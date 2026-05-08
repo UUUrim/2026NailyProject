@@ -7,10 +7,10 @@ Measure real fingernails from photos using an ArUco marker for scale, then gener
 ## Project Flow
 
 ```
-1. Take a photo  →  2. Measure nail  →  3. Generate STL
+1. Take photos  →  2. Crop  →  3. Measure  →  4. Generate STL
 ```
 
-### Step 1 — Take a photo
+### Step 1 — Take photos
 
 Each finger is photographed individually (one photo per finger).
 
@@ -29,23 +29,53 @@ Print at 100% scale (no "fit to page"). Measure the inner black square with cali
 
 ---
 
-### Step 2 — Measure the nail
+### Step 2–4 — Run the full pipeline (recommended)
+
+```bash
+python run_pipeline.py \
+    --photos photos/thumb.jpg photos/index.jpg photos/middle.jpg \
+             photos/ring.jpg  photos/pinky.jpg
+```
+
+This runs all three steps automatically for all 5 fingers:
+1. **Crop** — removes the bottom 30% of each photo (box edge, red fabric, etc.)
+2. **Measure** — detects the ArUco marker, segments the finger, and measures the nail
+3. **Generate STL** — produces a `round` nail tip STL for each finger
+
+**Optional flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--aruco-size` | `20` | Physical ArUco marker side length in mm |
+| `--crop-fraction` | `0.30` | Fraction of image height to remove from bottom |
+| `--output` | `results/` | Root output folder |
+
+**Output per finger** (saved to `results/{finger}/`):
+- `nail_measurements.json` — all measurements + mesh parameters
+- `profile.json` — nail size classification + skin tone
+- `{finger}_annotated.jpg` — photo with nail outline and measurements overlaid
+- `stl/nail_{finger}_round.stl` — 3D-printable nail tip
+
+---
+
+### Running steps individually
+
+#### Step 2 — Crop
+
+The crop step removes the bottom portion of the photo to isolate the navy background, marker, and finger. It is handled automatically by `run_pipeline.py`, but can also be run manually via `crop_and_measure.py`.
+
+#### Step 3 — Measure
 
 ```bash
 # Single finger
-python nail_measurer.py --top index1.jpg --finger index --aruco-size 20 --output results/index
+python nail_measurer.py --top index_cropped.jpg --finger index --aruco-size 20 --output results/index
 
 # All fingers at once (batch)
 python nail_measurer.py --batch \
     --fingers thumb index middle ring pinky \
-    --tops    thumb.jpg index.jpg middle.jpg ring.jpg pinky.jpg \
+    --tops    thumb_cropped.jpg index_cropped.jpg middle_cropped.jpg ring_cropped.jpg pinky_cropped.jpg \
     --aruco-size 20 --output results/
 ```
-
-**Output per finger:**
-- `nail_measurements.json` — all measurements + mesh parameters
-- `profile.json` — nail size classification + skin tone
-- `{finger}_annotated.jpg` — photo with nail outline and measurements overlaid
 
 **What gets measured:**
 
@@ -59,20 +89,13 @@ python nail_measurer.py --batch \
 | `thickness_mm` | Estimated from c-curve (geometric estimate) |
 | `skin_tone_hex` | Median skin colour sampled around the nail |
 
----
-
-### Step 3 — Generate STL
+#### Step 4 — Generate STL
 
 ```bash
 python nail_exact_stl.py --input results/index/nail_measurements.json \
-    --shape round --output results/index/stl/
+    --shape round --finger index --output results/index/stl/
 
 # Available shapes: round | almond | square | stiletto | ballerina
-# Optional flags:
-#   --finger index          only generate one finger
-#   --thickness 2.0         shell thickness in mm (default 2.0)
-#   --tip-extension 5.0     extra mm beyond natural nail tip
-#   --cuticle-depth 1.5     depth of cuticle arch in mm
 ```
 
 **Available tip shapes:**
@@ -91,12 +114,14 @@ python nail_exact_stl.py --input results/index/nail_measurements.json \
 
 | File | Purpose |
 |------|---------|
+| `run_pipeline.py` | **Full pipeline** — crop → measure → STL for all 5 fingers |
 | `generate_aruco.py` | Generate the ArUco marker PNG to print |
-| `nail_measurer.py` | **Step 2** — Measure nails from photos; outputs JSON + annotated images |
-| `manual_selector.py` | Fallback for Step 2 — manually trace the nail outline when auto-detection fails |
-| `nail_exact_stl.py` | **Step 3** — Generate parametric STL from measurements (primary generator) |
-| `nail_shape_stl.py` | Alternative Step 3 — STL built from the actual traced nail polygon |
-| `nail_tip_generator.py` | Older Step 3 generator — supports C-curve presets (flat/medium/steep) |
+| `nail_measurer.py` | Step 3 — Measure nails from cropped photos; outputs JSON + annotated images |
+| `nail_exact_stl.py` | Step 4 — Generate parametric STL from measurements |
+| `crop_and_measure.py` | Single-finger crop + measure + STL (manual use) |
+| `manual_selector.py` | Fallback — manually trace the nail outline when auto-detection fails |
+| `nail_shape_stl.py` | Alternative STL generator built from the actual traced nail polygon |
+| `nail_tip_generator.py` | Older STL generator — supports C-curve presets (flat/medium/steep) |
 
 ---
 
@@ -111,6 +136,8 @@ results/
     stl/
       nail_{finger}_{shape}.stl
 ```
+
+> `results/` is listed in `.gitignore` and is not tracked by git.
 
 ---
 
