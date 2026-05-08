@@ -126,7 +126,7 @@ def detect_aruco(image: np.ndarray, aruco_size_mm: float):
 # 2. Finger segmentation (resolution-aware)
 # ─────────────────────────────────────────────────────────────
 
-def segment_finger(image: np.ndarray):
+def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     H, W = image.shape[:2]
     scale    = max(W, H) / 2000.0
     ks_large = max(9,  int(9  * scale) | 1)
@@ -135,6 +135,21 @@ def segment_finger(image: np.ndarray):
           f"kernels={ks_large},{ks_small}")
 
     L = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)[:,:,0]
+
+    # Blank out the ArUco marker region before thresholding so the white
+    # marker paper is never mistaken for a finger (especially for small
+    # fingers like the pinky where the marker may be larger).
+    if aruco_corners is not None:
+        padding = int(15 * scale)
+        pts = aruco_corners.astype(np.int32)
+        rect = cv2.boundingRect(pts)
+        x, y, rw, rh = rect
+        x  = max(0, x  - padding)
+        y  = max(0, y  - padding)
+        rw = min(W - x, rw + 2 * padding)
+        rh = min(H - y, rh + 2 * padding)
+        L[y:y+rh, x:x+rw] = 0
+
     _, skin = cv2.threshold(L, 130, 255, cv2.THRESH_BINARY)
     kL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_large, ks_large))
     kS = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_small, ks_small))
@@ -309,23 +324,23 @@ def measure_top(image: np.ndarray, mpp: float,
     # ── Cuticle detection ─────────────────────────────────────
     hw       = int(width_px * 0.38)
     x1, x2   = max(0, tip_x - hw), min(W, tip_x + hw)
-    max_srch = min(int(20 / mpp), len(widths)-1)
+    # Search up to 16 mm. The old 20 mm limit picked up false edges from
+    # skin creases; 14 mm was too tight and selected early in-plate edges.
+    max_srch = min(int(16 / mpp), len(widths)-1)
     roi      = gray[tip_y:tip_y+max_srch, x1:x2].copy()
     roi_m    = finger_mask[tip_y:tip_y+max_srch, x1:x2]
     roi[roi_m == 0] = 0
     clahe    = cv2.createCLAHE(clipLimit=6.0, tileGridSize=(4,4))
     enh      = clahe.apply(roi)
-    sob      = cv2.Sobel(enh.astype(float), cv2.CV_64F, 0, 1, ksize=5)
-    rstr     = uniform_filter1d(np.maximum(sob, 0).sum(axis=1), size=3)
-    min_d    = max(int(4 / mpp), plate_start + 2)
-    prom_min = max(rstr[min_d:].max() * 0.10, 0.5) if len(rstr) > min_d else 0.5
-    pks, _   = find_peaks(rstr[min_d:], distance=6, prominence=prom_min)
-    if len(pks) > 0:
-        prom_vals = peak_prominences(rstr[min_d:], pks)[0]
-        best_pk   = pks[int(np.argmax(prom_vals))]
-        cuticle_y = tip_y + min_d + int(best_pk)
-    else:
-        cuticle_y = tip_y + int(11/mpp)
+    # Cuticle position from W/L anthropometric ratio (Jung et al. 2015, ~0.91).
+    # Sobel edge detection was tried but consistently picks wrong edges in this
+    # setup (nail shine / skin creases produce stronger gradients than the
+    # actual cuticle fold under diffuse overhead LED lighting).
+    # The population-derived W/L ratio is more stable and accurate here.
+    w_mm_est  = width_px * (1.0 - 2 * 0.08) * mpp
+    wl_len_px = int((w_mm_est / 0.91) / mpp)
+    cuticle_y = tip_y + wl_len_px
+    print(f"  [Cuticle] W/L estimate: {w_mm_est:.1f}mm / 0.91 = {w_mm_est/0.91:.1f}mm")
 
     cut_idx   = min(cuticle_y - tip_y, len(widths)-1)
     length_px = float(cuticle_y - tip_y)
@@ -521,7 +536,7 @@ def measure_finger(top_path: str, finger: str,
 
     print(f"\n[1/3] ArUco + finger segmentation …")
     mpp, aruco_corners, marker_id = detect_aruco(top_img, aruco_size_mm)
-    finger_mask, _, bbox          = segment_finger(top_img)
+    finger_mask, _, bbox          = segment_finger(top_img, aruco_corners)
 
     print(f"\n[2/3] Nail measurement + C-curve …")
     data = measure_top(top_img, mpp, finger_mask, bbox)
@@ -690,9 +705,9 @@ def main():
         json.dump(profile_data, f, indent=2)
 
     print(f"\n{'='*55}")
-    print(f"✅ Saved → {json_path}")
+    print(f"[OK] Saved -> {json_path}")
     print(f"   Fingers: {[r['finger'] for r in results]}")
-    print(f"\n🎉 Next: python nail_exact_stl.py --input {json_path}")
+    print(f"\nNext: python nail_exact_stl.py --input {json_path}")
     print(f"{'='*55}")
 
 

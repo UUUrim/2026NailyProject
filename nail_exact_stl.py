@@ -69,31 +69,33 @@ def write_binary_stl(filepath, triangles):
 # Tip shape catalogue
 # ─────────────────────────────────────────────────────────────
 
-SHAPES = ("oval", "almond", "square", "squoval", "stiletto", "coffin")
+SHAPES = ("round", "almond", "square", "stiletto", "ballerina")
 
 # Height of the tip taper region as a fraction of nail width W.
-# Shapes whose tips taper to a point (oval, almond, stiletto) are closed
-# by the degenerate-triangle filter.  Flat-ended shapes (square, squoval,
-# coffin) need an explicit tip-cap face and a non-zero tip_h so the cap
+# Shapes whose tips taper to a point (round, almond, stiletto) are closed
+# by the degenerate-triangle filter.  Flat-ended shapes (square, ballerina)
+# need an explicit tip-cap face and a non-zero tip_h so the cap
 # has a well-defined cross-section.
 TIP_HEIGHT_FACTOR = {
-    "oval":     0.50,   # semi-ellipse, smooth closed arc
-    "almond":   0.70,   # cosine taper to a soft point
-    "square":   0.00,   # no taper — flat perpendicular tip, full width
-    "squoval":  0.20,   # square corners + quarter-circle fillet r = 0.2 W
-    "stiletto": 1.50,   # linear taper to a sharp point (longer, more dramatic)
-    "coffin":   1.00,   # linear taper to flat tip ~40 % of nail width
+    "round":     0.50,  # semi-ellipse, smooth closed arc
+    "almond":    0.70,  # cosine taper to a soft point
+    "square":    0.00,  # no taper — flat perpendicular tip, full width
+    "stiletto":  1.50,  # linear taper to a sharp point (longer, more dramatic)
+    "ballerina": 1.00,  # linear taper to flat tip ~40 % of nail width
 }
 
 # Shapes whose tip is a flat face (need an explicit cap triangle strip).
-FLAT_TIP_SHAPES = {"square", "squoval", "coffin"}
+FLAT_TIP_SHAPES = {"square", "ballerina"}
+
+# Shapes worn long — default tip extension 7 mm instead of 3 mm.
+LONG_SHAPES = {"almond", "stiletto", "ballerina"}
 
 
 # ─────────────────────────────────────────────────────────────
 # Nail shape: analytic cross-section width at each Y
 # ─────────────────────────────────────────────────────────────
 
-def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="oval"):
+def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round"):
     """
     Return (x_left, x_right) for the nail footprint at height y_val.
 
@@ -113,36 +115,26 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="oval"):
         # Normalised position within tip: 0 at base, 1 at tip end.
         t = min((y_val - y_side_top) / tip_h, 1.0) if tip_h > 0 else 1.0
 
-        if shape == "oval":
+        if shape == "round":
             # Ellipse: x²/a² + y²/b² = 1 → half_w = (W/2)·√(1−t²)
             half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         elif shape == "almond":
-            # Cosine taper — narrower than oval, closes to a soft point.
+            # Cosine taper — narrower than round, closes to a soft point.
             half_w = W / 2 * float(np.cos(t * np.pi / 2))
-
-        elif shape == "squoval":
-            # Quarter-circle fillet of radius r = 0.2·W at each corner.
-            # Arc centre: (r, L_total−r) and (W−r, L_total−r).
-            # At dy above y_side_top:  xl = r − √(r²−dy²)
-            #                          xr = (W−r) + √(r²−dy²)
-            r   = W * 0.2
-            dy  = y_val - y_side_top          # 0 → r
-            arc = float(np.sqrt(max(r * r - dy * dy, 0.0)))
-            return r - arc, (W - r) + arc
 
         elif shape == "stiletto":
             # Linear taper to a sharp point over a long region (1.5·W).
             # w(t) = W·(1−t)  →  0 at t=1
             half_w = W / 2 * (1.0 - t)
 
-        elif shape == "coffin":
+        elif shape == "ballerina":
             # Linear taper from full width to ~40 % of W at the flat top.
             # w(t) = W·(1 − 0.6·t)  →  0.4·W at t=1
             half_w = W / 2 * (1.0 - 0.6 * t)
 
         else:
-            # Fallback: oval
+            # Fallback: round
             half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         return W / 2 - half_w, W / 2 + half_w
@@ -199,8 +191,8 @@ def generate_stl(params, output_path):
     # Shape-specific default extensions: stiletto/coffin get 7 mm,
     # all other shapes default to 3 mm.  An explicit --tip-extension
     # value always wins (passed as a non-None entry in params).
-    _shape_tmp = params.get("shape", "oval")
-    _ext_default = 7.0 if _shape_tmp in ("stiletto", "coffin") else 3.0
+    _shape_tmp = params.get("shape", "round")
+    _ext_default = 7.0 if _shape_tmp in LONG_SHAPES else 3.0
     L_ext     = float(params.get("tip_extension_mm") or _ext_default)
     CUT_DEPTH = float(params.get("cuticle_depth_mm", 1.5))
     x_cen     = W / 2.0
@@ -356,9 +348,9 @@ def main():
                         "(default 1.5 — increase for deeper arch)")
     p.add_argument("--thickness",      type=float, default=2.0,
                    help="Uniform shell thickness in mm (default 2.0)")
-    p.add_argument("--shape",          default="oval", choices=SHAPES,
-                   help="Tip shape: oval | almond | square | squoval | "
-                        "stiletto | coffin  (default: oval)")
+    p.add_argument("--shape",          default="round", choices=SHAPES,
+                   help="Tip shape: round | almond | square | "
+                        "stiletto | ballerina  (default: round)")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -371,7 +363,7 @@ def main():
     if not nails:
         sys.exit("ERROR: No matching nails in JSON")
 
-    ext_default = 7.0 if args.shape in ("stiletto", "coffin") else 3.0
+    ext_default = 7.0 if args.shape in LONG_SHAPES else 3.0
     display_ext = args.tip_extension if args.tip_extension is not None else ext_default
 
     print(f"\n{'='*55}")
