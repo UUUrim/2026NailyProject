@@ -26,7 +26,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create #원래 있던 건 삭제 후 새로운 걸 넣음 (추후 update로 바꾸기)
+      ddl-auto: update #원래 있던 건 삭제 후 새로운 걸 넣음 (추후 update로 바꾸기)
     show-sql: true
     properties:
       hibernate:
@@ -36,3 +36,8 @@ spring:
 jwt:
   secret: ENC(FkakyO2z6YL4WhnZDzGaKLJItWBSR+i68tPa6Hy2L+GE+n+63C+W4zQBbOongiXK)
   expiration: 86400000 #24시간
+
+gemini:
+  api:
+    key: ENC(YPIKQ2gSXU3R4IS+yGNolp4rtp47RJo8bzrtZ2sZaXhxGkf7UrzdeHoGbtA2k6Nq)
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"

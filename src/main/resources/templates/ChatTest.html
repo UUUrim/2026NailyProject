@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>채팅 테스트</title>
+    <style>
+        body { margin: 0; font-family: Arial; background: #f8f8f8; }
+        .container { max-width: 600px; margin: 40px auto; background: white; border-radius: 8px; padding: 20px; }
+        h2 { text-align: center; }
+        .session-box { margin-bottom: 20px; text-align: center; }
+        .session-info { font-size: 13px; color: #888; margin-top: 8px; }
+        .chat-box { border: 1px solid #ddd; border-radius: 8px; height: 400px; overflow-y: auto; padding: 15px; margin-bottom: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .msg { max-width: 75%; padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.5; word-break: break-word; }
+        .msg.user { background: #333; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+        .msg.ai { background: #f0f0f0; color: #333; align-self: flex-start; border-bottom-left-radius: 4px; }
+        .msg.system { background: #fff3cd; color: #856404; align-self: center; font-size: 12px; border-radius: 8px; }
+        .input-row { display: flex; gap: 8px; }
+        .input-row input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+        button { padding: 10px 16px; background: #333; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        .start-btn { width: 100%; padding: 12px; }
+        .error { color: red; font-size: 13px; text-align: center; margin-top: 8px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2> 채팅 테스트</h2>
+
+    <!-- 세션 시작 -->
+    <div class="session-box">
+        <button class="start-btn" onclick="startSession()" id="startBtn">채팅 세션 시작</button>
+        <div class="session-info" id="sessionInfo"></div>
+        <div class="error" id="errorMsg"></div>
+    </div>
+
+    <!-- 채팅창 -->
+    <div class="chat-box" id="chatBox">
+        <div class="msg system">세션을 시작하면 채팅이 가능합니다.</div>
+    </div>
+
+    <!-- 입력창 -->
+    <div class="input-row">
+        <input type="text" id="msgInput" placeholder="메시지를 입력하세요..." disabled
+               onkeydown="if(event.key==='Enter') sendMessage()">
+        <button onclick="sendMessage()" id="sendBtn" disabled>전송</button>
+    </div>
+</div>
+
+<script>
+    const token = localStorage.getItem('accessToken');
+    let sessionId = null;
+
+    if (!token) {
+        alert('로그인이 필요합니다.');
+        window.location.href = '/login';
+    }
+
+    // 세션 시작
+    async function startSession() {
+        document.getElementById('errorMsg').textContent = '';
+        document.getElementById('startBtn').disabled = true;
+
+        try {
+            const res = await fetch('/chats/session', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const result = await res.json();
+
+            if (result.ok) {
+                sessionId = result.data.sessionId;
+                document.getElementById('sessionInfo').textContent = `세션 ID: ${sessionId}`;
+                document.getElementById('msgInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                addMessage('system', '채팅 세션이 시작되었습니다! 원하는 네일 스타일을 말해보세요 💅');
+            } else {
+                document.getElementById('errorMsg').textContent = result.message;
+                document.getElementById('startBtn').disabled = false;
+            }
+        } catch (e) {
+            document.getElementById('errorMsg').textContent = '서버 오류가 발생했습니다.';
+            document.getElementById('startBtn').disabled = false;
+        }
+    }
+
+    // 메시지 전송
+    async function sendMessage() {
+        const input = document.getElementById('msgInput');
+        const message = input.value.trim();
+        if (!message || !sessionId) return;
+
+        input.value = '';
+        addMessage('user', message);
+        document.getElementById('sendBtn').disabled = true;
+        addMessage('system', 'AI가 답변 중...');
+
+        try {
+            const res = await fetch(`/chats/${sessionId}/messages`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ message })
+            });
+
+            const result = await res.json();
+
+            // "AI가 답변 중..." 제거
+            removeLastSystemMsg();
+
+            if (result.ok) {
+                addMessage('ai', result.data.aiMessage);
+            } else {
+                addMessage('system', `오류: ${result.message}`);
+            }
+        } catch (e) {
+            removeLastSystemMsg();
+            addMessage('system', '서버 오류가 발생했습니다.');
+        }
+
+        document.getElementById('sendBtn').disabled = false;
+        input.focus();
+    }
+
+    function addMessage(role, text) {
+        const chatBox = document.getElementById('chatBox');
+        const div = document.createElement('div');
+        div.className = `msg ${role}`;
+        div.textContent = text;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function removeLastSystemMsg() {
+        const chatBox = document.getElementById('chatBox');
+        const msgs = chatBox.querySelectorAll('.msg.system');
+        if (msgs.length > 0) {
+            msgs[msgs.length - 1].remove();
+        }
+    }
+</script>
+</body>
+</html>

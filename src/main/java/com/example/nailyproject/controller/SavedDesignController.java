@@ -18,9 +18,8 @@ public class SavedDesignController {
 
     private final SavedDesignService savedDesignService;
 
-    /**
-     * 저장 디자인 전체 목록 조회 GET /users/me/liked-designs
-     */
+
+    //저장 디자인 전체 목록 조회 GET /users/me/liked-designs
     @GetMapping("/liked-designs")
     public ResponseEntity<ApiResponse<List<SavedDesignResponseDto>>> getSavedDesigns(
             @AuthenticationPrincipal User user) {

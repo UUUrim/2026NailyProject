@@ -32,4 +32,9 @@ public class MainController {
     public String profileTestPage() {
         return "profile";
     }
+
+    @GetMapping("/chat-test")
+    public String chatTestPage() {
+        return "ChatTest";
+    }
 }
