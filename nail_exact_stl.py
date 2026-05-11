@@ -69,7 +69,7 @@ def write_binary_stl(filepath, triangles):
 # Tip shape catalogue
 # ─────────────────────────────────────────────────────────────
 
-SHAPES = ("round", "almond", "square", "stiletto", "ballerina")
+SHAPES = ("round", "oval", "almond", "square", "stiletto", "ballerina")
 
 # Height of the tip taper region as a fraction of nail width W.
 # Shapes whose tips taper to a point (round, almond, stiletto) are closed
@@ -77,8 +77,9 @@ SHAPES = ("round", "almond", "square", "stiletto", "ballerina")
 # need an explicit tip-cap face and a non-zero tip_h so the cap
 # has a well-defined cross-section.
 TIP_HEIGHT_FACTOR = {
-    "round":     0.50,  # semi-ellipse, smooth closed arc
-    "almond":    0.70,  # cosine taper to a soft point
+    "round":     0.50,  # semi-ellipse (tip_h = 0.5·W) → perfect semi-circle, short and wide
+    "oval":      0.65,  # semi-ellipse (tip_h = 0.65·W) → taller ellipse, more elongated than round
+    "almond":    0.70,  # cosine taper to a soft point — sharper than oval, worn long
     "square":    0.00,  # no taper — flat perpendicular tip, full width
     "stiletto":  1.50,  # linear taper to a sharp point (longer, more dramatic)
     "ballerina": 1.00,  # linear taper to flat tip ~40 % of nail width
@@ -115,8 +116,10 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round"):
         # Normalised position within tip: 0 at base, 1 at tip end.
         t = min((y_val - y_side_top) / tip_h, 1.0) if tip_h > 0 else 1.0
 
-        if shape == "round":
+        if shape in ("round", "oval"):
             # Ellipse: x²/a² + y²/b² = 1 → half_w = (W/2)·√(1−t²)
+            # Both use the same smooth ellipse curve; oval just has a taller
+            # tip region (TIP_HEIGHT_FACTOR 0.65 vs 0.50) → more elongated.
             half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         elif shape == "almond":
@@ -197,7 +200,7 @@ def generate_stl(params, output_path):
     CUT_DEPTH = float(params.get("cuticle_depth_mm", 1.5))
     x_cen     = W / 2.0
 
-    shape   = params.get("shape", "oval")
+    shape   = params.get("shape", "round")
     L_total = L + L_ext
     # For stiletto and coffin the taper covers only the extension beyond the
     # natural nail — full width is maintained up to the free edge, then the
@@ -349,7 +352,7 @@ def main():
     p.add_argument("--thickness",      type=float, default=2.0,
                    help="Uniform shell thickness in mm (default 2.0)")
     p.add_argument("--shape",          default="round", choices=SHAPES,
-                   help="Tip shape: round | almond | square | "
+                   help="Tip shape: round | oval | almond | square | "
                         "stiletto | ballerina  (default: round)")
     args = p.parse_args()
 
