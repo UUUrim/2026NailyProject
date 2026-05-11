@@ -403,14 +403,16 @@ def measure_top(image: np.ndarray, mpp: float,
         smooth = pts.astype(np.int32)
 
     # ── Skin tone ─────────────────────────────────────────────
-    nail_mask_full = np.zeros((H, W), np.uint8)
-    cv2.fillPoly(nail_mask_full, [nail_polygon], 255)
-    k25  = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25,25))
-    ring = cv2.bitwise_and(
-        cv2.dilate(nail_mask_full, k25),
-        cv2.bitwise_not(nail_mask_full))
-    ring = cv2.bitwise_and(ring, finger_mask)
-    pixels = image[ring > 0]
+    # Sample a band of skin on the finger below the cuticle, well away
+    # from the nail plate and any nail polish.
+    offset_px    = int(5  / mpp)   # skip 5 mm below the cuticle fold
+    band_px      = int(15 / mpp)   # then sample a 15 mm tall band
+    sample_top   = min(cuticle_y + offset_px, H - 1)
+    sample_bot   = min(cuticle_y + offset_px + band_px, H)
+    skin_mask    = np.zeros((H, W), np.uint8)
+    skin_mask[sample_top:sample_bot, :] = 255
+    skin_mask    = cv2.bitwise_and(skin_mask, finger_mask)
+    pixels = image[skin_mask > 0]
     if len(pixels):
         b, g, r = [int(np.median(pixels[:,i])) for i in range(3)]
         hex_color = f"#{r:02X}{g:02X}{b:02X}"
