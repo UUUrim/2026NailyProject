@@ -36,5 +36,16 @@ out/
 ### VS Code ###
 .vscode/
 
-
 application-key.yml
+
+### Model files ###
+*.safetensors
+*.ckpt
+*.pt
+
+### Generated images ###
+outputs/
+
+### OS ###
+.DS_Store
+Thumbs.db

@@ -26,7 +26,8 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/", "/login", "/signup", "/profile",
                                 "/users/signup", "/users/email/**", "/users/me", "/hello",
-                                "/chat-test", "/chats/**"
+                                "/chat-test", "/chats/**",
+                                "/api/designs/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

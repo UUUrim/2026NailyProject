@@ -23,7 +23,7 @@ public class NailDesign {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "image_url", nullable = false, length = 50)
+    @Column(name = "image_url", nullable = false, length = 500)
     private String imageUrl;
 
     @Column(name = "prompt_summary")

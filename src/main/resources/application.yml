@@ -26,7 +26,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update #원래 있던 건 삭제 후 새로운 걸 넣음 (추후 update로 바꾸기)
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
@@ -35,7 +35,7 @@ spring:
 
 jwt:
   secret: ENC(FkakyO2z6YL4WhnZDzGaKLJItWBSR+i68tPa6Hy2L+GE+n+63C+W4zQBbOongiXK)
-  expiration: 86400000 #24시간
+  expiration: 86400000
 
 gemini:
   api:
