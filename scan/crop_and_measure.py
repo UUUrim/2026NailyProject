@@ -6,11 +6,11 @@ import sys
 import os
 import subprocess
 
-IMAGE_SRC  = r"C:\nail_ArUco\photos\middle2.jpg"
-IMAGE_CROP = r"C:\nail_ArUco\photos\middle2_cropped.jpg"
+IMAGE_SRC  = r"C:\nail_ArUco\scan\photos\middle2.jpg"
+IMAGE_CROP = r"C:\nail_ArUco\scan\photos\middle2_cropped.jpg"
 FINGER     = "middle"
 ARUCO_SIZE = 20
-OUTPUT_DIR = r"C:\nail_ArUco\results\middle"
+OUTPUT_DIR = r"C:\nail_ArUco\scan\results\middle"
 SHAPES     = ["round", "almond", "square", "stiletto", "ballerina"]
 CROP_BOTTOM_FRAC = 0.30   # remove bottom 30% (red fabric + black device)
 
@@ -28,13 +28,13 @@ print(f"Cropped: {h}x{w} -> {cropped.shape[0]}x{cropped.shape[1]}, saved to {IMA
 # Run measurer
 cmd = [
     sys.executable,
-    r"C:\nail_ArUco\nail_measurer.py",
+    r"C:\nail_ArUco\scan\nail_measurer.py",
     "--top",        IMAGE_CROP,
     "--finger",     FINGER,
     "--aruco-size", str(ARUCO_SIZE),
     "--output",     OUTPUT_DIR,
 ]
-result = subprocess.run(cmd, cwd=r"C:\nail_ArUco")
+result = subprocess.run(cmd, cwd=r"C:\nail_ArUco\scan")
 if result.returncode != 0:
     sys.exit(result.returncode)
 
@@ -50,14 +50,14 @@ print(f"{'='*55}")
 for shape in SHAPES:
     cmd = [
         sys.executable,
-        r"C:\nail_ArUco\nail_exact_stl.py",
+        r"C:\nail_ArUco\scan\nail_exact_stl.py",
         "--input",  measurements_json,
         "--shape",  shape,
         "--finger", FINGER,
         "--output", stl_output_dir,
     ]
     print(f"\n[STL] Generating '{shape}' ...")
-    subprocess.run(cmd, cwd=r"C:\nail_ArUco")
+    subprocess.run(cmd, cwd=r"C:\nail_ArUco\scan")
 
 print(f"\n{'='*55}")
 print("All done! STL files saved to:", stl_output_dir)

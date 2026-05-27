@@ -9,14 +9,14 @@ import subprocess
 
 ARUCO_SIZE = 20
 CROP_BOTTOM_FRAC = 0.30
-BASE = r"C:\nail_ArUco"
+BASE = r"C:\nail_ArUco\scan"
 
 FINGERS = [
-    ("thumb",  r"C:\nail_ArUco\photos\thumb4.jpg",  r"C:\nail_ArUco\results\thumb"),
-    ("index",  r"C:\nail_ArUco\photos\index4.jpg",  r"C:\nail_ArUco\results\index"),
-    ("middle", r"C:\nail_ArUco\photos\middle4.jpg", r"C:\nail_ArUco\results\middle"),
-    ("ring",   r"C:\nail_ArUco\photos\ring4.jpg",   r"C:\nail_ArUco\results\ring"),
-    ("pinky",  r"C:\nail_ArUco\photos\pinky4.jpg",  r"C:\nail_ArUco\results\pinky"),
+    ("thumb",  r"C:\nail_ArUco\scan\photos\thumb4.jpg",  r"C:\nail_ArUco\scan\results\thumb"),
+    ("index",  r"C:\nail_ArUco\scan\photos\index4.jpg",  r"C:\nail_ArUco\scan\results\index"),
+    ("middle", r"C:\nail_ArUco\scan\photos\middle4.jpg", r"C:\nail_ArUco\scan\results\middle"),
+    ("ring",   r"C:\nail_ArUco\scan\photos\ring4.jpg",   r"C:\nail_ArUco\scan\results\ring"),
+    ("pinky",  r"C:\nail_ArUco\scan\photos\pinky4.jpg",  r"C:\nail_ArUco\scan\results\pinky"),
 ]
 
 for finger, src, out_dir in FINGERS:

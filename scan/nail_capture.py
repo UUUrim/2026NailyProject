@@ -32,7 +32,7 @@ import os
 from collections import deque
 
 # ── Settings ───────────────q───────────────────────────────────────────────────
-PROJECT_DIR   = r"C:\nail_ArUco"
+PROJECT_DIR   = r"C:\nail_ArUco\scan"
 PHOTOS_DIR    = os.path.join(PROJECT_DIR, "photos")
 ARUCO_SIZE    = 20        # real marker size in mm
 SHAPES        = ["round", "almond", "square", "stiletto", "ballerina"]
