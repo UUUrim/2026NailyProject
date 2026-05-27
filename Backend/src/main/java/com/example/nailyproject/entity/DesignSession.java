@@ -12,6 +12,11 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
 @Builder
+
+// 사용자의 디자인 요청 과정을 담는 세션
+// 선택지, 자유입력 키워드, 최종 프롬프트 저장
+// 채팅/선택 단계
+
 public class DesignSession {
 
     @Id
@@ -45,6 +50,13 @@ public class DesignSession {
 
     @Column(name = "generated_prompt", columnDefinition = "TEXT")
     private String generatedPrompt;
+
+    @Column(name = "refine_keywords", columnDefinition = "JSON")
+    private String refineKeywords; // 자유입력 키워드 JSON 배열
+
+    public void updateRefineKeywords(String refineKeywords) {
+        this.refineKeywords = refineKeywords;
+    }
 
     public void updateExtractedPreferences(String extractedPreferences) {
         this.extractedPreferences = extractedPreferences;
