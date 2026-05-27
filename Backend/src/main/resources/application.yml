@@ -1,0 +1,61 @@
+spring:
+  application:
+    name: nailyProject
+
+  profiles:
+    include: key
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: be1.2026.nail
+    password: ENC(Ck8oZWahUEWHmUwNdfg4jsz4lKgczeiFJbbWKuoZOWY=)
+    properties:
+      mail:
+        smtp:
+          auth: true
+          timeout: 300000
+          starttls:
+            enable: true
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: ENC(Og0DvFxPpMUQdoKBnOLKVdLOC17GeAzq)
+
+  jpa:
+    hibernate:
+      ddl-auto: update #원래 있던 건 삭제 후 새로운 걸 넣음 (추후 update로 바꾸기)
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    database-platform: org.hibernate.dialect.MySQLDialect
+
+jwt:
+  secret: ENC(FkakyO2z6YL4WhnZDzGaKLJItWBSR+i68tPa6Hy2L+GE+n+63C+W4zQBbOongiXK)
+  expiration: 86400000 #24시간
+
+gemini:
+  api:
+    key: ENC(YPIKQ2gSXU3R4IS+yGNolp4rtp47RJo8bzrtZ2sZaXhxGkf7UrzdeHoGbtA2k6Nq)
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+
+
+cloud:
+  aws:
+    credentials:
+      access-key: ENC(AU/E7IFqxUGt4sfLmq0Vx6LeCVH66OUf1YGkwuAs75k=)
+      secret-key: ENC(sQrGfc6mBxSTFwKohhPE229OZczYKDMZPI8aus5PuwHTp0OSEMWFAf7IPmdtCRDoL0/zBBgANqs=)
+    s3:
+      bucket: naily-scans #버킷이름
+    region:
+      static: us-east-1
+    stack:
+      auto: false
