@@ -25,22 +25,26 @@ Live preview:
 
 import cv2
 import cv2.aruco as aruco
+import numpy as np
 import subprocess
 import sys
 import os
 from collections import deque
 
-# ── Settings ──────────────────────────────────────────────────────────────────
+# ── Settings ───────────────q───────────────────────────────────────────────────
 PROJECT_DIR   = r"C:\nail_ArUco"
 PHOTOS_DIR    = os.path.join(PROJECT_DIR, "photos")
 ARUCO_SIZE    = 20        # real marker size in mm
 SHAPES        = ["round", "almond", "square", "stiletto", "ballerina"]
-CAMERA_INDEX  = 1         # None = auto-detect; or set to 0 / 1 manually
+CAMERA_INDEX  = 0        # None = auto-detect; or set to 0 / 1 manually
 
 # Auto-capture tuning
-STABLE_FRAMES   = 45      # frames marker must stay still before countdown starts (~1.5s at 30fps)
-STABLE_PX_THRESH = 6      # max pixel movement allowed to count as "still"
+STABLE_FRAMES   = 20      # frames marker must stay still before countdown starts (~0.7s at 30fps)
+STABLE_PX_THRESH = 20     # max pixel movement allowed to count as "still"
 COUNTDOWN_SEC   = 3       # seconds for the 3-2-1 countdown
+
+# Finger detection (skin pixel fraction required to confirm finger is present)
+SKIN_FRACTION_MIN = 0.04   # at least 4% of frame must be skin-colored
 
 # Crop settings (pixels removed from each edge before saving — 0 = disabled)
 # Tune CROP_BOTTOM to cut out the open hand-entry side of the box.
@@ -97,10 +101,25 @@ def select_shapes():
 
 def make_aruco_detector():
     """Create an ArUco detector for 4x4_50 dictionary (same as generate_aruco.py)."""
-    dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    dictionary = aruco.getPredefinedDictionary(aruco.DICT_6X6_50)
     params = aruco.DetectorParameters()
     detector = aruco.ArucoDetector(dictionary, params)
     return detector
+
+
+def detect_finger(frame):
+    """
+    Return (finger_present, skin_fraction).
+    Detects skin-colored pixels in HSV space.
+    Works well against dark (navy/black) backgrounds.
+    """
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # Skin tone range: covers light to medium-dark skin on dark background
+    lower = np.array([0,  20,  60], dtype=np.uint8)
+    upper = np.array([25, 200, 255], dtype=np.uint8)
+    mask = cv2.inRange(hsv, lower, upper)
+    skin_fraction = mask.sum() / 255.0 / (frame.shape[0] * frame.shape[1])
+    return skin_fraction >= SKIN_FRACTION_MIN, skin_fraction
 
 
 def detect_aruco(frame, detector):
@@ -116,11 +135,12 @@ def marker_center(corners):
     return pts.mean(axis=0)
 
 
-def draw_preview(frame, corners, ids, stable_frames, countdown_val):
+def draw_preview(frame, corners, ids, stable_frames, countdown_val, spread=None, finger_present=False, skin_fraction=0.0):
     """
     Draw ArUco overlay + status border + countdown.
     stable_frames : how many consecutive still frames so far
     countdown_val : None = not counting, else int seconds remaining
+    spread        : current pixel spread (for debug display)
     Returns annotated frame.
     """
     out = frame.copy()
@@ -130,14 +150,20 @@ def draw_preview(frame, corners, ids, stable_frames, countdown_val):
     if detected:
         aruco.drawDetectedMarkers(out, corners, ids)
 
+    # Status icons for marker and finger (always shown)
+    marker_color = (0, 220, 0) if detected else (0, 0, 255)
+    finger_color  = (0, 220, 0) if finger_present else (0, 0, 255)
+    cv2.putText(out, f"Marker: {'OK' if detected else 'NOT FOUND'}",
+                (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, marker_color, 2)
+    cv2.putText(out, f"Finger: {'OK' if finger_present else 'NOT FOUND'}  (skin {skin_fraction*100:.1f}%)",
+                (10, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.8, finger_color, 2)
+
     if not detected:
         # Red border
         color = (0, 0, 255)
         cv2.rectangle(out, (0, 0), (w - 1, h - 1), color, 8)
-        cv2.putText(out, "No marker — place ArUco marker in view",
-                    (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
         cv2.putText(out, "SPACE: force capture  |  Q: quit",
-                    (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 0), 2)
+                    (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
 
     elif countdown_val is not None:
         # Green border + large countdown number
@@ -146,28 +172,37 @@ def draw_preview(frame, corners, ids, stable_frames, countdown_val):
         cv2.putText(out, str(countdown_val),
                     (w // 2 - 60, h // 2 + 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 255, 0), 20, cv2.LINE_AA)
-        cv2.putText(out, "Hold still!",
-                    (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+        cv2.putText(out, "Hold still! Auto-capturing...",
+                    (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.85, color, 2)
+
+    elif not finger_present:
+        # Marker found but no finger
+        color = (0, 165, 255)  # orange
+        cv2.rectangle(out, (0, 0), (w - 1, h - 1), color, 8)
+        cv2.putText(out, "Place your finger in the box",
+                    (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.85, color, 2)
+        cv2.putText(out, "SPACE: force capture  |  Q: quit",
+                    (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
 
     else:
-        # Marker detected, not yet stable enough
+        # Marker + finger detected, building stability
         ratio = min(stable_frames / STABLE_FRAMES, 1.0)
-        # Border fades yellow → green as stability grows
         b = int(0)
         g = int(180 + 75 * ratio)
         r = int(255 * (1 - ratio))
         color = (b, g, r)
         cv2.rectangle(out, (0, 0), (w - 1, h - 1), color, 8)
 
+        spread_str = f"spread: {spread:.1f}/{STABLE_PX_THRESH}px  frames: {stable_frames}/{STABLE_FRAMES}" if spread is not None else f"frames: {stable_frames}/{STABLE_FRAMES}"
+        cv2.putText(out, spread_str,
+                    (10, 115), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 200), 1)
+        cv2.putText(out, "SPACE: force capture  |  Q: quit",
+                    (10, 145), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
+
         # Progress bar at bottom
         bar_w = int((w - 20) * ratio)
         cv2.rectangle(out, (10, h - 25), (10 + bar_w, h - 10), color, -1)
         cv2.rectangle(out, (10, h - 25), (w - 10, h - 10), (180, 180, 180), 1)
-
-        cv2.putText(out, "Marker detected — hold still...",
-                    (10, h - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2)
-        cv2.putText(out, "SPACE: force capture  |  Q: quit",
-                    (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 200, 0), 2)
 
     # Draw crop boundary lines so the user knows what will be saved
     if CROP_BOTTOM > 0:
@@ -262,8 +297,9 @@ def capture_photo(finger, camera_idx):
         # ── Live preview ──────────────────────────────────────────────────────
         corners, ids = detect_aruco(frame, detector)
         detected = ids is not None and len(ids) > 0
+        finger_present, skin_fraction = detect_finger(frame)
 
-        if not detected:
+        if not detected or not finger_present:
             recent_centers.clear()
             countdown_start = None
 
@@ -271,22 +307,21 @@ def capture_photo(finger, camera_idx):
             cx, cy = marker_center(corners)
             recent_centers.append((cx, cy))
 
-            # Check stability: max distance from mean over recent frames
-            if len(recent_centers) == STABLE_FRAMES:
-                xs = [p[0] for p in recent_centers]
-                ys = [p[1] for p in recent_centers]
-                spread = max(max(xs) - min(xs), max(ys) - min(ys))
-                if spread > STABLE_PX_THRESH:
-                    # Still moving — reset
-                    recent_centers.clear()
-                    countdown_start = None
-                elif countdown_start is None:
-                    # Just became stable — start countdown
-                    countdown_start = time.time()
+        # Compute spread over the sliding window (always, for debug display)
+        current_spread = None
+        if detected and len(recent_centers) >= 2:
+            xs = [p[0] for p in recent_centers]
+            ys = [p[1] for p in recent_centers]
+            current_spread = max(max(xs) - min(xs), max(ys) - min(ys))
 
-            elif countdown_start is not None:
-                # Buffer not full yet but countdown was running — reset
+        # Check stability once the buffer is full (marker + finger both required)
+        if detected and finger_present and len(recent_centers) == STABLE_FRAMES:
+            if current_spread > STABLE_PX_THRESH:
                 countdown_start = None
+            elif countdown_start is None:
+                countdown_start = time.time()
+        elif not detected or not finger_present:
+            countdown_start = None
 
         # Countdown logic
         countdown_val = None
@@ -311,7 +346,8 @@ def capture_photo(finger, camera_idx):
             continue
 
         display = draw_preview(frame, corners, ids,
-                               len(recent_centers), countdown_val)
+                               len(recent_centers), countdown_val, current_spread,
+                               finger_present, skin_fraction)
         cv2.imshow(window_name, display)
 
     cap.release()

@@ -79,7 +79,7 @@ SHAPES = ("round", "oval", "almond", "square", "stiletto", "ballerina")
 TIP_HEIGHT_FACTOR = {
     "round":     0.50,  # semi-ellipse (tip_h = 0.5·W) → perfect semi-circle, short and wide
     "oval":      0.65,  # semi-ellipse (tip_h = 0.65·W) → taller ellipse, more elongated than round
-    "almond":    0.70,  # cosine taper to a soft point — sharper than oval, worn long
+    "almond":    0.85,  # elongated ellipse — tapered sides, fully rounded tip
     "square":    0.00,  # no taper — flat perpendicular tip, full width
     "stiletto":  1.50,  # linear taper to a sharp point (longer, more dramatic)
     "ballerina": 1.00,  # linear taper to flat tip ~40 % of nail width
@@ -96,7 +96,7 @@ LONG_SHAPES = {"almond", "stiletto", "ballerina"}
 # Nail shape: analytic cross-section width at each Y
 # ─────────────────────────────────────────────────────────────
 
-def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round"):
+def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0):
     """
     Return (x_left, x_right) for the nail footprint at height y_val.
 
@@ -110,7 +110,12 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round"):
     if y_val >= y_side_top:
         # ── Tip region ────────────────────────────────────────
         if shape == "square":
-            # No taper; flat perpendicular tip at full width.
+            # Flat tip at full width, but with a circular-arc corner in XY
+            # for the last tip_r mm so the plan-view corners are rounded.
+            if tip_r > 0 and y_val >= (L_total - tip_r):
+                d_y   = y_val - (L_total - tip_r)          # 0→tip_r
+                inset = tip_r - float(np.sqrt(max(tip_r ** 2 - d_y ** 2, 0.0)))
+                return inset, float(W) - inset
             return 0.0, float(W)
 
         # Normalised position within tip: 0 at base, 1 at tip end.
@@ -123,13 +128,18 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round"):
             half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         elif shape == "almond":
-            # Cosine taper — narrower than round, closes to a soft point.
-            half_w = W / 2 * float(np.cos(t * np.pi / 2))
+            # Single smooth ellipse — same formula as round/oval.
+            # The taller TIP_HEIGHT_FACTOR (0.85 vs oval's 0.65) gives the
+            # characteristic almond silhouette: more tapered sides, rounded tip.
+            half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         elif shape == "stiletto":
-            # Linear taper to a sharp point over a long region (1.5·W).
-            # w(t) = W·(1−t)  →  0 at t=1
-            half_w = W / 2 * (1.0 - t)
+            # Convex taper to a sharp point.
+            # Power < 1 makes sides bow outward (convex) near the taper base
+            # then converge smoothly to the tip — matches the elegant stiletto
+            # silhouette in the reference (vs. a harsh straight-line taper).
+            # w(t) = W·(1−t)^0.65
+            half_w = W / 2 * (1.0 - t) ** 0.65
 
         elif shape == "ballerina":
             # Linear taper from full width to ~40 % of W at the flat top.
@@ -186,7 +196,7 @@ def arc_z(x_arr, x_cen, c_mm, arc_r):
 def generate_stl(params, output_path):
     C         = float(params["c_curve_mm"])
     arc_r     = float(params["arc_radius_mm"])
-    THICK     = float(params.get("thickness_mm", 2.0))
+    THICK     = float(params.get("thickness_mm", 1.2))
     W         = float(params["width_mm"])
     # Prefer corrected_length_mm when the measurer flagged the raw length as
     # suspect (nail tip not fully visible in photo).
@@ -201,12 +211,24 @@ def generate_stl(params, output_path):
     x_cen     = W / 2.0
 
     shape   = params.get("shape", "round")
+    EDGE_R  = float(params.get("edge_round_mm", 0.0))
     L_total = L + L_ext
-    # For stiletto and coffin the taper covers only the extension beyond the
-    # natural nail — full width is maintained up to the free edge, then the
-    # sides taper inward over exactly L_ext mm.
-    if shape in ("stiletto", "coffin"):
+
+    # Square uses no XY plan-view corner rounding — corners are 90° in footprint.
+    # The "bent paper" look comes from the C-curve carried to the tip face.
+    CORNER_R = 0.0
+
+    # Stiletto: taper covers the extension plus the top 30 % of the natural nail,
+    # so the sides start narrowing before the free edge — matches the smooth
+    # elongated silhouette in the reference (not just an abrupt spike at the tip).
+    # Coffin: taper over extension only (flat tip keeps full width longer).
+    if shape == "stiletto":
+        tip_h = L_ext + L * 0.30
+    elif shape == "coffin":
         tip_h = L_ext
+    elif shape == "ballerina":
+        # Straight sides from cuticle to midpoint, taper from midpoint to tip.
+        tip_h = L_total * 0.5
     else:
         tip_h = W * TIP_HEIGHT_FACTOR.get(shape, 0.50)
 
@@ -220,7 +242,8 @@ def generate_stl(params, output_path):
     grid_x = np.zeros((ny, nx))
     grid_y = np.zeros((ny, nx))
     for i, y in enumerate(ys):
-        xl, xr = x_extent(y, W, L_total, tip_h, CUT_DEPTH, shape)
+        xl, xr = x_extent(y, W, L_total, tip_h, CUT_DEPTH, shape,
+                          tip_r=CORNER_R)
         grid_x[i] = xl + np.linspace(0, 1, nx) * (xr - xl)
         grid_y[i] = y
 
@@ -232,6 +255,76 @@ def generate_stl(params, output_path):
     arc_off = arc_z(grid_x, x_cen, C, arc_r)     # (ny, nx)  0→C  bowl
     z_bot   = C - arc_off                          # (ny, nx)  C→0  dome (inner)
     z_top   = z_bot + THICK                        # (ny, nx)  uniform shell
+
+    # ── Top perimeter edge rounding ───────────────────────────
+    # Applies a quarter-circle fillet where the top surface meets the side
+    # walls, eliminating the sharp 90° corner.  Only in the body/tip region
+    # (y ≥ 0) — the cuticle arch is left untouched per design intent.
+    if EDGE_R > 0:
+        r = min(EDGE_R, THICK * 0.95)
+
+        # Lateral fillet: distance from left / right edge of each row's footprint
+        x_left  = grid_x[:, 0:1]                        # (ny, 1)
+        x_right = grid_x[:, -1:]                         # (ny, 1)
+        d_lat   = np.minimum(grid_x - x_left,
+                             x_right - grid_x)           # (ny, nx)
+        dz_lat  = np.where(d_lat < r,
+                           r - np.sqrt(np.maximum(r**2 - (r - d_lat)**2, 0.0)),
+                           0.0)
+        # Non-flat shapes: lateral fillet along the body, skip cuticle arch.
+        # Flat-tip shapes (square, ballerina): apply a *spherical* corner
+        # fillet ONLY at the two tip corners (where side wall + tip cap +
+        # top surface all meet) — NOT the full edge line.
+        if shape not in FLAT_TIP_SHAPES:
+            dz_lat = np.where(grid_y >= 0.0, dz_lat, 0.0)
+            z_top  = np.maximum(z_top - dz_lat, z_bot)
+        elif shape == "square":
+            # Square: full-width tip-edge fillet across the entire front face.
+            # This gives the "bent A4 paper, edges smoothed" look:
+            # the C-curve dome transitions smoothly into the vertical front face
+            # along the whole width, not just at the two corners.
+            d_tip_arr = np.maximum(L_total - grid_y, 0.0)
+            in_body   = grid_y >= 0.0
+            # Quarter-circle fillet where top surface meets front face (full width)
+            dz_tip = np.where(
+                (d_tip_arr < r) & in_body,
+                r - np.sqrt(np.maximum(r**2 - (r - d_tip_arr)**2, 0.0)),
+                0.0
+            )
+            # Spherical upgrade at the two top corners (side + tip both active)
+            in_corner = (d_lat < r) & (d_tip_arr < r) & in_body
+            under_c   = r**2 - (r - d_lat)**2 - (r - d_tip_arr)**2
+            dz_corner = np.where(
+                in_corner,
+                np.where(under_c >= 0.0,
+                         r - np.sqrt(np.maximum(under_c, 0.0)),
+                         r),
+                0.0
+            )
+            # At each point take whichever fillet is deeper
+            z_top = np.maximum(z_top - np.maximum(dz_tip, dz_corner), z_bot)
+        else:
+            # Other flat-tip shapes (ballerina): spherical corner only
+            d_tip_arr  = np.maximum(L_total - grid_y, 0.0)
+            in_corner  = (d_lat < r) & (d_tip_arr < r)
+            under_c    = r**2 - (r - d_lat)**2 - (r - d_tip_arr)**2
+            dz_corner  = np.where(
+                in_corner,
+                np.where(under_c >= 0.0,
+                         r - np.sqrt(np.maximum(under_c, 0.0)),
+                         r),
+                0.0
+            )
+            z_top = np.maximum(z_top - dz_corner, z_bot)
+
+        # Tip fillet — pointed shapes only (almond, stiletto):
+        # domes the apex so it tapers smoothly rather than ending as a ridge.
+        if shape not in ("round", "oval") and shape not in FLAT_TIP_SHAPES:
+            d_tip  = np.maximum(L_total - grid_y, 0.0)  # (ny, nx)
+            dz_tip = np.where(d_tip < r,
+                              r - np.sqrt(np.maximum(r**2 - (r - d_tip)**2, 0.0)),
+                              0.0)
+            z_top  = np.maximum(z_top - dz_tip, z_bot)
 
     # ── 3-D point arrays ──────────────────────────────────────
     top3d = np.stack([grid_x, grid_y, z_top], axis=2)  # (ny, nx, 3)
@@ -281,11 +374,11 @@ def generate_stl(params, output_path):
         all_tris.append([T0, B1, T1])
         all_tris.append([T0, B0, B1])
 
-    # ── Tip cap  (flat-tip shapes: square / squoval / coffin) ────
-    # Pointed shapes (oval, almond, stiletto) converge to zero width and are
-    # closed implicitly by the degenerate-triangle filter below.
-    # Flat-tip shapes have a finite cross-section at i=ny-1 that must be
-    # closed with an explicit cap face (normal +Y).
+    # ── Tip cap  (flat-tip shapes + almond with tip truncation) ──
+    # Flat-tip shapes (square, ballerina) and almond when ALMOND_TIP_R > 0
+    # end with a finite-width cross-section that needs an explicit cap face.
+    # Pure pointed shapes (stiletto, round, oval) converge to zero width and
+    # are closed by the degenerate-triangle filter below.
     # Winding for +Y: viewed from +Y the vertices are CCW →
     #   Tri1 [t[M,j], t[M,j+1], b[M,j]]
     #   Tri2 [t[M,j+1], b[M,j+1], b[M,j]]
@@ -349,11 +442,16 @@ def main():
     p.add_argument("--cuticle-depth",  type=float, default=1.5,
                    help="Depth of cuticle arch below cuticle line in mm "
                         "(default 1.5 — increase for deeper arch)")
-    p.add_argument("--thickness",      type=float, default=2.0,
-                   help="Uniform shell thickness in mm (default 2.0)")
+    p.add_argument("--thickness",      type=float, default=1.2,
+                   help="Uniform shell thickness in mm (default 1.2)")
     p.add_argument("--shape",          default="round", choices=SHAPES,
                    help="Tip shape: round | oval | almond | square | "
                         "stiletto | ballerina  (default: round)")
+    p.add_argument("--edge-round",     type=float, default=None,
+                   help="Fillet radius (mm) for the top perimeter edge — "
+                        "rounds the sharp junction between top surface and "
+                        "side walls (default: 1.0 for almond/ballerina/"
+                        "square/stiletto, 0 for round/oval)")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -369,10 +467,13 @@ def main():
     ext_default = 7.0 if args.shape in LONG_SHAPES else 3.0
     display_ext = args.tip_extension if args.tip_extension is not None else ext_default
 
+    _edge_round_default = 1.0 if args.shape in {"almond", "ballerina", "square", "stiletto"} else 0.0
+    edge_round = args.edge_round if args.edge_round is not None else _edge_round_default
+
     print(f"\n{'='*55}")
     print(f"  Exact-Fit Nail STL  v15  |  shape: {args.shape}")
     print(f"  Tip +{display_ext}mm  CuticleArch {args.cuticle_depth}mm  "
-          f"Thick {args.thickness}mm")
+          f"Thick {args.thickness}mm  EdgeRound {edge_round}mm")
     print(f"{'='*55}")
 
     for nail in nails:
@@ -391,6 +492,7 @@ def main():
             "cuticle_depth_mm":    args.cuticle_depth,
             "thickness_mm":        args.thickness,
             "shape":               args.shape,
+            "edge_round_mm":       edge_round,
         }
 
         out   = os.path.join(args.output, f"nail_{finger}_{args.shape}.stl")

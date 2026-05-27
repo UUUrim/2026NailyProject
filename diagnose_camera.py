@@ -13,7 +13,7 @@ import cv2
 import cv2.aruco as aruco
 import time
 
-CAMERA_INDEX = 1   # change to 0 if you see the wrong camera
+CAMERA_INDEX = 0   # change to 0 if you see the wrong camera
 
 DICTS = {
     "4x4_50":  aruco.DICT_4X4_50,
