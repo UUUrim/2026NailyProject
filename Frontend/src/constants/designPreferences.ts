@@ -1,50 +1,119 @@
-export type PreferenceKey =
-  | 'mood'
-  | 'designType'
-  | 'season'
-  | 'length'
-  | 'motif'
-  | 'shape'
-  | 'color'
+export type PreferenceKey = 'mood' | 'designType' | 'season' | 'motif' | 'shape' | 'color'
 
 export type NailDesignPreferences = {
   mood: string[]
   designType: string[]
   season: string[]
-  length: string[]
   motif: string[]
   shape: string[]
   color: string[]
+  freeText: string
 }
 
 export const INITIAL_PREFERENCES: NailDesignPreferences = {
   mood: [],
   designType: [],
   season: [],
-  length: [],
   motif: [],
   shape: [],
   color: [],
+  freeText: '',
 }
 
 export const PREFERENCE_LIMITS: Record<PreferenceKey, number> = {
   mood: 2,
   designType: 2,
   season: 1,
-  length: 1,
   motif: 2,
   shape: 1,
   color: 2,
 }
 
-export const PREFERENCE_OPTIONS: Record<PreferenceKey, string[]> = {
-  mood: ['lovely', 'simple', 'modern', 'chic', 'cute', 'kitschy', 'funky', 'feminine', 'elegant', 'pure', 'delicate'],
-  designType: ['glitter', 'gradient', 'cheek', 'marble', 'french', 'magnetic', 'powder', 'matte', 'art'],
-  season: ['spring', 'summer', 'autumn', 'winter', '상관없음'],
-  length: ['short', 'medium', 'long'],
-  motif: ['star', 'ribbon', 'floral', 'heart', 'crystal', 'pearl', 'swirl', 'polka dot', '없음', '기타'],
-  shape: ['아몬드', '라운드', '스퀘어', '스틸레토', '발리나', '오발'],
-  color: ['#FDE2EA', '#FFC0D0', '#FF90B3', '#DE869F', '#A98BFF', '#7CD6D6', '#FFF2A8', '#E6E6E6'],
+export type PreferenceOption = {
+  value: string
+  label: string
+}
+
+export const PREFERENCE_OPTIONS: Record<PreferenceKey, PreferenceOption[]> = {
+  mood: [
+    { value: 'lovely', label: '러블리' },
+    { value: 'simple', label: '심플' },
+    { value: 'modern', label: '모던' },
+    { value: 'chic', label: '시크' },
+    { value: 'cute', label: '큐트' },
+    { value: 'kitschy', label: '키치' },
+    { value: 'funky', label: '펑키' },
+    { value: 'feminine', label: '페미닌' },
+    { value: 'elegant', label: '엘레강트' },
+    { value: 'pure', label: '퓨어' },
+    { value: 'delicate', label: '섬세' },
+  ],
+  designType: [
+    { value: 'glitter', label: '글리터' },
+    { value: 'gradient', label: '그라데이션' },
+    { value: 'cheek', label: '치크' },
+    { value: 'marble', label: '마블' },
+    { value: 'french', label: '프렌치' },
+    { value: 'magnetic', label: '마그네틱' },
+    { value: 'powder', label: '파우더' },
+    { value: 'matte', label: '매트' },
+    { value: 'art', label: '아트' },
+  ],
+  season: [
+    { value: 'spring', label: '봄' },
+    { value: 'summer', label: '여름' },
+    { value: 'autumn', label: '가을' },
+    { value: 'winter', label: '겨울' },
+    { value: '상관없음', label: '상관없음' },
+  ],
+  motif: [
+    { value: 'star', label: '별' },
+    { value: 'ribbon', label: '리본' },
+    { value: 'floral', label: '플로럴' },
+    { value: 'heart', label: '하트' },
+    { value: 'crystal', label: '크리스탈' },
+    { value: 'pearl', label: '펄' },
+    { value: 'swirl', label: '스월' },
+    { value: 'polka dot', label: '도트' },
+    { value: '없음', label: '없음' },
+    { value: '기타', label: '기타' },
+  ],
+  shape: [
+    { value: 'square', label: '스퀘어' },
+    { value: 'oval', label: '오발' },
+    { value: 'round', label: '라운드' },
+    { value: 'almond', label: '아몬드' },
+    { value: 'stiletto', label: '스틸레토' },
+    { value: 'ballerina', label: '발레리나' },
+  ],
+  color: [
+    { value: '#FDE2EA', label: '#FDE2EA' },
+    { value: '#FFC0D0', label: '#FFC0D0' },
+    { value: '#FF90B3', label: '#FF90B3' },
+    { value: '#DE869F', label: '#DE869F' },
+    { value: '#A98BFF', label: '#A98BFF' },
+    { value: '#7CD6D6', label: '#7CD6D6' },
+    { value: '#FFF2A8', label: '#FFF2A8' },
+    { value: '#E6E6E6', label: '#E6E6E6' },
+  ],
+}
+
+export const PREFERENCE_SECTION_LABELS: Record<PreferenceKey, string> = {
+  mood: '무드',
+  designType: '디자인 타입',
+  season: '시즌',
+  motif: '모티프',
+  shape: '네일 쉐입',
+  color: '컬러',
+}
+
+export const SHAPE_PREVIEW_IMAGES: Record<string, string> = {
+  square: '/images/shapes/square.png',
+  oval: '/images/shapes/oval.png',
+  round: '/images/shapes/round.png',
+  almond: '/images/shapes/almond.png',
+  stiletto: '/images/shapes/stiletto.png',
+  ballerina: '/images/shapes/ballerina.png',
 }
 
 export type SeasonRow = {
@@ -85,17 +154,27 @@ export const PERSONAL_COLOR_SWATCHES: Record<string, string[]> = {
   winter_true: ['#D70040', '#0033A0', '#00A3A3', '#6A0DAD', '#222222', '#F5F5F5'],
 }
 
+function formatPreferenceValues(key: PreferenceKey, values: string[]): string {
+  if (values.length === 0) return 'not specified'
+  return values
+    .map((value) => PREFERENCE_OPTIONS[key].find((option) => option.value === value)?.label ?? value)
+    .join(', ')
+}
+
 export function buildDesignPrompt(preferences: NailDesignPreferences): string {
   const lines = [
     'Create a custom nail tip design with the following preferences:',
-    `mood: ${preferences.mood.join(', ') || 'not specified'}`,
-    `designType: ${preferences.designType.join(', ') || 'not specified'}`,
-    `season: ${preferences.season.join(', ') || 'not specified'}`,
-    `length: ${preferences.length.join(', ') || 'not specified'}`,
-    `motif: ${preferences.motif.join(', ') || 'not specified'}`,
-    `shape: ${preferences.shape.join(', ') || 'not specified'}`,
+    `mood: ${formatPreferenceValues('mood', preferences.mood)}`,
+    `designType: ${formatPreferenceValues('designType', preferences.designType)}`,
+    `season: ${formatPreferenceValues('season', preferences.season)}`,
+    `motif: ${formatPreferenceValues('motif', preferences.motif)}`,
+    `shape: ${formatPreferenceValues('shape', preferences.shape)}`,
     `color(HEX): ${preferences.color.join(', ') || 'not specified'}`,
   ]
+
+  if (preferences.freeText.trim()) {
+    lines.push(`additional notes: ${preferences.freeText.trim()}`)
+  }
 
   return lines.join('\n')
 }

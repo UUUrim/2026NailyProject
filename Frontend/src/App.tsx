@@ -1,5 +1,8 @@
 import { HomePage } from '@/pages/HomePage'
+import { HandScanPage } from '@/pages/HandScanPage'
+import { HandScanResultPage } from '@/pages/HandScanResultPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { MyPage } from '@/pages/MyPage'
 import { NailDesignPreferencePage } from '@/pages/NailDesignPreferencePage'
 import { NailDesignResultPage } from '@/pages/NailDesignResultPage'
 import { ProcessGuidePage } from '@/pages/ProcessGuidePage'
@@ -14,7 +17,10 @@ function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/mypage" element={<MyPage />} />
       <Route path="/process" element={<ProcessGuidePage />} />
+      <Route path="/scan/hand" element={<HandScanPage />} />
+      <Route path="/scan/result" element={<HandScanResultPage />} />
       <Route path="/design/preferences" element={<NailDesignPreferencePage />} />
       <Route path="/design/result" element={<NailDesignResultPage />} />
       <Route path="/signup" element={<SignupLandingPage />} />

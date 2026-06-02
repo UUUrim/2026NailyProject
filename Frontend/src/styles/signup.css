@@ -78,6 +78,12 @@
   font-weight: 500;
 }
 
+.auth-split__profile {
+  display: inline-flex;
+  color: #de869f;
+  text-decoration: none;
+}
+
 .auth-split__content {
   flex: 1;
   width: 100%;
@@ -120,6 +126,12 @@
   align-items: center;
   justify-content: center;
   text-decoration: none;
+  cursor: pointer;
+}
+
+.signup-box__submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .signup-box__divider {
@@ -201,6 +213,19 @@
   background: #f7f7f7;
   font-size: 12px;
   color: #777;
+  cursor: pointer;
+}
+
+.signup-box__inline-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.signup-box__status {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #a54b69;
+  line-height: 1.45;
 }
 
 .signup-box__provider-email {

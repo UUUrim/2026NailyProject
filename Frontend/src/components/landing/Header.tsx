@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { AuthNav } from '@/components/layout/AuthNav'
 
 export function Header() {
   return (
@@ -8,12 +9,11 @@ export function Header() {
           Naily
         </Link>
         <nav className="landing-header__nav" aria-label="주요 메뉴">
-          <Link to="/login" className="landing-header__login">
-            로그인
-          </Link>
-          <Link to="/signup" className="landing-header__signup">
-            무료로 시작하기
-          </Link>
+          <AuthNav
+            loginClassName="landing-header__login"
+            signupClassName="landing-header__signup"
+            profileClassName="landing-header__profile"
+          />
         </nav>
       </div>
     </header>
