@@ -2,6 +2,8 @@ package com.example.nailyproject.controller;
 
 import com.example.nailyproject.dto.request.ScanResultRequestDto;
 import com.example.nailyproject.dto.request.ScanStartRequestDto;
+import com.example.nailyproject.dto.request.StlGenerateRequestDto;
+import com.example.nailyproject.dto.request.StlResultRequestDto;
 import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.dto.response.ScanStartResponseDto;
@@ -52,6 +54,7 @@ public class ScanController {
             @RequestParam("finger") ScanImg.Finger finger,
             @RequestParam("file") MultipartFile file) throws IOException {
 
+        // 백엔드가 파일을 직접 받아서 S3에 올리도록
         String imageUrl = scanService.uploadFingerImage(user, scanId, finger, file);
 
         return ResponseEntity.ok(
@@ -67,28 +70,36 @@ public class ScanController {
     public ResponseEntity<ApiResponse<Void>> requestAnalyze(
             @AuthenticationPrincipal User user,
             @PathVariable Long scanId) {
-
         scanService.requestAnalyze(user, scanId);
-
-        return ResponseEntity.ok(
-                ApiResponse.success(200, "분석 요청이 완료되었습니다. 잠시 후 결과를 확인해주세요.", null)
-        );
+        return ResponseEntity.ok(ApiResponse.success(200, "1단계: 분석 요청이 완료되었습니다.", null));
     }
 
-    /**
-     * 분석 결과 수신 POST /scans/{scanId}/analyze/result
-     * Python 분석 서버가 호출하는 콜백 API
-     */
     @PostMapping("/{scanId}/analyze/result")
     public ResponseEntity<ApiResponse<Void>> receiveAnalyzeResult(
             @PathVariable Long scanId,
             @RequestBody ScanResultRequestDto result) {
-
         scanService.receiveAnalyzeResult(scanId, result);
+        return ResponseEntity.ok(ApiResponse.success(200, "1단계: 분석 결과가 저장되었습니다.", null));
+    }
 
-        return ResponseEntity.ok(
-                ApiResponse.success(200, "분석 결과가 저장되었습니다.", null)
-        );
+
+    //  [2단계] STL 생성 파이프라인 (유저가 쉐입 선택 시)
+
+    @PostMapping("/{scanId}/generate-stl")
+    public ResponseEntity<ApiResponse<Void>> requestGenerateStl(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long scanId,
+            @Valid @RequestBody StlGenerateRequestDto request) {
+        scanService.requestGenerateStl(user, scanId, request);
+        return ResponseEntity.ok(ApiResponse.success(200, "2단계: STL 모델 생성을 요청했습니다.", null));
+    }
+
+    @PostMapping("/{scanId}/generate-stl/result")
+    public ResponseEntity<ApiResponse<Void>> receiveStlResult(
+            @PathVariable Long scanId,
+            @RequestBody StlResultRequestDto result) {
+        scanService.receiveStlResult(scanId, result);
+        return ResponseEntity.ok(ApiResponse.success(200, "2단계: STL 파일 생성이 완료되었습니다.", null));
     }
 
     /**
