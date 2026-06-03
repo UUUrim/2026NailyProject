@@ -5,13 +5,14 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Getter
 @Builder
 public class SavedDesignResponseDto {
 
     private Long designId;
-    private String imageUrl;
+    private List<String> imageUrls;
     private LocalDateTime savedAt;
     private FolderInfo folder;
 
@@ -33,7 +34,7 @@ public class SavedDesignResponseDto {
 
         return SavedDesignResponseDto.builder()
                 .designId(savedDesign.getNailDesign().getId())
-                .imageUrl(savedDesign.getNailDesign().getImageUrl())
+                .imageUrls(savedDesign.getNailDesign().getImageUrls())
                 .savedAt(savedDesign.getSavedAt())
                 .folder(folderInfo)
                 .build();

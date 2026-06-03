@@ -88,6 +88,7 @@ public class NailDesignService {
                 .designId(nailDesign.getId())
                 .status(nailDesign.getStatus().name())
                 .generatedPrompt(finalPrompt)
+                .imageUrls(nailDesign.getImageUrls()) //DB에서 사진 3장 리스트를 꺼내서 DTO에 담기
                 .build();
     }
 
@@ -112,14 +113,15 @@ public class NailDesignService {
         JsonNode responseJson = objectMapper.readTree(response.getBody());
         String promptId = responseJson.get("prompt_id").asText();
 
-        String imageUrl = waitForImage(promptId);
+//        String imageUrl = waitForImage(promptId);
+        List<String> imageUrls = waitForImage(promptId);
 
         NailDesign design = NailDesign.builder()
                 .user(user)
-                .imageUrl(imageUrl)
+                .imageUrls(imageUrls)
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1")
-                .status(NailDesign.DesignStatus.DRAFT)
+                .status(NailDesign.DesignStatus.COMPLETED)
                 .build();
 
         return nailDesignRepository.save(design);
@@ -461,7 +463,7 @@ public class NailDesignService {
 //        return prompt.toString();
 //    }
 
-    private String waitForImage(String promptId) throws Exception {
+    private List<String> waitForImage(String promptId) throws Exception {
         for (int i = 0; i < 60; i++) {
             Thread.sleep(1000);
 
@@ -479,9 +481,14 @@ public class NailDesignService {
                 JsonNode outputs = history.get(promptId).get("outputs");
                 if (outputs != null && outputs.has("9")) {
                     JsonNode images = outputs.get("9").get("images");
+                    // 3장의 이미지를 모두 리스트에 담아서 리턴하도록
                     if (images != null && images.size() > 0) {
-                        String filename = images.get(0).get("filename").asText();
-                        return COMFY_URL + "/view?filename=" + filename + "&ngrok-skip-browser-warning=true";
+                        List<String> imageUrls = new ArrayList<>();
+                        for (JsonNode img : images) {
+                            String filename = img.get("filename").asText();
+                            imageUrls.add(COMFY_URL + "/view?filename=" + filename + "&ngrok-skip-browser-warning=true");
+                        }
+                        return imageUrls;
                     }
                 }
             }
@@ -514,13 +521,14 @@ public class NailDesignService {
         ));
 
         workflow.put("5", Map.of(
-                "inputs", Map.of("width", 768, "height", 512, "batch_size", 1),
+                "inputs", Map.of("width", 768, "height", 512, "batch_size", 3),
                 "class_type", "EmptyLatentImage"
         ));
 
         workflow.put("6", Map.of(
                 "inputs", Map.of(
-                        "text", prompt,
+                        "text", prompt
+                        ,
                         "clip", new Object[]{"16", 0}
                 ),
                 "class_type", "CLIPTextEncode"
@@ -528,7 +536,7 @@ public class NailDesignService {
 
         workflow.put("7", Map.of(
                 "inputs", Map.of(
-                        "text", "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy",
+                        "text", "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy, deformed, ugly, dots, polka dot, stripes, dark colors, bold colors, tweezers, tools, props, gray background, colored background",
                         "clip", new Object[]{"16", 0}
                 ),
                 "class_type", "CLIPTextEncode"
