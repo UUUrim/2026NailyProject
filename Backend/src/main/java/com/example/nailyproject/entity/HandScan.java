@@ -32,7 +32,7 @@ public class HandScan {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     @Builder.Default
-    private ScanStatus status = ScanStatus.PENDING;
+    private ScanStatus status = ScanStatus.READY;
 
     // 분석 결과
     @Column(name = "shape", length = 50)
@@ -44,6 +44,9 @@ public class HandScan {
     @Column(name = "recommended_colors", columnDefinition = "JSON")
     private String recommendedColors; // 추천 색상 JSON 배열
 
+    @Column(name = "overall_size", length = 20)
+    private String overallSize;
+
     @CreationTimestamp
     @Column(name = "scanned_at", nullable = false, updatable = false)
     private LocalDateTime scannedAt;
@@ -53,10 +56,17 @@ public class HandScan {
     }
 
     public enum ScanStatus {
-        PENDING,    // 분석 대기
-        ANALYZING,  // 분석 중
-        COMPLETED,  // 분석 완료
-        FAILED      // 분석 실패
+        READY,           // 방 생성됨
+        ANALYZING,       // 파이썬 수치 측정 중
+        MEASURED,        // 수치 측정 완료
+        GENERATING_STL,  // 파이썬 STL 생성 중
+        COMPLETED,       // 최종 완료
+        FAILED           // 실패
+    }
+
+    // 상태 변경용 범용 메서드
+    public void updateStatus(ScanStatus status) {
+        this.status = status;
     }
 
     // 분석 시작
@@ -65,11 +75,17 @@ public class HandScan {
     }
 
     // 분석 결과 저장
-    public void updateAnalysisResult(String shape, String skinToneHex, String recommendedColors) {
+    public void updateAnalysisResult(String shape, String skinToneHex, String recommendedColors, String overallSize) {
         this.shape = shape;
         this.skinToneHex = skinToneHex;
         this.recommendedColors = recommendedColors;
-        this.status = ScanStatus.COMPLETED;
+        this.overallSize = overallSize;
+        this.status = ScanStatus.MEASURED;
+    }
+
+    //  프론트에서 유저가 쉐입(shape)을 선택했을 때 저장하는 용도
+    public void updateShape(String shape) {
+        this.shape = shape;
     }
 
     // 분석 실패

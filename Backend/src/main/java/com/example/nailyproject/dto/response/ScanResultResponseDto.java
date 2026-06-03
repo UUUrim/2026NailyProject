@@ -9,6 +9,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
+//사용자의 화면에 분석 결과를 띄워주기 위한 목적
+
 @Getter
 @Builder
 public class ScanResultResponseDto {
@@ -21,6 +23,7 @@ public class ScanResultResponseDto {
     private String shape;
     private String skinToneHex;
     private List<String> recommendedColors;
+    private String overallSize;
 
     // 손가락별 결과
     private List<FingerResultDto> fingers;
@@ -32,7 +35,6 @@ public class ScanResultResponseDto {
     public static class FingerResultDto {
         private String finger;
         private String imageUrl;
-        private String annotatedImageUrl;
         private String stlUrl;
         private String measurements; // JSON 문자열
         private String size;
@@ -43,7 +45,6 @@ public class ScanResultResponseDto {
                 .map(img -> FingerResultDto.builder()
                         .finger(img.getFinger().name())
                         .imageUrl(img.getImageUrl())
-                        .annotatedImageUrl(img.getAnnotatedImageUrl())
                         .stlUrl(img.getStlUrl())
                         .measurements(img.getMeasurements())
                         .size(img.getSize())
@@ -56,6 +57,7 @@ public class ScanResultResponseDto {
                 .status(handScan.getStatus().name())
                 .shape(handScan.getShape())
                 .skinToneHex(handScan.getSkinToneHex())
+                .overallSize(handScan.getOverallSize())
                 .scannedAt(handScan.getScannedAt())
                 .fingers(fingers)
                 .build();

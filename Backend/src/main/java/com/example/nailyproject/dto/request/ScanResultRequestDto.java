@@ -9,18 +9,18 @@ import java.util.List;
 @NoArgsConstructor
 public class ScanResultRequestDto {
 
-    private List<FingerResult> fingers;         // 손가락별 결과
-    private String skinToneHex;                 // 전체 피부톤 HEX
-    private List<String> recommendedColors;     // 추천 색상 리스트
+    private String overallSize; //평균관련해서 손톱 크기
+    private String shape;    // 추천하는 초기 쉐입
+    private String skinToneHex;
+    private List<String> recommendedColors;
+    private List<FingerResult> fingers;
 
     @Getter
     @NoArgsConstructor
     public static class FingerResult {
         private String finger;                  // THUMB, INDEX, MIDDLE, RING, PINKY
-        private String annotatedImageUrl;       // {finger}_annotated.jpg URL
-        private String stlUrl;                  // nail_{finger}_{shape}.stl URL
         private NailMeasurements measurements;  // nail_measurements.json
-        private String size;                    // profile.json의 size 분류
+        private String size;                    // 개별 손가락 팁 size
     }
 
     @Getter
