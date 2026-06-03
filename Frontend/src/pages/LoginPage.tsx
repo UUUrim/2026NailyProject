@@ -1,5 +1,6 @@
 import '@/styles/login.css'
 import { Link, useNavigate } from 'react-router-dom'
+import { AuthNav } from '@/components/layout/AuthNav'
 import { setLoggedIn } from '@/utils/auth'
 
 export function LoginPage() {
@@ -37,12 +38,11 @@ export function LoginPage() {
             Naily
           </Link>
           <nav className="login-wireframe__nav" aria-label="상단 메뉴">
-            <Link to="/login" className="login-wireframe__link">
-              로그인
-            </Link>
-            <Link to="/signup" className="login-wireframe__cta">
-              무료로 시작하기
-            </Link>
+            <AuthNav
+              loginClassName="login-wireframe__link"
+              signupClassName="login-wireframe__cta"
+              profileClassName="login-wireframe__profile"
+            />
           </nav>
         </header>
 
@@ -63,7 +63,7 @@ export function LoginPage() {
               <label className="login-form__label" htmlFor="password">
                 비밀번호
               </label>
-              <input id="password" className="login-form__input" placeholder="••••••••" />
+              <input id="password" className="login-form__input" type="password" placeholder="••••••••" />
 
               <div className="login-form__row">
                 <label className="login-form__check">

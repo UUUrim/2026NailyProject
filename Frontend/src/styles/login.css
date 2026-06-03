@@ -52,6 +52,12 @@
   font-weight: 500;
 }
 
+.login-wireframe__profile {
+  display: inline-flex;
+  color: #de869f;
+  text-decoration: none;
+}
+
 .login-wireframe__main {
   flex: 1;
   display: grid;
