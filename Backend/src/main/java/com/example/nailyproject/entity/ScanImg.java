@@ -31,10 +31,6 @@ public class ScanImg {
     @Column(name = "image_url", nullable = false, length = 500)
     private String imageUrl;
 
-    // 분석 완료 후 주석 이미지 URL ({finger}_annotated.jpg)
-    @Column(name = "annotated_image_url", length = 500)
-    private String annotatedImageUrl;
-
     // STL 파일 URL
     @Column(name = "stl_url", length = 500)
     private String stlUrl;
@@ -56,10 +52,12 @@ public class ScanImg {
     }
 
     // 분석 결과 업데이트
-    public void updateAnalysisResult(String annotatedImageUrl, String stlUrl, String measurements, String size) {
-        this.annotatedImageUrl = annotatedImageUrl;
-        this.stlUrl = stlUrl;
+    public void updateAnalysisResult(String measurements, String size) {
         this.measurements = measurements;
         this.size = size;
+    }
+
+    public void updateStlUrl(String stlUrl) {
+        this.stlUrl = stlUrl;
     }
 }

@@ -22,22 +22,21 @@ public class S3Service {
     private String bucket;
 
     /**
-     * 이미지 업로드
-     * 경로: {userId}/{handSide}/{finger}/image_{uuid}.jpg
+     * ✨ [수정됨] 이미지 업로드 (경로를 외부에서 주입받음)
+     * ScanService에서 만든 s3Key (예: photos/u001/125/right/thumb.jpg) 그대로 업로드합니다.
      */
-    public String uploadImage(MultipartFile file, Long userId, String handSide, String finger) throws IOException {
-        String path = buildImagePath(userId, handSide, finger);
-        return upload(file.getInputStream(), path, file.getContentType(), file.getSize());
+    public String uploadImageWithKey(MultipartFile file, String s3Key) throws IOException {
+        return upload(file.getInputStream(), s3Key, file.getContentType(), file.getSize());
     }
 
     /**
-     * STL 파일 업로드
-     * 경로: {userId}/{handSide}/{finger}/stl/{fileName}
+     * STL 파일 업로드 (이 부분도 나중에 파이썬이 올릴 거면 안 쓰일 수 있지만, 일단 둠 )
      */
     public String uploadStl(InputStream inputStream, Long userId, String handSide, String finger, String fileName, long size) throws IOException {
         String path = userId + "/" + handSide.toLowerCase() + "/" + finger.toLowerCase() + "/stl/" + fileName;
         return upload(inputStream, path, "application/octet-stream", size);
     }
+
 
     /**
      * S3 업로드 공통 메서드
@@ -59,11 +58,11 @@ public class S3Service {
         amazonS3.deleteObject(bucket, fileName);
     }
 
-    /**
-     * 이미지 경로 생성
-     * {userId}/{handSide}/{finger}/image.jpg
-     */
-    private String buildImagePath(Long userId, String handSide, String finger) {
-        return userId + "/" + handSide.toLowerCase() + "/" + finger.toLowerCase() + "/image.jpg";
-    }
+//    /**
+//     * 이미지 경로 생성
+//     * {userId}/{handSide}/{finger}/image.jpg
+//     */
+//    private String buildImagePath(Long userId, String handSide, String finger) {
+//        return userId + "/" + handSide.toLowerCase() + "/" + finger.toLowerCase() + "/image.jpg";
+//    }
 }
