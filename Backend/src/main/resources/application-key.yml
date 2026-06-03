@@ -1,0 +1,8 @@
+jasypt:
+  encryptor:
+    bean: jasyptStringEncryptor
+    key: NailyImportantKey
+
+spring:
+  datasource:
+    password: 1234

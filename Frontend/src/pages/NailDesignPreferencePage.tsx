@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   buildDesignPrompt,
@@ -54,17 +54,51 @@ export function NailDesignPreferencePage() {
     getRecommendedSeasonCode() ?? 'spring_light',
   )
   const [pickerColor, setPickerColor] = useState<string>('#DE869F')
+  const [sessionId, setSessionId] = useState<number | null>(null)  // 여기 추가
 
   const prompt = useMemo(() => buildDesignPrompt(preferences), [preferences])
   const seasonSwatches = PERSONAL_COLOR_SWATCHES[selectedSeasonCode] ?? []
   const isValidHex = /^#[0-9a-fA-F]{6}$/.test(pickerColor)
 
+      // 페이지 진입 시 세션 생성
+  useEffect(() => {
+    const createSession = async () => {
+      const token = localStorage.getItem('token')
+      try {
+        const response = await fetch('/chats/session', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+        const result = await response.json()
+        setSessionId(result.data.sessionId)
+      } catch {
+        alert('세션 생성에 실패했습니다.')
+      }
+    }
+    createSession()
+  }, [])
+
   const toggleColor = (hex: string) => {
     setPreferences((prev) => togglePreference(prev, 'color', hex.toUpperCase()))
   }
 
-  const handleSubmit = () => {
-    navigate('/design/result', { state: { preferences, prompt } })
+  const handleSubmit = async () => {
+    const token = localStorage.getItem('token')
+    try {
+      await fetch(`/chats/${sessionId}/preferences`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(preferences),
+      })
+      navigate('/design/result', { state: { preferences, prompt, sessionId } })
+    } catch {
+      alert('선호도 저장에 실패했습니다.')
+    }
   }
 
   return (

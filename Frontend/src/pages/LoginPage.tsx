@@ -5,9 +5,28 @@ import { setLoggedIn } from '@/utils/auth'
 export function LoginPage() {
   const navigate = useNavigate()
 
-  const handleLogin = () => {
-    setLoggedIn(true)
-    navigate('/process')
+  const handleLogin = async () => {
+    const email = (document.getElementById('email') as HTMLInputElement).value
+    const password = (document.getElementById('password') as HTMLInputElement).value
+
+    try {
+      const response = await fetch('/users/email/login', {  // 경로 수정
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        localStorage.setItem('token', result.data.token)  // ApiResponse 구조라 .data.token
+        setLoggedIn(true)
+        navigate('/process')
+      } else {
+        alert('이메일 또는 비밀번호가 틀렸습니다.')
+      }
+    } catch {
+      alert('서버 연결에 실패했습니다.')
+    }
   }
 
   return (
