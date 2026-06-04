@@ -210,8 +210,34 @@
 
 .design-result-regenerate-wrap {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 0.75rem;  /* 추가 */
   margin: 1.5rem 0 0.5rem;
+}
+
+.design-result-save {
+  border: 1px solid #de869f;
+  border-radius: 999px;
+  background: #de869f;
+  color: #ffffff;
+  padding: 0.75rem 1.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.design-result-save:hover:not(:disabled) {
+  background: #de5a7f;
+  color: #fff;
+}
+
+.design-result-save.is-saved {
+  background: #df98ac;
+  color: #fff;
+  cursor: default;
+  opacity: 0.7;
 }
 
 .design-result-regenerate {
@@ -279,6 +305,8 @@
   border: none;
   background: transparent;
   color: #de869f;
+  width: 100%;
+  text-align: center;
   cursor: pointer;
   text-decoration: underline;
 }
@@ -554,6 +582,8 @@
 }
 
 .nail-design-page__submit {
+  display: block;
+  margin: 20px auto 0;  /* auto로 좌우 센터 */
   margin-top: 20px;
   width: 100%;
   max-width: 360px;
@@ -585,7 +615,7 @@
 
 .result-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }

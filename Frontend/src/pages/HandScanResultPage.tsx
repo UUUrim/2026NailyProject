@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageBackLink } from '@/components/layout/PageBackLink'
 import { FingerDetailModal } from '@/components/handScan/FingerDetailModal'
 import { getNailShape, NAIL_SHAPES } from '@/constants/nailShapes'
+import { addNailTipPrintOrder, saveHandScanRecord } from '@/utils/mypageStorage'
 import '@/styles/hand-scan-result.css'
 
 const API_BASE = '/api'
@@ -50,6 +52,7 @@ export function HandScanResultPage() {
     const navigate = useNavigate()
     const location = useLocation()
     const scanId = (location.state as { scanId?: number })?.scanId
+    const fromMypage = !!(location.state as { fromMypage?: boolean } | null)?.fromMypage
 
     const [result, setResult] = useState<ScanResult | null>(null)
     const [isLoading, setIsLoading] = useState(true)
@@ -57,6 +60,8 @@ export function HandScanResultPage() {
     const [showFingerModal, setShowFingerModal] = useState(false)
     const [selectedShape, setSelectedShape] = useState<string>('round')
     const [isGeneratingStl, setIsGeneratingStl] = useState(false)
+    const [showPrintModal, setShowPrintModal] = useState(false)
+    const [printConfirmed, setPrintConfirmed] = useState(false)
 
     useEffect(() => {
         if (!scanId) {
@@ -73,9 +78,12 @@ export function HandScanResultPage() {
                 if (!res.ok) throw new Error('결과를 불러오는데 실패했습니다.')
                 const data = await res.json()
                 setResult(data.data)
-                // 추천 쉐입으로 초기 선택값 설정
                 if (data.data.shape) {
                     setSelectedShape(data.data.shape)
+                }
+                // 마이페이지에 저장 (마이페이지에서 온 경우 제외)
+                if (!fromMypage && data.data) {
+                    saveHandScanRecord(data.data)
                 }
                 return data.data.status
             } catch (e) {
@@ -94,7 +102,7 @@ export function HandScanResultPage() {
         }
 
         void poll()
-    }, [scanId])
+    }, [scanId, fromMypage])
 
     const handleGenerateStl = async () => {
         setIsGeneratingStl(true)
@@ -145,7 +153,10 @@ export function HandScanResultPage() {
 
     return (
         <AppShell mainClassName="scan-result-page">
-            <PageBackLink to="/scan/hand" label="손 촬영" />
+            {fromMypage
+                ? <PageBackLink to="/mypage" label="손 분석 기록" state={{ tab: 'scan' }} />
+                : <PageBackLink to="/scan/hand" label="손 촬영" />
+            }
 
             <header className="scan-result-hero">
                 <p className="scan-result-hero__eyebrow">Hand Scan Analysis</p>
@@ -212,8 +223,12 @@ export function HandScanResultPage() {
                         return (
                             <article
                                 key={shape.id}
-                                className={`scan-shape-card ${isSelected ? 'is-recommended' : ''}`}
+                                className={`scan-shape-card ${isSelected ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''}`}
                                 onClick={() => setSelectedShape(shape.id)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => e.key === 'Enter' && setSelectedShape(shape.id)}
+                                aria-pressed={isSelected}
                                 style={{ cursor: 'pointer' }}
                             >
                                 {isRecommended && <span className="scan-shape-card__badge">추천</span>}
@@ -230,6 +245,14 @@ export function HandScanResultPage() {
                 <button
                     type="button"
                     className="scan-result-cta"
+                    onClick={() => setShowPrintModal(true)}
+                    disabled={printConfirmed}
+                >
+                    {printConfirmed ? '출력 신청 완료 ✓' : '네일팁 출력하기'}
+                </button>
+                <button
+                    type="button"
+                    className="scan-result-cta"
                     onClick={() => void handleGenerateStl()}
                     disabled={isGeneratingStl}
                 >
@@ -239,6 +262,34 @@ export function HandScanResultPage() {
 
             {showFingerModal && result.fingers.length > 0 && (
                 <FingerDetailModal fingers={result.fingers as never} onClose={() => setShowFingerModal(false)} />
+            )}
+
+            {showPrintModal && createPortal(
+                <div className="print-modal">
+                    <button type="button" className="print-modal__backdrop" onClick={() => setShowPrintModal(false)} />
+                    <div className="print-modal__panel" role="dialog" aria-modal="true">
+                        <p className="print-modal__icon">🖨️</p>
+                        <h2>출력 신청 완료</h2>
+                        <p>
+                            당신의 네일팁이{' '}
+                            <strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape}</strong>
+                            {' '}(으)로 출력 신청되었습니다.
+                        </p>
+                        <button
+                            type="button"
+                            className="scan-result-cta"
+                            onClick={() => {
+                                const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
+                                addNailTipPrintOrder({ shapeId: selectedShape, shapeLabelKo })
+                                setPrintConfirmed(true)
+                                setShowPrintModal(false)
+                            }}
+                        >
+                            확인
+                        </button>
+                    </div>
+                </div>,
+                document.body
             )}
         </AppShell>
     )

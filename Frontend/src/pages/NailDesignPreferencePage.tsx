@@ -18,6 +18,37 @@ import { getHandScanResult } from '@/utils/handScanStorage'
 import { getRecommendedSeasonCode } from '@/utils/personalColorStorage'
 import '@/styles/nail-design.css'
 
+// function togglePreference(
+//   prev: NailDesignPreferences,
+//   key: PreferenceKey,
+//   value: string,
+// ): NailDesignPreferences {
+//   const selected = prev[key]
+//   const hasValue = selected.includes(value)
+
+//   if (hasValue) {
+//     return { ...prev, [key]: selected.filter((item) => item !== value) }
+//   }
+
+//   const limit = PREFERENCE_LIMITS[key]
+//   let nextSelected = [...selected]
+
+//   if (key === 'motif') {
+//     if (value === '없음') {
+//       nextSelected = ['없음']
+//     } else {
+//       nextSelected = nextSelected.filter((item) => item !== '없음')
+//       nextSelected = [...nextSelected, value].slice(-limit)
+//     }
+//   } else if (limit === 1) {
+//     nextSelected = [value]
+//   } else {
+//     nextSelected = [...nextSelected, value].slice(-limit)
+//   }
+
+//   return { ...prev, [key]: nextSelected }
+// }
+
 function togglePreference(
     prev: NailDesignPreferences,
     key: PreferenceKey,
@@ -26,6 +57,7 @@ function togglePreference(
   const selected = prev[key]
   const hasValue = selected.includes(value)
 
+  // 이미 선택된 경우 → 취소
   if (hasValue) {
     return { ...prev, [key]: selected.filter((item) => item !== value) }
   }
@@ -38,12 +70,14 @@ function togglePreference(
       nextSelected = ['없음']
     } else {
       nextSelected = nextSelected.filter((item) => item !== '없음')
-      nextSelected = [...nextSelected, value].slice(-limit)
+      if (nextSelected.length >= limit) return prev  // 막기
+      nextSelected = [...nextSelected, value]
     }
   } else if (limit === 1) {
     nextSelected = [value]
   } else {
-    nextSelected = [...nextSelected, value].slice(-limit)
+    if (nextSelected.length >= limit) return prev  // 막기
+    nextSelected = [...nextSelected, value]
   }
 
   return { ...prev, [key]: nextSelected }
