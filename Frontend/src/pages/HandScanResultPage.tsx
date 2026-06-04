@@ -5,40 +5,12 @@ import { AppShell } from '@/components/layout/AppShell'
 import { PageBackLink } from '@/components/layout/PageBackLink'
 import { FingerDetailModal } from '@/components/handScan/FingerDetailModal'
 import { getNailShape, NAIL_SHAPES } from '@/constants/nailShapes'
-import { addNailTipPrintOrder, saveHandScanRecord } from '@/utils/mypageStorage'
+import { addNailTipPrintOrder } from '@/utils/mypageStorage'
+import { getScanResult, generateStl, type ScanResultResponse } from '@/api/scan'
+import { ApiError } from '@/utils/apiClient'
 import '@/styles/hand-scan-result.css'
 
-const API_BASE = '/api'
-
-interface FingerResult {
-    finger: string
-    imageUrl: string
-    stlUrl: string
-    measurements: string
-    size: string
-}
-
-interface ScanResult {
-    scanId: number
-    handSide: string
-    status: string
-    shape: string
-    skinToneHex: string
-    recommendedColors: string[]
-    overallSize: string
-    fingers: FingerResult[]
-    scannedAt: string
-}
-
-function MetricCard({
-                        title,
-                        value,
-                        hint,
-                    }: {
-    title: string
-    value: string
-    hint: string
-}) {
+function MetricCard({ title, value, hint }: { title: string; value: string; hint: string }) {
     return (
         <article className="scan-metric-card">
             <h3>{title}</h3>
@@ -54,7 +26,7 @@ export function HandScanResultPage() {
     const scanId = (location.state as { scanId?: number })?.scanId
     const fromMypage = !!(location.state as { fromMypage?: boolean } | null)?.fromMypage
 
-    const [result, setResult] = useState<ScanResult | null>(null)
+    const [result, setResult] = useState<ScanResultResponse | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [showFingerModal, setShowFingerModal] = useState(false)
@@ -63,31 +35,22 @@ export function HandScanResultPage() {
     const [showPrintModal, setShowPrintModal] = useState(false)
     const [printConfirmed, setPrintConfirmed] = useState(false)
 
+    // 폴링: GET /scans/{scanId} — status가 MEASURED 또는 COMPLETED 될 때까지
     useEffect(() => {
         if (!scanId) {
-            setIsLoading(false)
             return
         }
 
-        const fetchResult = async () => {
-            const token = localStorage.getItem('token')
+        const fetchResult = async (): Promise<string | null> => {
             try {
-                const res = await fetch(`${API_BASE}/scans/${scanId}`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                })
-                if (!res.ok) throw new Error('결과를 불러오는데 실패했습니다.')
-                const data = await res.json()
-                setResult(data.data)
-                if (data.data.shape) {
-                    setSelectedShape(data.data.shape)
-                }
-                // 마이페이지에 저장 (마이페이지에서 온 경우 제외)
-                if (!fromMypage && data.data) {
-                    saveHandScanRecord(data.data)
-                }
-                return data.data.status
+                const data = await getScanResult(scanId)
+                setResult(data)
+                if (data.shape) setSelectedShape(data.shape)
+
+                return data.status
             } catch (e) {
-                setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
+                const msg = e instanceof ApiError ? e.message : '오류가 발생했습니다.'
+                setError(msg)
                 return null
             } finally {
                 setIsLoading(false)
@@ -96,30 +59,25 @@ export function HandScanResultPage() {
 
         const poll = async () => {
             const status = await fetchResult()
-            if (status !== 'MEASURED' && status !== 'COMPLETED' && status !== null) {
-                setTimeout(poll, 3000)
+            // READY | ANALYZING 상태면 3초 후 재시도
+            if (status !== null && status !== 'MEASURED' && status !== 'COMPLETED' && status !== 'FAILED') {
+                setTimeout(() => void poll(), 3000)
             }
         }
 
         void poll()
     }, [scanId, fromMypage])
 
+    // POST /scans/{scanId}/generate-stl { shape }
     const handleGenerateStl = async () => {
+        if (!scanId) return
         setIsGeneratingStl(true)
-        const token = localStorage.getItem('token')
         try {
-            const res = await fetch(`${API_BASE}/scans/${scanId}/generate-stl`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ shape: selectedShape }),
-            })
-            if (!res.ok) throw new Error('STL 생성 요청에 실패했습니다.')
-            navigate('/design/preferences')
+            await generateStl(scanId, selectedShape)
+            navigate('/design/preferences', { state: { scanId } })
         } catch (e) {
-            alert(e instanceof Error ? e.message : 'STL 생성 요청에 실패했습니다.')
+            const msg = e instanceof ApiError ? e.message : 'STL 생성 요청에 실패했습니다.'
+            alert(msg)
         } finally {
             setIsGeneratingStl(false)
         }
@@ -213,8 +171,7 @@ export function HandScanResultPage() {
             <section className="scan-result-section">
                 <h2>네일팁 모양 선택</h2>
                 <p className="scan-result-section__sub">
-                    추천 쉐입은 <strong>{recommended?.labelKo ?? result.shape}</strong>입니다.
-                    원하는 모양을 선택해 주세요.
+                    추천 쉐입은 <strong>{recommended?.labelKo ?? result.shape}</strong>입니다. 원하는 모양을 선택해 주세요.
                 </p>
                 <div className="scan-shape-grid">
                     {NAIL_SHAPES.map((shape) => {
@@ -289,7 +246,7 @@ export function HandScanResultPage() {
                         </button>
                     </div>
                 </div>,
-                document.body
+                document.body,
             )}
         </AppShell>
     )

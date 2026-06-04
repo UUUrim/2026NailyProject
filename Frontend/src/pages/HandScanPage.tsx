@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageBackLink } from '@/components/layout/PageBackLink'
+import { startScan, uploadFingerImage, requestAnalyze } from '@/api/scan'
+import { ApiError } from '@/utils/apiClient'
 import '@/styles/hand-scan.css'
 
 const FINGERS = ['THUMB', 'INDEX', 'MIDDLE', 'RING', 'PINKY'] as const
@@ -15,8 +17,6 @@ const FINGER_LABELS: Record<Finger, string> = {
   PINKY: '새끼',
 }
 
-const API_BASE = '/api'
-
 export function HandScanPage() {
   const navigate = useNavigate()
   const [cameraOn, setCameraOn] = useState(false)
@@ -25,7 +25,6 @@ export function HandScanPage() {
   const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('default')
 
-  // 촬영 진행 상태
   const [currentFingerIndex, setCurrentFingerIndex] = useState(0)
   const [scanId, setScanId] = useState<number | null>(null)
   const [uploadedFingers, setUploadedFingers] = useState<Finger[]>([])
@@ -59,7 +58,6 @@ export function HandScanPage() {
   const handleStartCamera = async (deviceId?: string) => {
     try {
       stopStream()
-
       const videoConstraint =
           deviceId && deviceId !== 'default'
               ? { deviceId: { exact: deviceId } }
@@ -83,26 +81,21 @@ export function HandScanPage() {
 
   const handleChangeCamera = async (deviceId: string) => {
     setSelectedDeviceId(deviceId)
-    if (cameraOn) {
-      await handleStartCamera(deviceId)
-    }
+    if (cameraOn) await handleStartCamera(deviceId)
   }
 
-// 크롭 없이 원본 그대로 Blob 반환
-  const captureAndCropBlob = async (): Promise<Blob> => {
+  const captureBlob = async (): Promise<Blob> => {
     const video = videoRef.current
     if (!video) throw new Error('Video element is not ready.')
 
-    const fullWidth = Math.max(1, video.videoWidth || 1280)
-    const fullHeight = Math.max(1, video.videoHeight || 720)
-
+    const w = Math.max(1, video.videoWidth || 1280)
+    const h = Math.max(1, video.videoHeight || 720)
     const canvas = document.createElement('canvas')
-    canvas.width = fullWidth
-    canvas.height = fullHeight
+    canvas.width = w
+    canvas.height = h
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('Canvas context is not available.')
-
-    ctx.drawImage(video, 0, 0, fullWidth, fullHeight)
+    ctx.drawImage(video, 0, 0, w, h)
 
     return new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(
@@ -113,51 +106,6 @@ export function HandScanPage() {
     })
   }
 
-  // 스캔 세션 시작 → scanId 받아오기
-  const startScanSession = async (): Promise<number> => {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${API_BASE}/scans`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ handSide: 'RIGHT' }),
-    })
-    if (!res.ok) throw new Error('스캔 세션 시작에 실패했습니다.')
-    const data = await res.json()
-    return data.data.scanId as number
-  }
-
-  // 손가락 이미지 업로드
-  const uploadFingerImage = async (id: number, finger: Finger, blob: Blob): Promise<void> => {
-    const token = localStorage.getItem('token')
-    const formData = new FormData()
-    formData.append('file', blob, `${finger.toLowerCase()}.jpg`)
-
-    const res = await fetch(`${API_BASE}/scans/${id}/images?finger=${finger}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
-    })
-    if (!res.ok) throw new Error(`${FINGER_LABELS[finger]} 이미지 업로드에 실패했습니다.`)
-  }
-
-  // 분석 요청
-  const requestAnalyze = async (id: number): Promise<void> => {
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${API_BASE}/scans/${id}/analyze`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
-    if (!res.ok) throw new Error('분석 요청에 실패했습니다.')
-  }
-
-  // 촬영 버튼 클릭 → 현재 손가락 촬영 + 업로드
   const handleCaptureFinger = async () => {
     if (!cameraOn) {
       setCameraError('먼저 카메라를 켜 주세요.')
@@ -168,32 +116,34 @@ export function HandScanPage() {
     setCameraError(null)
 
     try {
-      // 첫 번째 손가락이면 스캔 세션 먼저 시작
+      // 첫 손가락이면 스캔 세션 시작 → POST /scans { handSide: 'RIGHT' }
       let currentScanId = scanId
       if (currentScanId === null) {
-        currentScanId = await startScanSession()
+        const data = await startScan('RIGHT')
+        currentScanId = data.scanId
         setScanId(currentScanId)
       }
 
-      // 촬영 + 크롭
-      const blob = await captureAndCropBlob()
-
-      // S3 업로드 (백엔드 경유)
+      // 촬영 → POST /scans/{scanId}/images?finger=THUMB
+      const blob = await captureBlob()
       await uploadFingerImage(currentScanId, currentFinger, blob)
 
       setUploadedFingers((prev) => [...prev, currentFinger])
 
-      // 다음 손가락으로
       if (currentFingerIndex < FINGERS.length - 1) {
         setCurrentFingerIndex((prev) => prev + 1)
       } else {
-        // 5개 다 찍었으면 분석 요청
+        // 5장 완료 → POST /scans/{scanId}/analyze
         await requestAnalyze(currentScanId)
         setIsDone(true)
         stopStream()
       }
     } catch (e) {
-      setCameraError(e instanceof Error ? e.message : '오류가 발생했습니다. 다시 시도해 주세요.')
+      if (e instanceof ApiError) {
+        setCameraError(e.message)
+      } else {
+        setCameraError(e instanceof Error ? e.message : '오류가 발생했습니다. 다시 시도해 주세요.')
+      }
     } finally {
       setIsUploading(false)
     }
@@ -206,12 +156,9 @@ export function HandScanPage() {
   }, [selectedDeviceId, videoInputs])
 
   useEffect(() => {
-    return () => {
-      stopStream()
-    }
+    return () => { stopStream() }
   }, [])
 
-  // 완료 후 결과 페이지로 이동
   useEffect(() => {
     if (isDone) {
       navigate('/scan/result', { state: { scanId } })
@@ -227,7 +174,6 @@ export function HandScanPage() {
           <p>손등과 손톱이 잘 보이도록 카메라에 맞춰 주세요.</p>
         </header>
 
-        {/* 진행 상태 표시 */}
         <div className="hand-scan__progress">
           {FINGERS.map((finger, idx) => (
               <span
