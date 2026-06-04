@@ -266,7 +266,7 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
     if not c_estimates:
         c_final = 2.0   # safe fallback
     else:
-        c_final = round(float(np.median(c_estimates)), 2)
+        c_final = round(float(np.nanmedian(c_estimates)), 2)
 
     # Arc radius from final c-curve
     w_mm  = nail_half * 2 * mpp

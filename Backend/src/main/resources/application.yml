@@ -59,3 +59,7 @@ cloud:
       static: us-east-1
     stack:
       auto: false
+
+python:
+  server:
+    url: http://localhost:8000

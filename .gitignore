@@ -46,7 +46,7 @@ out/
 ### VS Code ###
 .vscode/
 
-application-key.yml
+Backend/src/main/resources/application-key.yml
 **/src/main/resources/templates/
 
 
@@ -91,4 +91,10 @@ __pycache__
 .claude
 claude
 
+
+.env
+scan/.env
+
+scan/photos
+scan/results
 
