@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 
 //이미지 올리기 + 이미지 삭제
 @Service
@@ -22,7 +23,7 @@ public class S3Service {
     private String bucket;
 
     /**
-     * ✨ [수정됨] 이미지 업로드 (경로를 외부에서 주입받음)
+     * [수정됨] 이미지 업로드 (경로를 외부에서 주입받음)
      * ScanService에서 만든 s3Key (예: photos/u001/125/right/thumb.jpg) 그대로 업로드합니다.
      */
     public String uploadImageWithKey(MultipartFile file, String s3Key) throws IOException {
@@ -65,4 +66,19 @@ public class S3Service {
 //    private String buildImagePath(Long userId, String handSide, String finger) {
 //        return userId + "/" + handSide.toLowerCase() + "/" + finger.toLowerCase() + "/image.jpg";
 //    }
+    /**
+     * 백엔드가 다운로드한 이미지(Byte 배열)를 S3에 직접 업로드
+     */
+    public String uploadImageBytes(byte[] imageBytes, String s3Key) {
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentType("image/png"); // ComfyUI는 기본적으로 png를 뱉어냅니다
+        metadata.setContentLength(imageBytes.length);
+
+        try (InputStream inputStream = new ByteArrayInputStream(imageBytes)) {
+            amazonS3.putObject(new PutObjectRequest(bucket, s3Key, inputStream, metadata));
+            return amazonS3.getUrl(bucket, s3Key).toString(); // S3 영구 주소 반환
+        } catch (Exception e) {
+            throw new RuntimeException("S3 이미지 업로드 중 오류 발생", e);
+        }
+    }
 }

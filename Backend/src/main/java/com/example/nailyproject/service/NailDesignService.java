@@ -3,6 +3,7 @@ package com.example.nailyproject.service;
 import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.request.UserPreferencesRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
+import com.example.nailyproject.dto.response.DesignImageResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -15,6 +16,7 @@ import org.springframework.http.*;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.time.format.DateTimeFormatter;
 
 @Service
 @Transactional
@@ -26,6 +28,7 @@ public class NailDesignService {
     private final HandScanRepository handScanRepository;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final S3Service s3Service;
 
 //    ComfyUI URL을 공유받은 ngrok 주소로 변경 (기본적으로 작성되어있음)
     private static final String COMFY_URL = "https://scalded-lard-seduce.ngrok-free.dev";
@@ -40,11 +43,13 @@ public class NailDesignService {
     public NailDesignService(NailDesignRepository nailDesignRepository,
                              UserRepository userRepository,
                              DesignSessionRepository designSessionRepository,
-                             HandScanRepository handScanRepository) {
+                             HandScanRepository handScanRepository,
+                             S3Service s3Service) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
         this.handScanRepository = handScanRepository;
+        this.s3Service = s3Service;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -114,11 +119,29 @@ public class NailDesignService {
         String promptId = responseJson.get("prompt_id").asText();
 
 //        String imageUrl = waitForImage(promptId);
-        List<String> imageUrls = waitForImage(promptId);
+        // 1. 파이썬에게 임시 ngrok 주소 3개를 받아옴.
+        List<String> ngrokUrls = waitForImage(promptId);
+
+        // 2. S3 주소를 담을 새 바구니 준비
+        List<String> s3Urls = new ArrayList<>();
+
+        // 3. 3장의 이미지를 순회하며 백엔드로 다운로드 후 S3 업로드
+        for (String ngrokUrl : ngrokUrls) {
+            HttpEntity<Void> imageRequest = new HttpEntity<>(getHeaders());
+            ResponseEntity<byte[]> imageResponse = restTemplate.exchange(
+                    ngrokUrl, HttpMethod.GET, imageRequest, byte[].class
+            );
+            byte[] imageBytes = imageResponse.getBody();
+
+            String s3Key = "designs/user_" + userId + "/" + UUID.randomUUID().toString() + ".png";
+            String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
+
+            s3Urls.add(s3Url); // 완성된 S3 영구 주소를 바구니에 담기
+        }
 
         NailDesign design = NailDesign.builder()
                 .user(user)
-                .imageUrls(imageUrls)
+                .imageUrls(s3Urls)
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1")
                 .status(NailDesign.DesignStatus.COMPLETED)
@@ -585,4 +608,32 @@ public class NailDesignService {
 
         return workflow;
     }
+
+    /**
+     * '내 디자인' 전체 이미지 목록 조회 (각각의 이미지를 개별 아이템으로 펼쳐서 반환)
+     */
+    public List<DesignImageResponseDto> getUserDesignHistory(Long userId) {
+        List<NailDesign> designs = nailDesignRepository.findAllByUserIdOrderByGeneratedAtDesc(userId);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
+        List<DesignImageResponseDto> resultList = new ArrayList<>();
+
+        for (NailDesign design : designs) {
+            String formattedDate = design.getGeneratedAt() != null
+                    ? design.getGeneratedAt().format(formatter) : "";
+
+            if (design.getImageUrls() != null) {
+                for (String url : design.getImageUrls()) {
+                    DesignImageResponseDto item = DesignImageResponseDto.builder()
+                            .designId(design.getId())
+                            .imageUrl(url)
+                            .createdAt(formattedDate)
+                            .build();
+                    resultList.add(item);
+                }
+            }
+        }
+        return resultList;
+    }
+
 }

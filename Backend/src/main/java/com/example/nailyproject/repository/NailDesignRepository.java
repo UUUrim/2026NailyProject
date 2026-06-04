@@ -4,7 +4,11 @@ package com.example.nailyproject.repository;
 import com.example.nailyproject.entity.NailDesign;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
+import java.util.List;
 
 @Repository
 public interface NailDesignRepository extends JpaRepository<NailDesign, Long> {
+
+    //User의 Id로 모든 디자인을 찾아서(findAllByUserId), 생성일자 기준 내림차순으로 정렬해라(OrderByCreatedAtDesc)
+    List<NailDesign> findAllByUserIdOrderByGeneratedAtDesc(Long userId);
 }
