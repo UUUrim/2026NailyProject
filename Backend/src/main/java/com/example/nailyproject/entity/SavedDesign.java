@@ -37,4 +37,8 @@ public class SavedDesign {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "saved_folder_id")
     private SavedFolder savedFolder; // null이면 폴더 미지정
+
+    //어떤 이미지를 찜했는지 기록용
+    @Column(name = "image_url", nullable = false, length = 500)
+    private String imageUrl;
 }

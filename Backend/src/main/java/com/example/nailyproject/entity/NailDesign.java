@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 // 실제 생성된 디자인 결과물
 // 이미지 URL, 사용된 AI 모델, 상태 저장
@@ -27,8 +28,10 @@ public class NailDesign {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @ElementCollection
+    @CollectionTable(name = "nail_design_images", joinColumns = @JoinColumn(name = "nail_design_id"))
     @Column(name = "image_url", nullable = false, length = 500)
-    private String imageUrl;
+    private List<String> imageUrls;
 
     @Column(name = "prompt_summary")
     private String promptSummary;
@@ -48,8 +51,8 @@ public class NailDesign {
         DRAFT, CONFIRMED, IN_PRODUCTION, COMPLETED
     }
 
-    public void updateImageUrl(String imageUrl) {
-        this.imageUrl = imageUrl;
+    public void updateImageUrls(List<String> imageUrls) {
+        this.imageUrls = imageUrls;
     }
 
     public void updateStatus(DesignStatus status) {

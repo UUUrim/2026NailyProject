@@ -5,6 +5,9 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
+import java.util.List;
+
+//이걸 찜목록 불러오기용으로
 
 @Getter
 @Builder
@@ -33,7 +36,7 @@ public class SavedDesignResponseDto {
 
         return SavedDesignResponseDto.builder()
                 .designId(savedDesign.getNailDesign().getId())
-                .imageUrl(savedDesign.getNailDesign().getImageUrl())
+                .imageUrl(savedDesign.getImageUrl())
                 .savedAt(savedDesign.getSavedAt())
                 .folder(folderInfo)
                 .build();

@@ -3,6 +3,7 @@ package com.example.nailyproject.service;
 import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.request.UserPreferencesRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
+import com.example.nailyproject.dto.response.DesignImageResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -15,6 +16,7 @@ import org.springframework.http.*;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.time.format.DateTimeFormatter;
 
 @Service
 @Transactional
@@ -26,6 +28,7 @@ public class NailDesignService {
     private final HandScanRepository handScanRepository;
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
+    private final S3Service s3Service;
 
 //    ComfyUI URL을 공유받은 ngrok 주소로 변경 (기본적으로 작성되어있음)
     private static final String COMFY_URL = "https://scalded-lard-seduce.ngrok-free.dev";
@@ -40,11 +43,13 @@ public class NailDesignService {
     public NailDesignService(NailDesignRepository nailDesignRepository,
                              UserRepository userRepository,
                              DesignSessionRepository designSessionRepository,
-                             HandScanRepository handScanRepository) {
+                             HandScanRepository handScanRepository,
+                             S3Service s3Service) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
         this.handScanRepository = handScanRepository;
+        this.s3Service = s3Service;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -88,6 +93,7 @@ public class NailDesignService {
                 .designId(nailDesign.getId())
                 .status(nailDesign.getStatus().name())
                 .generatedPrompt(finalPrompt)
+                .imageUrls(nailDesign.getImageUrls()) //DB에서 사진 3장 리스트를 꺼내서 DTO에 담기
                 .build();
     }
 
@@ -112,14 +118,33 @@ public class NailDesignService {
         JsonNode responseJson = objectMapper.readTree(response.getBody());
         String promptId = responseJson.get("prompt_id").asText();
 
-        String imageUrl = waitForImage(promptId);
+//        String imageUrl = waitForImage(promptId);
+        // 1. 파이썬에게 임시 ngrok 주소 3개를 받아옴.
+        List<String> ngrokUrls = waitForImage(promptId);
+
+        // 2. S3 주소를 담을 새 바구니 준비
+        List<String> s3Urls = new ArrayList<>();
+
+        // 3. 3장의 이미지를 순회하며 백엔드로 다운로드 후 S3 업로드
+        for (String ngrokUrl : ngrokUrls) {
+            HttpEntity<Void> imageRequest = new HttpEntity<>(getHeaders());
+            ResponseEntity<byte[]> imageResponse = restTemplate.exchange(
+                    ngrokUrl, HttpMethod.GET, imageRequest, byte[].class
+            );
+            byte[] imageBytes = imageResponse.getBody();
+
+            String s3Key = "designs/user_" + userId + "/" + UUID.randomUUID().toString() + ".png";
+            String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
+
+            s3Urls.add(s3Url); // 완성된 S3 영구 주소를 바구니에 담기
+        }
 
         NailDesign design = NailDesign.builder()
                 .user(user)
-                .imageUrl(imageUrl)
+                .imageUrls(s3Urls)
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1")
-                .status(NailDesign.DesignStatus.DRAFT)
+                .status(NailDesign.DesignStatus.COMPLETED)
                 .build();
 
         return nailDesignRepository.save(design);
@@ -461,7 +486,7 @@ public class NailDesignService {
 //        return prompt.toString();
 //    }
 
-    private String waitForImage(String promptId) throws Exception {
+    private List<String> waitForImage(String promptId) throws Exception {
         for (int i = 0; i < 60; i++) {
             Thread.sleep(1000);
 
@@ -479,9 +504,14 @@ public class NailDesignService {
                 JsonNode outputs = history.get(promptId).get("outputs");
                 if (outputs != null && outputs.has("9")) {
                     JsonNode images = outputs.get("9").get("images");
+                    // 3장의 이미지를 모두 리스트에 담아서 리턴하도록
                     if (images != null && images.size() > 0) {
-                        String filename = images.get(0).get("filename").asText();
-                        return COMFY_URL + "/view?filename=" + filename + "&ngrok-skip-browser-warning=true";
+                        List<String> imageUrls = new ArrayList<>();
+                        for (JsonNode img : images) {
+                            String filename = img.get("filename").asText();
+                            imageUrls.add(COMFY_URL + "/view?filename=" + filename + "&ngrok-skip-browser-warning=true");
+                        }
+                        return imageUrls;
                     }
                 }
             }
@@ -514,13 +544,14 @@ public class NailDesignService {
         ));
 
         workflow.put("5", Map.of(
-                "inputs", Map.of("width", 768, "height", 512, "batch_size", 1),
+                "inputs", Map.of("width", 768, "height", 512, "batch_size", 3),
                 "class_type", "EmptyLatentImage"
         ));
 
         workflow.put("6", Map.of(
                 "inputs", Map.of(
-                        "text", prompt,
+                        "text", prompt
+                        ,
                         "clip", new Object[]{"16", 0}
                 ),
                 "class_type", "CLIPTextEncode"
@@ -528,7 +559,7 @@ public class NailDesignService {
 
         workflow.put("7", Map.of(
                 "inputs", Map.of(
-                        "text", "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy",
+                        "text", "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy, deformed, ugly, dots, polka dot, stripes, dark colors, bold colors, tweezers, tools, props, gray background, colored background",
                         "clip", new Object[]{"16", 0}
                 ),
                 "class_type", "CLIPTextEncode"
@@ -577,4 +608,32 @@ public class NailDesignService {
 
         return workflow;
     }
+
+    /**
+     * '내 디자인' 전체 이미지 목록 조회 (각각의 이미지를 개별 아이템으로 펼쳐서 반환)
+     */
+    public List<DesignImageResponseDto> getUserDesignHistory(Long userId) {
+        List<NailDesign> designs = nailDesignRepository.findAllByUserIdOrderByGeneratedAtDesc(userId);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
+        List<DesignImageResponseDto> resultList = new ArrayList<>();
+
+        for (NailDesign design : designs) {
+            String formattedDate = design.getGeneratedAt() != null
+                    ? design.getGeneratedAt().format(formatter) : "";
+
+            if (design.getImageUrls() != null) {
+                for (String url : design.getImageUrls()) {
+                    DesignImageResponseDto item = DesignImageResponseDto.builder()
+                            .designId(design.getId())
+                            .imageUrl(url)
+                            .createdAt(formattedDate)
+                            .build();
+                    resultList.add(item);
+                }
+            }
+        }
+        return resultList;
+    }
+
 }
