@@ -55,6 +55,8 @@ export function HandScanResultPage() {
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [showFingerModal, setShowFingerModal] = useState(false)
+    const [selectedShape, setSelectedShape] = useState<string>('round')
+    const [isGeneratingStl, setIsGeneratingStl] = useState(false)
 
     useEffect(() => {
         if (!scanId) {
@@ -71,15 +73,49 @@ export function HandScanResultPage() {
                 if (!res.ok) throw new Error('결과를 불러오는데 실패했습니다.')
                 const data = await res.json()
                 setResult(data.data)
+                // 추천 쉐입으로 초기 선택값 설정
+                if (data.data.shape) {
+                    setSelectedShape(data.data.shape)
+                }
+                return data.data.status
             } catch (e) {
                 setError(e instanceof Error ? e.message : '오류가 발생했습니다.')
+                return null
             } finally {
                 setIsLoading(false)
             }
         }
 
-        void fetchResult()
+        const poll = async () => {
+            const status = await fetchResult()
+            if (status !== 'MEASURED' && status !== 'COMPLETED' && status !== null) {
+                setTimeout(poll, 3000)
+            }
+        }
+
+        void poll()
     }, [scanId])
+
+    const handleGenerateStl = async () => {
+        setIsGeneratingStl(true)
+        const token = localStorage.getItem('token')
+        try {
+            const res = await fetch(`${API_BASE}/scans/${scanId}/generate-stl`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ shape: selectedShape }),
+            })
+            if (!res.ok) throw new Error('STL 생성 요청에 실패했습니다.')
+            navigate('/design/preferences')
+        } catch (e) {
+            alert(e instanceof Error ? e.message : 'STL 생성 요청에 실패했습니다.')
+        } finally {
+            setIsGeneratingStl(false)
+        }
+    }
 
     if (isLoading) {
         return (
@@ -163,35 +199,41 @@ export function HandScanResultPage() {
                 </section>
             )}
 
-            {result.shape && (
-                <section className="scan-result-section">
-                    <h2>추천 네일팁 모양</h2>
-                    <p className="scan-result-section__sub">
-                        손톱 비율과 곡률을 기준으로 가장 잘 어울리는 쉐입은{' '}
-                        <strong>{recommended?.labelKo ?? result.shape}</strong> 입니다.
-                    </p>
-                    <div className="scan-shape-grid">
-                        {NAIL_SHAPES.map((shape) => {
-                            const isRecommended = shape.id === result.shape
-                            return (
-                                <article
-                                    key={shape.id}
-                                    className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''}`}
-                                >
-                                    {isRecommended && <span className="scan-shape-card__badge">추천</span>}
-                                    <img src={shape.image} alt={shape.labelKo} />
-                                    <h3>{shape.labelKo}</h3>
-                                    <p>{shape.labelEn}</p>
-                                </article>
-                            )
-                        })}
-                    </div>
-                </section>
-            )}
+            <section className="scan-result-section">
+                <h2>네일팁 모양 선택</h2>
+                <p className="scan-result-section__sub">
+                    추천 쉐입은 <strong>{recommended?.labelKo ?? result.shape}</strong>입니다.
+                    원하는 모양을 선택해 주세요.
+                </p>
+                <div className="scan-shape-grid">
+                    {NAIL_SHAPES.map((shape) => {
+                        const isRecommended = shape.id === result.shape
+                        const isSelected = shape.id === selectedShape
+                        return (
+                            <article
+                                key={shape.id}
+                                className={`scan-shape-card ${isSelected ? 'is-recommended' : ''}`}
+                                onClick={() => setSelectedShape(shape.id)}
+                                style={{ cursor: 'pointer' }}
+                            >
+                                {isRecommended && <span className="scan-shape-card__badge">추천</span>}
+                                <img src={shape.image} alt={shape.labelKo} />
+                                <h3>{shape.labelKo}</h3>
+                                <p>{shape.labelEn}</p>
+                            </article>
+                        )
+                    })}
+                </div>
+            </section>
 
             <div className="scan-result-actions">
-                <button type="button" className="scan-result-cta" onClick={() => navigate('/design/preferences')}>
-                    네일 디자인 생성하기
+                <button
+                    type="button"
+                    className="scan-result-cta"
+                    onClick={() => void handleGenerateStl()}
+                    disabled={isGeneratingStl}
+                >
+                    {isGeneratingStl ? 'STL 생성 중...' : '네일 디자인 생성하기'}
                 </button>
             </div>
 

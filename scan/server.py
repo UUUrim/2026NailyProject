@@ -2,7 +2,7 @@
 server.py
 ---------
 FastAPI server that receives scan requests from the Spring backend,
-runs the nail pipeline, and sends results back via callback.
+runs the nail measurement pipeline, and sends results back via callback.
 
 Usage:
     uvicorn server:app --host 0.0.0.0 --port 8000 --reload
@@ -63,11 +63,63 @@ def download_photos(userid: str, session: str, hand: str):
         client.download_file(BUCKET, s3_key, local_path)
 
 
+# ── crop + measure만 실행 (STL/S3 없음) ────────────────────────
+def run_measure_only(userid: str, session: str, hand: str):
+    photos_root  = os.path.join(BASE, "photos",  userid, session, hand)
+    results_root = os.path.join(BASE, "results", userid, session, hand)
+
+    for finger in FINGER_ORDER:
+        photo_path = os.path.join(photos_root, f"{finger}.jpg")
+        finger_out = os.path.join(results_root, finger)
+        os.makedirs(finger_out, exist_ok=True)
+
+        # Step 1: Crop
+        import cv2
+        img = cv2.imread(photo_path)
+        if img is None:
+            raise FileNotFoundError(f"Cannot open: {photo_path}")
+        h, w = img.shape[:2]
+        cut = int(h * 0.7)  # 하단 30% 제거
+        cropped = img[:cut, :]
+        cropped_path = photo_path.replace(".jpg", "_cropped.jpg")
+        cv2.imwrite(cropped_path, cropped)
+        print(f"  [{finger}] Cropped: {h}x{w} -> {cut}x{w}")
+
+        # Step 2: Measure
+        result = subprocess.run(
+            [
+                sys.executable,
+                os.path.join(BASE, "nail_measurer.py"),
+                "--top",        cropped_path,
+                "--finger",     finger,
+                "--aruco-size", "20.0",
+                "--output",     finger_out,
+            ],
+            cwd=BASE,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  [{finger}] Measure failed (skipping): {result.stderr[-200:]}")
+            continue
+        print(f"  [{finger}] Measured OK")
+
+
+# ── nan/inf 를 0으로 변환 ────────────────────────────────────────
+def safe_float(val, default=0.0):
+    import math
+    try:
+        v = float(val) if val is not None else default
+        if math.isnan(v) or math.isinf(v):
+            return default
+        return v
+    except (TypeError, ValueError):
+        return default
+
+
 # ── 결과 JSON 읽어서 콜백 데이터 만들기 ─────────────────────────
 def build_callback_data(userid: str, session: str, hand: str) -> dict:
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    s3_prefix = f"results/{userid}/{session}/{hand}"
-    s3_base_url = f"https://{BUCKET}.s3.amazonaws.com"
 
     fingers_data = []
     skin_tones = []
@@ -78,89 +130,66 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
         measurements_path = os.path.join(finger_dir, "nail_measurements.json")
         profile_path = os.path.join(finger_dir, "profile.json")
 
-        # nail_measurements.json 읽기
-        with open(measurements_path, "r") as f:
-            measurements_json = json.load(f)
+        # 측정 실패한 손가락은 건너뜀
+        if not os.path.exists(measurements_path) or not os.path.exists(profile_path):
+            print(f"  [{finger}] Skipping - measurement files not found")
+            continue
 
-        finger_data = measurements_json.get("by_finger", {}).get(finger, {})
+        try:
+            with open(measurements_path, "r") as f:
+                measurements_json = json.load(f)
 
-        # profile.json 읽기
-        with open(profile_path, "r") as f:
-            profile = json.load(f)
+            finger_data = measurements_json.get("by_finger", {}).get(finger, {})
 
-        size = profile.get("nail_size", "average")
-        skin_tone = finger_data.get("skin_tone_hex", "")
+            with open(profile_path, "r") as f:
+                profile = json.load(f)
 
-        if skin_tone:
-            skin_tones.append(skin_tone)
-        sizes.append(size)
+            size = profile.get("nail_size", "average")
+            skin_tone = finger_data.get("skin_tone_hex", "")
 
-        fingers_data.append({
-            "finger": finger.upper(),
-            "measurements": {
-                "widthMm": finger_data.get("width_mm", 0),
-                "lengthMm": finger_data.get("length_mm", 0),
-                "correctedLengthMm": finger_data.get("corrected_length_mm", 0),
-                "cCurveMm": finger_data.get("c_curve_mm", 0),
-                "arcRadiusMm": finger_data.get("arc_radius_mm", 0),
-                "thicknessMm": finger_data.get("thickness_mm", 0),
-            },
-            "size": size,
-            "stlUrl": f"{s3_base_url}/{s3_prefix}/stl/nail_{finger}_round.stl",
-            "annotatedUrl": f"{s3_base_url}/{s3_prefix}/{finger}/{finger}_annotated.jpg",
-        })
+            if skin_tone:
+                skin_tones.append(skin_tone)
+            sizes.append(size)
 
-    # 대표 피부톤 (엄지 기준)
+            fingers_data.append({
+                "finger": finger.upper(),
+                "measurements": {
+                    "widthMm":           safe_float(finger_data.get("width_mm")),
+                    "lengthMm":          safe_float(finger_data.get("length_mm")),
+                    "correctedLengthMm": safe_float(finger_data.get("corrected_length_mm")),
+                    "cCurveMm":          safe_float(finger_data.get("c_curve_mm")),
+                    "arcRadiusMm":       safe_float(finger_data.get("arc_radius_mm")),
+                    "thicknessMm":       safe_float(finger_data.get("thickness_mm")),
+                },
+                "size": size,
+            })
+        except Exception as e:
+            print(f"  [{finger}] Skipping - error reading results: {e}")
+            continue
+
     skin_tone_hex = skin_tones[0] if skin_tones else "#C8A882"
-
-    # 전체 크기 (가장 많이 나온 값)
-    overall_size = max(set(sizes), key=sizes.count)
-
-    # 추천 모양 (round 기본)
-    shape = "round"
+    overall_size  = max(set(sizes), key=sizes.count) if sizes else "average"
 
     return {
-        "shape": shape,
-        "skinToneHex": skin_tone_hex,
-        "overallSize": overall_size,
+        "shape":             "round",
+        "skinToneHex":       skin_tone_hex,
+        "overallSize":       overall_size,
         "recommendedColors": [],
-        "fingers": fingers_data,
+        "fingers":           fingers_data,
     }
 
 
 # ── 파이프라인 실행 후 콜백 전송 ────────────────────────────────
 def run_measure_and_callback(userid: str, session: str, hand: str, callback_url: str):
     try:
-        # S3에서 사진 다운로드
         print(f"\n[Pipeline] Downloading photos for {userid}/{session}/{hand}...")
         download_photos(userid, session, hand)
 
-        # run_pipeline.py 실행
-        print(f"[Pipeline] Running pipeline...")
-        result = subprocess.run(
-            [
-                sys.executable,
-                os.path.join(BASE, "run_pipeline.py"),
-                "--userid", userid,
-                "--session", session,
-                "--hand", hand,
-                "--shape", "round",
-            ],
-            cwd=BASE,
-            capture_output=True,
-            text=True,
-        )
+        print(f"[Pipeline] Running measurement...")
+        run_measure_only(userid, session, hand)
 
-        if result.returncode != 0:
-            print(f"[Pipeline] ERROR:\n{result.stderr}")
-            requests.post(callback_url, json={"success": False, "message": result.stderr})
-            return
-
-        print(f"[Pipeline] Done!")
-
-        # 결과 읽어서 콜백 전송
+        print(f"[Pipeline] Done! Sending callback to {callback_url}...")
         callback_data = build_callback_data(userid, session, hand)
-        print(f"[Pipeline] Sending callback to {callback_url}...")
         response = requests.post(callback_url, json=callback_data)
         print(f"[Pipeline] Callback response: {response.status_code}")
 
@@ -186,8 +215,8 @@ def run_stl_and_callback(userid: str, session: str, hand: str, shape: str, callb
                 [
                     sys.executable,
                     os.path.join(BASE, "nail_exact_stl.py"),
-                    "--input", measurements_path,
-                    "--shape", shape,
+                    "--input",  measurements_path,
+                    "--shape",  shape,
                     "--finger", finger,
                     "--output", stl_dir,
                 ],
@@ -202,7 +231,6 @@ def run_stl_and_callback(userid: str, session: str, hand: str, shape: str, callb
         from s3_upload import upload_folder
         upload_folder(stl_dir, f"{s3_prefix}/stl")
 
-        # 콜백 전송
         fingers_data = [
             {
                 "finger": finger.upper(),
