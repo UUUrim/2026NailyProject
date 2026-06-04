@@ -192,12 +192,19 @@
   border-radius: 14px;
   padding: 1rem;
   text-align: center;
+  cursor: pointer;                          /* 추가 */
+  transition: border-color 0.15s, box-shadow 0.15s;  /* 추가 */
 }
 
-.scan-shape-card.is-recommended {
+.scan-shape-card:hover { /*추가*/
+  border-color: #f0b8cb;
+  box-shadow: 0 4px 12px rgba(222, 134, 159, 0.1);
+}
+
+/* .scan-shape-card.is-recommended {
   border-color: #de869f;
   box-shadow: 0 8px 24px rgba(222, 134, 159, 0.18);
-}
+} */
 
 .scan-shape-card__badge {
   position: absolute;
@@ -208,6 +215,11 @@
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
+}
+
+.scan-shape-card.is-selected {          /* 추가 */
+  border-color: #de869f;
+  box-shadow: 0 8px 24px rgba(222, 134, 159, 0.18);
 }
 
 .scan-shape-card img {
@@ -232,13 +244,14 @@
 .scan-result-actions {
   display: flex;
   justify-content: center;
+  gap: 1.50rem;
   padding-top: 1rem;
 }
 
 .scan-result-cta {
   border: none;
   border-radius: 999px;
-  background: #272727;
+  background: #de869f;
   color: #fff;
   padding: 0.9rem 2rem;
   font-size: 1rem;
@@ -452,4 +465,60 @@
   .finger-modal__list li {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+.print-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.print-modal__backdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.print-modal__panel {
+  position: relative;
+  background: #fff;
+  border-radius: 20px;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.print-modal__icon {
+  margin: 0 0 0.25rem;
+  font-size: 2.5rem;
+}
+
+.print-modal__panel h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.print-modal__panel p {
+  margin: 0 0 1rem;
+  color: #555;
+  font-size: 0.95rem;
+  line-height: 1.5;
 }
