@@ -14,7 +14,7 @@ spring:
     host: smtp.gmail.com
     port: 587
     username: be1.2026.nail
-    password: ENC(O8AIUQA5YtYRYMeuklMMhUMEfiTnus7z)
+    password: ENC(QGfOaj4g41cWhTK+pS/xBw/0oa2MvAFzlDSf+AiNirQ=) #수정: 재암호화(인증코드 발송 실패 문제 해결)
     properties:
       mail:
         smtp:
