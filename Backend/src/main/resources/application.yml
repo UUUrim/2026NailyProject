@@ -14,7 +14,7 @@ spring:
     host: smtp.gmail.com
     port: 587
     username: be1.2026.nail
-    password: ENC(Ck8oZWahUEWHmUwNdfg4jsz4lKgczeiFJbbWKuoZOWY=)
+    password: ENC(O8AIUQA5YtYRYMeuklMMhUMEfiTnus7z)
     properties:
       mail:
         smtp:
@@ -27,7 +27,7 @@ spring:
     url: jdbc:mysql://localhost:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: root
-    password: ENC(QEhROk80ih1qlC5lnhc58A==)
+    password: ENC(vu8GQP2qjD0N+lr4aSjGHw==)
 
   jpa:
     hibernate:
@@ -39,20 +39,20 @@ spring:
     database-platform: org.hibernate.dialect.MySQLDialect
 
 jwt:
-  secret: ENC(FkakyO2z6YL4WhnZDzGaKLJItWBSR+i68tPa6Hy2L+GE+n+63C+W4zQBbOongiXK)
+  secret: ENC(uAYjhPVuUKuxBjz3YEDgK/rxu5UtXbipxkgsDq7rCR2XYZg1U9hS2jxX+oK5PIX+)
   expiration: 86400000 #24시간
 
 gemini:
   api:
-    key: ENC(YPIKQ2gSXU3R4IS+yGNolp4rtp47RJo8bzrtZ2sZaXhxGkf7UrzdeHoGbtA2k6Nq)
+    key: ENC(f11Gu+eqSDV89d4XdLuuhSgUpmthWA1ZFzmg9oZgvPOmNwjRqrbNyVa5n0uOHLqb)
     url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
 
 cloud:
   aws:
     credentials:
-      access-key: ENC(AU/E7IFqxUGt4sfLmq0Vx6LeCVH66OUf1YGkwuAs75k=)
-      secret-key: ENC(sQrGfc6mBxSTFwKohhPE229OZczYKDMZPI8aus5PuwHTp0OSEMWFAf7IPmdtCRDoL0/zBBgANqs=)
+      access-key: ENC(jRZOYDKW6O+5etRT6PeZCVhUzethhP2zK+KNAqo5OIU=)
+      secret-key: ENC(5yvNDJbbm6948H0BdfBNy+G8tVX0SZY8gNsrS7JwDxbcpzqREoje0Sq5s2bYqEaekmVf+1WHhzY=)
     s3:
       bucket: naily-scans #버킷이름
     region:
