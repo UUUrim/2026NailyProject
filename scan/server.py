@@ -169,12 +169,37 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
 
     skin_tone_hex = skin_tones[0] if skin_tones else "#C8A882"
     overall_size  = max(set(sizes), key=sizes.count) if sizes else "average"
+    recommended_colors = []
+    season_code = None
+    season_name_ko = None
+
+    # 퍼스널컬러 진단 (main_proto.py 로직)
+    photos_root = os.path.join(BASE, "photos", userid, session, hand)
+    from personal_color import diagnose_personal_color
+
+    for finger in ("index", "middle", "ring", "thumb"):
+        photo_path = os.path.join(photos_root, f"{finger}.jpg")
+        diagnosis = diagnose_personal_color(photo_path)
+        if diagnosis and "error" not in diagnosis:
+            skin_tone_hex = diagnosis["skinToneHex"]
+            recommended_colors = diagnosis["recommendedColors"]
+            season_code = diagnosis["seasonCode"]
+            season_name_ko = diagnosis["seasonNameKo"]
+            print(
+                f"  [PersonalColor] {finger}: "
+                f"{diagnosis['seasonNameKo']} ({diagnosis['seasonCode']})"
+            )
+            break
+        if diagnosis and "error" in diagnosis:
+            print(f"  [PersonalColor] {finger}: {diagnosis['error']}")
 
     return {
         "shape":             "round",
         "skinToneHex":       skin_tone_hex,
         "overallSize":       overall_size,
-        "recommendedColors": [],
+        "recommendedColors": recommended_colors,
+        "seasonCode":        season_code,
+        "seasonNameKo":      season_name_ko,
         "fingers":           fingers_data,
     }
 
