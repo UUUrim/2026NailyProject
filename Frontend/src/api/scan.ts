@@ -16,10 +16,12 @@ export interface FingerResult {
 export interface ScanResultResponse {
     scanId: number
     handSide: string
-    status: string // 'PENDING' | 'MEASURED' | 'COMPLETED'
+    status: string
     shape: string
     skinToneHex: string
     recommendedColors: string[]
+    seasonCode: string        // ← 추가
+    seasonNameKo: string      // ← 추가
     overallSize: string
     fingers: FingerResult[]
     scannedAt: string

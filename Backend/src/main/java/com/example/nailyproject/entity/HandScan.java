@@ -44,6 +44,12 @@ public class HandScan {
     @Column(name = "recommended_colors", columnDefinition = "JSON")
     private String recommendedColors; // 추천 색상 JSON 배열
 
+    @Column(name = "season_code", length = 30)
+    private String seasonCode; // 퍼스널컬러 16계절 코드 (e.g. spring_light)
+
+    @Column(name = "season_name_ko", length = 30)
+    private String seasonNameKo; // 퍼스널컬러 한글명 (e.g. 봄 라이트)
+
     @Column(name = "overall_size", length = 20)
     private String overallSize;
 
@@ -75,10 +81,19 @@ public class HandScan {
     }
 
     // 분석 결과 저장
-    public void updateAnalysisResult(String shape, String skinToneHex, String recommendedColors, String overallSize) {
+    public void updateAnalysisResult(
+            String shape,
+            String skinToneHex,
+            String recommendedColors,
+            String seasonCode,
+            String seasonNameKo,
+            String overallSize
+    ) {
         this.shape = shape;
         this.skinToneHex = skinToneHex;
         this.recommendedColors = recommendedColors;
+        this.seasonCode = seasonCode;
+        this.seasonNameKo = seasonNameKo;
         this.overallSize = overallSize;
         this.status = ScanStatus.MEASURED;
     }

@@ -11,21 +11,21 @@ const STEPS = [
   },
   {
     number: '02',
-    title: '네일 디자인 생성',
-    description: '선호 스타일과 분석 결과를 반영해 AI가 맞춤 디자인을 제안합니다.',
+    title: '3D 프린터 제작',
+    description: '분석된 손톱 형태에 맞춘 나만의 네일팁을 출력합니다.',
     accent: '#f3eeff',
   },
   {
     number: '03',
-    title: '3D 미리보기',
-    description: '내 손톱 모델에 디자인을 입혀 실제 착용 느낌을 확인합니다.',
+    title: '네일 디자인 생성',
+    description: '선호 스타일과 분석 결과를 반영해 AI가 맞춤 디자인을 제안합니다.',
     accent: '#eef8ff',
   },
   {
     number: '04',
-    title: '3D 프린터 제작',
-    description: '마음에 드는 디자인을 선택해 맞춤 네일팁을 출력합니다.',
-    accent: '#f5f5f5',
+    title: '3D 미리보기',
+    description: '내 손 위에 디자인을 입혀 실제 착용 느낌을 확인합니다.',
+    accent: '#ebf9f1',
   },
 ]
 
@@ -42,7 +42,7 @@ export function ProcessGuidePage() {
           이렇게 만들어져요
         </h1>
         <p className="process-v2__lead">
-          손 스캔부터 3D 프린팅까지, 네일리가 함께하는 4단계 제작 과정입니다.
+          손 스캔부터 3D 프린팅까지, 네일리와 함께하는 4단계 제작 과정입니다.
         </p>
       </section>
 

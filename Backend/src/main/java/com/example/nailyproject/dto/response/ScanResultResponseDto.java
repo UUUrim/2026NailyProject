@@ -2,10 +2,13 @@ package com.example.nailyproject.dto.response;
 
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.ScanImg;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -23,6 +26,8 @@ public class ScanResultResponseDto {
     private String shape;
     private String skinToneHex;
     private List<String> recommendedColors;
+    private String seasonCode;
+    private String seasonNameKo;
     private String overallSize;
 
     // 손가락별 결과
@@ -40,7 +45,11 @@ public class ScanResultResponseDto {
         private String size;
     }
 
-    public static ScanResultResponseDto from(HandScan handScan, List<ScanImg> scanImages) {
+    public static ScanResultResponseDto from(
+            HandScan handScan,
+            List<ScanImg> scanImages,
+            ObjectMapper objectMapper
+    ) {
         List<FingerResultDto> fingers = scanImages.stream()
                 .map(img -> FingerResultDto.builder()
                         .finger(img.getFinger().name())
@@ -57,9 +66,32 @@ public class ScanResultResponseDto {
                 .status(handScan.getStatus().name())
                 .shape(handScan.getShape())
                 .skinToneHex(handScan.getSkinToneHex())
+                .recommendedColors(parseRecommendedColors(handScan.getRecommendedColors(), objectMapper))
+                .seasonCode(handScan.getSeasonCode())
+                .seasonNameKo(handScan.getSeasonNameKo())
                 .overallSize(handScan.getOverallSize())
                 .scannedAt(handScan.getScannedAt())
                 .fingers(fingers)
                 .build();
+    }
+
+    private static List<String> parseRecommendedColors(String raw, ObjectMapper objectMapper) {
+        if (raw == null || raw.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<List<String>>() {});
+        } catch (Exception ignored) {
+            // List.toString() 형태 "[#AABBCC, #DDEEFF]" 호환
+            String trimmed = raw.trim();
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+                if (trimmed.isEmpty()) {
+                    return Collections.emptyList();
+                }
+                return List.of(trimmed.split("\\s*,\\s*"));
+            }
+            return Collections.emptyList();
+        }
     }
 }

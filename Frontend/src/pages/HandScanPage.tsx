@@ -14,7 +14,7 @@ const FINGER_LABELS: Record<Finger, string> = {
   INDEX: '검지',
   MIDDLE: '중지',
   RING: '약지',
-  PINKY: '새끼',
+  PINKY: '소지',
 }
 
 export function HandScanPage() {

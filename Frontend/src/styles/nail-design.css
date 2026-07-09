@@ -464,6 +464,16 @@
   background: #fff;
 }
 
+.season-fixed-badge {
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+  color: #555;
+}
+
+.season-fixed-badge strong {
+  color: #b05c8a;
+}
+
 .swatch-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

@@ -13,11 +13,15 @@
 }
 
 .auth-split__logo {
-  margin: 28px 0 0 52px;
+  position: absolute; /*수정*/
+  top: 1.25rem; /*수정*/
+  left: 2rem; /*수정*/
   font-family: var(--font-brand);
-  font-size: 2rem;
-  line-height: 1;
   color: #de869f;
+  font-size: 2rem;
+  font-weight: 400; /*수정*/
+  line-height: 1;
+  text-decoration: none;  /*수정*/
 }
 
 .auth-split__line {
