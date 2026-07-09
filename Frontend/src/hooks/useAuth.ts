@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AUTH_CHANGE_EVENT, isLoggedIn, setLoggedIn as setAuthLoggedIn } from '@/utils/auth'
+import { AUTH_CHANGE_EVENT, isLoggedIn, clearToken } from '@/utils/auth'
 
 export function useAuth() {
   const [loggedIn, setLoggedInState] = useState(() => isLoggedIn())
@@ -14,10 +14,10 @@ export function useAuth() {
     }
   }, [])
 
-  const setLoggedIn = useCallback((value: boolean) => {
-    setAuthLoggedIn(value)
-    setLoggedInState(value)
+  const logout = useCallback(() => {
+    clearToken()
+    setLoggedInState(false)
   }, [])
 
-  return { isLoggedIn: loggedIn, setLoggedIn }
+  return { isLoggedIn: loggedIn, logout }
 }

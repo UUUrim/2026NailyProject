@@ -2,22 +2,38 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageBackLink } from '@/components/layout/PageBackLink'
-import { usePersonalColorRecommender } from '@/services/aiContext'
-import { buildHandScanAnalysis } from '@/utils/handScanAnalysis'
-import { setHandScanResult } from '@/utils/handScanStorage'
-import { setRecommendedSeasonCode } from '@/utils/personalColorStorage'
+import { startScan, uploadFingerImage, requestAnalyze } from '@/api/scan'
+import { ApiError } from '@/utils/apiClient'
 import '@/styles/hand-scan.css'
+
+const FINGERS = ['THUMB', 'INDEX', 'MIDDLE', 'RING', 'PINKY'] as const
+type Finger = (typeof FINGERS)[number]
+
+const FINGER_LABELS: Record<Finger, string> = {
+  THUMB: '엄지',
+  INDEX: '검지',
+  MIDDLE: '중지',
+  RING: '약지',
+  PINKY: '소지',
+}
 
 export function HandScanPage() {
   const navigate = useNavigate()
-  const personalColorRecommender = usePersonalColorRecommender()
   const [cameraOn, setCameraOn] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
   const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('default')
+
+  const [currentFingerIndex, setCurrentFingerIndex] = useState(0)
+  const [scanId, setScanId] = useState<number | null>(null)
+  const [uploadedFingers, setUploadedFingers] = useState<Finger[]>([])
+  const [isDone, setIsDone] = useState(false)
+
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+
+  const currentFinger = FINGERS[currentFingerIndex]
 
   const stopStream = () => {
     if (streamRef.current) {
@@ -42,11 +58,10 @@ export function HandScanPage() {
   const handleStartCamera = async (deviceId?: string) => {
     try {
       stopStream()
-
       const videoConstraint =
-        deviceId && deviceId !== 'default'
-          ? { deviceId: { exact: deviceId } }
-          : { facingMode: 'user' }
+          deviceId && deviceId !== 'default'
+              ? { deviceId: { exact: deviceId } }
+              : { facingMode: 'user' }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraint,
@@ -66,62 +81,71 @@ export function HandScanPage() {
 
   const handleChangeCamera = async (deviceId: string) => {
     setSelectedDeviceId(deviceId)
-    if (cameraOn) {
-      await handleStartCamera(deviceId)
-    }
+    if (cameraOn) await handleStartCamera(deviceId)
   }
 
-  const captureFrameBlob = async (): Promise<Blob> => {
+  const captureBlob = async (): Promise<Blob> => {
     const video = videoRef.current
-    if (!video) {
-      throw new Error('Video element is not ready.')
-    }
+    if (!video) throw new Error('Video element is not ready.')
 
-    const width = Math.max(1, video.videoWidth || 1280)
-    const height = Math.max(1, video.videoHeight || 720)
-
+    const w = Math.max(1, video.videoWidth || 1280)
+    const h = Math.max(1, video.videoHeight || 720)
     const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
+    canvas.width = w
+    canvas.height = h
     const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      throw new Error('Canvas context is not available.')
-    }
-    ctx.drawImage(video, 0, 0, width, height)
+    if (!ctx) throw new Error('Canvas context is not available.')
+    ctx.drawImage(video, 0, 0, w, h)
 
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Failed to create image blob.'))), 'image/jpeg', 0.92)
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('Failed to create image blob.'))),
+          'image/jpeg',
+          0.92,
+      )
     })
-    return blob
   }
 
-  const handleCompleteScan = async () => {
+  const handleCaptureFinger = async () => {
     if (!cameraOn) {
-      setCameraError('먼저 카메라를 켜고 손을 촬영해 주세요.')
+      setCameraError('먼저 카메라를 켜 주세요.')
       return
     }
 
-    setIsAnalyzing(true)
+    setIsUploading(true)
     setCameraError(null)
 
     try {
-      const frame = await captureFrameBlob()
-      const rec = await personalColorRecommender.recommend({ frame })
-      const seasonCode = rec?.seasonCode ?? 'spring_light'
-      const analysis = buildHandScanAnalysis(seasonCode)
+      // 첫 손가락이면 스캔 세션 시작 → POST /scans { handSide: 'RIGHT' }
+      let currentScanId = scanId
+      if (currentScanId === null) {
+        const data = await startScan('RIGHT')
+        currentScanId = data.scanId
+        setScanId(currentScanId)
+      }
 
-      setRecommendedSeasonCode(seasonCode)
-      setHandScanResult({
-        ...analysis,
-        capturedAt: new Date().toISOString(),
-      })
+      // 촬영 → POST /scans/{scanId}/images?finger=THUMB
+      const blob = await captureBlob()
+      await uploadFingerImage(currentScanId, currentFinger, blob)
 
-      stopStream()
-      navigate('/scan/result')
-    } catch {
-      setCameraError('손 스캔 분석에 실패했습니다. 카메라가 켜져 있는지 확인해 주세요.')
+      setUploadedFingers((prev) => [...prev, currentFinger])
+
+      if (currentFingerIndex < FINGERS.length - 1) {
+        setCurrentFingerIndex((prev) => prev + 1)
+      } else {
+        // 5장 완료 → POST /scans/{scanId}/analyze
+        await requestAnalyze(currentScanId)
+        setIsDone(true)
+        stopStream()
+      }
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setCameraError(e.message)
+      } else {
+        setCameraError(e instanceof Error ? e.message : '오류가 발생했습니다. 다시 시도해 주세요.')
+      }
     } finally {
-      setIsAnalyzing(false)
+      setIsUploading(false)
     }
   }
 
@@ -132,70 +156,102 @@ export function HandScanPage() {
   }, [selectedDeviceId, videoInputs])
 
   useEffect(() => {
-    return () => {
-      stopStream()
-    }
+    return () => { stopStream() }
   }, [])
 
+  useEffect(() => {
+    if (isDone) {
+      navigate('/scan/result', { state: { scanId } })
+    }
+  }, [isDone, navigate, scanId])
+
   return (
-    <AppShell mainClassName="hand-scan-page">
-      <PageBackLink to="/process" />
+      <AppShell mainClassName="hand-scan-page">
+        <PageBackLink to="/process" />
 
-      <header className="hand-scan-page__intro">
-        <h1>손 촬영 및 스캔</h1>
-        <p>손등과 손톱이 잘 보이도록 카메라에 맞춰 주세요.</p>
-      </header>
+        <header className="hand-scan-page__intro">
+          <h1>손 촬영 및 스캔</h1>
+          <p>손등과 손톱이 잘 보이도록 카메라에 맞춰 주세요.</p>
+        </header>
 
-      <button
-        type="button"
-        className="hand-scan__start-camera"
-        onClick={() => void handleStartCamera(selectedDeviceId)}
-      >
-        손 촬영하기
-      </button>
+        <div className="hand-scan__progress">
+          {FINGERS.map((finger, idx) => (
+              <span
+                  key={finger}
+                  className={[
+                    'hand-scan__progress-step',
+                    uploadedFingers.includes(finger) ? 'hand-scan__progress-step--done' : '',
+                    idx === currentFingerIndex && !isDone ? 'hand-scan__progress-step--current' : '',
+                  ]
+                      .filter(Boolean)
+                      .join(' ')}
+              >
+            {FINGER_LABELS[finger]}
+          </span>
+          ))}
+        </div>
 
-      {cameraOn && (
-        <section className="hand-scan__camera">
-          <div className="hand-scan__camera-controls">
-            <label className="hand-scan__camera-label" htmlFor="handScanCameraSelect">
-              카메라 선택
-            </label>
-            <select
-              id="handScanCameraSelect"
-              className="hand-scan__camera-select"
-              value={selectedDeviceId}
-              onChange={(e) => void handleChangeCamera(e.target.value)}
-            >
-              <option value="default">기본 카메라</option>
-              {videoInputs.map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `카메라 ${index + 1}`}
-                </option>
-              ))}
-            </select>
+        {!isDone && (
+            <p className="hand-scan__current-finger">
+              현재 촬영: <strong>{FINGER_LABELS[currentFinger]}</strong> ({currentFingerIndex + 1} / {FINGERS.length})
+            </p>
+        )}
+
+        <button
+            type="button"
+            className="hand-scan__start-camera"
+            onClick={() => void handleStartCamera(selectedDeviceId)}
+            disabled={cameraOn}
+        >
+          {cameraOn ? '카메라 켜짐' : '카메라 켜기'}
+        </button>
+
+        {cameraOn && (
+            <section className="hand-scan__camera">
+              <div className="hand-scan__camera-controls">
+                <label className="hand-scan__camera-label" htmlFor="handScanCameraSelect">
+                  카메라 선택
+                </label>
+                <select
+                    id="handScanCameraSelect"
+                    className="hand-scan__camera-select"
+                    value={selectedDeviceId}
+                    onChange={(e) => void handleChangeCamera(e.target.value)}
+                >
+                  <option value="default">기본 카메라</option>
+                  {videoInputs.map((device, index) => (
+                      <option key={device.deviceId} value={device.deviceId}>
+                        {device.label || `카메라 ${index + 1}`}
+                      </option>
+                  ))}
+                </select>
+                <button
+                    type="button"
+                    className="hand-scan__camera-refresh"
+                    onClick={() => void refreshDeviceList()}
+                >
+                  새로고침
+                </button>
+                <span className="hand-scan__camera-selected">{selectedLabel}</span>
+              </div>
+              <video ref={videoRef} autoPlay playsInline muted className="hand-scan__video" />
+            </section>
+        )}
+
+        {cameraError && <p className="hand-scan__error">{cameraError}</p>}
+
+        {!isDone && (
             <button
-              type="button"
-              className="hand-scan__camera-refresh"
-              onClick={() => void refreshDeviceList()}
+                type="button"
+                className="hand-scan__complete"
+                onClick={() => void handleCaptureFinger()}
+                disabled={!cameraOn || isUploading}
             >
-              새로고침
+              {isUploading
+                  ? '업로드 중…'
+                  : `${FINGER_LABELS[currentFinger]} 촬영 (${currentFingerIndex + 1}/${FINGERS.length})`}
             </button>
-            <span className="hand-scan__camera-selected">{selectedLabel}</span>
-          </div>
-          <video ref={videoRef} autoPlay playsInline muted className="hand-scan__video" />
-        </section>
-      )}
-
-      {cameraError && <p className="hand-scan__error">{cameraError}</p>}
-
-      <button
-        type="button"
-        className="hand-scan__complete"
-        onClick={() => void handleCompleteScan()}
-        disabled={!cameraOn || isAnalyzing}
-      >
-        {isAnalyzing ? '분석 중…' : '촬영 및 스캔 완료'}
-      </button>
-    </AppShell>
+        )}
+      </AppShell>
   )
 }

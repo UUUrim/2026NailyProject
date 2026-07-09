@@ -44,8 +44,8 @@ export const PREFERENCE_OPTIONS: Record<PreferenceKey, PreferenceOption[]> = {
     { value: 'kitschy', label: '키치' },
     { value: 'funky', label: '펑키' },
     { value: 'feminine', label: '페미닌' },
-    { value: 'elegant', label: '엘레강트' },
-    { value: 'pure', label: '퓨어' },
+    { value: 'elegant', label: '우아' },
+    { value: 'pure', label: '순수' },
     { value: 'delicate', label: '섬세' },
   ],
   designType: [
@@ -73,10 +73,10 @@ export const PREFERENCE_OPTIONS: Record<PreferenceKey, PreferenceOption[]> = {
     { value: 'heart', label: '하트' },
     { value: 'crystal', label: '크리스탈' },
     { value: 'pearl', label: '펄' },
-    { value: 'swirl', label: '스월' },
+    { value: 'swirl', label: '소용돌이' },
     { value: 'polka dot', label: '도트' },
     { value: '없음', label: '없음' },
-    { value: '기타', label: '기타' },
+    // { value: '기타', label: '기타' },
   ],
   shape: [
     { value: 'square', label: '스퀘어' },
@@ -99,10 +99,10 @@ export const PREFERENCE_OPTIONS: Record<PreferenceKey, PreferenceOption[]> = {
 }
 
 export const PREFERENCE_SECTION_LABELS: Record<PreferenceKey, string> = {
-  mood: '무드',
+  mood: '분위기',
   designType: '디자인 타입',
-  season: '시즌',
-  motif: '모티프',
+  season: '계절',
+  motif: '핵심 요소',
   shape: '네일 쉐입',
   color: '컬러',
 }

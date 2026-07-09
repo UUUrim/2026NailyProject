@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AuthSplitLayout } from '@/components/auth/AuthSplitLayout'
-import { setLoggedIn } from '@/utils/auth'
+import { setToken } from '@/utils/auth'
 import '@/styles/signup.css'
 
 export function SignupNaverPage() {
@@ -28,7 +28,7 @@ export function SignupNaverPage() {
       return
     }
 
-    setLoggedIn(true)
+    setToken('temp-token') // 소셜 로그인 백엔드 구현 전 임시
     navigate('/process')
   }
 
