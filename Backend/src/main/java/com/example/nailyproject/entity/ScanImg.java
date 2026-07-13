@@ -40,7 +40,7 @@ public class ScanImg {
     private String measurements;
 
     // 사이즈 분류 (profile.json의 size)
-    @Column(name = "size", length = 10)
+    @Column(name = "size", length = 20)
     private String size;
 
     @CreationTimestamp

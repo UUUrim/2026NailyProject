@@ -13,6 +13,8 @@ public class ScanResultRequestDto {
     private String shape;    // 추천하는 초기 쉐입
     private String skinToneHex;
     private List<String> recommendedColors;
+    private String seasonCode;
+    private String seasonNameKo;
     private List<FingerResult> fingers;
 
     @Getter

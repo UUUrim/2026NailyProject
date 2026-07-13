@@ -18,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -135,12 +137,22 @@ public class ScanService {
         HandScan handScan = handScanRepository.findById(scanId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 파이썬이 웹훅으로 보내준(resultDto) 4개의 데이터를 방금 수정한 엔티티 메서드에 쏙 넣어줍니다.
+        String recommendedColorsJson = null;
+        if (resultDto.getRecommendedColors() != null && !resultDto.getRecommendedColors().isEmpty()) {
+            try {
+                recommendedColorsJson = objectMapper.writeValueAsString(resultDto.getRecommendedColors());
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException("추천 컬러 JSON 변환 중 오류가 발생했습니다.", e);
+            }
+        }
+
         handScan.updateAnalysisResult(
                 resultDto.getShape(),
                 resultDto.getSkinToneHex(),
-                resultDto.getRecommendedColors() != null ? resultDto.getRecommendedColors().toString() : null,
-                resultDto.getOverallSize() // ✨ 여기서 overallSize가 DB로 들어갑니다!
+                recommendedColorsJson,
+                resultDto.getSeasonCode(),
+                resultDto.getSeasonNameKo(),
+                resultDto.getOverallSize()
         );
 
         // 2. ScanImg (자식들) 업데이트: 각 손가락별 측정 수치와 팁 호수 저장
@@ -218,7 +230,7 @@ public class ScanService {
 
         List<ScanImg> scanImages = scanImgRepository.findByHandScan(handScan);
 
-        return ScanResultResponseDto.from(handScan, scanImages);
+        return ScanResultResponseDto.from(handScan, scanImages, objectMapper);
     }
 
     /**
@@ -230,7 +242,7 @@ public class ScanService {
 
         List<ScanImg> scanImages = scanImgRepository.findByHandScan(handScan);
 
-        return ScanResultResponseDto.from(handScan, scanImages);
+        return ScanResultResponseDto.from(handScan, scanImages, objectMapper);
     }
 
 

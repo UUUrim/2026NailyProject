@@ -24,6 +24,7 @@ public class EmailVerificationService {
         codeStore.put(email, code);
 
         SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom("be1.2026naily@gmail.com"); //추가: 발신자 메일 설정(인증코드 발송 실패 문제 해결)
         message.setTo(email);
         message.setSubject("[Naily] 이메일 인증코드");
         message.setText("인증코드: " + code + "\n\n5분 이내에 입력해주세요.");
