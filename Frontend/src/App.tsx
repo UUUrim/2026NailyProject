@@ -12,6 +12,7 @@ import { SignupGooglePage } from '@/pages/SignupGooglePage'
 import { SignupLandingPage } from '@/pages/SignupLandingPage'
 import { SignupNaverPage } from '@/pages/SignupNaverPage'
 import { Navigate, Route, Routes } from 'react-router-dom'
+import {OAuthSuccessPage} from "@/pages/OAuthSuccessPage.tsx"   //소셜 로그인 추가
 
 function App() {
     return (
@@ -22,6 +23,7 @@ function App() {
             <Route path="/signup/email" element={<SignupEmailPage />} />
             <Route path="/signup/google" element={<SignupGooglePage />} />
             <Route path="/signup/naver" element={<SignupNaverPage />} />
+            <Route path="/oauth/success" element={<OAuthSuccessPage />} />  {/* 소셜 로그인 추가 */}
 
             <Route element={<RootLayout />}>
                 <Route path="/login" element={<LoginPage />} />

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { login } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
+import { getSocialAuthUrl } from '@/apis/user'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -115,22 +116,32 @@ export function LoginPage() {
               </div>
 
               <div className="social-login">
-                <Link to="/signup/google" className="social-login__button">
-                  <img
-                      src="/2026NailyProject-main/Frontend/public/google-logo.png"
-                      alt=""
-                      className="social-login__icon-image social-login__icon-image--google"
-                  />
+                {/* 수정: Link가 아니라 실제 페이지로 이동 */}
+                <a href={getSocialAuthUrl('google')} className="social-login__button">
+                  <img src="/images/google-logo.png" alt="" className="social-login__icon-image social-login__icon-image--google" />
                   구글로 로그인
-                </Link>
-                <Link to="/signup/naver" className="social-login__button">
-                  <img
-                      src="/2026NailyProject-main/Frontend/public/naver-logo.png"
-                      alt=""
-                      className="social-login__icon-image social-login__icon-image--naver"
-                  />
+                </a>
+                <a href={getSocialAuthUrl('naver')} className="social-login__button">
+                  <img src="/images/naver-logo.png" alt="" className="social-login__icon-image social-login__icon-image--naver" />
                   네이버로 로그인
-                </Link>
+                </a>
+
+                {/*<Link to="/signup/google" className="social-login__button">*/}
+                {/*  <img*/}
+                {/*      src="/2026NailyProject-main/Frontend/public/google-logo.png"*/}
+                {/*      alt=""*/}
+                {/*      className="social-login__icon-image social-login__icon-image--google"*/}
+                {/*  />*/}
+                {/*  구글로 로그인*/}
+                {/*</Link>*/}
+                {/*<Link to="/signup/naver" className="social-login__button">*/}
+                {/*  <img*/}
+                {/*      src="/2026NailyProject-main/Frontend/public/naver-logo.png"*/}
+                {/*      alt=""*/}
+                {/*      className="social-login__icon-image social-login__icon-image--naver"*/}
+                {/*  />*/}
+                {/*  네이버로 로그인*/}
+                {/*</Link>*/}
               </div>
 
               <p className="login-card__signup">

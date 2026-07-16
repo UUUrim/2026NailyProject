@@ -15,6 +15,13 @@ export interface SignupResponse {
     nickname: string
 }
 
+export interface SocialSignupParams {   /** 소셜 로그인 추가 **/
+    signupToken: string
+    password: string
+    name: string
+    nickname: string
+}
+
 export interface UserProfileResponse {
     userId: number
     email: string
@@ -54,6 +61,18 @@ export async function signup(params: {
     nickname: string
 }): Promise<SignupResponse> {
     const res = await apiClient.post<SignupResponse>('/users/signup', params, false)
+    return res.data
+}
+
+export function getSocialAuthUrl(provider: 'google' | 'naver'): string {    /** 소셜 로그인 추가 **/
+    const base = import.meta.env.VITE_API_BASE_URL ?? ''
+    return `${base}/oauth/${provider}/authorize`
+}
+
+/** POST /users/social/signup — 소셜 가입 + 자동 로그인(토큰 저장) */
+export async function socialSignup(params: SocialSignupParams): Promise<LoginResponse> {    /** 소셜 로그인 추가 **/
+    const res = await apiClient.post<LoginResponse>('/users/social/signup', params, false)
+    setToken(res.data.token)
     return res.data
 }
 

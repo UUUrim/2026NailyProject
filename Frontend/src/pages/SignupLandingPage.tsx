@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { AuthSplitLayout } from '@/components/auth/AuthSplitLayout'
 import '@/styles/signup.css'
+import {getSocialAuthUrl} from "@/apis/user.ts";
 
 export function SignupLandingPage() {
   return (
@@ -21,14 +22,15 @@ export function SignupLandingPage() {
         </div>
 
         <div className="signup-box__social">
-          <Link to="/signup/google" className="signup-box__social-button">
-            <img src="/images/google-logo.png" alt="" className="signup-box__social-icon" />
-            구글로 가입
-          </Link>
-          <Link to="/signup/naver" className="signup-box__social-button">
-            <img src="/images/naver-logo.png" alt="" className="signup-box__social-icon" />
-            네이버로 가입
-          </Link>
+          {/* 수정: Link가 아니라 실제 페이지로 이동 */}
+          <a href={getSocialAuthUrl('google')} className="social-login__button">
+            <img src="/images/google-logo.png" alt="" className="social-login__icon-image social-login__icon-image--google" />
+            구글로 로그인
+          </a>
+          <a href={getSocialAuthUrl('naver')} className="social-login__button">
+            <img src="/images/naver-logo.png" alt="" className="social-login__icon-image social-login__icon-image--naver" />
+            네이버로 로그인
+          </a>
         </div>
       </section>
     </AuthSplitLayout>

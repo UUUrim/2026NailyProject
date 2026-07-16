@@ -1,18 +1,29 @@
-import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, type FormEvent, useEffect } from 'react'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { AuthSplitLayout } from '@/components/auth/AuthSplitLayout'
-import { setToken } from '@/utils/auth'
+import { socialSignup } from '@/apis/user'
+import { ApiError } from '@/utils/apiClient'
 import '@/styles/signup.css'
 
 export function SignupGooglePage() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const email = params.get('email') ?? ''
+  const signupToken = params.get('signupToken') ?? ''
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [name, setName] = useState('')
   const [nickname, setNickname] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
 
-  const handleSignup = (event: FormEvent) => {
+  useEffect(() => {
+    if (!email || !signupToken) {
+      // OAuth 절차 없이 직접 들어온 경우 → 로그인으로 튕기고 소셜 버튼부터 다시 태우기
+      navigate('/signup', { replace: true })
+    }
+  }, [email, signupToken, navigate])
+
+  const handleSignup = async (event: FormEvent) => {   // ← async 추가
     event.preventDefault()
 
     if (password.length < 8) {
@@ -27,9 +38,13 @@ export function SignupGooglePage() {
       setStatusMessage('이름과 닉네임을 입력해 주세요.')
       return
     }
-
-    setToken('temp-token') // 소셜 로그인 백엔드 구현 전 임시
-    navigate('/process')
+    try {
+      await socialSignup({ signupToken, password, name, nickname })
+      navigate('/process')
+    } catch (e) {
+      setStatusMessage(e instanceof ApiError ? e.message : '가입에 실패했습니다.')
+    }
+    // setToken('temp-token')과 마지막 navigate('/process') 줄은 삭제
   }
 
   return (
@@ -37,11 +52,11 @@ export function SignupGooglePage() {
       <section className="signup-box">
         <h1 className="signup-box__heading">구글 가입</h1>
 
-        <form onSubmit={handleSignup}>
+        <form onSubmit={(e) => void handleSignup(e)}>
           <label className="signup-box__label">이메일</label>
           <div className="signup-box__provider-email">
             <img src="/images/google-logo.png" alt="" className="signup-box__social-icon" />
-            <span>example@gmail.com</span>
+            <span>{email}</span>
           </div>
 
           <label className="signup-box__label" htmlFor="google-password">
