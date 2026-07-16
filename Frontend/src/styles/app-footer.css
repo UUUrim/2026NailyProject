@@ -1,0 +1,44 @@
+.app-footer {
+  height: 96px;
+  border-top: 1px solid #efefef;
+  background: linear-gradient(180deg, #f7f7f7 0%, #fef2f6 100%);
+  padding: 0 78px 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  flex-shrink: 0;
+}
+
+.app-footer__logo {
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1;
+}
+
+.app-footer__copyright {
+  margin: 0;
+  text-align: center;
+  font-size: 10px;
+}
+
+.app-footer__mail {
+  text-align: right;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .app-footer {
+    padding: 0 1.25rem 12px;
+    height: auto;
+    min-height: 80px;
+    gap: 8px;
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .app-footer__mail {
+    text-align: center;
+  }
+}
