@@ -24,10 +24,10 @@ spring:
             enable: true
 
   datasource:
-    url: jdbc:mysql://localhost:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    url: jdbc:mysql://nailydb.cy74oskiegr8.us-east-1.rds.amazonaws.com:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: admin
+    password: ENC(eGPb9gyXu7yqOlB2AQ8GrdugJnaGrnTy)
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root
-    password: ENC(vu8GQP2qjD0N+lr4aSjGHw==)
 
   jpa:
     hibernate:
