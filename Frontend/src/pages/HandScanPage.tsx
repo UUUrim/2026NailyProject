@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageBackLink } from '@/components/layout/PageBackLink'
-import { startScan, uploadFingerImage, requestAnalyze } from '@/api/scan'
+import { startScan, uploadFingerImage, requestAnalyze } from '@/apis/scan'
 import { ApiError } from '@/utils/apiClient'
 import '@/styles/hand-scan.css'
 

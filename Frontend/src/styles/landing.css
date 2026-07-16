@@ -14,9 +14,21 @@
   color: var(--naily-text);
   background: #ffffff;
   min-height: 100svh;
+  --landing-header-height: 4.5rem;
 }
 
 /* Header (over hero image) */
+
+.landing__header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  margin-bottom: calc(-1 * var(--landing-header-height));
+}
+
+.landing__header-sticky + .hero-panel--top .hero-panel__inner {
+  padding-top: var(--landing-header-height);
+}
 
 .landing-header {
   position: relative;
@@ -118,12 +130,12 @@
 
 .hero-panel__overlay--top {
   background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.12) 0%,
-    rgba(255, 255, 255, 0) 38%,
-    rgba(255, 255, 255, 0.35) 68%,
-    rgba(255, 255, 255, 0.92) 88%,
-    #ffffff 100%
+          180deg,
+          rgba(255, 255, 255, 0.12) 0%,
+          rgba(255, 255, 255, 0) 38%,
+          rgba(255, 255, 255, 0.35) 68%,
+          rgba(255, 255, 255, 0.92) 88%,
+          #ffffff 100%
   );
 }
 
@@ -150,13 +162,13 @@
 
 .hero-panel--bottom .hero-panel__overlay--bottom {
   background: linear-gradient(
-    180deg,
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.88) 14%,
-    rgba(255, 255, 255, 0) 30%,
-    rgba(255, 255, 255, 0) 52%,
-    rgba(255, 255, 255, 0.62) 82%,
-    #ffffff 100%
+          180deg,
+          #ffffff 0%,
+          rgba(255, 255, 255, 0.88) 14%,
+          rgba(255, 255, 255, 0) 30%,
+          rgba(255, 255, 255, 0) 52%,
+          rgba(255, 255, 255, 0.62) 82%,
+          #ffffff 100%
   );
 }
 
@@ -416,11 +428,11 @@
   z-index: 0;
   pointer-events: none;
   background: linear-gradient(
-    180deg,
-    #ffffff 0%,
-    rgba(255, 255, 255, 0.82) 40%,
-    rgba(255, 255, 255, 0.35) 70%,
-    transparent 100%
+          180deg,
+          #ffffff 0%,
+          rgba(255, 255, 255, 0.82) 40%,
+          rgba(255, 255, 255, 0.35) 70%,
+          transparent 100%
   );
 }
 
@@ -430,10 +442,10 @@
   max-width: var(--naily-max-width);
   margin: 0 auto;
   padding: calc(
-      var(--footer-fade-height, 7rem) + var(--footer-pad-top, 1.25rem) +
-        var(--footer-content-offset, 1.25rem)
-    )
-    2rem var(--footer-pad-bottom, 2.75rem);
+          var(--footer-fade-height, 7rem) + var(--footer-pad-top, 1.25rem) +
+          var(--footer-content-offset, 1.25rem)
+  )
+  2rem var(--footer-pad-bottom, 2.75rem);
 }
 
 .landing-footer__logo {

@@ -1,3 +1,6 @@
+
+
+//수정
 import type { HandScanAnalysis } from '@/utils/handScanAnalysis'
 
 const PROFILE_KEY = 'naily_user_profile'

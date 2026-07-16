@@ -12,7 +12,7 @@ import {
   PREFERENCE_SECTION_LABELS,
   type PreferenceKey,
 } from '@/constants/designPreferences'
-import { likeDesign, unlikeDesign } from '@/api/design'
+import { likeDesign, unlikeDesign } from '@/apis/design'
 import { ApiError } from '@/utils/apiClient'
 import '@/styles/nail-design.css'
 

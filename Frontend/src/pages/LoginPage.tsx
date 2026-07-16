@@ -1,8 +1,7 @@
 import '@/styles/login.css'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AuthNav } from '@/components/layout/AuthNav'
-import { login } from '@/api/user'
+import { login } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
 
 export function LoginPage() {
@@ -45,19 +44,6 @@ export function LoginPage() {
   return (
       <div className="login-wireframe">
         <div className="login-wireframe__canvas">
-          <header className="login-wireframe__header">
-            <Link to="/" className="login-wireframe__logo">
-              Naily
-            </Link>
-            <nav className="login-wireframe__nav" aria-label="상단 메뉴">
-              <AuthNav
-                  loginClassName="login-wireframe__link"
-                  signupClassName="login-wireframe__cta"
-                  profileClassName="login-wireframe__profile"
-              />
-            </nav>
-          </header>
-
           <main className="login-wireframe__main">
             <section className="login-card" aria-label="로그인 폼">
               <h1 className="login-card__title">
@@ -131,7 +117,7 @@ export function LoginPage() {
               <div className="social-login">
                 <Link to="/signup/google" className="social-login__button">
                   <img
-                      src="/images/google-logo.png"
+                      src="/2026NailyProject-main/Frontend/public/google-logo.png"
                       alt=""
                       className="social-login__icon-image social-login__icon-image--google"
                   />
@@ -139,7 +125,7 @@ export function LoginPage() {
                 </Link>
                 <Link to="/signup/naver" className="social-login__button">
                   <img
-                      src="/images/naver-logo.png"
+                      src="/2026NailyProject-main/Frontend/public/naver-logo.png"
                       alt=""
                       className="social-login__icon-image social-login__icon-image--naver"
                   />
@@ -152,12 +138,6 @@ export function LoginPage() {
               </p>
             </section>
           </main>
-
-          <footer className="login-wireframe__footer">
-            <p className="login-wireframe__footer-logo">Naily</p>
-            <p className="login-wireframe__copyright">© 2026. Naily(네일리) All rights reserved.</p>
-            <span className="login-wireframe__mail" aria-hidden="true">✉</span>
-          </footer>
         </div>
       </div>
   )
