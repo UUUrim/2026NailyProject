@@ -245,6 +245,11 @@ export function HandScanResultPage() {
                         hint="손톱 측면 곡률 지수 (0~1)"
                     />
                 </div>
+                {/*<div className="scan-result-metrics">*/}
+                {/*    <MetricCard title="전체 크기" value={result.overallSize ?? '-'} hint="손톱 전체 크기 분류" />*/}
+                {/*    <MetricCard title="손 방향" value={result.handSide === 'RIGHT' ? '오른손' : '왼손'} hint="촬영한 손 방향" />*/}
+                {/*    <MetricCard title="분석 상태" value={result.status} hint="현재 분석 진행 상태" />*/}
+                {/*</div>*/}
             </section>
 
             {result.seasonCode && (

@@ -171,6 +171,8 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
+  color: #333;
+  text-decoration: none;
 }
 
 .social-login__icon-image {

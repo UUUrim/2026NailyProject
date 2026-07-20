@@ -66,7 +66,7 @@ export async function signup(params: {
 
 export function getSocialAuthUrl(provider: 'google' | 'naver'): string {    /** 소셜 로그인 추가 **/
     const base = import.meta.env.VITE_API_BASE_URL ?? ''
-    return `${base}/oauth/${provider}/authorize`
+    return `${base}/oauth2/authorization/${provider}`   /** 경로 수정 **/
 }
 
 /** POST /users/social/signup — 소셜 가입 + 자동 로그인(토큰 저장) */
