@@ -103,9 +103,9 @@
 
 import { getToken, clearToken } from '@/utils/auth'
 
-// export const BASE_URL = ''
+export const BASE_URL = ''
 // export const BASE_URL = 'http://100.48.79.172:8080'
-export const BASE_URL='http://nailyweb.duckdns.org:8080'
+// export const BASE_URL='http://nailyweb.duckdns.org:8080'
 
 // ─── 백엔드 ApiResponse<T> 구조 ───────────────────────────────────────────────
 export interface ApiResponse<T> {

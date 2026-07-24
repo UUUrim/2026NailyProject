@@ -10,7 +10,7 @@ import {
     savePreferences,
     refineKeywords,
 } from '@/apis/chat'
-import { generateDesign, generateDesignFromImage } from '@/apis/design'
+import { generateDesign, generateDesignFromImage, type DesignExtractedDetails } from '@/apis/design'
 import { getNailShape, type NailShapeId } from '@/constants/nailShapes'
 import { NailPreview3D } from '@/components/nail3d/NailPreview3D'
 import {
@@ -63,6 +63,7 @@ type GeneratedDesign = {
     preferences: NailDesignPreferences
     source: GenerationSource
     shapeId: NailShapeId
+    details?: DesignExtractedDetails
 }
 
 const DESIGN_FEEDBACK_QUICK_REPLY: QuickReply = {
@@ -458,10 +459,6 @@ export function NailDesignChatPage() {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
         }
-        if (!scanId) {
-            pushAssistant('먼저 손 스캔을 진행해 주세요. 스캔 결과가 있어야 디자인을 생성할 수 있어요.')
-            return
-        }
 
         setGenerationSource(source)
         setIsSending(true)
@@ -477,6 +474,7 @@ export function NailDesignChatPage() {
                 preferences,
                 source,
                 shapeId: resolveShapeId(preferences),
+                details: data.details,
             })
 
             if (source === 'scan-auto') {
@@ -529,6 +527,7 @@ export function NailDesignChatPage() {
                 preferences: INITIAL_PREFERENCES,
                 source: 'photo',
                 shapeId: resolveShapeId(INITIAL_PREFERENCES),
+                details: data.details,
             })
             pushAssistantImages('짜잔! 이런 디자인은 어떠세요?', data.imageUrls)
             setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
@@ -574,7 +573,11 @@ export function NailDesignChatPage() {
             }
             case 'scan-auto': {
                 setMode('scan-auto')
-                pushAssistant('내 손 스캔 정보를 바탕으로 어울리는 디자인을 자동으로 만들어드릴게요.')
+                pushAssistant(
+                    scanId
+                        ? '내 손 스캔 정보를 바탕으로 어울리는 디자인을 자동으로 만들어드릴게요.'
+                        : '아직 손 스캔 정보가 없어서, 기본 추천값으로 디자인을 만들어드릴게요.',
+                )
                 void runGenerateDesign(INITIAL_PREFERENCES, 'scan-auto')
                 break
             }
@@ -663,6 +666,10 @@ export function NailDesignChatPage() {
                     imageUrls: lastDesign.imageUrls,
                     preferences: lastDesign.preferences,
                     prompt: lastDesign.prompt,
+                    shapeId: lastDesign.shapeId,
+                    details: lastDesign.details,
+                    leftScanId: leftAnalysis?.scanId ?? null,
+                    rightScanId: rightAnalysis?.scanId ?? null,
                 },
             })
             return

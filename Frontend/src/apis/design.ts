@@ -1,16 +1,30 @@
 import { apiClient, BASE_URL } from '@/utils/apiClient'
 
 // ─── 응답 타입 ────────────────────────────────────────────────────────────────
+
+/**
+ * 디자인 생성 모델이 이미지와 함께 추출해서 내려주는 세부 요소.
+ * (컬러팔레트 / 질감·텍스처 / 네일 파츠는 모델 쪽에서 추출 — 프론트는 받아서 표시만 함)
+ */
+export interface DesignExtractedDetails {
+    colorPalette: string[] // 디자인에 사용된 컬러 hex 코드 목록 (예: ["#FDE2EA", "#DE869F"])
+    textures: string[]     // 디자인의 질감/텍스처 라벨 목록 (예: ["글리터", "그라데이션"])
+    nailParts: string[]    // 디자인에 사용된 네일 파츠 라벨 목록 (예: ["펄", "하트 스톤"])
+}
+
 export interface DesignGenerateResponse {
     designId: number
     status: string
     generatedPrompt: string
-    imageUrls: string[] // 3장
+    imageUrls: string[] // 1장
+    details?: DesignExtractedDetails
 }
 
 export interface DesignImageResponse {
     designId: number
+    sessionId: number | null
     imageUrl: string
+    promptSummary: string
     createdAt: string
 }
 
@@ -29,7 +43,7 @@ export interface SavedDesignResponse {
 /** POST /designs/generate — 디자인 생성 요청 */
 export async function generateDesign(params: {
     sessionId: number
-    scanId: number
+    scanId?: number | null
 }): Promise<DesignGenerateResponse> {
     const res = await apiClient.post<DesignGenerateResponse>('/designs/generate', params)
     return res.data
@@ -66,6 +80,11 @@ export async function generateDesignFromImage(params: {
 export async function getMyDesigns(): Promise<DesignImageResponse[]> {
     const res = await apiClient.get<DesignImageResponse[]>('/users/me/designs')
     return res.data
+}
+
+/** DELETE /users/me/designs/{designId} — 내 디자인 삭제 */
+export async function deleteDesign(designId: number): Promise<void> {
+    await apiClient.delete(`/users/me/designs/${designId}`)
 }
 
 // ─── 찜하기 ───────────────────────────────────────────────────────────────────
