@@ -1,16 +1,28 @@
 import '@/styles/login.css'
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { login } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
 import { getSocialAuthUrl } from '@/apis/user'
+import { AlertModal } from '@/components/common/AlertModal'
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [modalMessage, setModalMessage] = useState('')
+
+  useEffect(() => {
+    const state = location.state as { error?: string } | null
+    if (state?.error) {
+      setModalMessage(state.error)
+      // 새로고침 시 메시지가 다시 뜨지 않도록 state 제거
+      navigate(location.pathname, { replace: true, state: null })
+    }
+  }, [location, navigate])
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -150,6 +162,10 @@ export function LoginPage() {
             </section>
           </main>
         </div>
+
+        {modalMessage && (
+            <AlertModal message={modalMessage} onClose={() => setModalMessage('')} />
+        )}
       </div>
   )
 }

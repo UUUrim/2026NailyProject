@@ -5,6 +5,7 @@ import { HandScanResultPage } from '@/pages/HandScanResultPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { MyPage } from '@/pages/MyPage'
 import { NailDesignPreferencePage } from '@/pages/NailDesignPreferencePage'
+import { NailDesignChatPage } from '@/pages/NailDesignChatPage'
 import { NailDesignResultPage } from '@/pages/NailDesignResultPage'
 import { ProcessGuidePage } from '@/pages/ProcessGuidePage'
 import { SignupEmailPage } from '@/pages/SignupEmailPage'
@@ -24,6 +25,7 @@ function App() {
             <Route path="/signup/google" element={<SignupGooglePage />} />
             <Route path="/signup/naver" element={<SignupNaverPage />} />
             <Route path="/oauth/success" element={<OAuthSuccessPage />} />  {/* 소셜 로그인 추가 */}
+            <Route path="/oauth/callback" element={<OAuthSuccessPage />} />  {/* 백엔드 리다이렉트 경로 대응 */}
 
             <Route element={<RootLayout />}>
                 <Route path="/login" element={<LoginPage />} />
@@ -32,6 +34,7 @@ function App() {
                 <Route path="/scan/hand" element={<HandScanPage />} />
                 <Route path="/scan/result" element={<HandScanResultPage />} />
                 <Route path="/design/preferences" element={<NailDesignPreferencePage />} />
+                <Route path="/design/chat" element={<NailDesignChatPage />} />
                 <Route path="/design/result" element={<NailDesignResultPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

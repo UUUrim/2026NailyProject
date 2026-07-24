@@ -349,6 +349,11 @@
   z-index: 2;
 }
 
+.finger-hotspot:hover,
+.finger-hotspot:focus-within {
+  z-index: 10;
+}
+
 .finger-hotspot__trigger {
   width: 28px;
   height: 28px;
