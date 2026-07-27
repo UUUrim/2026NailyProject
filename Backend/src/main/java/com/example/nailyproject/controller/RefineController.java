@@ -33,11 +33,4 @@ public class RefineController {
                 ApiResponse.success(200, "키워드 추출 및 저장 성공.", keywords)
         );
     }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException e) {
-        return ResponseEntity
-                .status(org.springframework.http.HttpStatus.BAD_REQUEST)
-                .body(ApiResponse.fail(400, e.getMessage()));
-    }
 }

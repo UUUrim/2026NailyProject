@@ -104,20 +104,8 @@ public class RefineService {
                 )
         );
 
-        // Gemini 호출
-        WebClient webClient = webClientBuilder.build();
-        JsonNode responseNode;
-        try {
-            responseNode = webClient.post()
-                    .uri(apiUrl + "?key=" + apiKey.trim())
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .bodyToMono(JsonNode.class)
-                    .block();
-        } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-            System.err.println("Gemini API 호출 실패: " + e.getStatusCode() + " " + e.getResponseBodyAsString());
-            throw new IllegalStateException("키워드 추출용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
-        }
+        // Gemini 호출 (429는 잠깐 대기 후 재시도)
+        JsonNode responseNode = callGeminiWithRetry(requestBody);
 
         // 응답 파싱
         List<String> keywords = new ArrayList<>();
@@ -172,6 +160,48 @@ public class RefineService {
 
         return keywords;
 
+    }
+
+    /**
+     * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
+     */
+    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+        WebClient webClient = webClientBuilder.build();
+        int maxAttempts = 3;
+        long backoffMillis = 1500;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return webClient.post()
+                        .uri(apiUrl + "?key=" + apiKey.trim())
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .block();
+            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+                int statusCode = e.getStatusCode().value();
+                boolean isRetryable = statusCode == 429 || statusCode == 503; // 429=요청과다, 503=모델 과부하
+                boolean hasAttemptsLeft = attempt < maxAttempts;
+
+                System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
+                        + e.getStatusCode() + " " + e.getResponseBodyAsString());
+
+                if (isRetryable && hasAttemptsLeft) {
+                    try {
+                        Thread.sleep(backoffMillis * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    continue;
+                }
+
+                if (isRetryable) {
+                    throw new IllegalStateException("지금 AI 서버가 혼잡해서 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
+                }
+                throw new IllegalStateException("키워드 추출용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+            }
+        }
+        throw new IllegalStateException("키워드 추출용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
     }
 
 }

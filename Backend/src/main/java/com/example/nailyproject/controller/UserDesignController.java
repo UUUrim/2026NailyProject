@@ -38,23 +38,4 @@ public class UserDesignController {
                 ApiResponse.success(200, "내 디자인 전체 목록 조회 성공.", data)
         );
     }
-
-    /**
-     * '내 디자인' 삭제 DELETE /users/me/designs/{designId}
-     */
-    @DeleteMapping("/designs/{designId}")
-    public ResponseEntity<ApiResponse<Void>> deleteDesign(
-            @AuthenticationPrincipal User user,
-            @PathVariable Long designId) {
-
-        nailDesignService.deleteDesign(user.getId(), designId);
-        return ResponseEntity.ok(ApiResponse.success(200, "디자인이 삭제되었습니다.", null));
-    }
-
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<ApiResponse<Void>> handleNotFound(IllegalArgumentException e) {
-        return ResponseEntity
-                .status(org.springframework.http.HttpStatus.NOT_FOUND)
-                .body(ApiResponse.fail(404, e.getMessage()));
-    }
 }

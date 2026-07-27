@@ -30,14 +30,14 @@ public class NailDesign {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "session_id")
-    private DesignSession session; // 세션별 이력 조회를 위한 연결 (구버전 데이터는 null일 수 있음)
+    private DesignSession session; // 이 디자인이 만들어진 챗봇 세션 (없을 수도 있음, nullable)
 
     @ElementCollection
     @CollectionTable(name = "nail_design_images", joinColumns = @JoinColumn(name = "nail_design_id"))
     @Column(name = "image_url", nullable = false, length = 500)
     private List<String> imageUrls;
 
-    @Column(name = "prompt_summary")
+    @Column(name = "prompt_summary", columnDefinition = "TEXT")
     private String promptSummary;
 
     @Column(name = "ai_model", nullable = false, length = 500)
@@ -55,11 +55,18 @@ public class NailDesign {
         DRAFT, CONFIRMED, IN_PRODUCTION, COMPLETED
     }
 
+    @Column(name = "design_plan", columnDefinition = "JSON")
+    private String designPlan; // STEP3에서 생성된 5개 손가락 상세 디자인 JSON 원문
+
     public void updateImageUrls(List<String> imageUrls) {
         this.imageUrls = imageUrls;
     }
 
     public void updateStatus(DesignStatus status) {
         this.status = status;
+    }
+
+    public void updateDesignPlan(String designPlan) {
+        this.designPlan = designPlan;
     }
 }

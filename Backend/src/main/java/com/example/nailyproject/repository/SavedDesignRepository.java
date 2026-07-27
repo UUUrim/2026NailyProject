@@ -20,4 +20,6 @@ public interface SavedDesignRepository extends JpaRepository<SavedDesign, Long> 
 
     // 3. 찜 목록 화면에 뿌려줄 때 최신순으로 가져오기
     List<SavedDesign> findAllByUserIdOrderBySavedAtDesc(Long userId);
+
+    void deleteAllByNailDesign(NailDesign nailDesign);
 }

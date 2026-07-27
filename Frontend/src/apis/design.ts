@@ -40,18 +40,18 @@ export interface SavedDesignResponse {
 
 // ─── 디자인 생성 ──────────────────────────────────────────────────────────────
 
-/** POST /designs/generate — 디자인 생성 요청 */
+/** POST /designs/generate-detailed — 상세 디자인 생성 요청 (STEP1~4 오케스트레이션) */
 export async function generateDesign(params: {
     sessionId: number
     scanId?: number | null
 }): Promise<DesignGenerateResponse> {
-    const res = await apiClient.post<DesignGenerateResponse>('/designs/generate', params)
+    const res = await apiClient.post<DesignGenerateResponse>('/designs/generate-detailed', params)
     return res.data
 }
 
 /**
- * POST /designs/generate-from-image — 업로드한 참고 이미지 기반 디자인 생성 요청
- * ⚠️ 백엔드에 아직 이 엔드포인트가 구현되어 있지 않습니다. 프론트 흐름만 먼저 만들어둔 상태예요.
+ * POST /designs/generate-detailed-from-image — 업로드한 참고 이미지 기반 상세 디자인 생성 요청
+ * multipart/form-data: image(파일), sessionId(선택), scanId(선택)
  */
 export async function generateDesignFromImage(params: {
     sessionId: number
@@ -64,13 +64,21 @@ export async function generateDesignFromImage(params: {
     formData.append('image', params.image, 'reference.jpg')
 
     const token = localStorage.getItem('token')
-    const res = await fetch(`${BASE_URL}/designs/generate-from-image`, {
+    const res = await fetch(`${BASE_URL}/designs/generate-detailed-from-image`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
     })
-    const body = await res.json()
-    if (!body.ok) throw new Error(body.message)
+    const raw = await res.text()
+    let body: { ok?: boolean; message?: string; data?: unknown }
+    try {
+        body = raw ? JSON.parse(raw) : {}
+    } catch {
+        throw new Error(`서버 응답을 처리할 수 없습니다. (status ${res.status})`)
+    }
+    if (!res.ok || !body.ok) {
+        throw new Error(body.message || `디자인 생성에 실패했습니다. (status ${res.status})`)
+    }
     return body.data as DesignGenerateResponse
 }
 
@@ -82,9 +90,9 @@ export async function getMyDesigns(): Promise<DesignImageResponse[]> {
     return res.data
 }
 
-/** DELETE /users/me/designs/{designId} — 내 디자인 삭제 */
+/** DELETE /designs/{designId} — 내 디자인 삭제 */
 export async function deleteDesign(designId: number): Promise<void> {
-    await apiClient.delete(`/users/me/designs/${designId}`)
+    await apiClient.delete(`/designs/${designId}`)
 }
 
 // ─── 찜하기 ───────────────────────────────────────────────────────────────────

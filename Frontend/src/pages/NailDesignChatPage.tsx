@@ -722,16 +722,9 @@ export function NailDesignChatPage() {
     const handleFreeformGenerate = () => {
         setActiveQuickReply(null)
         const freeText = freeformLogRef.current.join('. ')
-        void (async () => {
-            if (sessionId && freeText.trim()) {
-                try {
-                    await refineKeywords(sessionId, freeText)
-                } catch {
-                    // 키워드 추출 실패해도 계속 진행 (스캔 기본값으로 생성됨)
-                }
-            }
-            await runGenerateDesign({ ...INITIAL_PREFERENCES, freeText }, 'freeform')
-        })()
+        // 대화 중에 백엔드(chat())가 이미 session.extractedPreferences를 채워두므로
+        // 별도 refineKeywords 호출 없이 바로 생성 (buildFinalPrompt 1순위로 그대로 사용됨)
+        void runGenerateDesign({ ...INITIAL_PREFERENCES, freeText }, 'freeform')
     }
 
     const sendFreeformMessage = async (text: string) => {
@@ -742,12 +735,30 @@ export function NailDesignChatPage() {
         freeformLogRef.current.push(text)
         setIsSending(true)
         try {
-            const reply = await sendChatMessage(sessionId, text)
-            pushAssistant(reply)
+            const res = await sendChatMessage(sessionId, text)
+            pushAssistant(res.reply)
+
+            if (res.isComplete) {
+                // 취향 파악이 끝났다고 봇이 이미 안내했으니, 말한 대로 바로 생성 시작
+                handleFreeformGenerate()
+                return
+            }
+
+            // Gemini의 isComplete 판단에만 의존하면 판단이 안 나올 때 생성할 방법이 없어지므로,
+            // 아직 완료 전이어도 사용자가 원하면 언제든 직접 생성을 시작할 수 있게 버튼을 항상 띄움
+            const generateOption = { value: '__generate__', label: '🎨 이 내용으로 디자인 생성하기' }
+            const suggestionOptions =
+                res.showOptions && res.options.length > 0
+                    ? res.options.map((label) => ({ value: label, label }))
+                    : []
+
             setActiveQuickReply({
-                id: `freeform-generate-${makeId()}`,
-                question: '준비되면 아래 버튼을 눌러 디자인을 생성해 주세요',
-                options: [{ value: 'generate', label: '🎨 이 내용으로 디자인 생성하기' }],
+                id: `freeform-actions-${makeId()}`,
+                question:
+                    suggestionOptions.length > 0
+                        ? '아래에서 골라 답하거나, 준비되면 바로 생성해보세요'
+                        : '준비되면 아래 버튼으로 바로 생성해보세요',
+                options: [...suggestionOptions, generateOption],
                 multi: false,
                 limit: 1,
                 layout: 'list',
@@ -797,6 +808,23 @@ export function NailDesignChatPage() {
         }
         if (activeQuickReply?.id.startsWith('freeform-generate')) {
             handleFreeformGenerate()
+            return
+        }
+        if (activeQuickReply?.id.startsWith('freeform-actions')) {
+            if (option.value === '__generate__') {
+                setActiveQuickReply(null)
+                pushUser(option.label)
+                handleFreeformGenerate()
+                return
+            }
+            const isHexColor = /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(option.label.trim())
+            setActiveQuickReply(null)
+            if (isHexColor) {
+                pushUserColors('', [option.label.trim()])
+            } else {
+                pushUser(option.label)
+            }
+            void sendFreeformMessage(option.label)
             return
         }
     }
@@ -1137,6 +1165,7 @@ export function NailDesignChatPage() {
                                                 const selected = selectedInQuickReply.includes(option.value)
                                                 const shapeImage =
                                                     activeQuickReply.id === 'pref-shape' ? SHAPE_PREVIEW_IMAGES[option.value] : undefined
+                                                const hexMatch = /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(option.label.trim())
                                                 return (
                                                     <button
                                                         key={option.value}
@@ -1155,7 +1184,15 @@ export function NailDesignChatPage() {
                                                                 className="design-chat__quickreply-shape-img"
                                                             />
                                                         )}
-                                                        <span>{option.label}</span>
+                                                        {hexMatch ? (
+                                                            <span
+                                                                className="design-chat__quickreply-color-swatch"
+                                                                style={{ background: option.label.trim() }}
+                                                                aria-label={option.label.trim()}
+                                                            />
+                                                        ) : (
+                                                            <span>{option.label}</span>
+                                                        )}
                                                     </button>
                                                 )
                                             })}

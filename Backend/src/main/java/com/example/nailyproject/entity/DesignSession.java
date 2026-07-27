@@ -61,6 +61,9 @@ public class DesignSession {
     public void updateExtractedPreferences(String extractedPreferences) {
         this.extractedPreferences = extractedPreferences;
     }
+    public void updateStatus(SessionStatus status) {
+        this.status = status;
+    }
 
     public void updateGeneratedPrompt(String generatedPrompt) {
         this.generatedPrompt = generatedPrompt;

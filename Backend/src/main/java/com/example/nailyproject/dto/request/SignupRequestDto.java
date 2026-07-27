@@ -7,11 +7,6 @@ import lombok.Data;
 @Data
 public class SignupRequestDto {
 
-//    private String email;
-//    private String password;
-//    private String name;
-//    private String nickname;
-
     @NotBlank
     @Email
     private String email;
