@@ -473,8 +473,12 @@ public class NailDesignService {
             }
         }
 
-        HandScan handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId())
-                .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
+        // 스캔 조회 (선택 - 없어도 생성 가능)
+        HandScan handScan = null;
+        if (request.getScanId() != null) {
+            handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId())
+                    .orElse(null);
+        }
 
         fillMissingFromScan(slots, handScan);
 
@@ -506,7 +510,7 @@ public class NailDesignService {
         nailDesign.updateDesignPlan(plan.toString());
         nailDesignRepository.save(nailDesign);
 
-        sendPlanToPartsGenerator(user.getId(), handScan.getId(), nailDesign.getId(), plan);
+        sendPlanToPartsGenerator(user.getId(), handScan != null ? handScan.getId() : null, nailDesign.getId(), plan);
 
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
@@ -517,6 +521,16 @@ public class NailDesignService {
     }
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
+        if (handScan == null) {
+            // 스캔 정보가 없으면 mood 정도만 기본값으로 채워서 진행
+            if (getLiked(slots, "mood").isEmpty()) {
+                String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
+                String defaultMood = ("glitter".equals(designType) || "marble".equals(designType)) ? "chic" : "simple";
+                addLiked(slots, "mood", defaultMood);
+            }
+            return;
+        }
+
         if (getLiked(slots, "shape").isEmpty() && handScan.getShape() != null && !handScan.getShape().isBlank()) {
             addLiked(slots, "shape", handScan.getShape());
         }
@@ -619,14 +633,15 @@ public class NailDesignService {
      */
     private void sendPlanToPartsGenerator(Long userId, Long scanId, Long designId, JsonNode plan) {
         try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("userId", userId);
+            body.put("scanId", scanId); // null일 수 있음 (스캔 없이 생성한 경우)
+            body.put("designId", designId);
+            body.put("plan", plan);
+
             webClientBuilder.build().post()
                     .uri(analysisServerUrl + "/generate/parts-from-plan")
-                    .bodyValue(Map.of(
-                            "userId", userId,
-                            "scanId", scanId,
-                            "designId", designId,
-                            "plan", plan
-                    ))
+                    .bodyValue(body)
                     .retrieve()
                     .bodyToMono(Void.class)
                     .doOnError(e -> System.err.println("파츠 생성기 호출 실패(미구현 상태일 수 있음): " + e.getMessage()))

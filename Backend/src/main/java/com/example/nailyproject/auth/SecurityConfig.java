@@ -40,7 +40,7 @@ public class SecurityConfig {
                                 "/", "/login", "/signup", "/profile",
                                 "/users/signup", "/users/email/**", "/hello",
                                 "/chat-test", "/chats/**", "/scans/**", "/designs/**", //"/users/me"
-                                "/oauth2/**", "/login/oauth2/**"
+                                "/oauth2/**", "/login/oauth2/**", "/error"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.*;
 
@@ -146,15 +147,16 @@ public class ChatService {
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("contents", contents);
         requestBody.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))));
-        requestBody.put("generationConfig", Map.of("responseMimeType", "application/json"));
 
-        WebClient webClient = webClientBuilder.build();
-        JsonNode responseNode = webClient.post()
-                .uri(apiUrl + "?key=" + apiKey.trim())
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        //Gemini에게 무조건 JSON으로 응답하도록 강제하는 설정
+        //응답이 중간에 잘리지 않도록 출력 토큰을 넉넉히 확보하고, 간단한 대화라 thinking 예산은 낮춤
+        requestBody.put("generationConfig", Map.of(
+                "responseMimeType", "application/json",
+                "maxOutputTokens", 4096,
+                "thinkingConfig", Map.of("thinkingLevel", "LOW")
+        ));
+
+        JsonNode responseNode = callGeminiWithRetry(requestBody);
 
         String aiResponseText = "";
         if (responseNode != null && responseNode.has("candidates")) {
@@ -197,7 +199,11 @@ public class ChatService {
             session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
 
         } catch (JsonProcessingException e) {
-            reply = "죄송합니다. 응답을 처리하는 중 오류가 발생했습니다.";
+            System.err.println("Gemini 응답 JSON 파싱 실패. 원본 응답: " + aiResponseText);
+            e.printStackTrace();
+            // 완전히 실패 문구만 보여주기 전에, 잘린 응답에서라도 "reply" 값을 최대한 살려봄
+            String salvaged = salvageReply(aiResponseText);
+            reply = salvaged != null ? salvaged : "죄송합니다. 응답을 처리하는 중 오류가 발생했습니다.";
         }
 
         chatMessageRepository.save(ChatMessage.builder()
@@ -244,5 +250,64 @@ public class ChatService {
                 case "remove_dislike" -> slot.getDisliked().remove(value);
             }
         }
+    }
+
+    /**
+     * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
+     * 그래도 실패하면 프론트가 "로그인 세션 만료"로 오인하지 않도록 IllegalStateException으로 변환.
+     */
+    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+        WebClient webClient = webClientBuilder.build();
+        int maxAttempts = 3;
+        long backoffMillis = 1500;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return webClient.post()
+                        .uri(apiUrl + "?key=" + apiKey.trim())
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .block();
+            } catch (WebClientResponseException e) {
+                boolean isRateLimited = e.getStatusCode().value() == 429;
+                boolean hasAttemptsLeft = attempt < maxAttempts;
+
+                System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
+                        + e.getStatusCode() + " " + e.getResponseBodyAsString());
+
+                if (isRateLimited && hasAttemptsLeft) {
+                    try {
+                        Thread.sleep(backoffMillis * attempt); // 1.5초, 3초 ...로 점점 늘려가며 재시도
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    continue;
+                }
+
+                if (isRateLimited) {
+                    throw new IllegalStateException("지금 요청이 많아 AI 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
+                }
+                throw new IllegalStateException("AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+            }
+        }
+        throw new IllegalStateException("AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+    }
+
+    /**
+     * Gemini 응답이 중간에 잘려 JSON 파싱이 실패했을 때, "reply" 필드 값만이라도
+     * 정규식으로 최대한 살려서 사용자에게 자연스러운 답을 보여주기 위한 폴백.
+     * 완전히 실패하면 null을 반환한다.
+     */
+    private String salvageReply(String truncatedJson) {
+        if (truncatedJson == null || truncatedJson.isBlank()) return null;
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("\"reply\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)").matcher(truncatedJson);
+        if (matcher.find()) {
+            String raw = matcher.group(1);
+            // JSON 이스케이프 문자 최소한으로 복원 (\n, \", \\)
+            return raw.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+        }
+        return null;
     }
 }

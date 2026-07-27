@@ -71,14 +71,14 @@ public class DesignController {
      * POST /designs/generate-detailed-from-image (multipart/form-data)
      *   - image: 참고 이미지 파일 (1장)
      *   - sessionId: (선택) 채팅 세션 ID
-     *   - scanId: (필수) 손 스캔 ID
+     *   - scanId: (선택) 손 스캔 ID — 없어도 생성 가능
      */
     @PostMapping(value = "/generate-detailed-from-image", consumes = "multipart/form-data")
     public ResponseEntity<ApiResponse<DesignGenerateResponseDto>> generateDetailedDesignFromImage(
             @AuthenticationPrincipal User user,
             @RequestParam("image") MultipartFile image,
             @RequestParam(value = "sessionId", required = false) Long sessionId,
-            @RequestParam("scanId") Long scanId) throws Exception {
+            @RequestParam(value = "scanId", required = false) Long scanId) throws Exception {
 
         DesignGenerateRequestDto request = new DesignGenerateRequestDto();
         // sessionId/scanId가 생성자나 setter로 안 들어가면, DTO에 setter 추가 필요

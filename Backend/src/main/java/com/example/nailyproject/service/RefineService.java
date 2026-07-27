@@ -98,23 +98,20 @@ public class RefineService {
                         "parts", List.of(Map.of("text", SYSTEM_PROMPT))
                 ),
                 "generationConfig", Map.of(
-                        "responseMimeType", "application/json"
+                        "responseMimeType", "application/json",
+                        "maxOutputTokens", 1024,
+                        "thinkingConfig", Map.of("thinkingLevel", "LOW")
                 )
         );
 
-        // Gemini 호출
-        WebClient webClient = webClientBuilder.build();
-        JsonNode responseNode = webClient.post()
-                .uri(apiUrl + "?key=" + apiKey.trim())
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        // Gemini 호출 (429는 잠깐 대기 후 재시도)
+        JsonNode responseNode = callGeminiWithRetry(requestBody);
 
         // 응답 파싱
         List<String> keywords = new ArrayList<>();
+        String aiResponseText = "";
         try {
-            String aiResponseText = responseNode.path("candidates").get(0)
+            aiResponseText = responseNode.path("candidates").get(0)
                     .path("content").path("parts").get(0)
                     .path("text").asText();
 
@@ -125,6 +122,7 @@ public class RefineService {
                 keywordsNode.forEach(k -> keywords.add(k.asText()));
             }
         } catch (JsonProcessingException e) {
+            System.err.println("Gemini 키워드 추출 JSON 파싱 실패. 원본 응답: " + aiResponseText);
             throw new RuntimeException("키워드 추출 중 오류가 발생했습니다.");
         }
 
@@ -162,6 +160,47 @@ public class RefineService {
 
         return keywords;
 
+    }
+
+    /**
+     * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
+     */
+    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+        WebClient webClient = webClientBuilder.build();
+        int maxAttempts = 3;
+        long backoffMillis = 1500;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return webClient.post()
+                        .uri(apiUrl + "?key=" + apiKey.trim())
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .block();
+            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+                boolean isRateLimited = e.getStatusCode().value() == 429;
+                boolean hasAttemptsLeft = attempt < maxAttempts;
+
+                System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
+                        + e.getStatusCode() + " " + e.getResponseBodyAsString());
+
+                if (isRateLimited && hasAttemptsLeft) {
+                    try {
+                        Thread.sleep(backoffMillis * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    continue;
+                }
+
+                if (isRateLimited) {
+                    throw new IllegalStateException("지금 요청이 많아 AI 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
+                }
+                throw new IllegalStateException("키워드 추출용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+            }
+        }
+        throw new IllegalStateException("키워드 추출용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
     }
 
 }

@@ -109,15 +109,15 @@ public class FingerDesignPlanService {
         Map<String, Object> requestBody = Map.of(
                 "contents", List.of(Map.of("role", "user", "parts", parts)),
                 "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
-                "generationConfig", Map.of("responseMimeType", "application/json")
+                //5개 손가락+파츠까지 담아야 해서 응답이 길어질 수 있으므로 토큰을 넉넉히, thinking은 낮게
+                "generationConfig", Map.of(
+                        "responseMimeType", "application/json",
+                        "maxOutputTokens", 8192,
+                        "thinkingConfig", Map.of("thinkingLevel", "LOW")
+                )
         );
 
-        JsonNode responseNode = webClientBuilder.build().post()
-                .uri(apiUrl + "?key=" + apiKey.trim())
-                .bodyValue(requestBody)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        JsonNode responseNode = callGeminiWithRetry(requestBody);
 
         String text = responseNode.path("candidates").get(0)
                 .path("content").path("parts").get(0).path("text").asText();
@@ -125,7 +125,49 @@ public class FingerDesignPlanService {
         try {
             return objectMapper.readTree(text);
         } catch (Exception e) {
-            throw new RuntimeException("디자인 플랜 JSON 파싱 실패", e);
+            System.err.println("디자인 플랜 JSON 파싱 실패. 원본 응답: " + text);
+            throw new IllegalStateException("디자인 플랜 생성 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.");
         }
+    }
+
+    /**
+     * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
+     */
+    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+        WebClient webClient = webClientBuilder.build();
+        int maxAttempts = 3;
+        long backoffMillis = 1500;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return webClient.post()
+                        .uri(apiUrl + "?key=" + apiKey.trim())
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(JsonNode.class)
+                        .block();
+            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+                boolean isRateLimited = e.getStatusCode().value() == 429;
+                boolean hasAttemptsLeft = attempt < maxAttempts;
+
+                System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
+                        + e.getStatusCode() + " " + e.getResponseBodyAsString());
+
+                if (isRateLimited && hasAttemptsLeft) {
+                    try {
+                        Thread.sleep(backoffMillis * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    continue;
+                }
+
+                if (isRateLimited) {
+                    throw new IllegalStateException("지금 요청이 많아 디자인 플랜 생성이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
+                }
+                throw new IllegalStateException("디자인 플랜용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+            }
+        }
+        throw new IllegalStateException("디자인 플랜용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
     }
 }
