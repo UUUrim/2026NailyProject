@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AuthSplitLayout } from '@/components/auth/AuthSplitLayout'
-import { sendVerificationCode, verifyEmailCode, signup } from '@/api/user'
-import { login } from '@/api/user'
+import { sendVerificationCode, verifyEmailCode, signup } from '@/apis/user'
+import { login } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
 import '@/styles/signup.css'
 

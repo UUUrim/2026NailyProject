@@ -368,8 +368,8 @@ import {
 } from '@/constants/designPreferences'
 import { getHandScanResult } from '@/utils/handScanStorage'
 import { getRecommendedSeasonCode } from '@/utils/personalColorStorage'
-import { createChatSession, savePreferences, refineKeywords } from '@/api/chat'
-import { generateDesign } from '@/api/design'
+import { createChatSession, savePreferences, refineKeywords } from '@/apis/chat'
+import { generateDesign } from '@/apis/design'
 import { ApiError } from '@/utils/apiClient'
 import '@/styles/nail-design.css'
 

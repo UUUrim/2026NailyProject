@@ -1,498 +1,669 @@
-/* .mypage-v2__profile {
+/* ══════════════════════════════════════════════════════════════════════
+   마이페이지 v3 — 왼쪽 사이드바 + 대시보드 레이아웃
+   ══════════════════════════════════════════════════════════════════════ */
+
+.mypage-x-page {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.mypage-x {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 1.25rem;
+  grid-template-columns: 240px 1fr;
+  gap: 1.75rem;
   align-items: start;
-  background: linear-gradient(135deg, #fff5f8, #fff);
-  border: 1px solid #f3e3ea;
-  border-radius: 20px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
 }
 
-.mypage-v2__avatar {
-  width: 64px;
-  height: 64px;
-  border-radius: 999px;
-  background: #de869f;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-
-.mypage-v2__profile-body h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
-}
-
-.mypage-v2__profile-body p {
-  margin: 0;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.mypage-v2__name {
-  margin-top: 0.25rem !important;
-  color: #999 !important;
-}
-
-.mypage-v2__edit-btn,
-.mypage-v2__logout {
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 8px;
-  padding: 0.5rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.875rem;
-}
-
-.mypage-v2__logout {
-  align-self: start;
-}
-
-.mypage-v2__edit-form {
-  margin-top: 0.75rem;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.mypage-v2__edit-form label {
-  display: grid;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: #555;
-}
-
-.mypage-v2__edit-form input {
-  height: 38px;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  padding: 0 10px;
-}
-
-.mypage-v2__edit-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.mypage-v2__edit-actions .primary {
-  background: #de869f;
-  border-color: #de869f;
-  color: #fff;
-}
-
-.mypage-v2__message {
-  margin: 0.5rem 0 0;
-  color: #de869f;
-  font-size: 0.85rem;
-}
-
-.mypage-v2__tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 1rem;
-}
-
-.mypage-v2__tabs button {
-  border: 1px solid #eee;
-  background: #fff;
-  border-radius: 999px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.mypage-v2__tabs button.is-active {
-  background: #de869f;
-  border-color: #de869f;
-  color: #fff;
-}
-
-.mypage-v2__toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 1rem;
-}
-
-.mypage-v2__toolbar button {
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 8px;
-  padding: 0.45rem 0.9rem;
-  cursor: pointer;
-}
-
-.mypage-v2__toolbar .primary {
-  background: #272727;
-  border-color: #272727;
-  color: #fff;
-}
-
-.mypage-v2__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 1rem;
-}
-
-.mypage-v2__card {
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.mypage-v2__card img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  display: block;
-}
-
-.mypage-v2__card p {
-  margin: 0;
-  padding: 8px 10px;
-  font-size: 0.8rem;
-  color: #888;
-}
-
-.mypage-v2__list {
-  display: grid;
-  gap: 12px;
-}
-
-.mypage-v2__print-row {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  padding: 12px;
-}
-
-.mypage-v2__print-row img {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 8px;
-}
-
-.mypage-v2__print-status {
-  font-weight: 700;
-  color: #de869f;
-}
-
-.mypage-v2__empty {
-  color: #888;
-  padding: 2rem;
-  text-align: center;
-}
-
-@media (max-width: 640px) {
-  .mypage-v2__profile {
-    grid-template-columns: 1fr;
-  }
-
-  .mypage-v2__logout {
-    justify-self: start;
-  }
-} */
-
-
-/*수정*/
-.mypage-v2__profile {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 1.25rem;
-  align-items: start;
-  background: linear-gradient(135deg, #fff5f8, #fff);
-  border: 1px solid #f3e3ea;
-  border-radius: 20px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.mypage-v2__avatar {
-  width: 64px;
-  height: 64px;
-  border-radius: 999px;
-  background: #de869f;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  font-weight: 700;
-}
-
-.mypage-v2__profile-body h1 {
-  margin: 0 0 0.25rem;
-  font-size: 1.5rem;
-}
-
-.mypage-v2__profile-body p {
-  margin: 0;
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.mypage-v2__name {
-  margin-top: 0.25rem !important;
-  color: #999 !important;
-}
-
-.mypage-v2__edit-btn,
-.mypage-v2__logout {
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 8px;
-  padding: 0.5rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.875rem;
-}
-
-.mypage-v2__logout {
-  align-self: start;
-}
-
-.mypage-v2__edit-form {
-  margin-top: 0.75rem;
-  display: grid;
-  gap: 0.5rem;
-}
-
-.mypage-v2__edit-form label {
-  display: grid;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: #555;
-}
-
-.mypage-v2__edit-form input {
-  height: 38px;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  padding: 0 10px;
-}
-
-.mypage-v2__edit-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.mypage-v2__edit-actions .primary {
-  background: #de869f;
-  border-color: #de869f;
-  color: #fff;
-}
-
-.mypage-v2__message {
-  margin: 0.5rem 0 0;
-  color: #de869f;
-  font-size: 0.85rem;
-}
-
-.mypage-v2__tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 1rem;
-}
-
-.mypage-v2__tabs button {
-  border: 1px solid #eee;
-  background: #fff;
-  border-radius: 999px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.mypage-v2__tabs button.is-active {
-  background: #de869f;
-  border-color: #de869f;
-  color: #fff;
-}
-
-.mypage-v2__toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 1rem;
-}
-
-.mypage-v2__toolbar button {
-  border: 1px solid #ddd;
-  background: #fff;
-  border-radius: 8px;
-  padding: 0.45rem 0.9rem;
-  cursor: pointer;
-}
-
-.mypage-v2__toolbar .primary {
-  background: #272727;
-  border-color: #272727;
-  color: #fff;
-}
-
-.mypage-v2__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 1rem;
-}
-
-.mypage-v2__card {
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.mypage-v2__card img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  display: block;
-}
-
-.mypage-v2__card p {
-  margin: 0;
-  padding: 8px 10px;
-  font-size: 0.8rem;
-  color: #888;
-}
-
-.mypage-v2__list {
-  display: grid;
-  gap: 12px;
-}
-
-.mypage-v2__print-row {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  padding: 12px;
-}
-
-.mypage-v2__print-row img {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 8px;
-}
-
-.mypage-v2__print-status {
-  font-weight: 700;
-  color: #de869f;
-}
-
-.mypage-v2__empty {
-  color: #888;
-  padding: 2rem;
-  text-align: center;
-}
-
-@media (max-width: 640px) {
-  .mypage-v2__profile {
-    grid-template-columns: 1fr;
-  }
-
-  .mypage-v2__logout {
-    justify-self: start;
-  }
-}
-
-/* 네일팁 출력 내역 */
-.mypage-v2__print-icon {
-  font-size: 2rem;
-  flex-shrink: 0;
-  width: 56px;
-  text-align: center;
-}
-
-.mypage-v2__print-shape {
-  font-weight: 700;
-  font-size: 1rem;
-  margin: 0 0 0.2rem;
-}
-
-.mypage-v2__print-date {
-  font-size: 0.8rem;
-  color: #aaa;
-  margin: 0;
-}
-
-/* 손 분석 기록 */
-.mypage-v2__scan-row {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-start;
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
-  padding: 14px;
-}
-
-.mypage-v2__scan-swatch {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  border: 2px solid #f0e0e8;
-}
-
-.mypage-v2__scan-body {
+/* ── 사이드바 ── */
+
+.mypage-x__sidebar {
+  position: sticky;
+  top: 6.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 1.25rem;
+  background: #fff;
+  border: 1px solid #f2e6ec;
+  border-radius: 18px;
+  padding: 1.25rem;
 }
 
-.mypage-v2__scan-season {
-  font-weight: 700;
-  font-size: 1rem;
-  color: #de869f;
-  margin: 0;
-}
-
-.mypage-v2__scan-metrics,
-.mypage-v2__scan-shape {
-  font-size: 0.85rem;
-  color: #555;
-  margin: 0;
-}
-
-.mypage-v2__scan-palette {
+.mypage-x__sidebar-profile {
   display: flex;
-  gap: 4px;
-  margin-top: 2px;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #f2e6ec;
 }
 
-.mypage-v2__scan-chip {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1px solid rgba(0,0,0,0.08);
-}
-
-.mypage-v2__scan-date {
-  font-size: 0.78rem;
-  color: #bbb;
+.mypage-x__sidebar-name {
   margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1a1a1a;
 }
 
-.mypage-v2__scan-row--clickable {
+.mypage-x__sidebar-email {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: #999;
+  word-break: break-all;
+}
+
+.mypage-x__avatar {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #de869f, #c96d88);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.mypage-x__avatar--lg {
+  width: 72px;
+  height: 72px;
+  font-size: 1.75rem;
+}
+
+.mypage-x__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.mypage-x__nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: #555;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
-  transition: box-shadow 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.mypage-v2__scan-row--clickable:hover {
+.mypage-x__nav-item:hover {
+  background: #fdf5f8;
+  color: #de869f;
+}
+
+.mypage-x__nav-item.is-active {
+  background: #de869f;
+  color: #fff;
+}
+
+.mypage-x__nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  font-size: 0.95rem;
+}
+
+.mypage-x__logout {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border: none;
+  border-top: 1px solid #f2e6ec;
+  background: none;
+  color: #aaa;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mypage-x__logout:hover {
+  color: #d23b3b;
+}
+
+/* ── 메인 ── */
+
+.mypage-x__main {
+  min-width: 0;
+}
+
+.mypage-x__title {
+  margin: 0 0 0.4rem;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.mypage-x__subtitle {
+  margin: 0 0 1.5rem;
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.5;
+}
+
+.mypage-x__section-heading {
+  margin: 2rem 0 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.mypage-x__muted {
+  color: #999;
+}
+
+.mypage-x__empty {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #aaa;
+  font-size: 0.9rem;
+  background: #fafafa;
+  border-radius: 14px;
+}
+
+/* ── 대시보드 통계 카드 ── */
+
+.mypage-x__stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.mypage-x__stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 1.15rem 1.1rem;
+  border: 1px solid #f2e6ec;
+  border-radius: 16px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+.mypage-x__stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(222, 134, 159, 0.14);
+  border-color: #f0c9d6;
+}
+
+.mypage-x__stat-icon {
+  font-size: 1.2rem;
+}
+
+.mypage-x__stat-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #1a1a1a;
+}
+
+.mypage-x__stat-label {
+  font-size: 0.78rem;
+  color: #999;
+  font-weight: 600;
+}
+
+.mypage-x__dashboard-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.mypage-x__cta {
+  height: 42px;
+  padding: 0 1.4rem;
+  border: none;
+  border-radius: 999px;
+  background: #de869f;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mypage-x__cta:hover {
+  background: #d0768f;
+}
+
+.mypage-x__cta--outline {
+  background: #fff;
+  color: #de869f;
+  border: 1.5px solid #de869f;
+}
+
+.mypage-x__cta--outline:hover {
+  background: #fdf5f8;
+}
+
+/* ── 프로필 카드 ── */
+
+.mypage-x__profile-card {
+  display: flex;
+  gap: 1.25rem;
+  background: linear-gradient(135deg, #fff5f8, #fff);
+  border: 1px solid #f3e3ea;
+  border-radius: 20px;
+  padding: 1.5rem;
+}
+
+.mypage-x__profile-body h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.2rem;
+}
+
+.mypage-x__profile-body p {
+  margin: 0.1rem 0;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.mypage-x__edit-btn {
+  margin-top: 0.75rem;
+  height: 36px;
+  padding: 0 1.1rem;
+  border: 1px solid #de869f;
+  border-radius: 999px;
+  background: #fff;
+  color: #de869f;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mypage-x__edit-btn:hover {
+  background: #fdf5f8;
+}
+
+.mypage-x__edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  max-width: 320px;
+}
+
+.mypage-x__edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #666;
+}
+
+.mypage-x__edit-form input {
+  height: 38px;
+  padding: 0 0.75rem;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.mypage-x__edit-form input:focus {
+  outline: none;
   border-color: #de869f;
-  box-shadow: 0 2px 12px rgba(222, 134, 159, 0.15);
+}
+
+.mypage-x__edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.mypage-x__edit-actions button {
+  height: 38px;
+  padding: 0 1.1rem;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mypage-x__edit-actions button.primary {
+  border: none;
+  background: #de869f;
+  color: #fff;
+}
+
+.mypage-x__message {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  color: #de869f;
+  font-weight: 600;
+}
+
+/* ── 이미지 그리드 (디자인/찜/세션) ── */
+
+.mypage-x__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.mypage-x__card {
+  border: 1px solid #f0f0f0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.mypage-x__card-image-btn {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 0;
+  background: #f5f5f5;
+  cursor: pointer;
+}
+
+.mypage-x__card-image-btn img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.2s;
+}
+
+.mypage-x__card-image-btn:hover img {
+  transform: scale(1.04);
+}
+
+.mypage-x__card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.7rem;
+}
+
+.mypage-x__card-date {
+  font-size: 0.7rem;
+  color: #999;
+}
+
+.mypage-x__heart-btn {
+  border: none;
+  background: none;
+  font-size: 1rem;
+  color: #ccc;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.mypage-x__heart-btn.is-liked {
+  color: #de869f;
+}
+
+/* ── 손 스캔 이력 리스트 ── */
+
+.mypage-x__scan-list,
+.mypage-x__print-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.mypage-x__scan-row,
+.mypage-x__print-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #f0f0f0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.mypage-x__scan-hand {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: #fdf5f8;
+  color: #de869f;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mypage-x__scan-info,
+.mypage-x__print-row > div:last-of-type {
+  flex: 1;
+  min-width: 0;
+}
+
+.mypage-x__scan-title,
+.mypage-x__print-shape {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.mypage-x__scan-date,
+.mypage-x__print-date {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.mypage-x__print-icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  background: #fdf5f8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.mypage-x__badge {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #eee;
+  color: #777;
+  text-transform: uppercase;
+}
+
+.mypage-x__badge--completed {
+  background: #e4f6ea;
+  color: #2f9e5c;
+}
+
+.mypage-x__badge--measured {
+  background: #e4f6ea;
+  color: #2f9e5c;
+}
+
+.mypage-x__badge--printing,
+.mypage-x__badge--analyzing {
+  background: #fff3d6;
+  color: #b8860b;
+}
+
+.mypage-x__badge--queued,
+.mypage-x__badge--ready {
+  background: #eef1ff;
+  color: #5468d4;
+}
+
+.mypage-x__badge--failed {
+  background: #fde8e8;
+  color: #d23b3b;
+}
+
+/* ── 세션별 통합 보기 ── */
+
+.mypage-x__session-group {
+  margin-bottom: 2rem;
+}
+
+.mypage-x__session-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #333;
+}
+
+.mypage-x__session-date {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #aaa;
+}
+
+/* ── 이미지 상세 모달 ── */
+
+.mypage-x__modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.mypage-x__modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
+.mypage-x__modal-panel {
+  position: relative;
+  width: min(92vw, 420px);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 18px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.mypage-x__modal-close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+}
+
+.mypage-x__modal-image {
+  width: 100%;
+  border-radius: 12px;
+  background: #f5f5f5;
+  object-fit: contain;
+  max-height: 55vh;
+}
+
+.mypage-x__modal-date {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.mypage-x__modal-prompt {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: #777;
+  line-height: 1.5;
+}
+
+.mypage-x__modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.mypage-x__modal-actions button {
+  flex: 1;
+  min-width: 100px;
+  height: 40px;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mypage-x__modal-actions button.is-active {
+  border-color: #de869f;
+  color: #de869f;
+}
+
+.mypage-x__modal-actions button.danger {
+  border-color: #f3c2c2;
+  color: #d23b3b;
+}
+
+.mypage-x__modal-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── 반응형 ── */
+
+@media (max-width: 900px) {
+  .mypage-x {
+    grid-template-columns: 1fr;
+  }
+
+  .mypage-x__sidebar {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .mypage-x__sidebar-profile {
+    border-bottom: none;
+    padding-bottom: 0;
+    width: 100%;
+  }
+
+  .mypage-x__nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+
+  .mypage-x__logout {
+    border-top: none;
+    padding-top: 0;
+    margin-left: auto;
+  }
+
+  .mypage-x__stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
