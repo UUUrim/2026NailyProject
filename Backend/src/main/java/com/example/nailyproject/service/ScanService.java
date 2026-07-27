@@ -62,36 +62,34 @@ public class ScanService {
      * [2단계] 프론트엔드에서 찍은 사진 5장 S3 업로드
      * POST /scans/{scanId}/images?finger=thumb
      */
-    public String uploadFingerImage(User user, Long scanId, ScanImg.Finger finger, MultipartFile file) throws IOException {
+    public Map<String, String> uploadFingerImages(User user, Long scanId, ScanImg.Finger finger,
+                                                  MultipartFile fileTop, MultipartFile fileSide) throws IOException {
         HandScan handScan = handScanRepository.findByIdAndUserId(scanId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 경로: photos/{userid}/{session}/{hand}/{finger}.jpg
-        String s3Key = String.format("photos/%s/%d/%s/%s.jpg",
+        // 경로: photos/{userid}/{session}/{hand}/{finger}_top.jpg, {finger}_side.jpg
+        String basePath = String.format("photos/%s/%d/%s/%s",
                 user.getId(),
                 scanId,
                 handScan.getHandSide().name().toLowerCase(),
                 finger.name().toLowerCase()
         );
 
-        // s3Service.uploadImage는 이제 단순히 URL 문자열을 반환하는 것이 아니라,
-        // 위에서 만든 s3Key 경로에 파일을 업로드하도록 수정되어야 합니다.
-        String imageUrl = s3Service.uploadImageWithKey(file, s3Key);
+        String imageUrlTop = s3Service.uploadImageWithKey(fileTop, basePath + "_top.jpg");
+        String imageUrlSide = s3Service.uploadImageWithKey(fileSide, basePath + "_side.jpg");
 
         // DB 저장 (기존 이미지 있으면 교체)
         scanImgRepository.findByHandScanAndFinger(handScan, finger)
-                .ifPresent(existing -> {
-                    // s3Service.deleteFile(existing.getImageUrl()); // 덮어쓰기 되므로 생략 가능
-                    scanImgRepository.delete(existing);
-                });
+                .ifPresent(existing -> scanImgRepository.delete(existing));
 
         scanImgRepository.save(ScanImg.builder()
                 .handScan(handScan)
                 .finger(finger)
-                .imageUrl(imageUrl)
+                .imageUrl(imageUrlTop)
+                .imageUrlSide(imageUrlSide)
                 .build());
 
-        return imageUrl;
+        return Map.of("imageUrlTop", imageUrlTop, "imageUrlSide", imageUrlSide);
     }
 
     /**

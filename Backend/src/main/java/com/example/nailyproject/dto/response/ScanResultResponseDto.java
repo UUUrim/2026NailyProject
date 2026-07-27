@@ -40,6 +40,7 @@ public class ScanResultResponseDto {
     public static class FingerResultDto {
         private String finger;
         private String imageUrl;
+        private String imageUrlSide;
         private String stlUrl;
         private String measurements; // JSON 문자열
         private String size;
@@ -54,6 +55,7 @@ public class ScanResultResponseDto {
                 .map(img -> FingerResultDto.builder()
                         .finger(img.getFinger().name())
                         .imageUrl(img.getImageUrl())
+                        .imageUrlSide(img.getImageUrlSide())
                         .stlUrl(img.getStlUrl())
                         .measurements(img.getMeasurements())
                         .size(img.getSize())

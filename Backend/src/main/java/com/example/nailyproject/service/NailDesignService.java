@@ -1,7 +1,8 @@
 package com.example.nailyproject.service;
 
+import com.example.nailyproject.dto.PromptResult;
+import com.example.nailyproject.dto.SlotData;
 import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
-import com.example.nailyproject.dto.request.UserPreferencesRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.response.DesignImageResponseDto;
 import com.example.nailyproject.entity.*;
@@ -13,7 +14,7 @@ import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
-
+import org.springframework.web.reactive.function.client.WebClient;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.time.format.DateTimeFormatter;
@@ -29,27 +30,35 @@ public class NailDesignService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
     private final S3Service s3Service;
+    private final SavedDesignRepository savedDesignRepository;
+    private final FingerDesignPlanService fingerDesignPlanService;
+    private final WebClient.Builder webClientBuilder;
 
-//    ComfyUI URL을 공유받은 ngrok 주소로 변경 (기본적으로 작성되어있음)
+    //    ComfyUI URL을 공유받은 ngrok 주소로 변경 (기본적으로 작성되어있음)
     private static final String COMFY_URL = "https://scalded-lard-seduce.ngrok-free.dev";
 
-    //  위한 카테고리별 허용 키워드 정의
-    private static final Set<String> SHAPE_KEYWORDS = Set.of("almond", "round", "square", "stiletto", "ballerina", "oval");
-    private static final Set<String> DESIGN_KEYWORDS = Set.of("glitter", "gradient", "cheek", "marble", "french", "magnetic", "powder", "matte", "art");
-    private static final Set<String> MOOD_KEYWORDS = Set.of("lovely", "simple", "modern", "chic", "cute", "kitschy", "funky", "feminine", "elegant", "pure", "delicate");
-    private static final Set<String> SEASON_KEYWORDS = Set.of("spring", "summer", "autumn", "winter");
-    private static final Set<String> MOTIF_KEYWORDS = Set.of("star", "ribbon", "floral", "heart", "crystal", "pearl", "swirl", "polka dot");
+    private static final String BASE_NEGATIVE_PROMPT =
+            "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy, deformed, ugly, dots, polka dot, stripes, dark colors, bold colors, tweezers, tools, props, gray background, colored background";
+
+    @org.springframework.beans.factory.annotation.Value("${analysis.server.url:http://localhost:8000}")
+    private String analysisServerUrl;
 
     public NailDesignService(NailDesignRepository nailDesignRepository,
                              UserRepository userRepository,
                              DesignSessionRepository designSessionRepository,
                              HandScanRepository handScanRepository,
-                             S3Service s3Service) {
+                             S3Service s3Service,
+                             SavedDesignRepository savedDesignRepository,
+                             FingerDesignPlanService fingerDesignPlanService,
+                             WebClient.Builder webClientBuilder) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
         this.handScanRepository = handScanRepository;
         this.s3Service = s3Service;
+        this.savedDesignRepository = savedDesignRepository;
+        this.fingerDesignPlanService = fingerDesignPlanService;
+        this.webClientBuilder = webClientBuilder;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -78,32 +87,41 @@ public class NailDesignService {
         HandScan handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 3. 최종 프롬프트 생성
-        String finalPrompt = buildFinalPrompt(session, handScan);
+        // 3. 최종 프롬프트 생성 (프롬프트 + negative를 함께 조립)
+        PromptResult promptResult = buildFinalPrompt(session, handScan);
 
         // 4. 세션에 최종 프롬프트 저장
         if (session != null) {
-            session.updateGeneratedPrompt(finalPrompt);
+            session.updateGeneratedPrompt(promptResult.prompt());
         }
 
-        // 5. ComfyUI로 이미지 생성 및 DB 저장 (@Async 처리가 필요한 부분)
-        NailDesign nailDesign = generateDesign(user.getId(), finalPrompt);
+        // 5. ComfyUI로 이미지 생성 및 DB 저장 (세션 연결 포함)
+        NailDesign nailDesign = generateDesign(user.getId(), promptResult.prompt(), promptResult.negativePrompt(), session);
 
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
                 .status(nailDesign.getStatus().name())
-                .generatedPrompt(finalPrompt)
-                .imageUrls(nailDesign.getImageUrls()) //DB에서 사진 3장 리스트를 꺼내서 DTO에 담기
+                .generatedPrompt(promptResult.prompt())
+                .imageUrls(nailDesign.getImageUrls())
                 .build();
     }
 
-//    ComfyUI로 이미지 생성 (기존 예서 코드)
-    public NailDesign generateDesign(Long userId, String prompt) throws Exception {
+    /**
+     * ComfyUI로 이미지 생성 (세션 연결 없이 - 하위 호환용)
+     */
+    public NailDesign generateDesign(Long userId, String prompt, String negativePrompt) throws Exception {
+        return generateDesign(userId, prompt, negativePrompt, null);
+    }
+
+    /**
+     * ComfyUI로 이미지 생성 (세션 연결 포함)
+     */
+    public NailDesign generateDesign(Long userId, String prompt, String negativePrompt, DesignSession session) throws Exception {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found: " + userId));
 
         String clientId = UUID.randomUUID().toString();
-        Map<String, Object> workflow = buildWorkflow(prompt);
+        Map<String, Object> workflow = buildWorkflow(prompt, negativePrompt);
 
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("prompt", workflow);
@@ -118,14 +136,13 @@ public class NailDesignService {
         JsonNode responseJson = objectMapper.readTree(response.getBody());
         String promptId = responseJson.get("prompt_id").asText();
 
-//        String imageUrl = waitForImage(promptId);
-        // 1. 파이썬에게 임시 ngrok 주소 3개를 받아옴.
+        // 1. 파이썬에게 임시 ngrok 주소를 받아옴 (batch_size=1 기준 1장)
         List<String> ngrokUrls = waitForImage(promptId);
 
         // 2. S3 주소를 담을 새 바구니 준비
         List<String> s3Urls = new ArrayList<>();
 
-        // 3. 3장의 이미지를 순회하며 백엔드로 다운로드 후 S3 업로드
+        // 3. 이미지를 순회하며 백엔드로 다운로드 후 S3 업로드
         for (String ngrokUrl : ngrokUrls) {
             HttpEntity<Void> imageRequest = new HttpEntity<>(getHeaders());
             ResponseEntity<byte[]> imageResponse = restTemplate.exchange(
@@ -136,11 +153,12 @@ public class NailDesignService {
             String s3Key = "designs/user_" + userId + "/" + UUID.randomUUID().toString() + ".png";
             String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
 
-            s3Urls.add(s3Url); // 완성된 S3 영구 주소를 바구니에 담기
+            s3Urls.add(s3Url);
         }
 
         NailDesign design = NailDesign.builder()
                 .user(user)
+                .session(session)
                 .imageUrls(s3Urls)
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1")
@@ -150,184 +168,73 @@ public class NailDesignService {
         return nailDesignRepository.save(design);
     }
 
-//    /**
-//     * [독립 테스트용 Mockup] ComfyUI 외부 통신을 차단하고 로직 및 DB 정합성만 검증
-//     */
-//    public NailDesign generateDesign(Long userId, String prompt) throws Exception {
-//        User user = userRepository.findById(userId)
-//                .orElseThrow(() -> new RuntimeException("User not found: " + userId));
-//
-//        // 서버 콘솔에 정상 조립 완료된 프롬프트가 무엇인지 실시간 출력
-//        System.out.println("\n==================================================================");
-//        System.out.println("[Naily DB Test] 조립된 최종 프롬프트 문장:");
-//        System.out.println(prompt);
-//        System.out.println("==================================================================\n");
-//
-//        /* ─── 외부 ComfyUI API 통신 릴레이 및 스레드 블로킹 루프 차단 (주석 처리) ───
-//        String clientId = UUID.randomUUID().toString();
-//        Map<String, Object> workflow = buildWorkflow(prompt);
-//
-//        Map<String, Object> requestBody = new HashMap<>();
-//        requestBody.put("prompt", workflow);
-//        requestBody.put("client_id", clientId);
-//
-//        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, getHeaders());
-//
-//        ResponseEntity<String> response = restTemplate.postForEntity(
-//                COMFY_URL + "/prompt", request, String.class
-//        );
-//
-//        JsonNode responseJson = objectMapper.readTree(response.getBody());
-//        String promptId = responseJson.get("prompt_id").asText();
-//
-//        String imageUrl = waitForImage(promptId);
-//        ───────────────────────────────────────────────────────────────────────────── */
-//
-//        // 타임아웃 없이 즉시 저장을 검증하기 위한 더미 S3/ngrok 가상 주소 바인딩
-//        String mockImageUrl = COMFY_URL + "/view?filename=mock_test_naily_00001_.png&ngrok-skip-browser-warning=true";
-//
-//        // DB 인서트 객체 빌드
-//        NailDesign design = NailDesign.builder()
-//                .user(user)
-//                .imageUrl(mockImageUrl)
-//                .promptSummary(prompt)
-//                .aiModel("z-image-turbo + lora-v1 (MOCK_ENV_TEST)")
-//                .status(NailDesign.DesignStatus.DRAFT)
-//                .build();
-//
-//        // 테이블 저장 후 영속성 데이터 반환
-//        return nailDesignRepository.save(design);
-//    }
-
     /**
-     * 기획서의 STEP 2, STEP 4 반영한 프롬프트 조립 알고리즘
+     * 슬롯(SlotData) 기반 최종 프롬프트 조립
+     * liked -> 긍정 프롬프트에 반영, disliked -> negative 프롬프트에 반영
      */
-    private String buildFinalPrompt(DesignSession session, HandScan handScan) {
+    private PromptResult buildFinalPrompt(DesignSession session, HandScan handScan) {
 
-        // 1. 선택지(UI) 파싱 - 1순위 데이터
-        UserPreferencesRequestDto preferences = null;
+        Map<String, SlotData> slots = new HashMap<>();
         try {
             if (session != null && session.getExtractedPreferences() != null) {
-                preferences = objectMapper.readValue(
-                        session.getExtractedPreferences(), UserPreferencesRequestDto.class);
+                slots = objectMapper.readValue(
+                        session.getExtractedPreferences(),
+                        objectMapper.getTypeFactory().constructMapType(HashMap.class, String.class, SlotData.class)
+                );
             }
         } catch (JsonProcessingException e) {
-            System.err.println("선택지 파싱 에러");
+            System.err.println("슬롯 파싱 에러");
         }
 
-        // 2. 자유입력 키워드(JSON 배열) 파싱 - 2순위 데이터
-        List<String> refineKeywords = new ArrayList<>();
-        try {
-            if (session != null && session.getRefineKeywords() != null) {
-                JsonNode keywordsNode = objectMapper.readTree(session.getRefineKeywords());
-                keywordsNode.forEach(k -> refineKeywords.add(k.asText().toLowerCase().trim()));
-            }else {
-                System.out.println("DB에 저장된 제미나이 키워드가 없음");
-            }
-        } catch (JsonProcessingException e) {
-            System.err.println("자유입력 키워드 파싱 에러");
-        }
-
-        // 3. 자유입력 키워드 카테고리별 분류 (빈칸 채우기용)
-        List<String> freeShapes = new ArrayList<>();
-        List<String> freeDesigns = new ArrayList<>();
-        List<String> freeMoods = new ArrayList<>();
-        List<String> freeSeasons = new ArrayList<>();
-        List<String> freeMotifs = new ArrayList<>();
-
-        for (String keyword : refineKeywords) {
-            if (SHAPE_KEYWORDS.contains(keyword)) freeShapes.add(keyword);
-            else if (DESIGN_KEYWORDS.contains(keyword)) freeDesigns.add(keyword);
-            else if (MOOD_KEYWORDS.contains(keyword)) freeMoods.add(keyword);
-            else if (SEASON_KEYWORDS.contains(keyword)) freeSeasons.add(keyword);
-            else if (MOTIF_KEYWORDS.contains(keyword)) freeMotifs.add(keyword);
-        }
-
-        //[슬롯 병합 시작] 선택지 우선, 없으면 자유입력, 없으면 기본값(분석값)
-
-        // [슬롯 1] Shape (형태)
+        List<String> shapeLiked = getLiked(slots, "shape");
         String finalShape;
-        if (preferences != null && preferences.getShape() != null && !preferences.getShape().isBlank()) {
-            finalShape = preferences.getShape(); // 1순위: 선택지
-        } else if (!freeShapes.isEmpty()) {
-            finalShape = freeShapes.get(0);      // 2순위: 자유입력
+        if (!shapeLiked.isEmpty()) {
+            finalShape = shapeLiked.get(0);
         } else if (handScan.getShape() != null && !handScan.getShape().isBlank()) {
-            finalShape = handScan.getShape();    // 3순위: 손분석 결과
+            finalShape = handScan.getShape();
         } else {
-            finalShape = "round";                // 최후 기본값
+            finalShape = "round";
         }
 
-        // [슬롯 2] Design Type (선택지 없으면 자유 입력 채택 - 병합 X)
-        List<String> finalDesigns = new ArrayList<>();
-        if (preferences != null && preferences.getDesignType() != null && !preferences.getDesignType().isEmpty()) {
-            finalDesigns.addAll(preferences.getDesignType()); // 선택지 우선
-        } else {
-            finalDesigns.addAll(freeDesigns);                 // 선택지 없으면 자유입력 채택
-        }
+        List<String> finalDesigns = getLiked(slots, "designType");
 
-        // [슬롯 3] Color (컬러)
-        List<String> finalColors = new ArrayList<>();
-        if (preferences != null && preferences.getColor() != null && !preferences.getColor().isEmpty()) {
-            finalColors = preferences.getColor(); // 1순위: 선택지 (탭1 or 탭2)
-        } else if (handScan.getRecommendedColors() != null) {
+        List<String> finalColors = getLiked(slots, "color");
+        if (finalColors.isEmpty() && handScan.getRecommendedColors() != null) {
             try {
-                // 3순위: 자동 분석된 추천 컬러 배열 파싱
                 finalColors = objectMapper.readValue(handScan.getRecommendedColors(),
                         objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-            } catch (JsonProcessingException e) {
-                // 파싱 실패 시 공백 유지
+            } catch (JsonProcessingException ignored) {
             }
         }
 
-        // [슬롯 4] Motif (+ 추가 모티프 병합)
-        List<String> finalMotifs = new ArrayList<>();
-        if (preferences != null && preferences.getMotif() != null && !preferences.getMotif().isEmpty() && !preferences.getMotif().contains("없음")) {
-            finalMotifs.addAll(preferences.getMotif()); // 선택지 넣기
-        }
-        for (String m : freeMotifs) {
-            if (!finalMotifs.contains(m)) finalMotifs.add(m); // 자유입력 중복 제외하고 병합
-        }
+        List<String> finalMotifs = getLiked(slots, "motif");
+        List<String> finalMoods = getLiked(slots, "mood");
 
-        // [슬롯 5] Mood (+ 추가 무드 병합)
-        List<String> finalMoods = new ArrayList<>();
-        if (preferences != null && preferences.getMood() != null && !preferences.getMood().isEmpty()) {
-            finalMoods.addAll(preferences.getMood()); // 선택지 넣기
-        }
-        for (String m : freeMoods) {
-            if (!finalMoods.contains(m)) finalMoods.add(m); // 자유입력 중복 제외하고 병합
-        }
-        // [슬롯 6] Season (계절) - 선택우선 -> 자유입력
-        String finalSeason = null;
-        if (preferences != null && preferences.getSeason() != null && !preferences.getSeason().isBlank() && !preferences.getSeason().equals("상관없음")) {
-            finalSeason = preferences.getSeason();
-        } else if (!freeSeasons.isEmpty()) {
-            finalSeason = freeSeasons.get(0);
-        }
-        // ─── [프롬프트 최종 조립 (안전한 List 결합 방식)] ───
+        List<String> seasonLiked = getLiked(slots, "season");
+        List<String> finalSeasons = seasonLiked.stream()
+                .filter(s -> !"none".equalsIgnoreCase(s))
+                .limit(2)
+                .toList();
+
         List<String> promptParts = new ArrayList<>();
-
         promptParts.add("nailart");
         promptParts.add(finalShape + " nail tips");
 
         if (!finalDesigns.isEmpty()) {
             promptParts.add(String.join(" ", finalDesigns) + " nail art");
         }
-
         if (!finalColors.isEmpty()) {
             List<String> limitedColors = finalColors.stream().limit(2).collect(Collectors.toList());
             promptParts.add(String.join(", ", limitedColors));
         }
-
         if (!finalMotifs.isEmpty()) {
             promptParts.add(String.join(" ", finalMotifs) + " nail art");
         }
-
         if (!finalMoods.isEmpty()) {
             promptParts.add(String.join(" ", finalMoods) + " mood");
         }
-
-        if (finalSeason != null && !finalSeason.isBlank()) {
-            promptParts.add(finalSeason + " season");
+        if (!finalSeasons.isEmpty()) {
+            promptParts.add(String.join(", ", finalSeasons) + " theme");
         }
 
         promptParts.add("korean nail art style");
@@ -337,16 +244,28 @@ public class NailDesignService {
 
         String finalPromptString = String.join(", ", promptParts);
 
+        List<String> allDisliked = new ArrayList<>();
+        for (SlotData s : slots.values()) {
+            if (s.getDisliked() != null) {
+                allDisliked.addAll(s.getDisliked());
+            }
+        }
+
+        String finalNegative = allDisliked.isEmpty()
+                ? BASE_NEGATIVE_PROMPT
+                : BASE_NEGATIVE_PROMPT + ", " + String.join(", ", allDisliked);
+
         System.out.println("최종 완성 프롬프트: " + finalPromptString);
+        System.out.println("최종 negative 프롬프트: " + finalNegative);
         System.out.println("--- [프롬프트 조립 종료] ---\n");
 
-        return finalPromptString;
-
+        return new PromptResult(finalPromptString, finalNegative);
     }
 
-
-
-
+    private List<String> getLiked(Map<String, SlotData> slots, String category) {
+        SlotData s = slots.get(category);
+        return (s != null && s.getLiked() != null) ? s.getLiked() : new ArrayList<>();
+    }
 
     private List<String> waitForImage(String promptId) throws Exception {
         for (int i = 0; i < 60; i++) {
@@ -366,7 +285,6 @@ public class NailDesignService {
                 JsonNode outputs = history.get(promptId).get("outputs");
                 if (outputs != null && outputs.has("9")) {
                     JsonNode images = outputs.get("9").get("images");
-                    // 3장의 이미지를 모두 리스트에 담아서 리턴하도록
                     if (images != null && images.size() > 0) {
                         List<String> imageUrls = new ArrayList<>();
                         for (JsonNode img : images) {
@@ -381,12 +299,12 @@ public class NailDesignService {
         throw new RuntimeException("이미지 생성 타임아웃");
     }
 
-    private Map<String, Object> buildWorkflow(String prompt) {
+    private Map<String, Object> buildWorkflow(String prompt, String negativePrompt) {
         Map<String, Object> workflow = new HashMap<>();
 
         workflow.put("3", Map.of(
                 "inputs", Map.of(
-                        "seed", (long)(Math.random() * Long.MAX_VALUE),
+                        "seed", (long) (Math.random() * Long.MAX_VALUE),
                         "steps", 30,
                         "cfg", 1,
                         "sampler_name", "euler",
@@ -406,14 +324,13 @@ public class NailDesignService {
         ));
 
         workflow.put("5", Map.of(
-                "inputs", Map.of("width", 768, "height", 512, "batch_size", 3),
+                "inputs", Map.of("width", 768, "height", 512, "batch_size", 1),
                 "class_type", "EmptyLatentImage"
         ));
 
         workflow.put("6", Map.of(
                 "inputs", Map.of(
-                        "text", prompt
-                        ,
+                        "text", prompt,
                         "clip", new Object[]{"16", 0}
                 ),
                 "class_type", "CLIPTextEncode"
@@ -421,7 +338,7 @@ public class NailDesignService {
 
         workflow.put("7", Map.of(
                 "inputs", Map.of(
-                        "text", "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy, deformed, ugly, dots, polka dot, stripes, dark colors, bold colors, tweezers, tools, props, gray background, colored background",
+                        "text", negativePrompt,
                         "clip", new Object[]{"16", 0}
                 ),
                 "class_type", "CLIPTextEncode"
@@ -473,6 +390,7 @@ public class NailDesignService {
 
     /**
      * '내 디자인' 전체 이미지 목록 조회 (각각의 이미지를 개별 아이템으로 펼쳐서 반환)
+     * sessionId, promptSummary도 함께 내려줘서 마이페이지에서 "이 디자인은 이런 취향으로 만들어졌어요"를 보여줄 수 있음
      */
     public List<DesignImageResponseDto> getUserDesignHistory(Long userId) {
         List<NailDesign> designs = nailDesignRepository.findAllByUserIdOrderByGeneratedAtDesc(userId);
@@ -483,12 +401,15 @@ public class NailDesignService {
         for (NailDesign design : designs) {
             String formattedDate = design.getGeneratedAt() != null
                     ? design.getGeneratedAt().format(formatter) : "";
+            Long sessionId = design.getSession() != null ? design.getSession().getId() : null;
 
             if (design.getImageUrls() != null) {
                 for (String url : design.getImageUrls()) {
                     DesignImageResponseDto item = DesignImageResponseDto.builder()
                             .designId(design.getId())
+                            .sessionId(sessionId)
                             .imageUrl(url)
+                            .promptSummary(design.getPromptSummary())
                             .createdAt(formattedDate)
                             .build();
                     resultList.add(item);
@@ -496,6 +417,224 @@ public class NailDesignService {
             }
         }
         return resultList;
+    }
+
+    /**
+     * 디자인 완전 삭제 DELETE /designs/{designId}
+     */
+    @Transactional
+    public void deleteDesign(User user, Long designId) {
+        NailDesign design = nailDesignRepository.findById(designId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
+
+        if (!design.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("본인의 디자인만 삭제할 수 있습니다.");
+        }
+
+        savedDesignRepository.deleteAllByNailDesign(design);
+
+        if (design.getImageUrls() != null) {
+            for (String imageUrl : design.getImageUrls()) {
+                s3Service.deleteFile(imageUrl);
+            }
+        }
+
+        nailDesignRepository.delete(design);
+    }
+
+    /**
+     * [상세 디자인 생성] STEP1~4 오케스트레이션, ComfyUI 1회 호출
+     * POST /designs/generate-detailed
+     */
+    public DesignGenerateResponseDto generateDetailedDesign(User user, DesignGenerateRequestDto request) throws Exception {
+        return generateDetailedDesignInternal(user, request, null, null);
+    }
+
+    /**
+     * [상세 디자인 생성 + 참고 이미지]
+     * POST /designs/generate-detailed-from-image
+     */
+    public DesignGenerateResponseDto generateDetailedDesignFromImage(
+            User user, DesignGenerateRequestDto request, String imageBase64, String imageMimeType) throws Exception {
+        return generateDetailedDesignInternal(user, request, imageBase64, imageMimeType);
+    }
+
+    private DesignGenerateResponseDto generateDetailedDesignInternal(
+            User user, DesignGenerateRequestDto request, String imageBase64, String imageMimeType) throws Exception {
+
+        DesignSession session = null;
+        Map<String, SlotData> slots = new HashMap<>();
+        if (request.getSessionId() != null) {
+            session = designSessionRepository.findByIdAndUserId(request.getSessionId(), user.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
+            if (session.getExtractedPreferences() != null) {
+                slots = objectMapper.readValue(session.getExtractedPreferences(),
+                        objectMapper.getTypeFactory().constructMapType(HashMap.class, String.class, SlotData.class));
+            }
+        }
+
+        HandScan handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
+
+        fillMissingFromScan(slots, handScan);
+
+        if (session != null) {
+            session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
+        }
+
+        String summary = summarizeSlots(slots);
+        JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType);
+
+        List<String> allDisliked = new ArrayList<>();
+        for (SlotData s : slots.values()) {
+            if (s.getDisliked() != null) allDisliked.addAll(s.getDisliked());
+        }
+        String finalNegative = allDisliked.isEmpty()
+                ? BASE_NEGATIVE_PROMPT
+                : BASE_NEGATIVE_PROMPT + ", " + String.join(", ", allDisliked);
+
+        System.out.println("최종 negative 프롬프트: " + finalNegative);
+        String combinedPrompt = buildCombinedPromptFromPlan(plan);
+
+        if (session != null) {
+            session.updateGeneratedPrompt(combinedPrompt);
+        }
+
+        // ComfyUI 1회 호출 (세션 연결 포함)
+        NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session);
+
+        nailDesign.updateDesignPlan(plan.toString());
+        nailDesignRepository.save(nailDesign);
+
+        sendPlanToPartsGenerator(user.getId(), handScan.getId(), nailDesign.getId(), plan);
+
+        return DesignGenerateResponseDto.builder()
+                .designId(nailDesign.getId())
+                .status(nailDesign.getStatus().name())
+                .generatedPrompt(combinedPrompt)
+                .imageUrls(nailDesign.getImageUrls())
+                .build();
+    }
+
+    private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
+        if (getLiked(slots, "shape").isEmpty() && handScan.getShape() != null && !handScan.getShape().isBlank()) {
+            addLiked(slots, "shape", handScan.getShape());
+        }
+
+        if (getLiked(slots, "color").isEmpty() && handScan.getRecommendedColors() != null) {
+            try {
+                List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                if (!palette.isEmpty()) {
+                    String randomColor = palette.get(new Random().nextInt(palette.size()));
+                    addLiked(slots, "color", randomColor);
+                }
+            } catch (JsonProcessingException ignored) {
+            }
+        }
+
+        if (getLiked(slots, "mood").isEmpty()) {
+            String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
+            String defaultMood = ("glitter".equals(designType) || "marble".equals(designType)) ? "chic" : "simple";
+            addLiked(slots, "mood", defaultMood);
+        }
+    }
+
+    private void addLiked(Map<String, SlotData> slots, String category, String value) {
+        SlotData slot = slots.computeIfAbsent(category, k -> new SlotData());
+        if (!slot.getLiked().contains(value)) slot.getLiked().add(value);
+    }
+
+    private String summarizeSlots(Map<String, SlotData> slots) {
+        StringBuilder sb = new StringBuilder();
+        for (String cat : List.of("shape", "mood", "designType", "color", "season", "motif")) {
+            List<String> liked = getLiked(slots, cat);
+            if (!liked.isEmpty()) {
+                sb.append(cat).append(": ").append(String.join(", ", liked)).append("\n");
+            }
+            List<String> disliked = slots.containsKey(cat) ? slots.get(cat).getDisliked() : List.of();
+            if (disliked != null && !disliked.isEmpty()) {
+                sb.append(cat).append(" (피해야 함): ").append(String.join(", ", disliked)).append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    private String buildCombinedPromptFromPlan(JsonNode plan) {
+        String shape = plan.path("shape").asText("round");
+        String mood = plan.path("mood").asText("");
+        String season = plan.path("season").asText("");
+
+        List<String> parts = new ArrayList<>();
+        parts.add("nailart");
+        parts.add(shape + " nail tips");
+        parts.add("five-finger matching nail set");
+
+        for (String fingerName : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            JsonNode finger = plan.get(fingerName);
+            if (finger == null) continue;
+            parts.add(describeFingerForPrompt(fingerName, finger));
+        }
+
+        if (!mood.isBlank()) parts.add(mood + " mood");
+        if (!season.isBlank() && !"none".equalsIgnoreCase(season)) parts.add(season + " theme");
+
+        parts.add("korean nail art style");
+        parts.add("product shot");
+        parts.add("white background");
+        parts.add("no hands");
+
+        String result = String.join(", ", parts);
+
+        System.out.println("최종 완성 프롬프트(통합): " + result);
+        return result;
+    }
+
+    private String describeFingerForPrompt(String fingerName, JsonNode finger) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(fingerName).append(": ");
+        sb.append(finger.path("design_type").asText());
+        sb.append(" ").append(finger.path("base_color").asText());
+
+        String motif = finger.path("motif").asText("none");
+        if (!"none".equalsIgnoreCase(motif) && !"없음".equals(motif)) {
+            sb.append(" with ").append(motif);
+        }
+
+        JsonNode partsList = finger.get("parts");
+        if (partsList != null && partsList.isArray() && partsList.size() > 0) {
+            List<String> partNames = new ArrayList<>();
+            partsList.forEach(p -> partNames.add(p.path("part_name").asText()));
+            sb.append(" (").append(String.join(", ", partNames)).append(")");
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * 출력 B: 손가락별 상세 JSON을 파이썬 파츠 3D 생성기로 전달.
+     * [API 계약 - 아직 파이썬 쪽 미구현]
+     *   POST {analysisServerUrl}/generate/parts-from-plan
+     *   body: { "userId": Long, "scanId": Long, "designId": Long, "plan": <STEP3 JSON 그대로> }
+     */
+    private void sendPlanToPartsGenerator(Long userId, Long scanId, Long designId, JsonNode plan) {
+        try {
+            webClientBuilder.build().post()
+                    .uri(analysisServerUrl + "/generate/parts-from-plan")
+                    .bodyValue(Map.of(
+                            "userId", userId,
+                            "scanId", scanId,
+                            "designId", designId,
+                            "plan", plan
+                    ))
+                    .retrieve()
+                    .bodyToMono(Void.class)
+                    .doOnError(e -> System.err.println("파츠 생성기 호출 실패(미구현 상태일 수 있음): " + e.getMessage()))
+                    .onErrorResume(e -> reactor.core.publisher.Mono.empty())
+                    .subscribe();
+        } catch (Exception e) {
+            System.err.println("파츠 생성기 호출 중 예외: " + e.getMessage());
+        }
     }
 
 }

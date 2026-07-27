@@ -11,4 +11,7 @@ public interface NailDesignRepository extends JpaRepository<NailDesign, Long> {
 
     //User의 Id로 모든 디자인을 찾아서(findAllByUserId), 생성일자 기준 내림차순으로 정렬해라(OrderByCreatedAtDesc)
     List<NailDesign> findAllByUserIdOrderByGeneratedAtDesc(Long userId);
+
+    // 삭제 등 소유권 검증이 필요한 단건 조회
+    java.util.Optional<NailDesign> findByIdAndUserId(Long id, Long userId);
 }

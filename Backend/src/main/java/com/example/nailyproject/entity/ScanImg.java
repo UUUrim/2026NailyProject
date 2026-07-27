@@ -27,9 +27,13 @@ public class ScanImg {
     @Column(name = "finger", nullable = false)
     private Finger finger;
 
-    // 원본 이미지 URL
+    // 원본 이미지 URL (탑뷰)
     @Column(name = "image_url", nullable = false, length = 500)
     private String imageUrl;
+
+    // 원본 이미지 URL (측면뷰)
+    @Column(name = "image_url_side", length = 500)
+    private String imageUrlSide;
 
     // STL 파일 URL
     @Column(name = "stl_url", length = 500)

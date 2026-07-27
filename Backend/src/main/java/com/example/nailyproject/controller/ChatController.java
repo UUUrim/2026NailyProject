@@ -2,6 +2,7 @@ package com.example.nailyproject.controller;
 
 import com.example.nailyproject.dto.request.ChatMessageRequestDto;
 import com.example.nailyproject.dto.response.ApiResponse;
+import com.example.nailyproject.dto.response.ChatResponseDto;
 import com.example.nailyproject.entity.DesignSession;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.service.ChatService;
@@ -37,16 +38,15 @@ public class ChatController {
 
     //채팅 메시지 전송 POST /chats/{sessionId}/messages
     @PostMapping("/{sessionId}/messages")
-    public ResponseEntity<ApiResponse<Map<String, String>>> sendMessage(
+    public ResponseEntity<ApiResponse<ChatResponseDto>> sendMessage(
             @AuthenticationPrincipal User user,
             @PathVariable Long sessionId,
             @Valid @RequestBody ChatMessageRequestDto request) {
 
-        String aiMessage = chatService.chat(user, sessionId, request.getMessage());
+        ChatResponseDto data = chatService.chat(user, sessionId, request.getMessage());
 
         return ResponseEntity.ok(
-                ApiResponse.success(200, "채팅메세지 전송 성공.",
-                        Map.of("aiMessage", aiMessage)));
+                ApiResponse.success(200, "채팅메세지 전송 성공.", data));
     }
 
     //400 입력값 오류
