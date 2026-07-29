@@ -1,16 +1,16 @@
 /* ══════════════════════════════════════════════════════════════════════
-   마이페이지 v3 — 왼쪽 사이드바 + 대시보드 레이아웃
+   마이페이지 v4 — 네일리 브랜드 톤 + 가독성 개선
    ══════════════════════════════════════════════════════════════════════ */
 
 .mypage-x-page {
-  max-width: 1180px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
 .mypage-x {
   display: grid;
-  grid-template-columns: 240px 1fr;
-  gap: 1.75rem;
+  grid-template-columns: 252px 1fr;
+  gap: 2rem;
   align-items: start;
 }
 
@@ -18,75 +18,87 @@
 
 .mypage-x__sidebar {
   position: sticky;
-  top: 6.5rem;
+  top: 6rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1.5rem;
   background: #fff;
-  border: 1px solid #f2e6ec;
-  border-radius: 18px;
-  padding: 1.25rem;
+  border: 1px solid #f2e3ea;
+  border-radius: 20px;
+  padding: 1.5rem 1.25rem;
+  box-shadow: 0 4px 20px rgba(222, 134, 159, 0.06);
 }
 
 .mypage-x__sidebar-profile {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #f2e6ec;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid #f5eaf0;
+}
+
+.mypage-x__sidebar-profile-text {
+  min-width: 0;
 }
 
 .mypage-x__sidebar-name {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #1a1a1a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mypage-x__sidebar-email {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  color: #999;
-  word-break: break-all;
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: #a3a3a3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mypage-x__avatar {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   border-radius: 999px;
   background: linear-gradient(135deg, #de869f, #c96d88);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 700;
+  box-shadow: 0 4px 12px rgba(222, 134, 159, 0.35);
 }
 
 .mypage-x__avatar--lg {
-  width: 72px;
-  height: 72px;
-  font-size: 1.75rem;
+  width: 76px;
+  height: 76px;
+  font-size: 1.9rem;
 }
 
 .mypage-x__nav {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.15rem;
 }
 
 .mypage-x__nav-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.75rem;
   width: 100%;
-  padding: 0.65rem 0.75rem;
+  padding: 0.7rem 0.85rem;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   background: none;
-  color: #555;
-  font-size: 0.85rem;
+  color: #666;
+  font-size: 0.875rem;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
@@ -99,29 +111,45 @@
 }
 
 .mypage-x__nav-item.is-active {
-  background: #de869f;
+  background: linear-gradient(135deg, #de869f, #d0768f);
   color: #fff;
+  box-shadow: 0 4px 12px rgba(222, 134, 159, 0.3);
 }
 
 .mypage-x__nav-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  font-size: 0.95rem;
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+}
+
+.mypage-x__nav-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mypage-x__nav-chevron {
+  margin-left: auto;
+  display: inline-flex;
+  opacity: 0.8;
 }
 
 .mypage-x__logout {
-  margin-top: 0.5rem;
-  padding-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 1.1rem;
   border: none;
-  border-top: 1px solid #f2e6ec;
+  border-top: 1px solid #f5eaf0;
   background: none;
-  color: #aaa;
+  color: #b3b3b3;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
   text-align: left;
+  transition: color 0.15s;
 }
 
 .mypage-x__logout:hover {
@@ -135,37 +163,63 @@
 }
 
 .mypage-x__title {
-  margin: 0 0 0.4rem;
-  font-size: 1.4rem;
-  font-weight: 700;
+  margin: 0 0 0.45rem;
+  font-size: 1.55rem;
+  font-weight: 800;
   color: #1a1a1a;
+  letter-spacing: -0.01em;
 }
 
 .mypage-x__subtitle {
-  margin: 0 0 1.5rem;
-  font-size: 0.85rem;
-  color: #888;
-  line-height: 1.5;
+  margin: 0 0 1.75rem;
+  font-size: 0.9rem;
+  color: #8f8f8f;
+  line-height: 1.6;
+}
+
+.mypage-x__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 2.25rem 0 1.1rem;
 }
 
 .mypage-x__section-heading {
-  margin: 2rem 0 1rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 1.05rem;
   font-weight: 700;
-  color: #333;
+  color: #262626;
+}
+
+.mypage-x__see-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border: none;
+  background: none;
+  color: #de869f;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mypage-x__see-all svg {
+  width: 14px;
+  height: 14px;
 }
 
 .mypage-x__muted {
-  color: #999;
+  color: #a3a3a3;
 }
 
 .mypage-x__empty {
-  padding: 3rem 1rem;
+  padding: 3.5rem 1rem;
   text-align: center;
-  color: #aaa;
+  color: #b3b3b3;
   font-size: 0.9rem;
   background: #fafafa;
-  border-radius: 14px;
+  border-radius: 16px;
+  border: 1px dashed #ececec;
 }
 
 /* ── 대시보드 통계 카드 ── */
@@ -174,41 +228,50 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2rem;
 }
 
 .mypage-x__stat-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.35rem;
-  padding: 1.15rem 1.1rem;
-  border: 1px solid #f2e6ec;
-  border-radius: 16px;
+  gap: 0.55rem;
+  padding: 1.35rem 1.25rem;
+  border: 1px solid #f2e3ea;
+  border-radius: 18px;
   background: #fff;
   cursor: pointer;
   text-align: left;
-  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
 }
 
 .mypage-x__stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(222, 134, 159, 0.14);
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(222, 134, 159, 0.16);
   border-color: #f0c9d6;
 }
 
 .mypage-x__stat-icon {
-  font-size: 1.2rem;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  color: #de869f;
+}
+
+.mypage-x__stat-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .mypage-x__stat-value {
-  font-size: 1.6rem;
+  font-size: 1.8rem;
   font-weight: 800;
   color: #1a1a1a;
+  line-height: 1;
 }
 
 .mypage-x__stat-label {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   color: #999;
   font-weight: 600;
 }
@@ -220,19 +283,21 @@
 }
 
 .mypage-x__cta {
-  height: 42px;
-  padding: 0 1.4rem;
+  height: 44px;
+  padding: 0 1.5rem;
   border: none;
   border-radius: 999px;
   background: #de869f;
   color: #fff;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   font-weight: 700;
   cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
 }
 
 .mypage-x__cta:hover {
   background: #d0768f;
+  transform: translateY(-1px);
 }
 
 .mypage-x__cta--outline {
@@ -249,29 +314,32 @@
 
 .mypage-x__profile-card {
   display: flex;
-  gap: 1.25rem;
-  background: linear-gradient(135deg, #fff5f8, #fff);
+  gap: 1.5rem;
+  background: linear-gradient(135deg, #fff6f9, #fff);
   border: 1px solid #f3e3ea;
-  border-radius: 20px;
-  padding: 1.5rem;
+  border-radius: 22px;
+  padding: 1.75rem;
 }
 
 .mypage-x__profile-body h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.2rem;
+  margin: 0 0 0.3rem;
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #1a1a1a;
 }
 
 .mypage-x__profile-body p {
-  margin: 0.1rem 0;
-  font-size: 0.85rem;
-  color: #666;
+  margin: 0.15rem 0;
+  font-size: 0.875rem;
+  color: #777;
+  line-height: 1.5;
 }
 
 .mypage-x__edit-btn {
-  margin-top: 0.75rem;
-  height: 36px;
-  padding: 0 1.1rem;
-  border: 1px solid #de869f;
+  margin-top: 0.9rem;
+  height: 38px;
+  padding: 0 1.2rem;
+  border: 1.5px solid #de869f;
   border-radius: 999px;
   background: #fff;
   color: #de869f;
@@ -287,25 +355,26 @@
 .mypage-x__edit-form {
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
-  max-width: 320px;
+  gap: 0.85rem;
+  max-width: 340px;
 }
 
 .mypage-x__edit-form label {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.78rem;
-  font-weight: 600;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 700;
   color: #666;
 }
 
 .mypage-x__edit-form input {
-  height: 38px;
-  padding: 0 0.75rem;
+  height: 40px;
+  padding: 0 0.85rem;
   border: 1px solid #eee;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  transition: border-color 0.15s;
 }
 
 .mypage-x__edit-form input:focus {
@@ -316,12 +385,12 @@
 .mypage-x__edit-actions {
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.25rem;
+  margin-top: 0.35rem;
 }
 
 .mypage-x__edit-actions button {
-  height: 38px;
-  padding: 0 1.1rem;
+  height: 40px;
+  padding: 0 1.2rem;
   border: 1px solid #ddd;
   border-radius: 999px;
   background: #fff;
@@ -336,29 +405,40 @@
   color: #fff;
 }
 
-.mypage-x__message {
-  margin-top: 0.6rem;
-  font-size: 0.8rem;
-  color: #de869f;
-  font-weight: 600;
+.mypage-x__edit-actions button.primary:hover {
+  background: #d0768f;
 }
 
-/* ── 이미지 그리드 (디자인/찜/세션) ── */
+.mypage-x__message {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: #de869f;
+  font-weight: 700;
+}
+
+/* ── 이미지 그리드 (디자인/찜/타임라인) ── */
 
 .mypage-x__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 1.1rem;
 }
 
 .mypage-x__card {
   border: 1px solid #f0f0f0;
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: hidden;
   background: #fff;
+  transition: box-shadow 0.18s, border-color 0.18s;
+}
+
+.mypage-x__card:hover {
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.07);
+  border-color: #f0d5dd;
 }
 
 .mypage-x__card-image-btn {
+  position: relative;
   display: block;
   width: 100%;
   border: none;
@@ -372,67 +452,107 @@
   aspect-ratio: 1;
   object-fit: cover;
   display: block;
-  transition: transform 0.2s;
+  transition: transform 0.25s;
 }
 
 .mypage-x__card-image-btn:hover img {
-  transform: scale(1.04);
+  transform: scale(1.05);
+}
+
+.mypage-x__card-zoom-hint {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 0.5rem 0.6rem;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.55), transparent);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.mypage-x__card-image-btn:hover .mypage-x__card-zoom-hint {
+  opacity: 1;
 }
 
 .mypage-x__card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0.7rem;
+  padding: 0.6rem 0.8rem;
 }
 
 .mypage-x__card-date {
-  font-size: 0.7rem;
-  color: #999;
+  font-size: 0.72rem;
+  color: #a3a3a3;
+  font-weight: 500;
 }
 
 .mypage-x__heart-btn {
+  display: inline-flex;
   border: none;
   background: none;
-  font-size: 1rem;
-  color: #ccc;
+  width: 18px;
+  height: 18px;
+  color: #d5d5d5;
   cursor: pointer;
-  line-height: 1;
+  padding: 0;
+}
+
+.mypage-x__heart-btn svg {
+  width: 100%;
+  height: 100%;
 }
 
 .mypage-x__heart-btn.is-liked {
   color: #de869f;
 }
 
-/* ── 손 스캔 이력 리스트 ── */
+.mypage-x__heart-btn.is-liked svg path {
+  fill: #de869f;
+}
+
+/* ── 손 스캔 이력 / 출력 내역 리스트 ── */
 
 .mypage-x__scan-list,
 .mypage-x__print-list {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.65rem;
 }
 
 .mypage-x__scan-row,
 .mypage-x__print-row {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
-  padding: 0.85rem 1rem;
+  gap: 1rem;
+  padding: 0.95rem 1.1rem;
   border: 1px solid #f0f0f0;
-  border-radius: 12px;
+  border-radius: 14px;
   background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.mypage-x__scan-row:hover,
+.mypage-x__print-row:hover {
+  border-color: #f0d5dd;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.04);
+}
+
+.mypage-x__scan-row--compact {
+  padding: 0.7rem 0.9rem;
 }
 
 .mypage-x__scan-hand {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   background: #fdf5f8;
   color: #de869f;
-  font-size: 0.8rem;
-  font-weight: 700;
+  font-size: 0.82rem;
+  font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -447,46 +567,48 @@
 .mypage-x__scan-title,
 .mypage-x__print-shape {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 700;
   color: #1a1a1a;
 }
 
 .mypage-x__scan-date,
 .mypage-x__print-date {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  color: #999;
+  margin: 0.2rem 0 0;
+  font-size: 0.76rem;
+  color: #a3a3a3;
 }
 
 .mypage-x__print-icon {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
   background: #fdf5f8;
+  color: #de869f;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+}
+
+.mypage-x__print-icon svg {
+  width: 17px;
+  height: 17px;
 }
 
 .mypage-x__badge {
   flex-shrink: 0;
-  padding: 0.3rem 0.7rem;
+  padding: 0.32rem 0.75rem;
   border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.68rem;
+  font-weight: 800;
   background: #eee;
-  color: #777;
+  color: #888;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
-.mypage-x__badge--completed {
-  background: #e4f6ea;
-  color: #2f9e5c;
-}
-
+.mypage-x__badge--completed,
 .mypage-x__badge--measured {
   background: #e4f6ea;
   color: #2f9e5c;
@@ -509,26 +631,75 @@
   color: #d23b3b;
 }
 
-/* ── 세션별 통합 보기 ── */
+/* ── 전체 활동 타임라인 ── */
 
-.mypage-x__session-group {
-  margin-bottom: 2rem;
-}
-
-.mypage-x__session-heading {
+.mypage-x__timeline {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  margin: 0 0 0.85rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #333;
+  flex-direction: column;
+  gap: 2.25rem;
+  padding-left: 1.6rem;
 }
 
-.mypage-x__session-date {
-  font-size: 0.75rem;
+.mypage-x__timeline::before {
+  content: '';
+  position: absolute;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  left: 0.28rem;
+  width: 2px;
+  background: linear-gradient(180deg, #f0c9d6, #f5eaf0);
+}
+
+.mypage-x__timeline-day {
+  position: relative;
+}
+
+.mypage-x__timeline-dot {
+  position: absolute;
+  top: 0.3rem;
+  left: -1.6rem;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #de869f;
+  box-shadow: 0 0 0 4px #fdf5f8;
+}
+
+.mypage-x__timeline-date {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #1a1a1a;
+}
+
+.mypage-x__timeline-block {
+  margin-bottom: 1.4rem;
+}
+
+.mypage-x__timeline-block:last-child {
+  margin-bottom: 0;
+}
+
+.mypage-x__timeline-block-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #666;
+}
+
+.mypage-x__timeline-block-title svg {
+  width: 16px;
+  height: 16px;
+  color: #de869f;
+}
+
+.mypage-x__timeline-block-title span {
   font-weight: 500;
-  color: #aaa;
+  color: #b3b3b3;
 }
 
 /* ── 이미지 상세 모달 ── */
@@ -546,84 +717,173 @@
   position: absolute;
   inset: 0;
   border: none;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.58);
   cursor: pointer;
 }
 
 .mypage-x__modal-panel {
   position: relative;
-  width: min(92vw, 420px);
+  width: min(92vw, 440px);
   max-height: 90vh;
   overflow-y: auto;
   background: #fff;
-  border-radius: 18px;
-  padding: 1.25rem;
+  border-radius: 20px;
+  padding: 1.4rem;
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 1rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+}
+
+.mypage-x__modal-panel--lg {
+  width: min(94vw, 770px);
+  max-height: 94vh;
+}
+
+.mypage-x__modal-image-viewport {
+  position: relative;
+  width: 100%;
+  height: min(70vh, 500px);
+  border-radius: 14px;
+  background: #f5f5f5;
+  overflow: hidden;
+}
+
+.mypage-x__modal-image-viewport.is-zoomed .mypage-x__modal-image {
+  cursor: grab;
+}
+
+.mypage-x__modal-image-viewport.is-dragging .mypage-x__modal-image {
+  cursor: grabbing;
+}
+
+.mypage-x__modal-zoom-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.mypage-x__modal-zoom-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.mypage-x__modal-zoom-controls button:hover:not(:disabled) {
+  background: #de869f;
+}
+
+.mypage-x__modal-zoom-controls button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mypage-x__modal-zoom-value {
+  min-width: 38px;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
 }
 
 .mypage-x__modal-close {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  top: 0.8rem;
+  right: 0.8rem;
   z-index: 1;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: none;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.55);
   color: #fff;
   cursor: pointer;
 }
 
 .mypage-x__modal-image {
   width: 100%;
-  border-radius: 12px;
+  height: 100%;
+  border-radius: 14px;
   background: #f5f5f5;
   object-fit: contain;
-  max-height: 55vh;
+  transition: transform 0.15s ease-out;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.mypage-x__modal-image-viewport.is-dragging .mypage-x__modal-image {
+  transition: none;
 }
 
 .mypage-x__modal-date {
   margin: 0;
-  font-size: 0.75rem;
-  color: #999;
+  font-size: 0.78rem;
+  color: #a3a3a3;
+  font-weight: 600;
 }
 
 .mypage-x__modal-prompt {
-  margin: 0.35rem 0 0;
-  font-size: 0.78rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
   color: #777;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .mypage-x__modal-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.55rem;
 }
 
 .mypage-x__modal-actions button {
   flex: 1;
-  min-width: 100px;
-  height: 40px;
-  border: 1px solid #ddd;
+  min-width: 110px;
+  height: 42px;
+  border: 1px solid #e0e0e0;
   border-radius: 999px;
   background: #fff;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.mypage-x__modal-actions button:hover {
+  background: #fafafa;
 }
 
 .mypage-x__modal-actions button.is-active {
   border-color: #de869f;
   color: #de869f;
+  background: #fdf5f8;
 }
 
 .mypage-x__modal-actions button.danger {
   border-color: #f3c2c2;
   color: #d23b3b;
+}
+
+.mypage-x__modal-actions button.danger:hover {
+  background: #fdf0f0;
 }
 
 .mypage-x__modal-actions button:disabled {
@@ -657,6 +917,10 @@
     flex: 1;
   }
 
+  .mypage-x__nav-chevron {
+    display: none;
+  }
+
   .mypage-x__logout {
     border-top: none;
     padding-top: 0;
@@ -665,5 +929,9 @@
 
   .mypage-x__stat-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .mypage-x__timeline {
+    padding-left: 1.2rem;
   }
 }
