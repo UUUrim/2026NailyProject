@@ -1361,7 +1361,7 @@ export function HandScanResultPage() {
                 rightScanId ? generateStl(rightScanId, selectedShape) : Promise.resolve(),
             ])
             const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
-            addNailTipPrintOrder({ shapeId: selectedShape, shapeLabelKo })
+            addNailTipPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId })
             setPrintConfirmed(true)
             setShowPrintModal(true)
         } catch (e) {

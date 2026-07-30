@@ -17,7 +17,7 @@ export const FEATURES: FeatureItem[] = [
     icon: 'fit',
     accent: '#fdeff4',
     description:
-      '손 촬영을 통해 당신의 손톱 모양에 딱 맞는\n네일팁을 만듭니다.',
+        '손 촬영을 통해 당신의 손톱 모양에 딱 맞는\n네일팁을 만듭니다.',
   },
   {
     title: 'Design',
@@ -33,16 +33,5 @@ export const FEATURES: FeatureItem[] = [
   },
 ]
 
-export const GALLERY_IMAGES = [
-  '/images/nail1.png',
-  '/images/nail2.png',
-  '/images/nail3.png',
-  '/images/nail4.png',
-  '/images/nail5.png',
-  '/images/nail6.png',
-  '/images/nail7.png',
-  '/images/nail8.png',
-]
-
 export const HERO_SUBTITLE =
-  '지금 바로 세상에 단 하나뿐인 당신만의 네일팁을 만드세요'
+    '지금 바로 세상에 단 하나뿐인 당신만의 네일팁을 만드세요'

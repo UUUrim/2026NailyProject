@@ -5,6 +5,7 @@ import com.example.nailyproject.dto.SlotData;
 import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.response.DesignImageResponseDto;
+import com.example.nailyproject.dto.response.CommunityDesignResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -415,6 +416,33 @@ public class NailDesignService {
                     resultList.add(item);
                 }
             }
+        }
+        return resultList;
+    }
+
+    /**
+     * '둘러보기' 커뮤니티 갤러리 GET /designs/community
+     * 전체 사용자가 생성한 디자인 중 완성된(COMPLETED) 것만 최신순으로 모아서 반환.
+     * 디자인 1건당 대표 이미지 1장(첫 번째 이미지)만 사용.
+     */
+    public List<CommunityDesignResponseDto> getCommunityGallery() {
+        List<NailDesign> designs =
+                nailDesignRepository.findTop60ByStatusOrderByGeneratedAtDesc(NailDesign.DesignStatus.COMPLETED);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
+        List<CommunityDesignResponseDto> resultList = new ArrayList<>();
+
+        for (NailDesign design : designs) {
+            if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) continue;
+
+            String formattedDate = design.getGeneratedAt() != null
+                    ? design.getGeneratedAt().format(formatter) : "";
+
+            resultList.add(CommunityDesignResponseDto.builder()
+                    .designId(design.getId())
+                    .imageUrl(design.getImageUrls().get(0))
+                    .createdAt(formattedDate)
+                    .build());
         }
         return resultList;
     }

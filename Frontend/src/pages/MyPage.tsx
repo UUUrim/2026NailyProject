@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { useAuth } from '@/hooks/useAuth'
@@ -13,11 +19,14 @@ import {
   type DesignImageResponse,
   type SavedDesignResponse,
 } from '@/apis/design'
-import { getMyScans, type ScanHistoryItem } from '@/apis/scan'
-import { ApiError, BASE_URL } from '@/utils/apiClient'
+import { getMyScans, getScanResult, type ScanHistoryItem, type ScanResultResponse } from '@/apis/scan'
+import { getNailShape } from '@/constants/nailShapes'
+import { SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
+import { ApiError } from '@/utils/apiClient'
+import { downloadImage } from '@/utils/downloadImage'
 import '@/styles/mypage.css'
 
-type SectionId = 'dashboard' | 'profile' | 'scans' | 'designs' | 'timeline' | 'favorites' | 'prints'
+type SectionId = 'dashboard' | 'profile' | 'timeline' | 'scans' | 'prints' | 'designs' | 'favorites'
 
 type DetailImage = {
   designId: number | null
@@ -33,6 +42,101 @@ const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   queued: '출력 대기',
   printing: '출력 중',
   completed: '완료',
+}
+
+// 손 스캔 상태값을 사용자가 이해할 수 있는 한글 문구로
+const SCAN_STATUS_LABEL: Record<string, string> = {
+  READY: '분석 대기 중',
+  ANALYZING: '분석 진행 중',
+  MEASURED: '분석 완료',
+  GENERATING_STL: '네일팁 제작 중',
+  COMPLETED: '분석 완료',
+  FAILED: '분석 실패',
+}
+
+// 한 번의 촬영에서 나온 왼손/오른손 스캔 기록을 하나로 묶은 단위
+type ScanSession = {
+  key: string
+  scannedAt: string
+  leftScanId: number | null
+  rightScanId: number | null
+  seasonNameKo: string | null
+  shape: string | null
+  status: string | null
+}
+
+type FingerStat = { label: string; lengthMm: number; widthMm: number; cCurve: number }
+
+type ScanDetail = {
+  scannedAt: string
+  seasonNameKo: string | null
+  shapeId: string | null
+  avgLength: number
+  avgWidth: number
+  avgCurve: number
+  fingers: FingerStat[]
+  comment: string
+}
+
+const FINGER_LABEL_KO: Record<string, string> = {
+  THUMB: '엄지',
+  INDEX: '검지',
+  MIDDLE: '중지',
+  RING: '약지',
+  PINKY: '소지',
+}
+
+function parseFingerMeasurements(measurements: string | null | undefined) {
+  try {
+    const m = JSON.parse(measurements ?? '{}') as {
+      lengthMm?: number
+      length?: number
+      widthMm?: number
+      width?: number
+      cCurve?: number
+      curve?: number
+    }
+    return {
+      lengthMm: Number(m.lengthMm ?? m.length ?? 12),
+      widthMm: Number(m.widthMm ?? m.width ?? 9),
+      cCurve: Number(m.cCurve ?? m.curve ?? 0.55),
+    }
+  } catch {
+    return { lengthMm: 12, widthMm: 9, cCurve: 0.55 }
+  }
+}
+
+function buildScanDetail(left: ScanResultResponse | null, right: ScanResultResponse | null): ScanDetail {
+  const fingers: FingerStat[] = [
+    ...(left?.fingers ?? []).map((f) => ({
+      label: `${FINGER_LABEL_KO[f.finger] ?? f.finger}(L)`,
+      ...parseFingerMeasurements(f.measurements),
+    })),
+    ...(right?.fingers ?? []).map((f) => ({
+      label: `${FINGER_LABEL_KO[f.finger] ?? f.finger}(R)`,
+      ...parseFingerMeasurements(f.measurements),
+    })),
+  ]
+
+  const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
+  const avgLength = Number(avg(fingers.map((f) => f.lengthMm)).toFixed(1))
+  const avgWidth = Number(avg(fingers.map((f) => f.widthMm)).toFixed(1))
+  const avgCurve = Number(avg(fingers.map((f) => f.cCurve)).toFixed(2))
+
+  const isLong = avgLength >= 12.5
+  const isNarrow = avgWidth <= 10
+  const isLowCurve = avgCurve <= 0.55
+
+  return {
+    scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
+    seasonNameKo: left?.seasonNameKo || right?.seasonNameKo || null,
+    shapeId: left?.shape || right?.shape || null,
+    avgLength,
+    avgWidth,
+    avgCurve,
+    fingers,
+    comment: `평균보다 손톱이 ${isLong ? '긴' : '짧은'} 편이고, ${isNarrow ? '좁은' : '넓은'} 편이에요. 곡률(C-curve)은 ${isLowCurve ? '완만한' : '뚜렷한'} 편입니다.`,
+  }
 }
 
 // ── 아이콘 (선 스타일로 통일) ────────────────────────────────────────────
@@ -71,32 +175,10 @@ const NAV_ITEMS: { id: SectionId; label: string; icon: keyof typeof Icon }[] = [
   { id: 'profile', label: '프로필', icon: 'user' },
   { id: 'timeline', label: '전체 활동 타임라인', icon: 'timeline' },
   { id: 'scans', label: '손 분석 결과 이력', icon: 'hand' },
+  { id: 'prints', label: '네일팁 출력 내역', icon: 'print' },
   { id: 'designs', label: '네일 디자인 생성 이력', icon: 'design' },
   { id: 'favorites', label: '찜 목록', icon: 'heart' },
-  { id: 'prints', label: '네일팁 출력 내역', icon: 'print' },
 ]
-
-async function downloadImage(url: string, filename: string) {
-  try {
-    const token = localStorage.getItem('token')
-    // 브라우저가 S3에 직접 fetch하면 CORS로 막히므로, 백엔드 다운로드 프록시를 거쳐서 받음
-    const res = await fetch(`${BASE_URL}/designs/download-proxy?url=${encodeURIComponent(url)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!res.ok) throw new Error('다운로드 실패')
-    const blob = await res.blob()
-    const objectUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = objectUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(objectUrl)
-  } catch {
-    alert('이미지 다운로드에 실패했어요. 잠시 후 다시 시도해 주세요.')
-  }
-}
 
 // 백엔드가 주는 "yyyy. M. d." 형식이든 ISO 문자열이든 안전하게 Date로 변환
 function parseDateFlexible(raw: string): Date | null {
@@ -155,10 +237,10 @@ export function MyPage() {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
+  const imageViewportRef = useRef<HTMLDivElement | null>(null)
 
   const ZOOM_MIN = 1
   const ZOOM_MAX = 4
-  const ZOOM_STEP = 0.5
 
   const openDetailImage = (img: DetailImage) => {
     setZoom(1)
@@ -172,13 +254,29 @@ export function MyPage() {
     setPan({ x: 0, y: 0 })
   }
 
-  const handleZoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, Number((z + ZOOM_STEP).toFixed(2))))
-  const handleZoomOut = () =>
+  const WHEEL_ZOOM_SENSITIVITY = 0.0015
+
+  // 마우스 휠로 확대/축소 (passive 리스너에서는 preventDefault가 무시되므로
+  // 네이티브 이벤트 리스너를 { passive: false }로 직접 등록한다)
+  useEffect(() => {
+    const viewport = imageViewportRef.current
+    if (!viewport || !detailImage) return
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
       setZoom((z) => {
-        const next = Math.max(ZOOM_MIN, Number((z - ZOOM_STEP).toFixed(2)))
+        const next = Math.min(
+            ZOOM_MAX,
+            Math.max(ZOOM_MIN, Number((z - e.deltaY * WHEEL_ZOOM_SENSITIVITY).toFixed(2))),
+        )
         if (next === ZOOM_MIN) setPan({ x: 0, y: 0 })
         return next
       })
+    }
+
+    viewport.addEventListener('wheel', onWheel, { passive: false })
+    return () => viewport.removeEventListener('wheel', onWheel)
+  }, [detailImage])
 
   const handleImagePointerDown = (e: ReactMouseEvent<HTMLImageElement>) => {
     if (zoom <= ZOOM_MIN) return
@@ -221,6 +319,85 @@ export function MyPage() {
       () => new Set(favorites.map((f) => `${f.designId}-${f.imageUrl}`)),
       [favorites],
   )
+
+  // 한 번의 촬영에서 나온 왼손/오른손 기록을 하나의 세션으로 묶음
+  // (같은 세션이면 촬영 시각이 서로 가까움 — 90분 이내면 같은 세션으로 판단)
+  const scanSessions = useMemo<ScanSession[]>(() => {
+    const sorted = [...scans].sort(
+        (a, b) => (parseDateFlexible(b.scannedAt)?.getTime() ?? 0) - (parseDateFlexible(a.scannedAt)?.getTime() ?? 0),
+    )
+    const used = new Set<number>()
+    const sessions: ScanSession[] = []
+
+    sorted.forEach((scan, i) => {
+      if (used.has(scan.scanId)) return
+      used.add(scan.scanId)
+
+      const scanTime = parseDateFlexible(scan.scannedAt)?.getTime() ?? 0
+      const partner = sorted.find((other, j) => {
+        if (j === i || used.has(other.scanId) || other.handSide === scan.handSide) return false
+        const otherTime = parseDateFlexible(other.scannedAt)?.getTime() ?? 0
+        return Math.abs(otherTime - scanTime) < 90 * 60 * 1000
+      })
+      if (partner) used.add(partner.scanId)
+
+      const left = scan.handSide === 'LEFT' ? scan : partner?.handSide === 'LEFT' ? partner : null
+      const right = scan.handSide === 'RIGHT' ? scan : partner?.handSide === 'RIGHT' ? partner : null
+
+      sessions.push({
+        key: `${scan.scanId}-${partner?.scanId ?? 'solo'}`,
+        scannedAt: scan.scannedAt,
+        leftScanId: left?.scanId ?? null,
+        rightScanId: right?.scanId ?? null,
+        seasonNameKo: left?.seasonNameKo ?? right?.seasonNameKo ?? null,
+        shape: left?.shape ?? right?.shape ?? null,
+        status: left?.status ?? right?.status ?? scan.status,
+      })
+    })
+
+    return sessions
+  }, [scans])
+
+  // ── 손 분석 세션 상세 모달 ──────
+  const [scanDetailSession, setScanDetailSession] = useState<ScanSession | null>(null)
+  const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null)
+  const [isLoadingScanDetail, setIsLoadingScanDetail] = useState(false)
+
+  const openScanDetail = async (session: ScanSession) => {
+    setScanDetailSession(session)
+    setScanDetail(null)
+    setIsLoadingScanDetail(true)
+    try {
+      const [left, right] = await Promise.all([
+        session.leftScanId ? getScanResult(session.leftScanId).catch(() => null) : Promise.resolve(null),
+        session.rightScanId ? getScanResult(session.rightScanId).catch(() => null) : Promise.resolve(null),
+      ])
+      setScanDetail(buildScanDetail(left, right))
+    } finally {
+      setIsLoadingScanDetail(false)
+    }
+  }
+
+  // ── 네일팁 출력 상세 모달 ──────
+  const [printDetailOrder, setPrintDetailOrder] = useState<NailTipPrintOrder | null>(null)
+  const [printDetailScan, setPrintDetailScan] = useState<ScanDetail | null>(null)
+  const [isLoadingPrintDetail, setIsLoadingPrintDetail] = useState(false)
+
+  const openPrintDetail = async (order: NailTipPrintOrder) => {
+    setPrintDetailOrder(order)
+    setPrintDetailScan(null)
+    if (!order.leftScanId && !order.rightScanId) return
+    setIsLoadingPrintDetail(true)
+    try {
+      const [left, right] = await Promise.all([
+        order.leftScanId ? getScanResult(order.leftScanId).catch(() => null) : Promise.resolve(null),
+        order.rightScanId ? getScanResult(order.rightScanId).catch(() => null) : Promise.resolve(null),
+      ])
+      setPrintDetailScan(buildScanDetail(left, right))
+    } finally {
+      setIsLoadingPrintDetail(false)
+    }
+  }
 
   const handleSaveProfile = async () => {
     if (newPassword && newPassword !== passwordConfirm) {
@@ -324,19 +501,51 @@ export function MyPage() {
 
   // ── 전체 활동 타임라인: 손 스캔 + 디자인 생성 + 네일팁 출력을 날짜별로 통합 ──────
   const timelineGroups = useMemo(() => {
-    const map = new Map<string, { scans: ScanHistoryItem[]; designs: DesignImageResponse[]; prints: NailTipPrintOrder[] }>()
+    const map = new Map<string, { scans: ScanSession[]; designs: DesignImageResponse[]; prints: NailTipPrintOrder[] }>()
 
     const ensure = (key: string) => {
       if (!map.has(key)) map.set(key, { scans: [], designs: [], prints: [] })
       return map.get(key)!
     }
 
-    scans.forEach((s) => ensure(dateKeyOf(s.scannedAt)).scans.push(s))
+    scanSessions.forEach((s) => ensure(dateKeyOf(s.scannedAt)).scans.push(s))
     designs.forEach((d) => ensure(dateKeyOf(d.createdAt)).designs.push(d))
     prints.forEach((p) => ensure(dateKeyOf(p.orderedAt)).prints.push(p))
 
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))
-  }, [scans, designs, prints])
+  }, [scanSessions, designs, prints])
+
+  const renderScanSessionRow = (session: ScanSession, compact = false) => {
+    const hasResult = Boolean(session.seasonNameKo && session.shape)
+    const shapeLabel = session.shape ? getNailShape(session.shape)?.labelKo ?? session.shape : null
+    const handLabel = session.leftScanId && session.rightScanId ? '양손' : session.leftScanId ? '왼손' : '오른손'
+
+    return (
+        <button
+            key={session.key}
+            type="button"
+            className={`mypage-x__scan-row${compact ? ' mypage-x__scan-row--compact' : ''}`}
+            onClick={() => void openScanDetail(session)}
+        >
+          <span className="mypage-x__scan-hand" aria-hidden="true">{handLabel.charAt(0)}</span>
+          <div className="mypage-x__scan-info">
+            {hasResult ? (
+                <p className="mypage-x__scan-title">
+                  {session.seasonNameKo} · {shapeLabel} 추천
+                </p>
+            ) : (
+                <p className="mypage-x__scan-title mypage-x__scan-title--pending">
+                  {SCAN_STATUS_LABEL[session.status ?? ''] ?? '분석 결과를 기다리고 있어요'}
+                </p>
+            )}
+            {!compact && <p className="mypage-x__scan-date">{handLabel} 촬영 · {session.scannedAt}</p>}
+          </div>
+          <span className={`mypage-x__badge mypage-x__badge--${(session.status ?? '').toLowerCase()}`}>
+            {SCAN_STATUS_LABEL[session.status ?? ''] ?? session.status ?? '-'}
+          </span>
+        </button>
+    )
+  }
 
   const renderImageGrid = (items: DesignImageResponse[] | SavedDesignResponse[], isFavoriteView: boolean) => {
     if (items.length === 0) {
@@ -387,7 +596,7 @@ export function MyPage() {
   }
 
   const totalDesignCount = designs.length
-  const totalScanCount = scans.length
+  const totalScanCount = scanSessions.length
   const totalFavoriteCount = favorites.length
   const totalPrintCount = prints.length
 
@@ -440,6 +649,11 @@ export function MyPage() {
                       <span className="mypage-x__stat-value">{totalScanCount}</span>
                       <span className="mypage-x__stat-label">손 분석 결과</span>
                     </button>
+                    <button type="button" className="mypage-x__stat-card" onClick={() => setSection('prints')}>
+                      <span className="mypage-x__stat-icon">{Icon.print}</span>
+                      <span className="mypage-x__stat-value">{totalPrintCount}</span>
+                      <span className="mypage-x__stat-label">네일팁 출력 신청</span>
+                    </button>
                     <button type="button" className="mypage-x__stat-card" onClick={() => setSection('designs')}>
                       <span className="mypage-x__stat-icon">{Icon.design}</span>
                       <span className="mypage-x__stat-value">{totalDesignCount}</span>
@@ -450,21 +664,16 @@ export function MyPage() {
                       <span className="mypage-x__stat-value">{totalFavoriteCount}</span>
                       <span className="mypage-x__stat-label">찜한 디자인</span>
                     </button>
-                    <button type="button" className="mypage-x__stat-card" onClick={() => setSection('prints')}>
-                      <span className="mypage-x__stat-icon">{Icon.print}</span>
-                      <span className="mypage-x__stat-value">{totalPrintCount}</span>
-                      <span className="mypage-x__stat-label">네일팁 출력 신청</span>
-                    </button>
                   </div>
 
-                  <div className="mypage-x__dashboard-actions">
-                    <button type="button" className="mypage-x__cta" onClick={() => navigate('/scan/hand')}>
-                      손 스캔하러 가기
-                    </button>
-                    <button type="button" className="mypage-x__cta mypage-x__cta--outline" onClick={() => navigate('/design/chat')}>
-                      새 디자인 생성하기
-                    </button>
-                  </div>
+                  {/*<div className="mypage-x__dashboard-actions">*/}
+                  {/*  <button type="button" className="mypage-x__cta" onClick={() => navigate('/scan/hand')}>*/}
+                  {/*    손 스캔하러 가기*/}
+                  {/*  </button>*/}
+                  {/*  <button type="button" className="mypage-x__cta mypage-x__cta--outline" onClick={() => navigate('/design/chat')}>*/}
+                  {/*    새 디자인 생성하기*/}
+                  {/*  </button>*/}
+                  {/*</div>*/}
 
                   <div className="mypage-x__section-header">
                     <h2 className="mypage-x__section-heading">최근 생성한 디자인</h2>
@@ -554,29 +763,14 @@ export function MyPage() {
             {section === 'scans' && (
                 <section>
                   <h1 className="mypage-x__title">손 분석 결과 이력</h1>
-                  <p className="mypage-x__subtitle">지금까지 진행한 손 스캔 분석 결과를 모아봤어요.</p>
+                  <p className="mypage-x__subtitle">지금까지 진행한 손 스캔 분석 결과예요. 클릭하면 자세한 결과를 볼 수 있어요.</p>
                   {isLoading ? (
                       <p className="mypage-x__empty">불러오는 중...</p>
-                  ) : scans.length === 0 ? (
+                  ) : scanSessions.length === 0 ? (
                       <p className="mypage-x__empty">아직 손 스캔 이력이 없어요.</p>
                   ) : (
                       <div className="mypage-x__scan-list">
-                        {scans.map((scan) => (
-                            <article key={scan.scanId} className="mypage-x__scan-row">
-                              <span className="mypage-x__scan-hand" aria-hidden="true">
-                                {scan.handSide === 'LEFT' ? 'L' : scan.handSide === 'RIGHT' ? 'R' : '?'}
-                              </span>
-                              <div className="mypage-x__scan-info">
-                                <p className="mypage-x__scan-title">
-                                  {scan.seasonNameKo ?? '분석 중'} · {scan.shape ?? '분석 중'}
-                                </p>
-                                <p className="mypage-x__scan-date">{scan.scannedAt}</p>
-                              </div>
-                              <span className={`mypage-x__badge mypage-x__badge--${(scan.status ?? '').toLowerCase()}`}>
-                                {scan.status ?? '-'}
-                              </span>
-                            </article>
-                        ))}
+                        {scanSessions.map((session) => renderScanSessionRow(session))}
                       </div>
                   )}
                 </section>
@@ -617,21 +811,7 @@ export function MyPage() {
                                           {Icon.hand} 손 촬영 · 분석 <span>{group.scans.length}건</span>
                                         </p>
                                         <div className="mypage-x__scan-list">
-                                          {group.scans.map((scan) => (
-                                              <article key={scan.scanId} className="mypage-x__scan-row mypage-x__scan-row--compact">
-                                                <span className="mypage-x__scan-hand" aria-hidden="true">
-                                                  {scan.handSide === 'LEFT' ? 'L' : scan.handSide === 'RIGHT' ? 'R' : '?'}
-                                                </span>
-                                                <div className="mypage-x__scan-info">
-                                                  <p className="mypage-x__scan-title">
-                                                    {scan.seasonNameKo ?? '분석 중'} · {scan.shape ?? '분석 중'}
-                                                  </p>
-                                                </div>
-                                                <span className={`mypage-x__badge mypage-x__badge--${(scan.status ?? '').toLowerCase()}`}>
-                                                  {scan.status ?? '-'}
-                                                </span>
-                                              </article>
-                                          ))}
+                                          {group.scans.map((session) => renderScanSessionRow(session, true))}
                                         </div>
                                       </div>
                                   )}
@@ -688,22 +868,33 @@ export function MyPage() {
             {section === 'prints' && (
                 <section>
                   <h1 className="mypage-x__title">네일팁 출력 내역</h1>
-                  <p className="mypage-x__subtitle">3D 네일팁 제작을 신청한 내역이에요.</p>
+                  <p className="mypage-x__subtitle">3D 네일팁 제작을 신청한 내역이에요. 클릭하면 어떤 손 분석 결과를 바탕으로 신청했는지 볼 수 있어요.</p>
                   {prints.length === 0 ? (
                       <p className="mypage-x__empty">출력 신청 내역이 없어요.</p>
                   ) : (
                       <div className="mypage-x__print-list">
                         {prints.map((order) => (
-                            <article key={order.id} className="mypage-x__print-row">
-                              <div className="mypage-x__print-icon" aria-hidden="true">{Icon.print}</div>
+                            <button
+                                key={order.id}
+                                type="button"
+                                className="mypage-x__print-row"
+                                onClick={() => void openPrintDetail(order)}
+                            >
+                              <div className="mypage-x__print-icon" aria-hidden="true">
+                                {SHAPE_PREVIEW_IMAGES[order.shapeId] ? (
+                                    <img src={SHAPE_PREVIEW_IMAGES[order.shapeId]} alt="" />
+                                ) : (
+                                    Icon.print
+                                )}
+                              </div>
                               <div>
-                                <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일팁</p>
+                                <p className="mypage-x__print-shape">{order.shapeLabelKo} 쉐입 네일팁 10개 출력</p>
                                 <p className="mypage-x__print-date">{new Date(order.orderedAt).toLocaleString('ko-KR')}</p>
                               </div>
                               <span className={`mypage-x__badge mypage-x__badge--${order.status}`}>
                                 {PRINT_STATUS_LABEL[order.status]}
                               </span>
-                            </article>
+                            </button>
                         ))}
                       </div>
                   )}
@@ -732,6 +923,7 @@ export function MyPage() {
                 </button>
 
                 <div
+                    ref={imageViewportRef}
                     className={`mypage-x__modal-image-viewport${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
                     onMouseUp={stopDragging}
                     onMouseLeave={stopDragging}
@@ -747,23 +939,7 @@ export function MyPage() {
                   />
 
                   <div className="mypage-x__modal-zoom-controls">
-                    <button
-                        type="button"
-                        onClick={handleZoomOut}
-                        disabled={zoom <= ZOOM_MIN}
-                        aria-label="축소"
-                    >
-                      −
-                    </button>
                     <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
-                    <button
-                        type="button"
-                        onClick={handleZoomIn}
-                        disabled={zoom >= ZOOM_MAX}
-                        aria-label="확대"
-                    >
-                      +
-                    </button>
                   </div>
                 </div>
 
@@ -775,7 +951,7 @@ export function MyPage() {
                       type="button"
                       onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
                   >
-                    이미지 저장
+                    로컬에 저장
                   </button>
                   <button
                       type="button"
@@ -797,6 +973,166 @@ export function MyPage() {
                       )
                   )}
                 </div>
+              </div>
+            </div>
+        )}
+
+        {/* ── 손 분석 결과 상세 모달 ───────────────────────────────────── */}
+        {scanDetailSession && (
+            <div className="mypage-x__modal" role="dialog" aria-modal="true">
+              <button
+                  type="button"
+                  className="mypage-x__modal-backdrop"
+                  aria-label="닫기"
+                  onClick={() => setScanDetailSession(null)}
+              />
+              <div className="mypage-x__modal-panel mypage-x__scan-detail-panel">
+                <button
+                    type="button"
+                    className="mypage-x__modal-close"
+                    onClick={() => setScanDetailSession(null)}
+                    aria-label="닫기"
+                >
+                  ✕
+                </button>
+
+                {isLoadingScanDetail || !scanDetail ? (
+                    <p className="mypage-x__empty">분석 결과를 불러오는 중...</p>
+                ) : (
+                    <>
+                      <p className="mypage-x__scan-detail-heading">
+                        <strong>{dateLabelOf(dateKeyOf(scanDetail.scannedAt))}</strong>에 스캔했던{' '}
+                        <strong>{profile?.nickname ?? '회원'}</strong>님의 손 분석 결과입니다.
+                      </p>
+
+                      <div className="mypage-x__scan-detail-summary">
+                        <div className="mypage-x__scan-detail-summary-item">
+                          <span className="mypage-x__scan-detail-summary-label">퍼스널컬러</span>
+                          <span className="mypage-x__scan-detail-summary-value">{scanDetail.seasonNameKo ?? '분석 결과 없음'}</span>
+                        </div>
+                        <div className="mypage-x__scan-detail-summary-item">
+                          {scanDetail.shapeId && SHAPE_PREVIEW_IMAGES[scanDetail.shapeId] && (
+                              <img
+                                  src={SHAPE_PREVIEW_IMAGES[scanDetail.shapeId]}
+                                  alt=""
+                                  className="mypage-x__scan-detail-shape-img"
+                              />
+                          )}
+                          <span className="mypage-x__scan-detail-summary-label">추천 네일팁 모양</span>
+                          <span className="mypage-x__scan-detail-summary-value">
+                            {scanDetail.shapeId ? getNailShape(scanDetail.shapeId)?.labelKo ?? scanDetail.shapeId : '분석 결과 없음'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mypage-x__scan-detail-metrics">
+                        <div className="mypage-x__scan-detail-metric">
+                          <span>평균 길이</span>
+                          <strong>{scanDetail.avgLength}mm</strong>
+                        </div>
+                        <div className="mypage-x__scan-detail-metric">
+                          <span>평균 너비</span>
+                          <strong>{scanDetail.avgWidth}mm</strong>
+                        </div>
+                        <div className="mypage-x__scan-detail-metric">
+                          <span>평균 곡률 (C-curve)</span>
+                          <strong>{scanDetail.avgCurve}</strong>
+                        </div>
+                      </div>
+                      <p className="mypage-x__scan-detail-comment">{scanDetail.comment}</p>
+
+                      {scanDetail.fingers.length > 0 && (
+                          <div className="mypage-x__scan-detail-finger-table">
+                            <div className="mypage-x__scan-detail-finger-row mypage-x__scan-detail-finger-row--head">
+                              <span>손가락</span><span>길이</span><span>너비</span><span>곡률</span>
+                            </div>
+                            {scanDetail.fingers.map((f) => (
+                                <div key={f.label} className="mypage-x__scan-detail-finger-row">
+                                  <span>{f.label}</span>
+                                  <span>{f.lengthMm.toFixed(1)}mm</span>
+                                  <span>{f.widthMm.toFixed(1)}mm</span>
+                                  <span>{f.cCurve.toFixed(2)}</span>
+                                </div>
+                            ))}
+                          </div>
+                      )}
+                    </>
+                )}
+              </div>
+            </div>
+        )}
+
+        {/* ── 네일팁 출력 상세 모달 ───────────────────────────────────── */}
+        {printDetailOrder && (
+            <div className="mypage-x__modal" role="dialog" aria-modal="true">
+              <button
+                  type="button"
+                  className="mypage-x__modal-backdrop"
+                  aria-label="닫기"
+                  onClick={() => setPrintDetailOrder(null)}
+              />
+              <div className="mypage-x__modal-panel mypage-x__scan-detail-panel">
+                <button
+                    type="button"
+                    className="mypage-x__modal-close"
+                    onClick={() => setPrintDetailOrder(null)}
+                    aria-label="닫기"
+                >
+                  ✕
+                </button>
+
+                <p className="mypage-x__scan-detail-heading">
+                  <strong>{new Date(printDetailOrder.orderedAt).toLocaleDateString('ko-KR')}</strong>에{' '}
+                  <strong>{printDetailOrder.shapeLabelKo}</strong> 쉐입으로 네일팁 10개(양손) 출력을 신청했어요.
+                </p>
+
+                <div className="mypage-x__scan-detail-summary">
+                  <div className="mypage-x__scan-detail-summary-item">
+                    {SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId] && (
+                        <img
+                            src={SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId]}
+                            alt=""
+                            className="mypage-x__scan-detail-shape-img"
+                        />
+                    )}
+                    <span className="mypage-x__scan-detail-summary-label">신청한 네일팁 모양</span>
+                    <span className="mypage-x__scan-detail-summary-value">
+                      {getNailShape(printDetailOrder.shapeId)?.labelKo ?? printDetailOrder.shapeId}
+                    </span>
+                  </div>
+                  <div className="mypage-x__scan-detail-summary-item">
+                    <span className="mypage-x__scan-detail-summary-label">진행 상태</span>
+                    <span className="mypage-x__scan-detail-summary-value">{PRINT_STATUS_LABEL[printDetailOrder.status]}</span>
+                  </div>
+                </div>
+
+                {!printDetailOrder.leftScanId && !printDetailOrder.rightScanId ? (
+                    <p className="mypage-x__scan-detail-comment">
+                      이 출력 신청에는 연결된 손 분석 기록 정보가 없어요. (예전에 신청한 건일 수 있어요)
+                    </p>
+                ) : isLoadingPrintDetail || !printDetailScan ? (
+                    <p className="mypage-x__empty">연결된 손 분석 결과를 불러오는 중...</p>
+                ) : (
+                    <>
+                      <p className="mypage-x__scan-detail-comment">
+                        이 출력은 <strong>{dateLabelOf(dateKeyOf(printDetailScan.scannedAt))}</strong>에 스캔한 손 분석 결과를 바탕으로 신청됐어요.
+                      </p>
+                      <div className="mypage-x__scan-detail-metrics">
+                        <div className="mypage-x__scan-detail-metric">
+                          <span>평균 길이</span>
+                          <strong>{printDetailScan.avgLength}mm</strong>
+                        </div>
+                        <div className="mypage-x__scan-detail-metric">
+                          <span>평균 너비</span>
+                          <strong>{printDetailScan.avgWidth}mm</strong>
+                        </div>
+                        <div className="mypage-x__scan-detail-metric">
+                          <span>평균 곡률 (C-curve)</span>
+                          <strong>{printDetailScan.avgCurve}</strong>
+                        </div>
+                      </div>
+                    </>
+                )}
               </div>
             </div>
         )}

@@ -526,11 +526,15 @@
 .mypage-x__print-row {
   display: flex;
   align-items: center;
+  width: 100%;
   gap: 1rem;
   padding: 0.95rem 1.1rem;
   border: 1px solid #f0f0f0;
   border-radius: 14px;
   background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
@@ -542,6 +546,133 @@
 
 .mypage-x__scan-row--compact {
   padding: 0.7rem 0.9rem;
+}
+
+.mypage-x__scan-title--pending {
+  color: #b3893f;
+}
+
+.mypage-x__print-icon img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+/* ── 손 분석/출력 상세 모달 ── */
+
+.mypage-x__scan-detail-panel {
+  width: min(94vw, 620px);
+}
+
+.mypage-x__scan-detail-heading {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #444;
+}
+
+.mypage-x__scan-detail-heading strong {
+  color: #de869f;
+}
+
+.mypage-x__scan-detail-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.mypage-x__scan-detail-summary-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding: 1rem;
+  background: #fdf5f8;
+  border-radius: 14px;
+}
+
+.mypage-x__scan-detail-shape-img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  margin-bottom: 0.15rem;
+}
+
+.mypage-x__scan-detail-summary-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #b3893f;
+  text-transform: none;
+}
+
+.mypage-x__scan-detail-summary-value {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #1a1a1a;
+}
+
+.mypage-x__scan-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.mypage-x__scan-detail-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem 0.5rem;
+  background: #f7f7f8;
+  border-radius: 12px;
+  text-align: center;
+}
+
+.mypage-x__scan-detail-metric span {
+  font-size: 0.7rem;
+  color: #999;
+  font-weight: 600;
+}
+
+.mypage-x__scan-detail-metric strong {
+  font-size: 1.15rem;
+  color: #1a1a1a;
+  font-weight: 800;
+}
+
+.mypage-x__scan-detail-comment {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  background: #fff8ef;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  color: #8a6d3b;
+  line-height: 1.6;
+}
+
+.mypage-x__scan-detail-finger-table {
+  border: 1px solid #f0f0f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.mypage-x__scan-detail-finger-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.8rem;
+  color: #444;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.mypage-x__scan-detail-finger-row:last-child {
+  border-bottom: none;
+}
+
+.mypage-x__scan-detail-finger-row--head {
+  background: #fafafa;
+  font-weight: 700;
+  color: #999;
+  font-size: 0.72rem;
 }
 
 .mypage-x__scan-hand {
@@ -736,14 +867,14 @@
 }
 
 .mypage-x__modal-panel--lg {
-  width: min(94vw, 770px);
+  width: min(94vw, 880px);
   max-height: 94vh;
 }
 
 .mypage-x__modal-image-viewport {
   position: relative;
   width: 100%;
-  height: min(70vh, 500px);
+  height: min(70vh, 620px);
   border-radius: 14px;
   background: #f5f5f5;
   overflow: hidden;

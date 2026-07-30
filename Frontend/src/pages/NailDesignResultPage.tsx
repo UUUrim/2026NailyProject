@@ -74,7 +74,7 @@ export function NailDesignResultPage() {
         leftScanId ? generateStl(leftScanId, nailShapeId) : Promise.resolve(),
         rightScanId ? generateStl(rightScanId, nailShapeId) : Promise.resolve(),
       ])
-      addNailTipPrintOrder({ shapeId: nailShapeId, shapeLabelKo: nailShapeLabel })
+      addNailTipPrintOrder({ shapeId: nailShapeId, shapeLabelKo: nailShapeLabel, leftScanId, rightScanId })
       setStlMessage('3D 네일팁 제작 요청이 접수됐어요! 마이페이지에서 진행 상황을 확인할 수 있어요.')
     } catch (e) {
       setStlMessage(e instanceof ApiError ? e.message : '3D 네일팁 제작 요청에 실패했어요. 다시 시도해 주세요.')

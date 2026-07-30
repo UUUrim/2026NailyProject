@@ -1,5 +1,3 @@
-
-
 //수정
 import type { HandScanAnalysis } from '@/utils/handScanAnalysis'
 
@@ -38,6 +36,8 @@ export type NailTipPrintOrder = {
   shapeLabelKo: string
   status: 'queued' | 'printing' | 'completed'
   orderedAt: string
+  leftScanId?: number | null
+  rightScanId?: number | null
 }
 
 export type FavoriteItem = {
@@ -117,7 +117,7 @@ export function getNailTipPrintOrders(): NailTipPrintOrder[] {
 }
 
 export function addNailTipPrintOrder(
-  order: Pick<NailTipPrintOrder, 'shapeId' | 'shapeLabelKo'>,
+    order: Pick<NailTipPrintOrder, 'shapeId' | 'shapeLabelKo' | 'leftScanId' | 'rightScanId'>,
 ): NailTipPrintOrder {
   const entry: NailTipPrintOrder = {
     ...order,
@@ -137,8 +137,8 @@ export function toggleFavorite(item: Omit<FavoriteItem, 'id' | 'savedAt'>): Favo
   const favorites = getFavorites()
   const exists = favorites.find((f) => f.imageUrl === item.imageUrl)
   const next = exists
-    ? favorites.filter((f) => f.imageUrl !== item.imageUrl)
-    : [{ ...item, id: `fav-${Date.now()}`, savedAt: new Date().toISOString() }, ...favorites]
+      ? favorites.filter((f) => f.imageUrl !== item.imageUrl)
+      : [{ ...item, id: `fav-${Date.now()}`, savedAt: new Date().toISOString() }, ...favorites]
   writeJson(FAVORITES_KEY, next)
   return next
 }
@@ -161,7 +161,7 @@ export function saveHandScanRecord(analysis: HandScanAnalysis): HandScanRecord {
   const existing = getHandScanRecords()
   const today = new Date().toDateString()
   const duplicate = existing.find(
-    (r) => r.seasonCode === analysis.seasonCode && new Date(r.capturedAt).toDateString() === today,
+      (r) => r.seasonCode === analysis.seasonCode && new Date(r.capturedAt).toDateString() === today,
   )
   if (duplicate) return duplicate
   writeJson(HAND_SCAN_RECORDS_KEY, [entry, ...existing])

@@ -40,6 +40,20 @@ public class DesignController {
     }
 
     /**
+     * '둘러보기' 커뮤니티 갤러리 GET /designs/community
+     * 로그인 여부와 상관없이 누구나 조회 가능 (SecurityConfig에서 permitAll 처리)
+     */
+    @GetMapping("/community")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.CommunityDesignResponseDto>>> getCommunityDesigns() {
+
+        var data = nailDesignService.getCommunityGallery();
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "둘러보기 갤러리 조회 성공.", data)
+        );
+    }
+
+    /**
      * 디자인 완전 삭제 DELETE /designs/{designId}
      */
     @DeleteMapping("/{designId}")
