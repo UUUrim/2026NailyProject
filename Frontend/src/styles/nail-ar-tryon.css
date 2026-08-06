@@ -1,0 +1,132 @@
+.nail-ar-tryon {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.nail-ar-tryon__backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+}
+
+.nail-ar-tryon__panel {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 100%);
+  max-height: calc(100svh - 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.nail-ar-tryon__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.nail-ar-tryon__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.nail-ar-tryon__subtitle {
+  margin: 0.35rem 0 0;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.nail-ar-tryon__close {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 999px;
+  background: #f5f5f5;
+  color: #444;
+  cursor: pointer;
+}
+
+.nail-ar-tryon__stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #111;
+  aspect-ratio: 16 / 10;
+}
+
+.nail-ar-tryon__video {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nail-ar-tryon__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+}
+
+.nail-ar-tryon__canvas.is-visible {
+  opacity: 1;
+}
+
+.nail-ar-tryon__loading,
+.nail-ar-tryon__error {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  text-align: center;
+  color: #fff;
+  font-size: 0.9375rem;
+}
+
+.nail-ar-tryon__error {
+  color: #ffd5df;
+}
+
+.nail-ar-tryon__hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #777;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .nail-ar-tryon {
+    padding: 0;
+  }
+
+  .nail-ar-tryon__panel {
+    width: 100%;
+    max-height: 100svh;
+    height: 100svh;
+    border-radius: 0;
+  }
+
+  .nail-ar-tryon__stage {
+    flex: 1;
+    aspect-ratio: auto;
+  }
+}

@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { NailArTryOnModal } from '@/components/ar/NailArTryOnModal'
 import { AppShell } from '@/components/layout/AppShell'
 import { useAuth } from '@/hooks/useAuth'
 import { getNailTipPrintOrders, type NailTipPrintOrder } from '@/utils/mypageStorage'
@@ -170,15 +171,59 @@ const Icon = {
   ),
 }
 
-const NAV_ITEMS: { id: SectionId; label: string; icon: keyof typeof Icon }[] = [
-  { id: 'dashboard', label: '대시보드', icon: 'home' },
-  { id: 'profile', label: '프로필', icon: 'user' },
-  { id: 'timeline', label: '전체 활동 타임라인', icon: 'timeline' },
-  { id: 'scans', label: '손 분석 결과 이력', icon: 'hand' },
-  { id: 'prints', label: '네일팁 출력 내역', icon: 'print' },
-  { id: 'designs', label: '네일 디자인 생성 이력', icon: 'design' },
-  { id: 'favorites', label: '찜 목록', icon: 'heart' },
+type NavItem = { id: SectionId; label: string; icon: keyof typeof Icon }
+
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: '홈',
+    items: [{ id: 'dashboard', label: '대시보드', icon: 'home' }],
+  },
+  {
+    label: '내 기록',
+    items: [
+      { id: 'timeline', label: '활동 타임라인', icon: 'timeline' },
+      { id: 'scans', label: '손 분석', icon: 'hand' },
+      { id: 'prints', label: '네일팁 출력', icon: 'print' },
+      { id: 'designs', label: '디자인', icon: 'design' },
+      { id: 'favorites', label: '찜 목록', icon: 'heart' },
+    ],
+  },
+  {
+    label: '계정',
+    items: [{ id: 'profile', label: '프로필 설정', icon: 'user' }],
+  },
 ]
+
+const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
+  dashboard: {
+    title: '대시보드',
+    subtitle: '지금까지의 네일리 활동을 한눈에 확인해보세요.',
+  },
+  profile: {
+    title: '프로필 설정',
+    subtitle: '닉네임과 비밀번호를 관리할 수 있어요.',
+  },
+  timeline: {
+    title: '활동 타임라인',
+    subtitle: '손 촬영·분석, 네일팁 출력, 디자인 생성까지 날짜별로 모아봤어요.',
+  },
+  scans: {
+    title: '손 분석 이력',
+    subtitle: '진행한 손 스캔 분석 결과예요. 항목을 누르면 상세 결과를 볼 수 있어요.',
+  },
+  designs: {
+    title: '디자인 이력',
+    subtitle: '생성한 모든 네일 디자인이에요. 이미지를 눌러 확대·저장·AR 미리보기가 가능해요.',
+  },
+  prints: {
+    title: '네일팁 출력 내역',
+    subtitle: '3D 네일팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
+  },
+  favorites: {
+    title: '찜 목록',
+    subtitle: '마음에 들어 찜해 둔 디자인만 모아뒀어요.',
+  },
+}
 
 // 백엔드가 주는 "yyyy. M. d." 형식이든 ISO 문자열이든 안전하게 Date로 변환
 function parseDateFlexible(raw: string): Date | null {
@@ -230,6 +275,7 @@ export function MyPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   const [detailImage, setDetailImage] = useState<DetailImage | null>(null)
+  const [arTryOnImageUrl, setArTryOnImageUrl] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
 
   // ── 이미지 확대/축소/이동 ──────
@@ -547,9 +593,81 @@ export function MyPage() {
     )
   }
 
-  const renderImageGrid = (items: DesignImageResponse[] | SavedDesignResponse[], isFavoriteView: boolean) => {
+  const totalDesignCount = designs.length
+  const totalScanCount = scanSessions.length
+  const totalFavoriteCount = favorites.length
+  const totalPrintCount = prints.length
+
+  const getNavCount = (id: SectionId): number | null => {
+    switch (id) {
+      case 'scans':
+        return totalScanCount || null
+      case 'designs':
+        return totalDesignCount || null
+      case 'prints':
+        return totalPrintCount || null
+      case 'favorites':
+        return totalFavoriteCount || null
+      default:
+        return null
+    }
+  }
+
+  const renderPageHeader = (id: SectionId) => {
+    const meta = SECTION_META[id]
+    return (
+        <header className="mypage-x__page-header">
+          <p className="mypage-x__page-eyebrow">My Naily</p>
+          <h1 className="mypage-x__title">{meta.title}</h1>
+          <p className="mypage-x__subtitle">{meta.subtitle}</p>
+        </header>
+    )
+  }
+
+  const renderEmptyState = ({
+    icon,
+    title,
+    description,
+    actionLabel,
+    onAction,
+  }: {
+    icon: keyof typeof Icon
+    title: string
+    description: string
+    actionLabel?: string
+    onAction?: () => void
+  }) => (
+      <div className="mypage-x__empty-state">
+        <span className="mypage-x__empty-icon" aria-hidden="true">{Icon[icon]}</span>
+        <p className="mypage-x__empty-title">{title}</p>
+        <p className="mypage-x__empty-desc">{description}</p>
+        {actionLabel && onAction && (
+            <button type="button" className="mypage-x__cta" onClick={onAction}>
+              {actionLabel}
+            </button>
+        )}
+      </div>
+  )
+
+  const renderImageGrid = (
+    items: DesignImageResponse[] | SavedDesignResponse[],
+    isFavoriteView: boolean,
+    empty?: { title: string; description: string; actionLabel?: string; onAction?: () => void },
+  ) => {
     if (items.length === 0) {
-      return <p className="mypage-x__empty">아직 데이터가 없어요.</p>
+      if (empty) {
+        return renderEmptyState({
+          icon: isFavoriteView ? 'heart' : 'design',
+          ...empty,
+        })
+      }
+      return renderEmptyState({
+        icon: 'design',
+        title: '아직 디자인이 없어요',
+        description: 'AI와 함께 첫 네일 디자인을 만들어보세요.',
+        actionLabel: '디자인 만들기',
+        onAction: () => navigate('/design/chat'),
+      })
     }
     return (
         <div className="mypage-x__grid">
@@ -595,11 +713,6 @@ export function MyPage() {
     )
   }
 
-  const totalDesignCount = designs.length
-  const totalScanCount = scanSessions.length
-  const totalFavoriteCount = favorites.length
-  const totalPrintCount = prints.length
-
   return (
       <AppShell mainClassName="mypage-x-page">
         <div className="mypage-x">
@@ -616,17 +729,30 @@ export function MyPage() {
             </div>
 
             <nav className="mypage-x__nav" aria-label="마이페이지 메뉴">
-              {NAV_ITEMS.map((item) => (
-                  <button
-                      key={item.id}
-                      type="button"
-                      className={`mypage-x__nav-item${section === item.id ? ' is-active' : ''}`}
-                      onClick={() => setSection(item.id)}
-                  >
-                    <span className="mypage-x__nav-icon" aria-hidden="true">{Icon[item.icon]}</span>
-                    {item.label}
-                    {section === item.id && <span className="mypage-x__nav-chevron" aria-hidden="true">{Icon.chevron}</span>}
-                  </button>
+              {NAV_GROUPS.map((group) => (
+                  <div key={group.label} className="mypage-x__nav-group">
+                    <p className="mypage-x__nav-group-label">{group.label}</p>
+                    {group.items.map((item) => {
+                      const count = getNavCount(item.id)
+                      return (
+                          <button
+                              key={item.id}
+                              type="button"
+                              className={`mypage-x__nav-item${section === item.id ? ' is-active' : ''}`}
+                              onClick={() => setSection(item.id)}
+                          >
+                            <span className="mypage-x__nav-icon" aria-hidden="true">{Icon[item.icon]}</span>
+                            <span className="mypage-x__nav-label">{item.label}</span>
+                            {count != null && (
+                                <span className="mypage-x__nav-badge">{count}</span>
+                            )}
+                            {section === item.id && (
+                                <span className="mypage-x__nav-chevron" aria-hidden="true">{Icon.chevron}</span>
+                            )}
+                          </button>
+                      )
+                    })}
+                  </div>
               ))}
             </nav>
 
@@ -639,25 +765,47 @@ export function MyPage() {
           {/* ── 메인 콘텐츠 ─────────────────────────────────────────── */}
           <main className="mypage-x__main">
             {section === 'dashboard' && (
-                <section>
-                  <h1 className="mypage-x__title">안녕하세요, {profile?.nickname ?? '회원'}님 👋</h1>
-                  <p className="mypage-x__subtitle">지금까지의 네일리 활동을 한눈에 확인해보세요.</p>
+                <section className="mypage-x__panel">
+                  <div className="mypage-x__hero">
+                    <div className="mypage-x__hero-copy">
+                      <p className="mypage-x__hero-eyebrow">Welcome back</p>
+                      <h1 className="mypage-x__hero-title">
+                        {profile?.nickname ?? '회원'} 님,<br />
+                        오늘도 네일리와 함께해요!
+                      </h1>
+                      <p className="mypage-x__hero-desc">
+                        손 분석부터 네일팁 출력, 디자인까지 — 내 네일 여정을 한곳에서 관리하세요.
+                      </p>
+                    </div>
+                    {/*<div className="mypage-x__hero-actions">*/}
+                    {/*  <button type="button" className="mypage-x__cta" onClick={() => navigate('/scan/hand')}>*/}
+                    {/*    손 스캔하기*/}
+                    {/*  </button>*/}
+                    {/*  <button*/}
+                    {/*      type="button"*/}
+                    {/*      className="mypage-x__cta mypage-x__cta--outline"*/}
+                    {/*      onClick={() => navigate('/design/chat')}*/}
+                    {/*  >*/}
+                    {/*    디자인 만들기*/}
+                    {/*  </button>*/}
+                    {/*</div>*/}
+                  </div>
 
                   <div className="mypage-x__stat-grid">
                     <button type="button" className="mypage-x__stat-card" onClick={() => setSection('scans')}>
                       <span className="mypage-x__stat-icon">{Icon.hand}</span>
                       <span className="mypage-x__stat-value">{totalScanCount}</span>
-                      <span className="mypage-x__stat-label">손 분석 결과</span>
+                      <span className="mypage-x__stat-label">손 분석</span>
                     </button>
                     <button type="button" className="mypage-x__stat-card" onClick={() => setSection('prints')}>
                       <span className="mypage-x__stat-icon">{Icon.print}</span>
                       <span className="mypage-x__stat-value">{totalPrintCount}</span>
-                      <span className="mypage-x__stat-label">네일팁 출력 신청</span>
+                      <span className="mypage-x__stat-label">네일팁 출력</span>
                     </button>
                     <button type="button" className="mypage-x__stat-card" onClick={() => setSection('designs')}>
                       <span className="mypage-x__stat-icon">{Icon.design}</span>
                       <span className="mypage-x__stat-value">{totalDesignCount}</span>
-                      <span className="mypage-x__stat-label">생성한 디자인</span>
+                      <span className="mypage-x__stat-label">생성 디자인</span>
                     </button>
                     <button type="button" className="mypage-x__stat-card" onClick={() => setSection('favorites')}>
                       <span className="mypage-x__stat-icon">{Icon.heart}</span>
@@ -666,33 +814,28 @@ export function MyPage() {
                     </button>
                   </div>
 
-                  {/*<div className="mypage-x__dashboard-actions">*/}
-                  {/*  <button type="button" className="mypage-x__cta" onClick={() => navigate('/scan/hand')}>*/}
-                  {/*    손 스캔하러 가기*/}
-                  {/*  </button>*/}
-                  {/*  <button type="button" className="mypage-x__cta mypage-x__cta--outline" onClick={() => navigate('/design/chat')}>*/}
-                  {/*    새 디자인 생성하기*/}
-                  {/*  </button>*/}
-                  {/*</div>*/}
-
                   <div className="mypage-x__section-header">
-                    <h2 className="mypage-x__section-heading">최근 생성한 디자인</h2>
+                    <h2 className="mypage-x__section-heading">최근 디자인</h2>
                     <button type="button" className="mypage-x__see-all" onClick={() => setSection('designs')}>
                       전체 보기 {Icon.chevron}
                     </button>
                   </div>
                   {isLoading ? (
-                      <p className="mypage-x__empty">불러오는 중...</p>
+                      <p className="mypage-x__loading">불러오는 중...</p>
                   ) : (
-                      renderImageGrid(designs.slice(0, 4), false)
+                      renderImageGrid(designs.slice(0, 4), false, {
+                        title: '아직 생성한 디자인이 없어요',
+                        description: 'AI와 대화하며 첫 네일 디자인을 만들어보세요.',
+                        actionLabel: '디자인 만들기',
+                        onAction: () => navigate('/design/chat'),
+                      })
                   )}
                 </section>
             )}
 
             {section === 'profile' && (
-                <section>
-                  <h1 className="mypage-x__title">프로필</h1>
-                  <p className="mypage-x__subtitle">닉네임과 비밀번호를 관리할 수 있어요.</p>
+                <section className="mypage-x__panel">
+                  {renderPageHeader('profile')}
                   <div className="mypage-x__profile-card">
                     <div className="mypage-x__avatar mypage-x__avatar--lg" aria-hidden="true">
                       {profile?.nickname.charAt(0) ?? '?'}
@@ -761,13 +904,18 @@ export function MyPage() {
             )}
 
             {section === 'scans' && (
-                <section>
-                  <h1 className="mypage-x__title">손 분석 결과 이력</h1>
-                  <p className="mypage-x__subtitle">지금까지 진행한 손 스캔 분석 결과예요. 클릭하면 자세한 결과를 볼 수 있어요.</p>
+                <section className="mypage-x__panel">
+                  {renderPageHeader('scans')}
                   {isLoading ? (
-                      <p className="mypage-x__empty">불러오는 중...</p>
+                      <p className="mypage-x__loading">불러오는 중...</p>
                   ) : scanSessions.length === 0 ? (
-                      <p className="mypage-x__empty">아직 손 스캔 이력이 없어요.</p>
+                      renderEmptyState({
+                        icon: 'hand',
+                        title: '손 분석 이력이 없어요',
+                        description: '손을 스캔하면 퍼스널컬러와 맞춤 네일팁 쉐입을 추천해드려요.',
+                        actionLabel: '손 스캔하기',
+                        onAction: () => navigate('/scan/hand'),
+                      })
                   ) : (
                       <div className="mypage-x__scan-list">
                         {scanSessions.map((session) => renderScanSessionRow(session))}
@@ -777,23 +925,29 @@ export function MyPage() {
             )}
 
             {section === 'designs' && (
-                <section>
-                  <h1 className="mypage-x__title">네일 디자인 생성 이력</h1>
-                  <p className="mypage-x__subtitle">지금까지 생성한 모든 디자인이에요. 클릭하면 확대해서 볼 수 있어요.</p>
-                  {isLoading ? <p className="mypage-x__empty">불러오는 중...</p> : renderImageGrid(designs, false)}
+                <section className="mypage-x__panel">
+                  {renderPageHeader('designs')}
+                  {isLoading ? (
+                      <p className="mypage-x__loading">불러오는 중...</p>
+                  ) : (
+                      renderImageGrid(designs, false)
+                  )}
                 </section>
             )}
 
             {section === 'timeline' && (
-                <section>
-                  <h1 className="mypage-x__title">전체 활동 타임라인</h1>
-                  <p className="mypage-x__subtitle">
-                    손 촬영·분석부터 디자인 생성, 네일팁 출력까지 — 날짜별로 진행한 전체 과정을 한눈에 볼 수 있어요.
-                  </p>
+                <section className="mypage-x__panel">
+                  {renderPageHeader('timeline')}
                   {isLoading ? (
-                      <p className="mypage-x__empty">불러오는 중...</p>
+                      <p className="mypage-x__loading">불러오는 중...</p>
                   ) : timelineGroups.length === 0 ? (
-                      <p className="mypage-x__empty">아직 활동 기록이 없어요.</p>
+                      renderEmptyState({
+                        icon: 'timeline',
+                        title: '아직 활동 기록이 없어요',
+                        description: '손 스캔이나 디자인 생성을 시작하면 여기에 타임라인으로 모여요.',
+                        actionLabel: '손 스캔하기',
+                        onAction: () => navigate('/scan/hand'),
+                      })
                   ) : (
                       <div className="mypage-x__timeline">
                         {timelineGroups.map(([key, group]) => {
@@ -858,19 +1012,32 @@ export function MyPage() {
             )}
 
             {section === 'favorites' && (
-                <section>
-                  <h1 className="mypage-x__title">찜 목록</h1>
-                  <p className="mypage-x__subtitle">마음에 들어서 찜해둔 디자인이에요.</p>
-                  {isLoading ? <p className="mypage-x__empty">불러오는 중...</p> : renderImageGrid(favorites, true)}
+                <section className="mypage-x__panel">
+                  {renderPageHeader('favorites')}
+                  {isLoading ? (
+                      <p className="mypage-x__loading">불러오는 중...</p>
+                  ) : (
+                      renderImageGrid(favorites, true, {
+                        title: '찜한 디자인이 없어요',
+                        description: '마음에 드는 디자인에 ♥를 눌러 모아보세요.',
+                        actionLabel: '디자인 둘러보기',
+                        onAction: () => setSection('designs'),
+                      })
+                  )}
                 </section>
             )}
 
             {section === 'prints' && (
-                <section>
-                  <h1 className="mypage-x__title">네일팁 출력 내역</h1>
-                  <p className="mypage-x__subtitle">3D 네일팁 제작을 신청한 내역이에요. 클릭하면 어떤 손 분석 결과를 바탕으로 신청했는지 볼 수 있어요.</p>
+                <section className="mypage-x__panel">
+                  {renderPageHeader('prints')}
                   {prints.length === 0 ? (
-                      <p className="mypage-x__empty">출력 신청 내역이 없어요.</p>
+                      renderEmptyState({
+                        icon: 'print',
+                        title: '출력 신청 내역이 없어요',
+                        description: '손 분석 후 맞춤 네일팁 3D 출력을 신청할 수 있어요.',
+                        actionLabel: '손 스캔하기',
+                        onAction: () => navigate('/scan/hand'),
+                      })
                   ) : (
                       <div className="mypage-x__print-list">
                         {prints.map((order) => (
@@ -949,6 +1116,13 @@ export function MyPage() {
                 <div className="mypage-x__modal-actions">
                   <button
                       type="button"
+                      className="mypage-x__modal-action--accent"
+                      onClick={() => setArTryOnImageUrl(detailImage.imageUrl)}
+                  >
+                    AR로 미리보기
+                  </button>
+                  <button
+                      type="button"
                       onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
                   >
                     로컬에 저장
@@ -975,6 +1149,13 @@ export function MyPage() {
                 </div>
               </div>
             </div>
+        )}
+
+        {arTryOnImageUrl && (
+            <NailArTryOnModal
+                imageUrl={arTryOnImageUrl}
+                onClose={() => setArTryOnImageUrl(null)}
+            />
         )}
 
         {/* ── 손 분석 결과 상세 모달 ───────────────────────────────────── */}

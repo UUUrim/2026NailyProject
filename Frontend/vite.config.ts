@@ -10,6 +10,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    exclude: ['@mediapipe/tasks-vision'],
+  },
   server: {
     proxy: {
       '/api': {

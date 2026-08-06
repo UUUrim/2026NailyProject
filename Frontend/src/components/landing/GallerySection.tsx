@@ -16,6 +16,7 @@ import {
 import { downloadImage } from '@/utils/downloadImage'
 import { isLoggedIn } from '@/utils/auth'
 import { ApiError } from '@/utils/apiClient'
+import { ScrollReveal } from '@/components/landing/ScrollReveal'
 import '@/styles/mypage.css'
 
 const VISIBLE_COUNT = 4
@@ -197,12 +198,19 @@ export function GallerySection() {
   }
 
   return (
-      <section className="gallery-section" aria-labelledby="gallery-title">
-        <h2 id="gallery-title" className="gallery-section__title">
-          둘러보기
+      <section className="gallery-section landing-section--viewport" aria-labelledby="gallery-title">
+        <div className="landing-section__shell">
+        <div className="landing-section__inner">
+        <ScrollReveal>
+        <h2 id="gallery-title" className="landing-section__title">
+          AI <span className="landing-section__highlight">디자인</span> 둘러보기
         </h2>
-        <p className="gallery-section__subtitle">네일리 사용자들이 직접 만든 디자인이에요</p>
+        <p className="landing-section__subtitle">
+          다른 사용자들이 AI로 만든 네일 디자인에서 영감을 받아 보세요
+        </p>
+        </ScrollReveal>
 
+        <ScrollReveal delay={140}>
         {isLoading ? (
             <div className="gallery-section__carousel">
               <div className="gallery-section__track">
@@ -224,7 +232,7 @@ export function GallerySection() {
                       onClick={handlePrev}
                       aria-label="이전 이미지"
                   >
-                    ‹
+                    ←
                   </button>
               )}
 
@@ -258,11 +266,12 @@ export function GallerySection() {
                       onClick={handleNext}
                       aria-label="다음 이미지"
                   >
-                    ›
+                    →
                   </button>
               )}
             </div>
         )}
+        </ScrollReveal>
 
         {/* ── 이미지 상세 모달 (확대/찜하기/로컬 저장) ───────────────────────── */}
         {detailDesign && (
@@ -323,6 +332,8 @@ export function GallerySection() {
               </div>
             </div>
         )}
+        </div>
+        </div>
       </section>
   )
 }
