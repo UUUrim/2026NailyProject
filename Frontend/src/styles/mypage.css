@@ -406,7 +406,7 @@
   font-size: 0.86rem;
   color: var(--mp-muted);
   line-height: 1.6;
-  max-width: 32ch;
+  max-width: 50ch;
 }
 
 /* ── 대시보드 통계 카드 ── */

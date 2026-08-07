@@ -9,7 +9,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { NailArTryOnModal } from '@/components/ar/NailArTryOnModal'
 import { AppShell } from '@/components/layout/AppShell'
 import { useAuth } from '@/hooks/useAuth'
-import { getNailTipPrintOrders, type NailTipPrintOrder } from '@/utils/mypageStorage'
+import { getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/apis/prints'
 import { getMyProfile, updateNickname, updatePassword, type UserProfileResponse } from '@/apis/user'
 import {
   getMyDesigns,
@@ -40,9 +40,9 @@ type DetailImage = {
 }
 
 const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
-  queued: '출력 대기',
-  printing: '출력 중',
-  completed: '완료',
+  QUEUED: '출력 대기',
+  PRINTING: '출력 중',
+  COMPLETED: '완료',
 }
 
 // 손 스캔 상태값을 사용자가 이해할 수 있는 한글 문구로
@@ -271,7 +271,7 @@ export function MyPage() {
   const [designs, setDesigns] = useState<DesignImageResponse[]>([])
   const [favorites, setFavorites] = useState<SavedDesignResponse[]>([])
   const [scans, setScans] = useState<ScanHistoryItem[]>([])
-  const [prints] = useState<NailTipPrintOrder[]>(getNailTipPrintOrders)
+  const [prints, setPrints] = useState<NailTipPrintOrder[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   const [detailImage, setDetailImage] = useState<DetailImage | null>(null)
@@ -351,11 +351,12 @@ export function MyPage() {
         .catch(() => {})
 
     setIsLoading(true)
-    Promise.allSettled([getMyDesigns(), getLikedDesigns(), getMyScans()]).then(
-        ([designsRes, favoritesRes, scansRes]) => {
+    Promise.allSettled([getMyDesigns(), getLikedDesigns(), getMyScans(), getMyPrintOrders()]).then(
+        ([designsRes, favoritesRes, scansRes, printsRes]) => {
           if (designsRes.status === 'fulfilled') setDesigns(designsRes.value)
           if (favoritesRes.status === 'fulfilled') setFavorites(favoritesRes.value)
           if (scansRes.status === 'fulfilled') setScans(scansRes.value)
+          if (printsRes.status === 'fulfilled') setPrints(printsRes.value)
           setIsLoading(false)
         },
     )
@@ -625,12 +626,12 @@ export function MyPage() {
   }
 
   const renderEmptyState = ({
-    icon,
-    title,
-    description,
-    actionLabel,
-    onAction,
-  }: {
+                              icon,
+                              title,
+                              description,
+                              actionLabel,
+                              onAction,
+                            }: {
     icon: keyof typeof Icon
     title: string
     description: string
@@ -650,9 +651,9 @@ export function MyPage() {
   )
 
   const renderImageGrid = (
-    items: DesignImageResponse[] | SavedDesignResponse[],
-    isFavoriteView: boolean,
-    empty?: { title: string; description: string; actionLabel?: string; onAction?: () => void },
+      items: DesignImageResponse[] | SavedDesignResponse[],
+      isFavoriteView: boolean,
+      empty?: { title: string; description: string; actionLabel?: string; onAction?: () => void },
   ) => {
     if (items.length === 0) {
       if (empty) {
@@ -774,7 +775,7 @@ export function MyPage() {
                         오늘도 네일리와 함께해요!
                       </h1>
                       <p className="mypage-x__hero-desc">
-                        손 분석부터 네일팁 출력, 디자인까지 — 내 네일 여정을 한곳에서 관리하세요.
+                        손 분석부터 네일팁 출력, 디자인까지 — 나의 네일 여정을 한곳에서 관리하세요.
                       </p>
                     </div>
                     {/*<div className="mypage-x__hero-actions">*/}
@@ -991,10 +992,10 @@ export function MyPage() {
                                                 <div>
                                                   <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일팁</p>
                                                   <p className="mypage-x__print-date">
-                                                    {new Date(order.orderedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                                                    {order.orderedAt}
                                                   </p>
                                                 </div>
-                                                <span className={`mypage-x__badge mypage-x__badge--${order.status}`}>
+                                                <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>
                                                   {PRINT_STATUS_LABEL[order.status]}
                                                 </span>
                                               </article>
@@ -1056,9 +1057,9 @@ export function MyPage() {
                               </div>
                               <div>
                                 <p className="mypage-x__print-shape">{order.shapeLabelKo} 쉐입 네일팁 10개 출력</p>
-                                <p className="mypage-x__print-date">{new Date(order.orderedAt).toLocaleString('ko-KR')}</p>
+                                <p className="mypage-x__print-date">{order.orderedAt}</p>
                               </div>
-                              <span className={`mypage-x__badge mypage-x__badge--${order.status}`}>
+                              <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>
                                 {PRINT_STATUS_LABEL[order.status]}
                               </span>
                             </button>
@@ -1263,7 +1264,7 @@ export function MyPage() {
                 </button>
 
                 <p className="mypage-x__scan-detail-heading">
-                  <strong>{new Date(printDetailOrder.orderedAt).toLocaleDateString('ko-KR')}</strong>에{' '}
+                  <strong>{printDetailOrder.orderedAt}</strong>에{' '}
                   <strong>{printDetailOrder.shapeLabelKo}</strong> 쉐입으로 네일팁 10개(양손) 출력을 신청했어요.
                 </p>
 

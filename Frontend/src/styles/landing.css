@@ -669,17 +669,40 @@
 .why-naily__inner {
   display: grid;
   grid-template-columns: 1fr 1.1fr;
-  gap: 3rem;
-  align-items: center;
+  grid-template-rows: auto auto;
+  gap: 1.75rem 3rem;
+  align-items: start;
+}
+
+.why-naily__header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin-bottom: 0.25rem;
 }
 
 .why-naily__visual-col {
+  grid-column: 1;
+  grid-row: 2;
   display: flex;
   justify-content: center;
+  align-self: start;
+}
+
+.why-naily__benefits-grid {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 20px;
+  overflow: hidden;
+  background: #fff;
 }
 
 .why-naily__intro {
-  margin: 0 0 1.75rem;
+  margin: 0;
   font-size: 0.9375rem;
   line-height: 1.65;
   color: var(--naily-text-muted);
@@ -887,16 +910,6 @@
     width: 72%;
     opacity: 1;
   }
-}
-
-.why-naily__benefits-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 20px;
-  overflow: hidden;
-  background: #fff;
 }
 
 .why-naily__benefit {
@@ -1352,6 +1365,13 @@
   .why-naily__inner {
     grid-template-columns: 1fr;
     gap: 2rem;
+  }
+
+  .why-naily__header,
+  .why-naily__visual-col,
+  .why-naily__benefits-grid {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .landing-section__title--left {

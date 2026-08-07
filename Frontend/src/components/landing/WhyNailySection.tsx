@@ -98,29 +98,27 @@ export function WhyNailySection() {
     <section className="why-naily landing-section--viewport" aria-labelledby="why-naily-title">
       <div className="landing-section__shell">
         <div className="landing-section__inner why-naily__inner">
+          <ScrollReveal className="why-naily__header">
+            <h2 id="why-naily-title" className="landing-section__title landing-section__title--left">
+              <span className="landing-section__highlight">네일리</span>의 장점
+            </h2>
+            <p className="why-naily__intro">
+              웹에서 모든 분석과 디자인 도구를 제공해요.
+            </p>
+          </ScrollReveal>
           <ScrollReveal className="why-naily__visual-col" delay={80}>
             <ServiceBrowserMockup />
           </ScrollReveal>
-          <div className="why-naily__content-col">
-            <ScrollReveal>
-              <h2 id="why-naily-title" className="landing-section__title landing-section__title--left">
-                <span className="landing-section__highlight">네일리</span>의 장점
-              </h2>
-              <p className="why-naily__intro">
-                웹에서 모든 분석과 디자인 도구를 제공해요.
-              </p>
-            </ScrollReveal>
-            <div className="why-naily__benefits-grid">
-              {NAILY_BENEFITS.map((benefit, index) => (
-                <article key={benefit.title} className="why-naily__benefit">
-                  <ScrollReveal delay={140 + index * 80}>
-                    <LandingBenefitIcon name={mapBenefitIcon(benefit.icon)} />
-                    <h3 className="why-naily__benefit-title">{benefit.title}</h3>
-                    <p className="why-naily__benefit-description">{benefit.description}</p>
-                  </ScrollReveal>
-                </article>
-              ))}
-            </div>
+          <div className="why-naily__benefits-grid">
+            {NAILY_BENEFITS.map((benefit, index) => (
+              <article key={benefit.title} className="why-naily__benefit">
+                <ScrollReveal delay={140 + index * 80}>
+                  <LandingBenefitIcon name={mapBenefitIcon(benefit.icon)} />
+                  <h3 className="why-naily__benefit-title">{benefit.title}</h3>
+                  <p className="why-naily__benefit-description">{benefit.description}</p>
+                </ScrollReveal>
+              </article>
+            ))}
           </div>
         </div>
       </div>
