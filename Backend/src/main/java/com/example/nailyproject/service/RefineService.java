@@ -179,13 +179,14 @@ public class RefineService {
                         .bodyToMono(JsonNode.class)
                         .block();
             } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-                boolean isRateLimited = e.getStatusCode().value() == 429;
+                int statusCode = e.getStatusCode().value();
+                boolean isRetryable = statusCode == 429 || statusCode == 503; // 429=요청과다, 503=모델 과부하
                 boolean hasAttemptsLeft = attempt < maxAttempts;
 
                 System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
                         + e.getStatusCode() + " " + e.getResponseBodyAsString());
 
-                if (isRateLimited && hasAttemptsLeft) {
+                if (isRetryable && hasAttemptsLeft) {
                     try {
                         Thread.sleep(backoffMillis * attempt);
                     } catch (InterruptedException ie) {
@@ -194,8 +195,8 @@ public class RefineService {
                     continue;
                 }
 
-                if (isRateLimited) {
-                    throw new IllegalStateException("지금 요청이 많아 AI 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
+                if (isRetryable) {
+                    throw new IllegalStateException("지금 AI 서버가 혼잡해서 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
                 }
                 throw new IllegalStateException("키워드 추출용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
             }

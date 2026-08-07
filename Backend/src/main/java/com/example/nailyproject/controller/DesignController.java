@@ -116,4 +116,18 @@ public class DesignController {
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiResponse.fail(500, e.getMessage()));
     }
+
+    /**
+     * 500 - 그 외 예상 못한 예외 (체크 예외 포함, 예: JSON 파싱 오류 등)
+     * 이게 없으면 위 두 핸들러에 안 걸리는 예외가 CORS 헤더도 없는 날것 그대로 응답되어,
+     * 프론트에서 원인 모를 오류(로그아웃 오작동 등)로 오인될 수 있음
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnexpectedError(Exception e) {
+        System.err.println("예상하지 못한 오류: " + e);
+        e.printStackTrace();
+        return ResponseEntity
+                .status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponse.fail(500, "디자인 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."));
+    }
 }

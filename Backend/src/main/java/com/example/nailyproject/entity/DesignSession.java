@@ -44,6 +44,12 @@ public class DesignSession {
     @Column(name = "extracted_preferences", columnDefinition = "JSON")
     private String extractedPreferences; // JSON 형태로 저장
 
+    @Column(name = "finger_overrides", columnDefinition = "JSON")
+    private String fingerOverrides;
+
+    @Column(name = "finger_dislikes", columnDefinition = "JSON")
+    private String fingerDislikes;
+
     public enum SessionStatus {
         IN_PROGRESS, COMPLETED, CANCELLED
     }
@@ -61,6 +67,15 @@ public class DesignSession {
     public void updateExtractedPreferences(String extractedPreferences) {
         this.extractedPreferences = extractedPreferences;
     }
+
+    public void updateFingerOverrides(String fingerOverrides) {
+        this.fingerOverrides = fingerOverrides;
+    }
+
+    public void updateFingerDislikes(String fingerDislikes) {
+        this.fingerDislikes = fingerDislikes;
+    }
+
     public void updateStatus(SessionStatus status) {
         this.status = status;
     }

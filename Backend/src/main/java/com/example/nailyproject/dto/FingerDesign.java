@@ -13,5 +13,5 @@ public class FingerDesign {
     private String designType;
     private String baseColor;
     private String motif;
-    private List<NailPart> parts;
+    private List<String> parts;
 }

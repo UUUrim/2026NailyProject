@@ -33,6 +33,7 @@ public class NailDesignService {
     private final SavedDesignRepository savedDesignRepository;
     private final FingerDesignPlanService fingerDesignPlanService;
     private final WebClient.Builder webClientBuilder;
+    private final ColorNameService colorNameService;
 
     //    ComfyUI URL을 공유받은 ngrok 주소로 변경 (기본적으로 작성되어있음)
     private static final String COMFY_URL = "https://scalded-lard-seduce.ngrok-free.dev";
@@ -50,7 +51,8 @@ public class NailDesignService {
                              S3Service s3Service,
                              SavedDesignRepository savedDesignRepository,
                              FingerDesignPlanService fingerDesignPlanService,
-                             WebClient.Builder webClientBuilder) {
+                             WebClient.Builder webClientBuilder,
+                             ColorNameService colorNameService) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -59,6 +61,7 @@ public class NailDesignService {
         this.savedDesignRepository = savedDesignRepository;
         this.fingerDesignPlanService = fingerDesignPlanService;
         this.webClientBuilder = webClientBuilder;
+        this.colorNameService = colorNameService;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -127,6 +130,12 @@ public class NailDesignService {
         requestBody.put("prompt", workflow);
         requestBody.put("client_id", clientId);
 
+        Map<String, Object> generationConfig = new HashMap<>();
+        generationConfig.put("responseMimeType", "application/json");
+
+        // 조립한 config를 requestBody에 추가
+        requestBody.put("generationConfig", generationConfig);
+
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, getHeaders());
 
         ResponseEntity<String> response = restTemplate.postForEntity(
@@ -166,6 +175,11 @@ public class NailDesignService {
                 .build();
 
         return nailDesignRepository.save(design);
+    }
+
+    //단어사이 하이픈 제거용
+    private String toPromptText(String value) {
+        return value.replace("-", " ");
     }
 
     /**
@@ -221,26 +235,34 @@ public class NailDesignService {
         promptParts.add(finalShape + " nail tips");
 
         if (!finalDesigns.isEmpty()) {
-            promptParts.add(String.join(" ", finalDesigns) + " nail art");
+            promptParts.add(finalDesigns.stream()
+                    .map(this::toPromptText)
+                    .collect(Collectors.joining(" ")) + " nail art");
         }
         if (!finalColors.isEmpty()) {
-            List<String> limitedColors = finalColors.stream().limit(2).collect(Collectors.toList());
+            List<String> limitedColors = finalColors.stream()
+                    .limit(2)
+                    .map(this::toPromptText)
+                    .collect(Collectors.toList());
             promptParts.add(String.join(", ", limitedColors));
         }
         if (!finalMotifs.isEmpty()) {
-            promptParts.add(String.join(" ", finalMotifs) + " nail art");
+            promptParts.add(finalMotifs.stream()
+                    .map(this::toPromptText)
+                    .collect(Collectors.joining(" ")) + " nail art");
         }
         if (!finalMoods.isEmpty()) {
-            promptParts.add(String.join(" ", finalMoods) + " mood");
+            promptParts.add(finalMoods.stream()
+                    .map(this::toPromptText)
+                    .collect(Collectors.joining(" ")) + " mood");
         }
         if (!finalSeasons.isEmpty()) {
-            promptParts.add(String.join(", ", finalSeasons) + " theme");
+            promptParts.add(finalSeasons.stream()
+                    .map(this::toPromptText)
+                    .collect(Collectors.joining(", ")) + " theme");
         }
 
-        promptParts.add("korean nail art style");
-        promptParts.add("product shot");
-        promptParts.add("white background");
-        promptParts.add("no hands");
+        promptParts.add("korean nail art style, product shot, white background, no hands, isolated nail tips, floating nails, disembodied nails");
 
         String finalPromptString = String.join(", ", promptParts);
 
@@ -468,8 +490,16 @@ public class NailDesignService {
             session = designSessionRepository.findByIdAndUserId(request.getSessionId(), user.getId())
                     .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
             if (session.getExtractedPreferences() != null) {
-                slots = objectMapper.readValue(session.getExtractedPreferences(),
-                        objectMapper.getTypeFactory().constructMapType(HashMap.class, String.class, SlotData.class));
+                try {
+                    slots = objectMapper.readValue(session.getExtractedPreferences(),
+                            objectMapper.getTypeFactory().constructMapType(HashMap.class, String.class, SlotData.class));
+                } catch (Exception e) {
+                    // 다른 흐름(예: 예전 선택지 저장 방식)에서 저장된 형식과 안 맞을 수 있으므로,
+                    // 전체 생성이 죽지 않도록 빈 슬롯으로 폴백
+                    System.err.println("extractedPreferences 파싱 실패, 빈 슬롯으로 진행: "
+                            + session.getExtractedPreferences());
+                    slots = new HashMap<>();
+                }
             }
         }
 
@@ -486,19 +516,55 @@ public class NailDesignService {
             session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
         }
 
-        String summary = summarizeSlots(slots);
+        String summary = summarizeSlots(slots, handScan)
+                + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
+                + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null);
         JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType);
+
+        // 사진 기반 생성 등으로 슬롯이 비어있던 카테고리를, 방금 나온 plan 결과값으로 역채움.
+        // 이걸 안 하면 이후 자유입력 채팅이 "슬롯이 텅 비어있다"고 판단해서
+        // mood/color 등을 처음부터 다시 인터뷰하듯 물어보게 된다.
+        if (session != null) {
+            backfillSlotsFromPlan(slots, plan);
+            session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
+        }
 
         List<String> allDisliked = new ArrayList<>();
         for (SlotData s : slots.values()) {
             if (s.getDisliked() != null) allDisliked.addAll(s.getDisliked());
         }
-        String finalNegative = allDisliked.isEmpty()
-                ? BASE_NEGATIVE_PROMPT
-                : BASE_NEGATIVE_PROMPT + ", " + String.join(", ", allDisliked);
+        // disliked 항목은 이제 별도 negative 채널이 아니라, "no X" 문구로 긍정 프롬프트 안에 합쳐서 넣는다.
+        List<String> noPhrases = new ArrayList<>();
+        for (Map.Entry<String, SlotData> entry : slots.entrySet()) {
+            String category = entry.getKey();
+            List<String> disliked = entry.getValue().getDisliked();
+            if (disliked == null || disliked.isEmpty()) continue;
 
-        System.out.println("최종 negative 프롬프트: " + finalNegative);
-        String combinedPrompt = buildCombinedPromptFromPlan(plan);
+            if ("color".equals(category)) {
+                // color의 disliked도 hex -> 이름으로 변환해서 "no X"로 만든다
+                List<String> resolvedNames = colorNameService.resolveColorNames(disliked);
+                resolvedNames.forEach(name -> noPhrases.add("no " + name));
+            } else {
+                disliked.forEach(d -> noPhrases.add("no " + toPromptText(d)));
+            }
+        }
+
+        String finalNegative = BASE_NEGATIVE_PROMPT; // ComfyUI negative 채널은 기본 품질 관련 값만 유지
+
+        Map<String, List<String>> fingerDislikesMap = new HashMap<>();
+        if (session != null && session.getFingerDislikes() != null && !session.getFingerDislikes().isBlank()) {
+            try {
+                JsonNode dislikesNode = objectMapper.readTree(session.getFingerDislikes());
+                dislikesNode.fields().forEachRemaining(entry -> {
+                    List<String> items = new ArrayList<>();
+                    entry.getValue().forEach(v -> items.add(v.asText()));
+                    fingerDislikesMap.put(entry.getKey(), items);
+                });
+            } catch (Exception ignored) {
+            }
+        }
+
+        String combinedPrompt = buildCombinedPromptFromPlan(plan, noPhrases, fingerDislikesMap);
 
         if (session != null) {
             session.updateGeneratedPrompt(combinedPrompt);
@@ -522,11 +588,8 @@ public class NailDesignService {
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
         if (handScan == null) {
-            // 스캔 정보가 없으면 mood 정도만 기본값으로 채워서 진행
             if (getLiked(slots, "mood").isEmpty()) {
-                String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
-                String defaultMood = ("glitter".equals(designType) || "marble".equals(designType)) ? "chic" : "simple";
-                addLiked(slots, "mood", defaultMood);
+                addLiked(slots, "mood", "simple");
             }
             return;
         }
@@ -535,22 +598,8 @@ public class NailDesignService {
             addLiked(slots, "shape", handScan.getShape());
         }
 
-        if (getLiked(slots, "color").isEmpty() && handScan.getRecommendedColors() != null) {
-            try {
-                List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                if (!palette.isEmpty()) {
-                    String randomColor = palette.get(new Random().nextInt(palette.size()));
-                    addLiked(slots, "color", randomColor);
-                }
-            } catch (JsonProcessingException ignored) {
-            }
-        }
-
         if (getLiked(slots, "mood").isEmpty()) {
-            String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
-            String defaultMood = ("glitter".equals(designType) || "marble".equals(designType)) ? "chic" : "simple";
-            addLiked(slots, "mood", defaultMood);
+            addLiked(slots, "mood", "simple");
         }
     }
 
@@ -559,70 +608,184 @@ public class NailDesignService {
         if (!slot.getLiked().contains(value)) slot.getLiked().add(value);
     }
 
-    private String summarizeSlots(Map<String, SlotData> slots) {
+    /**
+     * fingerDesignPlanService.generatePlan()이 만든 plan(JSON)의 top-level 값
+     * (shape/mood/season/color/designType/motif)을, 아직 비어있는 슬롯 카테고리에만
+     * 채워 넣는다. 이미 값이 있는 카테고리는 건드리지 않는다(사용자가 직접 고른 값이
+     * 있으면 그게 우선).
+     */
+    private void backfillSlotsFromPlan(Map<String, SlotData> slots, JsonNode plan) {
+        backfillOne(slots, "shape", plan);
+        backfillOne(slots, "mood", plan);
+        backfillOne(slots, "season", plan);
+        backfillOne(slots, "color", plan);
+        backfillOne(slots, "designType", plan);
+        backfillOne(slots, "motif", plan);
+    }
+
+    private void backfillOne(Map<String, SlotData> slots, String category, JsonNode plan) {
+        boolean alreadyFilled = slots.containsKey(category) && !slots.get(category).getLiked().isEmpty();
+        if (alreadyFilled) return;
+
+        JsonNode valueNode = plan.path(category);
+        if (valueNode.isMissingNode() || valueNode.asText().isBlank()) return;
+        if ("none".equalsIgnoreCase(valueNode.asText())) return;
+
+        addLiked(slots, category, valueNode.asText());
+    }
+
+    private String buildFingerInstructionText(String fingerOverridesJson) {
+        if (fingerOverridesJson == null || fingerOverridesJson.isBlank()) return "";
+        try {
+            JsonNode overrides = objectMapper.readTree(fingerOverridesJson);
+            StringBuilder sb = new StringBuilder("\n[사용자가 명시적으로 지정한 손가락별 디자인 - 반드시 그대로 반영]\n");
+            overrides.fields().forEachRemaining(entry -> {
+                sb.append(entry.getKey()).append(": ").append(entry.getValue().asText()).append("\n");
+            });
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String buildFingerDislikeInstructionText(String fingerDislikesJson) {
+        if (fingerDislikesJson == null || fingerDislikesJson.isBlank()) return "";
+        try {
+            JsonNode dislikes = objectMapper.readTree(fingerDislikesJson);
+            StringBuilder sb = new StringBuilder("\n[사용자가 명시적으로 지정한 손가락별 비선호 - 절대 반영 금지]\n");
+            dislikes.fields().forEachRemaining(entry -> {
+                List<String> items = new ArrayList<>();
+                entry.getValue().forEach(v -> items.add(v.asText()));
+                sb.append(entry.getKey()).append(": ").append(String.join(", ", items)).append(" 절대 사용 금지\n");
+            });
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan) {
         StringBuilder sb = new StringBuilder();
         for (String cat : List.of("shape", "mood", "designType", "color", "season", "motif")) {
             List<String> liked = getLiked(slots, cat);
             if (!liked.isEmpty()) {
-                sb.append(cat).append(": ").append(String.join(", ", liked)).append("\n");
+                if ("color".equals(cat)) {
+                    // hex -> 영어 이름 변환은 Gemini의 추측이 아니라 ColorNameService(외부 API + 로컬 폴백)로 확정
+                    List<String> resolvedNames = colorNameService.resolveColorNames(liked).stream()
+                            .distinct()
+                            .toList();
+                    sb.append("color(이미 확정된 값, 절대 다른 이름으로 바꾸지 말고 그대로 사용): ")
+                            .append(String.join(", ", resolvedNames)).append("\n");
+                } else {
+                    sb.append(cat).append(": ").append(String.join(", ", liked)).append("\n");
+                }
             }
             List<String> disliked = slots.containsKey(cat) ? slots.get(cat).getDisliked() : List.of();
             if (disliked != null && !disliked.isEmpty()) {
                 sb.append(cat).append(" (피해야 함): ").append(String.join(", ", disliked)).append("\n");
             }
         }
+
+        if (getLiked(slots, "color").isEmpty() && handScan != null && handScan.getRecommendedColors() != null) {
+            try {
+                List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                if (!palette.isEmpty()) {
+                    // 퍼스널컬러 후보도 hex 그대로 넘기지 않고, 이름으로 변환해서 후보로 제시
+                    List<String> resolvedPalette = colorNameService.resolveColorNames(palette);
+                    sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, 이 중에서 mood와 가장 잘 어울리는 것을 선택): ")
+                            .append(String.join(", ", resolvedPalette)).append("\n");
+                }
+            } catch (JsonProcessingException ignored) {
+            }
+        }
+
         return sb.toString();
     }
 
-    private String buildCombinedPromptFromPlan(JsonNode plan) {
-        String shape = plan.path("shape").asText("round");
+    private String buildCombinedPromptFromPlan(JsonNode plan, List<String> noPhrases, Map<String, List<String>> fingerDislikesMap) {
+        String shape = toPromptText(plan.path("shape").asText("round"));
         String mood = plan.path("mood").asText("");
         String season = plan.path("season").asText("");
+        String overallColor = plan.path("color").asText("");
+        String overallDesignType = plan.path("designType").asText("");
+        String overallMotif = plan.path("motif").asText("");
 
         List<String> parts = new ArrayList<>();
+        parts.add("A studio product photo of five " + shape + "-shaped press-on nail tips arranged in a perfectly straight horizontal line with equal spacing between each tip");
         parts.add("nailart");
-        parts.add(shape + " nail tips");
-        parts.add("five-finger matching nail set");
+
+        if (!overallDesignType.isBlank()) {
+            parts.add(toPromptText(overallDesignType));
+        }
+        if (!overallColor.isBlank()) {
+            parts.add(toPromptText(overallColor) + " base color");
+        }
+        if (!overallMotif.isBlank() && !"none".equalsIgnoreCase(overallMotif)) {
+            parts.add(toPromptText(overallMotif) + " motif");
+        }
 
         for (String fingerName : List.of("thumb", "index", "middle", "ring", "pinky")) {
             JsonNode finger = plan.get(fingerName);
             if (finger == null) continue;
-            parts.add(describeFingerForPrompt(fingerName, finger));
+            List<String> fingerDislikes = fingerDislikesMap.getOrDefault(fingerName, List.of());
+            String desc = describeFingerForPrompt(fingerName, finger, fingerDislikes);
+            if (desc != null) {
+                parts.add(desc);
+            }
         }
 
-        if (!mood.isBlank()) parts.add(mood + " mood");
-        if (!season.isBlank() && !"none".equalsIgnoreCase(season)) parts.add(season + " theme");
+        if (!mood.isBlank()) parts.add(toPromptText(mood) + " mood");
+        if (!season.isBlank() && !"none".equalsIgnoreCase(season)) parts.add(toPromptText(season));
 
-        parts.add("korean nail art style");
+        if (!noPhrases.isEmpty()) {
+            parts.add(String.join(", ", noPhrases));
+        }
+
+        parts.add("top-down flat lay view");
+        parts.add("plain white background");
+        parts.add("no shadow, no hands, no fingers, no text, no watermark");
         parts.add("product shot");
-        parts.add("white background");
-        parts.add("no hands");
 
         String result = String.join(", ", parts);
-
         System.out.println("최종 완성 프롬프트(통합): " + result);
         return result;
     }
 
-    private String describeFingerForPrompt(String fingerName, JsonNode finger) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(fingerName).append(": ");
-        sb.append(finger.path("design_type").asText());
-        sb.append(" ").append(finger.path("base_color").asText());
-
+    private String describeFingerForPrompt(String fingerName, JsonNode finger, List<String> fingerDislikes) {
+        String designType = finger.path("design_type").asText("");
+        String baseColor = finger.path("base_color").asText("");
         String motif = finger.path("motif").asText("none");
-        if (!"none".equalsIgnoreCase(motif) && !"없음".equals(motif)) {
-            sb.append(" with ").append(motif);
-        }
-
         JsonNode partsList = finger.get("parts");
-        if (partsList != null && partsList.isArray() && partsList.size() > 0) {
-            List<String> partNames = new ArrayList<>();
-            partsList.forEach(p -> partNames.add(p.path("part_name").asText()));
-            sb.append(" (").append(String.join(", ", partNames)).append(")");
+        boolean hasParts = partsList != null && partsList.isArray() && partsList.size() > 0;
+
+        // 지정된 게 아무것도 없으면 이 손가락은 프롬프트에서 아예 생략
+        boolean isEmpty = designType.isBlank() && baseColor.isBlank()
+                && ("none".equalsIgnoreCase(motif)) && !hasParts && fingerDislikes.isEmpty();
+        if (isEmpty) return null;
+
+        List<String> descriptors = new ArrayList<>();
+        if (!designType.isBlank()) descriptors.add(toPromptText(designType));
+        if (!baseColor.isBlank()) descriptors.add(toPromptText(baseColor));
+
+        if (hasParts) {
+            List<String> partTags = new ArrayList<>();
+            partsList.forEach(p -> partTags.add(toPromptText(p.asText())));
+            descriptors.add("with " + String.join(" and ", partTags));
+        } else if (!"none".equalsIgnoreCase(motif)) {
+            descriptors.add("with " + toPromptText(motif));
         }
 
-        return sb.toString();
+        String base = fingerName + " features " + String.join(" ", descriptors);
+
+        if (!fingerDislikes.isEmpty()) {
+            String withoutPart = fingerDislikes.stream()
+                    .map(this::toPromptText)
+                    .collect(Collectors.joining(" or "));
+            base = base + " without " + withoutPart;
+        }
+
+        return base;
     }
 
     /**

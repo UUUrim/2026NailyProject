@@ -43,7 +43,7 @@ public class ChatController {
             @PathVariable Long sessionId,
             @Valid @RequestBody ChatMessageRequestDto request) {
 
-        ChatResponseDto data = chatService.chat(user, sessionId, request.getMessage());
+        ChatResponseDto data = chatService.chat(user, sessionId, request.getMessage()); //사용자가 채팅으로 메세지 보내면 이걸 ChatService에 넘김 + 제미나이 응답 받아서 돌려주는 거까지
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "채팅메세지 전송 성공.", data));

@@ -13,3 +13,4 @@ public class SlotData {
     private List<String> liked = new ArrayList<>();
     private List<String> disliked = new ArrayList<>();
 }
+
