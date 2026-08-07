@@ -7,6 +7,7 @@ import { getLatestScanResult, getScanResult, type ScanResultResponse } from '@/a
 import {
     createChatSession,
     sendChatMessage,
+    savePreferences,
     refineKeywords,
 } from '@/apis/chat'
 import { generateDesign, generateDesignFromImage, type DesignExtractedDetails } from '@/apis/design'
@@ -1326,6 +1327,15 @@ export function NailDesignChatPage() {
                                                             disabled={isSending}
                                                         />
                                                     </label>
+
+                                                    <button
+                                                        type="button"
+                                                        className="design-chat__color-custom-add"
+                                                        onClick={() => toggleQuickReplyValue(customColor.toUpperCase())}
+                                                        disabled={isSending}
+                                                    >
+                                                        이 색상 추가하기
+                                                    </button>
                                                 </div>
                                             </div>
 

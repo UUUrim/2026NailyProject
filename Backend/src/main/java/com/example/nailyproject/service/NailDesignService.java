@@ -588,8 +588,11 @@ public class NailDesignService {
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
         if (handScan == null) {
+            // 스캔 정보가 없으면 mood 정도만 기본값으로 채워서 진행
             if (getLiked(slots, "mood").isEmpty()) {
-                addLiked(slots, "mood", "simple");
+                String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
+                String defaultMood = ("glitter".equals(designType) || "marble".equals(designType)) ? "chic" : "simple";
+                addLiked(slots, "mood", defaultMood);
             }
             return;
         }
@@ -598,8 +601,22 @@ public class NailDesignService {
             addLiked(slots, "shape", handScan.getShape());
         }
 
+        if (getLiked(slots, "color").isEmpty() && handScan.getRecommendedColors() != null) {
+            try {
+                List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                if (!palette.isEmpty()) {
+                    String randomColor = palette.get(new Random().nextInt(palette.size()));
+                    addLiked(slots, "color", randomColor);
+                }
+            } catch (JsonProcessingException ignored) {
+            }
+        }
+
         if (getLiked(slots, "mood").isEmpty()) {
-            addLiked(slots, "mood", "simple");
+            String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
+            String defaultMood = ("glitter".equals(designType) || "marble".equals(designType)) ? "chic" : "simple";
+            addLiked(slots, "mood", defaultMood);
         }
     }
 

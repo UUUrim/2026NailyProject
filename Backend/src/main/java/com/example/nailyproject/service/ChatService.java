@@ -164,7 +164,6 @@ public class ChatService {
     }
 
     public ChatResponseDto chat(User user, Long sessionId, String userMessage) {
-
         DesignSession session = designSessionRepository.findByIdAndUserId(sessionId, user.getId()) //다른 사람이 해당 세션에 접근 못하게
                 .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
 
@@ -377,7 +376,6 @@ public class ChatService {
             String category = action.get("category").asText();
             String actionType = action.get("action").asText();
             String value = action.get("value").asText();
-
             // color 카테고리는 반드시 hex 형식만 허용, 아니면 조용히 무시
             if ("color".equals(category) && ("add_like".equals(actionType) || "add_dislike".equals(actionType))) {
                 if (!HEX_PATTERN.matcher(value.trim()).matches()) {

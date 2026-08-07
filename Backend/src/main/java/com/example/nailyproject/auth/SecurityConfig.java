@@ -41,6 +41,7 @@ public class SecurityConfig {
                                 "/users/signup", "/users/email/**", "/hello",
                                 "/chat-test", "/chats/**", "/scans/**", "/designs/**", //"/users/me"
                                 "/oauth2/**", "/login/oauth2/**", "/error"
+
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

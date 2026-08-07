@@ -215,10 +215,15 @@
 
 .design-chat__bubble-images img {
     width: 100%;
+<<<<<<< HEAD
     /* aspect-ratio: 1; */
     /* object-fit: cover; */
     height: auto;
     max-width: 350px; /* 원하는 최대 가로 크기로 숫자를 조절해 주세요 (예: 100px, 150px) */
+=======
+    aspect-ratio: 1;
+    object-fit: cover;
+>>>>>>> origin/dogyeong
     border-radius: 12px;
     border: 1px solid rgba(0, 0, 0, 0.06);
     display: block;
