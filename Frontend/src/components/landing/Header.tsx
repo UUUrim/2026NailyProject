@@ -25,7 +25,7 @@ export function Header() {
         <header className="landing-header">
             <div className="landing-header__inner">
                 <Link to="/" className="landing-header__logo">
-                    Naily
+                    <img src="/images/logo.png" alt="Naily" className="landing-header__logo-image" />
                 </Link>
 
                 {isLoggedIn && (

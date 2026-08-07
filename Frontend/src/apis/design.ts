@@ -38,6 +38,12 @@ export interface SavedDesignResponse {
     } | null
 }
 
+export interface CommunityDesignResponse {
+    designId: number
+    imageUrl: string
+    createdAt: string
+}
+
 // ─── 디자인 생성 ──────────────────────────────────────────────────────────────
 
 /** POST /designs/generate-detailed — 상세 디자인 생성 요청 (STEP1~4 오케스트레이션) */
@@ -110,5 +116,13 @@ export async function unlikeDesign(designId: number, imageUrl: string): Promise<
 /** GET /users/me/liked-designs — 찜 목록 조회 */
 export async function getLikedDesigns(): Promise<SavedDesignResponse[]> {
     const res = await apiClient.get<SavedDesignResponse[]>('/users/me/liked-designs')
+    return res.data
+}
+
+// ─── 둘러보기(커뮤니티 갤러리) ─────────────────────────────────────────────────
+
+/** GET /designs/community — 메인페이지 '둘러보기': 전체 사용자가 생성한 디자인 목록 (로그인 불필요) */
+export async function getCommunityDesigns(): Promise<CommunityDesignResponse[]> {
+    const res = await apiClient.get<CommunityDesignResponse[]>('/designs/community', false)
     return res.data
 }

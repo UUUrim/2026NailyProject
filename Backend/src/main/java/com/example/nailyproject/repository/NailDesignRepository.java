@@ -14,4 +14,7 @@ public interface NailDesignRepository extends JpaRepository<NailDesign, Long> {
 
     // 삭제 등 소유권 검증이 필요한 단건 조회
     java.util.Optional<NailDesign> findByIdAndUserId(Long id, Long userId);
+
+    // '둘러보기' 커뮤니티 갤러리용 - 전체 사용자의 완성된 디자인을 최신순으로 조회 (최대 60개)    //추가
+    List<NailDesign> findTop60ByStatusOrderByGeneratedAtDesc(NailDesign.DesignStatus status);
 }

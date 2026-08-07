@@ -1,5 +1,6 @@
 import { CtaButton } from '@/components/landing/CtaButton'
 import { Header } from '@/components/landing/Header'
+import { ScrollReveal } from '@/components/landing/ScrollReveal'
 import { HERO_SUBTITLE, MAIN_BG } from '@/constants/landing'
 
 type HeroPanelProps = {
@@ -28,9 +29,11 @@ export function HeroPanel({
       <div className="hero-panel__inner">
         {showHeader && <Header />}
         <div className="hero-panel__content">
-          {showTitle && <h1 className="hero-panel__title">Own your Nail</h1>}
-          <p className="hero-panel__subtitle">{HERO_SUBTITLE}</p>
-          <CtaButton onClick={onStartClick} />
+          <ScrollReveal delay={variant === 'top' ? 0 : 80}>
+            {showTitle && <h1 className="hero-panel__title">Own your Nail</h1>}
+            <p className="hero-panel__subtitle">{HERO_SUBTITLE}</p>
+            <CtaButton onClick={onStartClick} />
+          </ScrollReveal>
         </div>
       </div>
     </section>

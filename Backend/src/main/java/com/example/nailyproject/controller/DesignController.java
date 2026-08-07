@@ -6,11 +6,15 @@ import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.service.NailDesignService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import java.net.URI;
 import java.util.Base64;
 
 @RestController
@@ -33,6 +37,20 @@ public class DesignController {
         return ResponseEntity
                 .status(HttpStatus.ACCEPTED) // 202
                 .body(ApiResponse.success(202, "디자인 생성 요청되었습니다.", data));
+    }
+
+    /**
+     * '둘러보기' 커뮤니티 갤러리 GET /designs/community
+     * 로그인 여부와 상관없이 누구나 조회 가능 (SecurityConfig에서 permitAll 처리)
+     */
+    @GetMapping("/community")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.CommunityDesignResponseDto>>> getCommunityDesigns() {
+
+        var data = nailDesignService.getCommunityGallery();
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "둘러보기 갤러리 조회 성공.", data)
+        );
     }
 
     /**
@@ -95,6 +113,33 @@ public class DesignController {
         return ResponseEntity
                 .status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.success(202, "사진 기반 상세 디자인 생성 요청되었습니다.", data));
+    }
+
+    /**
+     * 이미지 다운로드 프록시 GET /designs/download-proxy?url=...
+     * 브라우저가 S3에 직접 fetch하면 CORS로 막히므로, 서버가 대신 받아서 첨부파일로 내려줌.
+     */
+    @GetMapping("/download-proxy")
+    public ResponseEntity<byte[]> downloadProxy(
+            @AuthenticationPrincipal User user,
+            @RequestParam("url") String url) {
+
+        // 우리 S3 버킷 이미지만 허용 (임의 서버로의 요청 방지)
+        if (!url.contains("naily-scans") || !url.contains(".amazonaws.com")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        byte[] imageBytes = new RestTemplate().getForObject(URI.create(url), byte[].class);
+        if (imageBytes == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        String filename = "naily-design-" + System.currentTimeMillis() + ".png";
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(imageBytes);
     }
 
     /**

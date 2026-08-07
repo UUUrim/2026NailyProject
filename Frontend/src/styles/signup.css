@@ -16,12 +16,16 @@
   position: absolute; /*수정*/
   top: 1.25rem; /*수정*/
   left: 2rem; /*수정*/
-  font-family: var(--font-brand);
-  color: #de869f;
-  font-size: 2rem;
-  font-weight: 400; /*수정*/
+  display: inline-flex;
+  align-items: center;
   line-height: 1;
   text-decoration: none;  /*수정*/
+}
+
+.auth-split__logo-image {
+  height: 5.625rem;
+  width: auto;
+  display: block;
 }
 
 .auth-split__line {
