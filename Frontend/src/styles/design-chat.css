@@ -215,8 +215,10 @@
 
 .design-chat__bubble-images img {
     width: 100%;
-    aspect-ratio: 1;
-    object-fit: cover;
+    /* aspect-ratio: 1; */
+    /* object-fit: cover; */
+    height: auto;
+    max-width: 350px; /* 원하는 최대 가로 크기로 숫자를 조절해 주세요 (예: 100px, 150px) */
     border-radius: 12px;
     border: 1px solid rgba(0, 0, 0, 0.06);
     display: block;
@@ -258,6 +260,18 @@
     margin-bottom: 1rem;
     max-height: 42vh;
     overflow-y: auto;
+}
+
+.design-chat__quickreply-back-btn {
+    font-size: 13px;
+    color: #888;
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+}
+.design-chat__quickreply-back-btn:hover {
+    color: #555;
 }
 
 .design-chat__quickreply-header {
@@ -375,7 +389,12 @@
 }
 
 .design-chat__quickreply-item.is-selected {
-    background: var(--naily-pink-light, #fdf5f8);
+    background: #f9e4ec;
+    font-weight: 600;
+}
+
+.design-chat__quickreply-item.is-selected:hover {
+    background: #f7d9e5;
 }
 
 .design-chat__quickreply-item.is-selected .design-chat__quickreply-index {
@@ -547,6 +566,8 @@
 
 .design-chat__color-picker {
     padding-top: 0.25rem;
+    padding-left: 0.90rem;
+    padding-right: 0.90rem;
 }
 
 .design-chat__color-picker-label {
@@ -640,7 +661,7 @@
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     align-content: start;
-    gap: 0.5rem;
+    gap: 0.3rem;
     /* 스와치 호버 확대(transform)가 상위 스크롤 영역 크기 계산에 영향을 주지 않도록 격리 */
     contain: paint;
     padding: 2px;
@@ -658,6 +679,7 @@
 
 .design-chat__color-swatch {
     width: 100%;
+    max-width: 75px; /*흠..좀 더 줄여도 되지 않을까*/
     aspect-ratio: 1;
     border-radius: 8px;
     border: 2px solid transparent;

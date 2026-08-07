@@ -7,7 +7,6 @@ import { getLatestScanResult, getScanResult, type ScanResultResponse } from '@/a
 import {
     createChatSession,
     sendChatMessage,
-    savePreferences,
     refineKeywords,
 } from '@/apis/chat'
 import { generateDesign, generateDesignFromImage, type DesignExtractedDetails } from '@/apis/design'
@@ -24,6 +23,7 @@ import {
     type PreferenceKey,
 } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
+import { registerChatSessionGuard } from '@/utils/chatSessionGuard'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
 
@@ -41,6 +41,7 @@ type ChatBubble = {
 type QuickReplyOption = {
     value: string
     label: string
+    colorHexes?: string[]
 }
 
 type QuickReply = {
@@ -283,6 +284,7 @@ export function NailDesignChatPage() {
 
     const [mode, setMode] = useState<Mode>('menu')
     const [preferenceStepIndex, setPreferenceStepIndex] = useState(0)
+    const [preferenceStepBubbleIds, setPreferenceStepBubbleIds] = useState<Record<number, string>>({})
     const [collectedPreferences, setCollectedPreferences] = useState<NailDesignPreferences>(
         INITIAL_PREFERENCES,
     )
@@ -297,6 +299,9 @@ export function NailDesignChatPage() {
     const [isSending, setIsSending] = useState(false)
     const [customColor, setCustomColor] = useState('#DE869F')
     const [isQuickReplyCollapsed, setIsQuickReplyCollapsed] = useState(false)
+    // 자유입력(Gemini) 흐름에서 "컬러/쉐입은 고정 UI로 고르고 싶을 때"를 위한 보조 픽커
+    const [freeformColorPickerOpen, setFreeformColorPickerOpen] = useState(false)
+    const [freeformShapePickerOpen, setFreeformShapePickerOpen] = useState(false)
 
     const [showAnalysisPanel, setShowAnalysisPanel] = useState(false)
     const [preview3DImage, setPreview3DImage] = useState<string | null>(null)
@@ -332,10 +337,14 @@ export function NailDesignChatPage() {
         setBubbles((prev) => [...prev, { id: makeId(), role: 'assistant', text, imageUrls, isDesignResult: true }])
     }
     const pushUser = (text: string) => {
-        setBubbles((prev) => [...prev, { id: makeId(), role: 'user', text }])
+        const id = makeId()
+        setBubbles((prev) => [...prev, { id, role: 'user', text }])
+        return id
     }
     const pushUserColors = (text: string, colorSwatches: string[]) => {
-        setBubbles((prev) => [...prev, { id: makeId(), role: 'user', text, colorSwatches }])
+        const id = makeId()
+        setBubbles((prev) => [...prev, { id, role: 'user', text, colorSwatches }])
+        return id
     }
 
     // ── 초기화 ─────────────────────────────────────────────────────────────
@@ -428,6 +437,38 @@ export function NailDesignChatPage() {
     useEffect(() => {
         setIsQuickReplyCollapsed(false)
     }, [activeQuickReply?.id])
+
+    // 채팅 중 새로고침/탭 닫기 방지: 세션이 있고 대화가 어느 정도 진행됐을 때만 경고
+    // (주의: "지금 세션이 날라갑니다 괜찮나요?" 같은 커스텀 문구는 브라우저 보안 정책상
+    //  최신 브라우저에서 표시가 안 되고, 브라우저 기본 확인 문구만 뜬다. 확인창 자체는 뜸.)
+    useEffect(() => {
+        if (!sessionId || !bubbles.some((b) => b.role === 'user')) return
+
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault()
+            e.returnValue = '' // 크롬 등 일부 브라우저는 빈 문자열 지정이 필요함
+        }
+
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+    }, [sessionId, bubbles])
+
+    // 채팅 중 상단 nav(scan/design 등) 클릭으로 앱 내부 이동할 때 방지
+    // — beforeunload와 달리 이건 우리가 직접 만든 확인창이라 문구를 자유롭게 쓸 수 있다.
+    useEffect(() => {
+        registerChatSessionGuard(() => {
+            const hasUserActivity = bubbles.some((b) => b.role === 'user')
+            if (!sessionId || !hasUserActivity) return true
+
+            const hasGeneratedDesign = bubbles.some((b) => b.isDesignResult)
+            const message = hasGeneratedDesign
+                ? '이미 생성된 디자인은 저장돼요. 다만 지금 나가면 여기까지 나눈 대화 내용은 사라져요. 그래도 나가시겠어요?'
+                : '지금 나가면 진행 중인 채팅 내용이 저장되지 않아요. 그래도 나가시겠어요?'
+
+            return window.confirm(message)
+        })
+        return () => registerChatSessionGuard(null)
+    }, [sessionId, bubbles])
 
     // ── 공통: 디자인 생성 후 이동 ───────────────────────────────────────────
     const resolveShapeId = (preferences: NailDesignPreferences): NailShapeId => {
@@ -558,6 +599,7 @@ export function NailDesignChatPage() {
             case 'freeform': {
                 setMode('freeform')
                 freeformLogRef.current = []
+                setSelectedInQuickReply([]) // 새 자유입력 세션 시작 — 이전 세션에서 고르던 색이 섞이지 않게 초기화
                 pushAssistant('네일 아트에 대해 자유롭게 이야기해주세요! 원하는 색감, 스타일, 무드 등 무엇이든 좋아요 😊')
                 break
             }
@@ -585,18 +627,37 @@ export function NailDesignChatPage() {
     }
 
     // ── 선택지 기반 흐름 ───────────────────────────────────────────────────
+    // motif 단계의 "없음"은 다른 모티프와 동시에 선택될 수 없다.
+    const MOTIF_NONE_VALUE = '없음' // designPreferences.ts의 motif "없음" 항목 value와 일치
+
     const toggleQuickReplyValue = (value: string) => {
         if (!activeQuickReply) return
         if (!activeQuickReply.multi) {
             handlePreferenceSingleSelect(value)
             return
         }
+
+        const isMotifStep = activeQuickReply.id === 'pref-motif'
+
         setSelectedInQuickReply((prev) => {
             if (prev.includes(value)) return prev.filter((v) => v !== value)
-            if (activeQuickReply.limit != null && prev.length >= activeQuickReply.limit) {
-                return [...prev.slice(1), value]
+
+            let next = prev
+            if (isMotifStep) {
+                if (value === MOTIF_NONE_VALUE) {
+                    // "없음"을 고르면 기존에 골라둔 다른 모티프는 전부 해제한다.
+                    return [MOTIF_NONE_VALUE]
+                }
+                if (prev.includes(MOTIF_NONE_VALUE)) {
+                    // 이미 "없음"이 선택된 상태에서 다른 모티프를 고르면, "없음"부터 뺀다.
+                    next = prev.filter((v) => v !== MOTIF_NONE_VALUE)
+                }
             }
-            return [...prev, value]
+
+            if (activeQuickReply.limit != null && next.length >= activeQuickReply.limit) {
+                return [...next.slice(1), value]
+            }
+            return [...next, value]
         })
     }
 
@@ -604,17 +665,32 @@ export function NailDesignChatPage() {
         confirmPreferenceStep([value])
     }
 
+    // 특정 단계로 이동하면서, 그 단계에 이미 답한 값이 있으면 선택 상태를 복원한다.
+    // (뒤로 갔다가 다시 앞으로 넘어올 때, 이미 골랐던 값이 사라지지 않도록 하기 위함)
+    const goToPreferenceStep = (index: number, preferences: NailDesignPreferences) => {
+        const step = PREFERENCE_STEPS[index]
+        const quickReply = buildPreferenceQuickReply(step)
+        const previousValues = preferences[step] ?? []
+
+        setSelectedInQuickReply(quickReply.multi ? previousValues : [])
+        setPreferenceStepIndex(index)
+        setActiveQuickReply(quickReply)
+    }
+
     const confirmPreferenceStep = (values: string[]) => {
         const step = PREFERENCE_STEPS[preferenceStepIndex]
-        if (step === 'color') {
-            pushUserColors(`${PREFERENCE_SECTION_LABELS.color}:`, values)
-        } else {
-            const labels = values
-                .map((v) => PREFERENCE_OPTIONS[step].find((o) => o.value === v)?.label ?? v)
-                .join(', ')
-            pushUser(`${PREFERENCE_SECTION_LABELS[step]}: ${labels || '선택 안 함'}`)
-        }
-        setSelectedInQuickReply([])
+        const bubbleId =
+            step === 'color'
+                ? pushUserColors(`${PREFERENCE_SECTION_LABELS.color}:`, values)
+                : pushUser(
+                    `${PREFERENCE_SECTION_LABELS[step]}: ${
+                        values
+                            .map((v) => PREFERENCE_OPTIONS[step].find((o) => o.value === v)?.label ?? v)
+                            .join(', ') || '선택 안 함'
+                    }`,
+                )
+        // 이 단계에서 만들어진 말풍선 id를 기록해 둔다 (뒤로가기 시 정확히 이 버블만 지우기 위함)
+        setPreferenceStepBubbleIds((prev) => ({ ...prev, [preferenceStepIndex]: bubbleId }))
 
         const updated: NailDesignPreferences = {
             ...collectedPreferences,
@@ -624,13 +700,36 @@ export function NailDesignChatPage() {
 
         const nextIndex = preferenceStepIndex + 1
         if (nextIndex < PREFERENCE_STEPS.length) {
-            setPreferenceStepIndex(nextIndex)
-            setActiveQuickReply(buildPreferenceQuickReply(PREFERENCE_STEPS[nextIndex]))
+            goToPreferenceStep(nextIndex, updated)
         } else {
+            setSelectedInQuickReply([])
             setActiveQuickReply(null)
             pushAssistant('선택 감사해요! 이 내용으로 디자인을 생성할게요.')
             void finalizePreferenceDesign(updated)
         }
+    }
+
+    // 선택지 기반 흐름에서 "뒤로가기" — 이전 단계로 돌아가서 그 단계의 답변을 다시 선택할 수 있게 한다.
+    // 그때 남겼던 말풍선은 지우고, 다시 확인(confirmPreferenceStep)하면 새 말풍선과 새 값으로 덮어써진다.
+    const goToPreviousPreferenceStep = () => {
+        const targetIndex = preferenceStepIndex - 1
+        if (targetIndex < 0) return
+
+        const bubbleIdToRemove = preferenceStepBubbleIds[targetIndex]
+        if (bubbleIdToRemove) {
+            setBubbles((prev) => prev.filter((bubble) => bubble.id !== bubbleIdToRemove))
+        }
+
+        // 지금 단계에서 "다음"을 안 눌러도, 고르고 있던 값을 임시로 저장해서
+        // 나중에 이 단계로 다시 돌아왔을 때 사라지지 않게 한다.
+        const currentStep = PREFERENCE_STEPS[preferenceStepIndex]
+        const updatedPreferences: NailDesignPreferences = {
+            ...collectedPreferences,
+            [currentStep]: selectedInQuickReply,
+        }
+        setCollectedPreferences(updatedPreferences)
+
+        goToPreferenceStep(targetIndex, updatedPreferences)
     }
 
     const finalizePreferenceDesign = async (preferences: NailDesignPreferences) => {
@@ -638,17 +737,27 @@ export function NailDesignChatPage() {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
         }
+
+        // 선택지에서 고른 내용을 자연어 문장으로 조립해서, 실제 Gemini와 연동된
+        // /chats/{sessionId}/messages(sendChatMessage)로 전송한다.
+        // 예전에는 /chats/{sessionId}/preferences(savePreferences, 레거시 API)를 호출했는데,
+        // 이 엔드포인트는 더 이상 백엔드의 SlotData 기반 슬롯 시스템과 연결되어 있지 않아서
+        // 여기서 고른 shape/color/season 등이 최종 프롬프트에 반영되지 않는 문제가 있었다.
+        const summaryMessage = [
+            preferences.mood?.length ? `무드는 ${preferences.mood.join(', ')}` : null,
+            preferences.designType?.length ? `디자인 타입은 ${preferences.designType.join(', ')}` : null,
+            preferences.season?.length ? `계절은 ${preferences.season.join(', ')}` : null,
+            preferences.motif?.length ? `모티프는 ${preferences.motif.join(', ')}` : null,
+            preferences.shape?.length ? `쉐입은 ${preferences.shape.join(', ')}` : null,
+            preferences.color?.length ? `컬러는 ${preferences.color.join(', ')}` : null,
+        ]
+            .filter(Boolean)
+            .join(', ') + '로 해주세요.'
+
         try {
-            await savePreferences(sessionId, {
-                mood: preferences.mood,
-                designType: preferences.designType,
-                season: preferences.season[0] ?? '',
-                motif: preferences.motif,
-                shape: preferences.shape[0] ?? '',
-                color: preferences.color,
-            })
+            await sendChatMessage(sessionId, summaryMessage)
         } catch {
-            // 선호도 저장 실패해도 스캔 기반 기본값으로 계속 진행
+            // 전송 실패해도 스캔 기반 기본값으로 계속 진행
         }
         await runGenerateDesign(preferences, 'preference')
     }
@@ -744,31 +853,72 @@ export function NailDesignChatPage() {
                 return
             }
 
-            // Gemini의 isComplete 판단에만 의존하면 판단이 안 나올 때 생성할 방법이 없어지므로,
-            // 아직 완료 전이어도 사용자가 원하면 언제든 직접 생성을 시작할 수 있게 버튼을 항상 띄움
-            const generateOption = { value: '__generate__', label: '🎨 이 내용으로 디자인 생성하기' }
             const suggestionOptions =
                 res.showOptions && res.options.length > 0
-                    ? res.options.map((label) => ({ value: label, label }))
+                    ? res.options.map((label) => ({ value: label, label, colorHexes: res.optionColors?.[label] }))
                     : []
 
-            setActiveQuickReply({
-                id: `freeform-actions-${makeId()}`,
-                question:
-                    suggestionOptions.length > 0
-                        ? '아래에서 골라 답하거나, 준비되면 바로 생성해보세요'
-                        : '준비되면 아래 버튼으로 바로 생성해보세요',
-                options: [...suggestionOptions, generateOption],
-                multi: false,
-                limit: 1,
-                layout: 'list',
-            })
+            // 컬러/쉐입을 물어보는 차례라면, Gemini가 준 텍스트 선택지 뒤에
+            // "고정 UI로 직접 고르기" 옵션을 하나 더 붙여준다.
+            const pickerOption =
+                res.nextQuestionTarget === 'color'
+                    ? [{ value: '__color_picker__', label: '🎨 컬러피커에서 직접 선택하기' }]
+                    : res.nextQuestionTarget === 'shape'
+                        ? [{ value: '__shape_picker__', label: '💅 쉐입 이미지로 직접 선택하기' }]
+                        : []
+
+            setFreeformColorPickerOpen(false)
+            setFreeformShapePickerOpen(false)
+
+            const combinedOptions = [...suggestionOptions, ...pickerOption]
+            if (combinedOptions.length > 0) {
+                setActiveQuickReply({
+                    id: `freeform-actions-${makeId()}`,
+                    question: '이런 느낌은 어때요? 직접 입력하셔도 좋아요',
+                    options: combinedOptions,
+                    multi: false,
+                    limit: 1,
+                    layout: 'list',
+                })
+            } else {
+                // Gemini의 답변 문구(완료됐다/시작할까요? 등)를 일일이 맞춰서 감지하는 대신,
+                // "더 이상 보여줄 선택지가 없다" 그 자체를 신호로 삼는다.
+                // isComplete가 true로 안 왔어도, 물어볼 게 없다는 건 사실상 대화가 끝났다는 뜻이므로
+                // 사용자가 바로 생성할지 더 얘기할지 선택할 수 있게 한다.
+                setActiveQuickReply({
+                    id: `freeform-actions-${makeId()}`,
+                    question: '바로 생성해드릴까요?',
+                    options: [
+                        { value: '__generate__', label: '✅ 네, 바로 생성해주세요' },
+                        { value: '__continue__', label: '💬 아직 더 얘기하고 싶어요' },
+                    ],
+                    multi: false,
+                    limit: 1,
+                    layout: 'list',
+                })
+            }
         } catch (e) {
             const msg = e instanceof ApiError ? e.message : '메시지 전송에 실패했어요. 다시 시도해 주세요.'
             pushAssistant(msg)
         } finally {
             setIsSending(false)
         }
+    }
+
+    // 자유입력 중 "선택지 기반으로 바꿔줘" 같은 뉘앙스를 감지해서, Gemini에게 물어보지 않고
+    // 곧바로 우리가 만든 선택지 기반(PREFERENCE_STEPS) 흐름으로 전환한다.
+    const isPreferenceModeSwitchIntent = (text: string) => {
+        const normalized = text.replace(/\s/g, '')
+        return /선택지/.test(normalized) && /(기반|방식|으로|바꿔|바꾸|할래|하고싶)/.test(normalized)
+    }
+
+    // handleMenuSelect의 'preference' 케이스와 동일한 화면 전환 (사용자 말풍선은 이미 별도로 쌓았으므로 여기선 안 쌓음)
+    const switchToPreferenceMode = () => {
+        setMode('preference')
+        setPreferenceStepIndex(0)
+        setCollectedPreferences(INITIAL_PREFERENCES)
+        pushAssistant('좋아요! 몇 가지만 골라주시면 바로 디자인을 만들어드릴게요.')
+        setActiveQuickReply(buildPreferenceQuickReply(PREFERENCE_STEPS[0]))
     }
 
     // ── 입력창 ─────────────────────────────────────────────────────────────
@@ -788,6 +938,12 @@ export function NailDesignChatPage() {
         }
 
         pushUser(text)
+
+        if (mode === 'freeform' && isPreferenceModeSwitchIntent(text)) {
+            switchToPreferenceMode()
+            return
+        }
+
         if (mode !== 'freeform') setMode('freeform')
         void sendFreeformMessage(text)
     }
@@ -817,6 +973,21 @@ export function NailDesignChatPage() {
                 handleFreeformGenerate()
                 return
             }
+            if (option.value === '__continue__') {
+                setActiveQuickReply(null)
+                pushUser(option.label)
+                return
+            }
+            if (option.value === '__color_picker__') {
+                setFreeformColorPickerOpen(true)
+                setIsQuickReplyCollapsed(false)
+                return
+            }
+            if (option.value === '__shape_picker__') {
+                setFreeformShapePickerOpen(true)
+                setIsQuickReplyCollapsed(false)
+                return
+            }
             const isHexColor = /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(option.label.trim())
             setActiveQuickReply(null)
             if (isHexColor) {
@@ -827,6 +998,36 @@ export function NailDesignChatPage() {
             void sendFreeformMessage(option.label)
             return
         }
+    }
+
+    // 컬러피커/쉐입피커에서 "뒤로가기" — 처음 봤던 추천 선택지 목록으로 돌아간다.
+    // 지금까지 고른 색상/쉐입은 그대로 유지한다 (뒤로갔다 다시 들어와도 선택 내용이 남아있도록).
+    const closeFreeformPicker = () => {
+        setFreeformColorPickerOpen(false)
+        setFreeformShapePickerOpen(false)
+    }
+
+    const toggleFreeformColor = (hex: string) => {
+        setSelectedInQuickReply((prev) => (prev.includes(hex) ? prev.filter((v) => v !== hex) : [...prev, hex]))
+    }
+
+    // 지금까지 담은 색상들을 한 번에 확정해서 Gemini에게 전송한다.
+    const handleFreeformColorPickerConfirm = () => {
+        if (selectedInQuickReply.length === 0) return
+        const hexes = [...selectedInQuickReply]
+        setFreeformColorPickerOpen(false)
+        setSelectedInQuickReply([])
+        setActiveQuickReply(null)
+        pushUserColors('', hexes)
+        void sendFreeformMessage(hexes.join(', '))
+    }
+
+    // 자유입력 흐름에서 쉐입 이미지로 직접 고른 값을 확정한다.
+    const handleFreeformShapeSelect = (label: string) => {
+        setFreeformShapePickerOpen(false)
+        setActiveQuickReply(null)
+        pushUser(label)
+        void sendFreeformMessage(label)
     }
 
     const handleToggleAnalysisPanel = () => {
@@ -965,10 +1166,16 @@ export function NailDesignChatPage() {
                                         </p>
                                     ))}
                                     {bubble.imageUrls && bubble.imageUrls.length > 0 && (
-                                        <div className="design-chat__bubble-images">
+                                        <div
+                                            className={
+                                                bubble.isDesignResult
+                                                    ? 'design-chat__bubble-images'
+                                                    : 'design-chat__bubble-images design-chat__bubble-images--user-photo'
+                                            }
+                                        >
                                             {bubble.imageUrls.map((url, i) => (
                                                 <div key={i} className="design-chat__bubble-image-wrap">
-                                                    <img src={url} alt={`생성된 네일 디자인 ${i + 1}`} />
+                                                    <img src={url} alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'} />
                                                     {bubble.isDesignResult && (
                                                         <button
                                                             type="button"
@@ -1016,6 +1223,31 @@ export function NailDesignChatPage() {
                     {activeQuickReply && (
                         <div className="design-chat__quickreply">
                             <div className="design-chat__quickreply-header">
+                                {activeQuickReply.id.startsWith('pref-') && preferenceStepIndex > 0 && (
+                                    <button
+                                        type="button"
+                                        className="design-chat__quickreply-back-btn"
+                                        onClick={goToPreviousPreferenceStep}
+                                        disabled={isSending}
+                                        aria-label="이전 질문으로 돌아가기"
+                                    >
+                                        ← 이전
+                                    </button>
+                                )}
+
+                                {activeQuickReply.id.startsWith('freeform-actions') &&
+                                    (freeformColorPickerOpen || freeformShapePickerOpen) && (
+                                        <button
+                                            type="button"
+                                            className="design-chat__quickreply-back-btn"
+                                            onClick={closeFreeformPicker}
+                                            disabled={isSending}
+                                            aria-label="추천 선택지로 돌아가기"
+                                        >
+                                            ← 이전
+                                        </button>
+                                    )}
+
                                 <button
                                     type="button"
                                     className="design-chat__quickreply-header-toggle"
@@ -1025,9 +1257,11 @@ export function NailDesignChatPage() {
                                     <p className="design-chat__quickreply-question">{activeQuickReply.question}</p>
                                 </button>
 
-                                {activeQuickReply.id === 'pref-color' && !detectedSeasonCode && (
-                                    <SeasonDropdown value={manualSeasonCode} onChange={setManualSeasonCode} disabled={isSending} />
-                                )}
+                                {(activeQuickReply.id === 'pref-color' ||
+                                        (activeQuickReply.id.startsWith('freeform-actions') && freeformColorPickerOpen)) &&
+                                    !detectedSeasonCode && (
+                                        <SeasonDropdown value={manualSeasonCode} onChange={setManualSeasonCode} disabled={isSending} />
+                                    )}
 
                                 <button
                                     type="button"
@@ -1076,14 +1310,6 @@ export function NailDesignChatPage() {
                                                 </div>
 
                                                 <div className="design-chat__color-custom">
-                                                    <label className="design-chat__color-custom-picker">
-                                                        <input
-                                                            type="color"
-                                                            value={customColor}
-                                                            onChange={(e) => setCustomColor(e.target.value)}
-                                                            disabled={isSending}
-                                                        />
-                                                    </label>
                                                     <button
                                                         type="button"
                                                         className="design-chat__color-custom-add"
@@ -1092,6 +1318,14 @@ export function NailDesignChatPage() {
                                                     >
                                                         이 색상 추가하기
                                                     </button>
+                                                    <label className="design-chat__color-custom-picker">
+                                                        <input
+                                                            type="color"
+                                                            value={customColor}
+                                                            onChange={(e) => setCustomColor(e.target.value)}
+                                                            disabled={isSending}
+                                                        />
+                                                    </label>
                                                 </div>
                                             </div>
 
@@ -1155,6 +1389,98 @@ export function NailDesignChatPage() {
                                                 <p className="design-chat__photo-upload-note">✓ 내 손 스캔 정보도 함께 반영돼요</p>
                                             )}
                                         </div>
+                                    ) : activeQuickReply.id.startsWith('freeform-actions') && freeformColorPickerOpen ? (
+                                        <div className="design-chat__color-picker">
+                                            {detectedSeasonCode && (
+                                                <p className="design-chat__color-picker-label">내 퍼스널컬러 팔레트</p>
+                                            )}
+
+                                            <div className="design-chat__color-main">
+                                                <div className="design-chat__color-grid">
+                                                    {personalPalette.map((hex, idx) => {
+                                                        const selected = selectedInQuickReply.includes(hex)
+                                                        return (
+                                                            <button
+                                                                key={`${hex}-${idx}`}
+                                                                type="button"
+                                                                className={`design-chat__color-swatch${selected ? ' is-selected' : ''}`}
+                                                                style={{ background: hex }}
+                                                                aria-label={hex}
+                                                                onClick={() => toggleFreeformColor(hex)}
+                                                                disabled={isSending}
+                                                            />
+                                                        )
+                                                    })}
+                                                </div>
+
+                                                <div className="design-chat__color-custom">
+                                                    <button
+                                                        type="button"
+                                                        className="design-chat__color-custom-add"
+                                                        onClick={() => toggleFreeformColor(customColor.toUpperCase())}
+                                                        disabled={isSending}
+                                                    >
+                                                        이 색상 추가하기
+                                                    </button>
+                                                    <label className="design-chat__color-custom-picker">
+                                                        <input
+                                                            type="color"
+                                                            value={customColor}
+                                                            onChange={(e) => setCustomColor(e.target.value)}
+                                                            disabled={isSending}
+                                                        />
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            {selectedInQuickReply.length > 0 && (
+                                                <div className="design-chat__color-selected">
+                                                    {selectedInQuickReply.map((hex) => (
+                                                        <span key={hex} className="design-chat__color-chip">
+                                                            <span className="design-chat__color-chip-swatch" style={{ background: hex }} />
+                                                            <button
+                                                                type="button"
+                                                                aria-label={`${hex} 선택 해제`}
+                                                                onClick={() => toggleFreeformColor(hex)}
+                                                                disabled={isSending}
+                                                            >
+                                                                ×
+                                                            </button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            <button
+                                                type="button"
+                                                className="design-chat__quickreply-confirm"
+                                                onClick={handleFreeformColorPickerConfirm}
+                                                disabled={isSending || selectedInQuickReply.length === 0}
+                                            >
+                                                다음 ({selectedInQuickReply.length}개 선택)
+                                            </button>
+                                        </div>
+                                    ) : activeQuickReply.id.startsWith('freeform-actions') && freeformShapePickerOpen ? (
+                                        <div className="design-chat__quickreply-list design-chat__quickreply-list--grid3">
+                                            {PREFERENCE_OPTIONS.shape.map((option) => (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    className="design-chat__quickreply-item"
+                                                    onClick={() => handleFreeformShapeSelect(option.label)}
+                                                    disabled={isSending}
+                                                >
+                                                    {SHAPE_PREVIEW_IMAGES[option.value] && (
+                                                        <img
+                                                            src={SHAPE_PREVIEW_IMAGES[option.value]}
+                                                            alt=""
+                                                            className="design-chat__quickreply-shape-img"
+                                                        />
+                                                    )}
+                                                    <span>{option.label}</span>
+                                                </button>
+                                            ))}
+                                        </div>
                                     ) : (
                                         <div
                                             className={`design-chat__quickreply-list${
@@ -1165,14 +1491,26 @@ export function NailDesignChatPage() {
                                                 const selected = selectedInQuickReply.includes(option.value)
                                                 const shapeImage =
                                                     activeQuickReply.id === 'pref-shape' ? SHAPE_PREVIEW_IMAGES[option.value] : undefined
-                                                const hexMatch = /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(option.label.trim())
+
+                                                // motif 단계에서 "없음"과 다른 모티프는 서로 배타적이므로,
+                                                // 반대쪽이 이미 선택되어 있으면 클릭 자체를 막아 헷갈리지 않게 한다.
+                                                const isMotifMutuallyExclusiveBlocked =
+                                                    activeQuickReply.id === 'pref-motif' &&
+                                                    !selected &&
+                                                    ((option.value === MOTIF_NONE_VALUE && selectedInQuickReply.length > 0) ||
+                                                        (option.value !== MOTIF_NONE_VALUE && selectedInQuickReply.includes(MOTIF_NONE_VALUE)))
+
+                                                // 라벨 전체가 hex인지가 아니라, 라벨 안에 hex가 포함되어 있는지로 검사
+                                                const hexInLabelMatch = option.label.match(/#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b/)
+                                                const isExactHex = /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(option.label.trim())
+
                                                 return (
                                                     <button
                                                         key={option.value}
                                                         type="button"
                                                         className={`design-chat__quickreply-item${selected ? ' is-selected' : ''}`}
                                                         onClick={() => handleQuickReplyClick(option)}
-                                                        disabled={isSending}
+                                                        disabled={isSending || isMotifMutuallyExclusiveBlocked}
                                                     >
                                                         {(activeQuickReply.id === 'pref-season' || activeQuickReply.id === 'menu') && (
                                                             <span className="design-chat__quickreply-index">{idx + 1}</span>
@@ -1184,12 +1522,39 @@ export function NailDesignChatPage() {
                                                                 className="design-chat__quickreply-shape-img"
                                                             />
                                                         )}
-                                                        {hexMatch ? (
+                                                        {option.colorHexes && option.colorHexes.length > 0 ? (
+                                                            // Gemini가 이 텍스트 선택지에 대해 알려준 대표 색상들을
+                                                            // hex 텍스트 노출 없이 작은 동그라미로만 보여준다.
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                                {option.label}
+                                                                <span style={{ display: 'inline-flex', gap: '2px' }}>
+                                                                    {option.colorHexes.map((hex, hexIdx) => (
+                                                                        <span
+                                                                            key={`${hex}-${hexIdx}`}
+                                                                            className="design-chat__quickreply-color-swatch design-chat__quickreply-color-swatch--inline"
+                                                                            style={{ background: hex }}
+                                                                            aria-label={hex}
+                                                                        />
+                                                                    ))}
+                                                                </span>
+                                                            </span>
+                                                        ) : isExactHex ? (
+                                                            // 기존 케이스: 라벨이 hex값 하나뿐일 때 (컬러피커 등)
                                                             <span
                                                                 className="design-chat__quickreply-color-swatch"
                                                                 style={{ background: option.label.trim() }}
                                                                 aria-label={option.label.trim()}
                                                             />
+                                                        ) : hexInLabelMatch ? (
+                                                            // 텍스트 + hex가 섞인 경우 (예: "시원한 블루 계열 (#00A3FF)")
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                                                {option.label}
+                                                                <span
+                                                                    className="design-chat__quickreply-color-swatch design-chat__quickreply-color-swatch--inline"
+                                                                    style={{ background: hexInLabelMatch[0] }}
+                                                                    aria-label={hexInLabelMatch[0]}
+                                                                />
+                                                            </span>
                                                         ) : (
                                                             <span>{option.label}</span>
                                                         )}

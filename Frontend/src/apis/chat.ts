@@ -82,6 +82,7 @@ export interface ChatResponse {
     nextQuestionTarget: string | null
     showOptions: boolean
     options: string[]
+    optionColors?: Record<string, string[]>
     isComplete: boolean
 }
 

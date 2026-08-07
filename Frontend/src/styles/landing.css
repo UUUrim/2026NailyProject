@@ -67,6 +67,7 @@
 }
 
 .landing-header__center-link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   font-size: 0.9375rem;
@@ -82,6 +83,23 @@
 .landing-header__center-link:hover {
   background: rgba(222, 134, 159, 0.12);
   transform: translateY(-2px);
+}
+
+.landing-header__center-link--active {
+  position: relative;
+  color: var(--naily-pink);
+}
+
+.landing-header__center-link--active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--naily-pink);
 }
 
 .landing-header__nav {

@@ -1295,6 +1295,9 @@ export function HandScanResultPage() {
     useEffect(() => {
         if (!leftScanId && !rightScanId) return
 
+        let cancelled = false // 언마운트되면 true로 바뀌어서, 예약된 다음 poll()이 실행돼도 즉시 멈춘다
+        let timer: ReturnType<typeof setTimeout> | null = null
+
         const fetchBoth = async (): Promise<[string | null, string | null]> => {
             const [leftRes, rightRes] = await Promise.all([
                 leftScanId ? getScanResult(leftScanId).catch((e) => {
@@ -1307,6 +1310,8 @@ export function HandScanResultPage() {
                 }) : Promise.resolve(null),
             ])
 
+            if (cancelled) return [null, null] // 응답 오는 사이에 이미 페이지를 떠났으면 상태 업데이트도 하지 않는다
+
             if (leftRes) setLeftResult(leftRes)
             if (rightRes) setRightResult(rightRes)
             const combinedShape = pickHandField('shape', leftRes, rightRes)
@@ -1318,14 +1323,20 @@ export function HandScanResultPage() {
 
         const poll = async () => {
             const [leftStatus, rightStatus] = await fetchBoth()
+            if (cancelled) return
             const leftDone = !leftScanId || (leftStatus && TERMINAL_STATUSES.includes(leftStatus))
             const rightDone = !rightScanId || (rightStatus && TERMINAL_STATUSES.includes(rightStatus))
             if (!(leftDone && rightDone)) {
-                setTimeout(() => void poll(), 3000)
+                timer = setTimeout(() => void poll(), 3000)
             }
         }
 
         void poll()
+
+        return () => {
+            cancelled = true
+            if (timer) clearTimeout(timer)
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [leftScanId, rightScanId, fromMypage])
 
