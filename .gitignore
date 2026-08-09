@@ -10,8 +10,7 @@ HELP.md
 
 build/
 !gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+Backend/build/
 
 Backend/.gradle
 
