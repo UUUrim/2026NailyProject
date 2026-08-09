@@ -34,7 +34,6 @@ public class FingerDesignPlanService {
         참고 이미지에 등장인물/캐릭터가 있다면, 그 캐릭터가 어떤 작품·프랜차이즈의
         누구인지 특정해 이름을 언급하거나 작풍명을 언급하세요.(예: 오비토, 카카시 등의 캐릭터가 나오면
          "나루토"사용) minimal 단어는 최대한 쓰지 마세요.
-       
         아래처럼 "시각적 스타일 요소"를 최대한 세밀하게 관찰해서 motif/design_type/
         parts에 녹여내세요:
         - 화풍/장르: anime, chibi, cartoon, cel-shaded, manga style 등 (특정 작품명이 있다면 포함하세요.)
@@ -47,15 +46,15 @@ public class FingerDesignPlanService {
         이렇게 뽑아낸 요소들을 손가락별 parts/design_type에 다양하게 분산시켜서,
         이미지를 안 보고도 "이런 사진, 장르겠구나" 싶을 만큼 구체적인 디자인 플랜을 만드세요.
 
-        [화려한 장식 요소 - 적극 활용]
+        [화려한 장식 요소 - 참고 이미지가 있을 때만 적용]
         parts에는 아래 같은 입체 장식 어휘를 적극적으로 활용해서 화려함을 더하세요
         (참고 이미지 분위기에 어울리는 것만 골라서 사용하세요):
          - 3D charm, crystal/rhinestone,foil, glitter, chrome/metallic
                       accent, embossed line art 등
          - 모든 손가락에는 3D charm이나 crystal처럼 입체감 있는 포인트 장식을
                       하나 이상 포함하세요.
-        [화려한 장식 요소 - 적극 활용]
-                    parts에는 아래 같은 입체 장식 어휘를 적극적으로 활용해서 화려함을 더하세요
+        
+         parts에는 아래 같은 입체 장식 어휘를 적극적으로 활용해서 화려함을 더하세요
                     (참고 이미지 분위기에 어울리는 것만 골라서 사용하고, 이미지랑 안 어울리면
                     억지로 넣지 마세요):
                     - 3D charm, crystal/rhinestone, foil, glitter, chrome/metallic accent,
@@ -63,7 +62,7 @@ public class FingerDesignPlanService {
                     - 최소 1~2개 손가락에는 3D charm이나 crystal처럼 입체감 있는 포인트 장식을
                       하나 이상 포함하세요.
             
-                    [장식 크기·형태 - 매우 중요]
+         [장식 크기·형태 - 참고 이미지가 있을 때만 적용, 매우 중요]
                     "3D pearl", "3D stud"처럼 크기·모양이 뻔하고 작은 점 형태의 기본 장식을
                     기본값처럼 반복해서 넣지 마세요. 특히 서로 다른 손가락에 pearl/stud류를
                     2개 이상 반복해서 쓰는 것은 금지합니다. 대신:
@@ -80,7 +79,7 @@ public class FingerDesignPlanService {
                       한 손가락에 하나씩 딱 박아넣기보다 모티프 라인을 따라 배치되는 느낌으로
                       묘사하세요 (예: "line of small crystals following the cloud outline").
                       
-        [참고이미지 제공 시 밋밋함 방지 - 매우 중요]
+        [참고이미지 제공 시 밋밋함 방지 - 참고 이미지가 있을 때만 적용, 매우 중요]
         참고 이미지가 있을 때, 이미지에서 색/패턴 1~2가지만 뽑아서
         그걸 손가락 5개에 기계적으로 번갈아 반복하는 것 금지. minimalist 포함 금지(예: "글로시 블랙" /
         "라인아트 레드"만 왔다갔다). 이런 결과는 절대 만들지 마세요. 대신:
@@ -180,6 +179,7 @@ public class FingerDesignPlanService {
         확정된 입력 정보에 "color 후보"가 주어졌다면, 그 후보들 중 mood/season과
         가장 잘 어울리는 색상 하나(또는 조합)를 당신이 판단해서 최상위 color에 채우세요.
         color 후보도 없다면, mood/season에 어울리는 색을 자유롭게 만들어서 사용하세요.
+        %s
 
         [확정된 입력 정보]
         %s
@@ -199,17 +199,57 @@ public class FingerDesignPlanService {
      * 참고 이미지 없이 플랜 생성
      */
     public JsonNode generatePlan(String confirmedInputSummary) {
-        return generatePlan(confirmedInputSummary, null, null);
+        return generatePlan(confirmedInputSummary, null, null, null);
     }
 
     /**
-     * 참고 이미지(base64)와 함께 플랜 생성
+     * 참고 이미지(base64)와 함께 플랜 생성 (새 디자인, 이전 플랜 없음)
      * @param imageBase64  base64로 인코딩된 이미지 (없으면 null)
      * @param imageMimeType 예: "image/jpeg", "image/png"
      */
     public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType) {
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, null);
+    }
 
-        String systemPrompt = String.format(SYSTEM_PROMPT, confirmedInputSummary);
+    /**
+     * "수정하고 싶어요" 흐름 전용: 직전에 만들어졌던 플랜(previousPlanJson)을 같이 넘겨서,
+     * 사용자가 요청한 부분만 바꾸고 나머지 손가락/필드는 이전 문구를 그대로 유지하도록 한다.
+     * 이걸 안 넘기면(=previousPlanJson이 null) 매번 완전히 새로 창작하듯 플랜을 만들어서,
+     * "새끼손가락에 파츠 하나만 추가해줘" 같은 사소한 수정에도 5개 손가락이 전부 바뀌어버렸다.
+     */
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson) {
+
+        String editModeSection = "";
+        if (previousPlanJson != null && !previousPlanJson.isBlank()) {
+            editModeSection = """
+                    [이전 디자인 플랜 - 매우 중요, 반드시 지킬 것]
+                    이번 요청은 완전히 새로운 디자인을 만드는 게 아니라, 아래 "이전 플랜"을
+                    기준으로 사용자가 [확정된 입력 정보]에서 요청한 부분만 "수정"하는 것입니다.
+                    - 사용자가 명시적으로 언급하지 않은 손가락/필드는 이전 플랜의 값을
+                      단어 하나도 바꾸지 말고 그대로 복사해서 쓰세요 (design_type, base_color,
+                      motif, parts 전부 동일하게).
+                    - 사용자가 특정 손가락을 지목했다면(예: "새끼손가락에 파츠 하나 추가"),
+                      그 손가락의 parts/design_type만 요청에 맞게 바꾸고, 다른 4개 손가락은
+                      이전 플랜 그대로 유지하세요.
+                    - [매우 중요 - 우선순위] [확정된 입력 정보]의 "손가락별 지정"이나
+                      "손가락별 비선호"에 특정 손가락이 언급돼 있다면, 그 손가락에 대해서는
+                      "이전 플랜 그대로 유지" 규칙을 무시하고 반드시 그 지정/비선호에 맞게
+                      해당 손가락의 design_type/parts를 실제로 다시 쓰세요. 예를 들어 이전
+                      플랜의 ring이 "star shaped charm"을 갖고 있었는데 손가락별 비선호에
+                      ring: star가 있다면, ring의 parts에서 star 관련 표현을 완전히 제거하고
+                      다른 요소(예: 언급된 대체 모티프)로 바꿔서 새로 써야 합니다. "이전 플랜에
+                      있던 문구니까 그대로 둔다"는 절대 안 됩니다 — 그러면 최종 프롬프트에
+                      "no star"와 "star shaped charm"이 동시에 나오는 모순이 생깁니다.
+                    - top-level의 shape/mood/season/color/designType/motif도, 사용자가
+                      바꿔달라고 한 것만 바꾸고 나머지는 이전 값 그대로 유지하세요.
+                    - color를 hex로 다시 확정 짓지 마세요. 이전 플랜의 색 표현을 그대로 쓰세요.
+
+                    [이전 플랜 (JSON)]
+                    %s
+                    """.formatted(previousPlanJson);
+        }
+
+        String systemPrompt = String.format(SYSTEM_PROMPT, editModeSection, confirmedInputSummary);
 
         List<Map<String, Object>> parts = new ArrayList<>();
         if (imageBase64 != null && imageMimeType != null) {

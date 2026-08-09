@@ -107,6 +107,7 @@ public class NailDesignService {
                 .status(nailDesign.getStatus().name())
                 .generatedPrompt(promptResult.prompt())
                 .imageUrls(nailDesign.getImageUrls())
+                .details(buildDetails(nailDesign))
                 .build();
     }
 
@@ -153,6 +154,7 @@ public class NailDesignService {
         List<String> s3Urls = new ArrayList<>();
 
         // 3. 이미지를 순회하며 백엔드로 다운로드 후 S3 업로드
+        String colorPaletteJson = null;
         for (String ngrokUrl : ngrokUrls) {
             HttpEntity<Void> imageRequest = new HttpEntity<>(getHeaders());
             ResponseEntity<byte[]> imageResponse = restTemplate.exchange(
@@ -164,6 +166,17 @@ public class NailDesignService {
             String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
 
             s3Urls.add(s3Url);
+
+            // 첫 번째 이미지(batch_size=1이라 사실상 1장뿐)를 컬러 워크플로우에 넘겨서
+            // 팔레트를 뽑는다. 실패해도 디자인 생성 자체는 계속 진행되도록 조용히 넘어간다.
+            if (colorPaletteJson == null) {
+                try {
+                    List<String> palette = extractColorPalette(imageBytes);
+                    colorPaletteJson = objectMapper.writeValueAsString(palette);
+                } catch (Exception e) {
+                    System.err.println("컬러 팔레트 추출 실패, 결과 화면엔 색상 없이 진행: " + e.getMessage());
+                }
+            }
         }
 
         NailDesign design = NailDesign.builder()
@@ -173,9 +186,155 @@ public class NailDesignService {
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1")
                 .status(NailDesign.DesignStatus.COMPLETED)
+                .colorPalette(colorPaletteJson)
                 .build();
 
         return nailDesignRepository.save(design);
+    }
+
+    /**
+     * 방금 생성된 네일 디자인 이미지를 ComfyUI 컬러 팔레트 워크플로우에 태워서
+     * 대표 색상 hex 리스트를 뽑아낸다.
+     * (참고: LoadImage 노드는 ComfyUI 서버 자체의 input 폴더 파일명을 참조하는 구조라서,
+     *  방금 만든 이미지를 먼저 /upload/image로 그 폴더에 올려준 뒤 워크플로우를 돌린다.)
+     */
+    private List<String> extractColorPalette(byte[] imageBytes) throws Exception {
+        String comfyFilename = uploadImageToComfy(imageBytes);
+
+        Map<String, Object> workflow = buildColorPaletteWorkflow(comfyFilename);
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("prompt", workflow);
+        requestBody.put("client_id", UUID.randomUUID().toString());
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, getHeaders());
+        ResponseEntity<String> response = restTemplate.postForEntity(COMFY_URL + "/prompt", request, String.class);
+        JsonNode responseJson = objectMapper.readTree(response.getBody());
+        String promptId = responseJson.get("prompt_id").asText();
+
+        String rawHexText = waitForColorPaletteText(promptId);
+
+        List<String> hexes = new ArrayList<>();
+        for (String token : rawHexText.split("[,\\n]")) {
+            String trimmed = token.trim();
+            if (trimmed.matches("^#[0-9A-Fa-f]{6}$")) {
+                hexes.add(trimmed.toUpperCase());
+            }
+        }
+        return hexes;
+    }
+
+    /** ComfyUI의 /upload/image로 이미지를 올리고, LoadImage 노드에 쓸 수 있는 파일명을 돌려받는다. */
+    private String uploadImageToComfy(byte[] imageBytes) {
+        String filename = "naily_palette_" + UUID.randomUUID() + ".png";
+
+        org.springframework.util.MultiValueMap<String, Object> body = new org.springframework.util.LinkedMultiValueMap<>();
+        body.add("image", new org.springframework.core.io.ByteArrayResource(imageBytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        });
+        body.add("type", "input");
+        body.add("overwrite", "true");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA);
+        headers.set("ngrok-skip-browser-warning", "true");
+
+        HttpEntity<org.springframework.util.MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
+        ResponseEntity<String> response = restTemplate.postForEntity(COMFY_URL + "/upload/image", request, String.class);
+
+        try {
+            JsonNode uploadResult = objectMapper.readTree(response.getBody());
+            // ComfyUI가 실제로 저장한 파일명을 우선 사용 (overwrite=false일 때 이름이 달라질 수 있음)
+            return uploadResult.has("name") ? uploadResult.get("name").asText() : filename;
+        } catch (Exception e) {
+            return filename;
+        }
+    }
+
+    /** 컬러_워크플로우.json 구조 그대로 재현. LoadImage(1)만 방금 업로드한 파일명으로 채운다. */
+    private Map<String, Object> buildColorPaletteWorkflow(String comfyFilename) {
+        Map<String, Object> workflow = new HashMap<>();
+
+        workflow.put("1", Map.of(
+                "inputs", Map.of("image", comfyFilename),
+                "class_type", "LoadImage"
+        ));
+        workflow.put("6", Map.of(
+                "inputs", Map.of(
+                        "crop_region", Map.of("x", 30, "y", 150, "width", 700, "height", 260),
+                        "image", new Object[]{"1", 0}
+                ),
+                "class_type", "ImageCropV2"
+        ));
+        workflow.put("2", Map.of(
+                "inputs", Map.of(
+                        "colors", 8,
+                        "mode", "Chart",
+                        "image", new Object[]{"6", 0}
+                ),
+                "class_type", "Image Color Palette"
+        ));
+        workflow.put("4", Map.of(
+                "inputs", Map.of(
+                        "delimiter", ", ",
+                        "text_list", new Object[]{"2", 1}
+                ),
+                "class_type", "Text List to Text"
+        ));
+        workflow.put("5", Map.of(
+                "inputs", Map.of(
+                        "text_0", "",
+                        "text", new Object[]{"4", 0}
+                ),
+                "class_type", "ShowText|pysssss"
+        ));
+
+        return workflow;
+    }
+
+    /**
+     * waitForImage와 같은 폴링 패턴이지만, 이미지(노드 9)가 아니라
+     * ShowText 노드(5)의 텍스트 출력을 기다린다.
+     */
+    private String waitForColorPaletteText(String promptId) throws Exception {
+        for (int i = 0; i < 60; i++) {
+            Thread.sleep(1000);
+
+            HttpEntity<Void> requestEntity = new HttpEntity<>(getHeaders());
+            ResponseEntity<String> historyResponse = restTemplate.exchange(
+                    COMFY_URL + "/history/" + promptId,
+                    HttpMethod.GET,
+                    requestEntity,
+                    String.class
+            );
+
+            JsonNode history = objectMapper.readTree(historyResponse.getBody());
+            if (!history.has(promptId)) continue;
+
+            JsonNode outputs = history.get(promptId).get("outputs");
+            if (outputs == null || !outputs.has("5")) continue;
+
+            JsonNode node5Output = outputs.get("5");
+            // pysssss ShowText 계열은 보통 "text" 키에 문자열 배열을 담아 돌려준다.
+            // 혹시 다른 키를 쓰는 버전이면, 배열 형태인 첫 번째 필드를 폴백으로 사용한다.
+            JsonNode textArray = node5Output.has("text") ? node5Output.get("text") : null;
+            if (textArray == null || !textArray.isArray() || textArray.isEmpty()) {
+                var fields = node5Output.fields();
+                while (fields.hasNext()) {
+                    var entry = fields.next();
+                    if (entry.getValue().isArray() && !entry.getValue().isEmpty()) {
+                        textArray = entry.getValue();
+                        break;
+                    }
+                }
+            }
+            if (textArray != null && textArray.isArray() && !textArray.isEmpty()) {
+                return textArray.get(0).asText();
+            }
+        }
+        throw new RuntimeException("컬러 팔레트 추출 타임아웃");
     }
 
     //단어사이 하이픈 제거용
@@ -547,7 +706,19 @@ public class NailDesignService {
         String summary = summarizeSlots(slots, handScan)
                 + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
                 + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null);
-        JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType);
+
+        // "수정하고 싶어요" 흐름이면 같은 세션에 이전 디자인이 이미 있을 것이므로, 그 플랜을
+        // 이어서 편집하게 넘긴다. 첫 생성이면 이전 디자인이 없어서 null이 되고, 지금까지처럼
+        // 완전히 새로 만든다.
+        String previousPlanJson = null;
+        if (session != null) {
+            previousPlanJson = nailDesignRepository.findTopBySessionIdOrderByGeneratedAtDesc(session.getId())
+                    .map(com.example.nailyproject.entity.NailDesign::getDesignPlan)
+                    .filter(p -> p != null && !p.isBlank())
+                    .orElse(null);
+        }
+
+        JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType, previousPlanJson);
 
         // 사진 기반 생성 등으로 슬롯이 비어있던 카테고리를, 방금 나온 plan 결과값으로 역채움.
         // 이걸 안 하면 이후 자유입력 채팅이 "슬롯이 텅 비어있다"고 판단해서
@@ -611,6 +782,25 @@ public class NailDesignService {
                 .status(nailDesign.getStatus().name())
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
+                .details(buildDetails(nailDesign))
+                .build();
+    }
+
+    /** DesignGenerateResponseDto.Details 조립 — 지금은 colorPalette만 실제로 채워지고, 나머지는 빈 배열. */
+    private DesignGenerateResponseDto.Details buildDetails(NailDesign nailDesign) {
+        List<String> colorPalette = List.of();
+        if (nailDesign.getColorPalette() != null && !nailDesign.getColorPalette().isBlank()) {
+            try {
+                colorPalette = objectMapper.readValue(nailDesign.getColorPalette(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+            } catch (Exception e) {
+                System.err.println("colorPalette 파싱 실패: " + nailDesign.getColorPalette());
+            }
+        }
+        return DesignGenerateResponseDto.Details.builder()
+                .colorPalette(colorPalette)
+                .textures(List.of())
+                .nailParts(List.of())
                 .build();
     }
 
@@ -663,7 +853,10 @@ public class NailDesignService {
         backfillOne(slots, "shape", plan);
         backfillOne(slots, "mood", plan);
         backfillOne(slots, "season", plan);
-        backfillOne(slots, "color", plan);
+        // color는 여기서 역채움하지 않는다 — plan.color는 "sand beige, sky blue..." 같은
+        // 자유 서술 문구라서, hex를 기대하는 summarizeSlots()/colorNameService에 들어가면
+        // "#sand beige" 같은 깨진 값이 만들어진다. color 슬롯은 hex를 다루는 경로
+        // (ChatService/RefineService)에서만 채워지도록 비워둔다.
         backfillOne(slots, "designType", plan);
         backfillOne(slots, "motif", plan);
     }
@@ -715,10 +908,12 @@ public class NailDesignService {
             List<String> liked = getLiked(slots, cat);
             if (!liked.isEmpty()) {
                 if ("color".equals(cat)) {
-                    // hex -> 영어 이름 변환은 Gemini의 추측이 아니라 ColorNameService(외부 API + 로컬 폴백)로 확정
-                    List<String> resolvedNames = colorNameService.resolveColorNames(liked).stream()
-                            .distinct()
-                            .toList();
+                    boolean allHex = liked.stream().allMatch(v -> v != null && v.trim().matches("^#?[0-9A-Fa-f]{6}$"));
+                    List<String> resolvedNames = allHex
+                            // hex -> 영어 이름 변환은 Gemini의 추측이 아니라 ColorNameService(외부 API + 로컬 폴백)로 확정
+                            ? colorNameService.resolveColorNames(liked).stream().distinct().toList()
+                            // hex가 아닌 값(예: 사진 기반 플랜의 서술형 컬러)은 변환 시도 없이 그대로 사용
+                            : liked.stream().distinct().toList();
                     sb.append("color(이미 확정된 값, 절대 다른 이름으로 바꾸지 말고 그대로 사용): ")
                             .append(String.join(", ", resolvedNames)).append("\n");
                 } else {
@@ -780,6 +975,9 @@ public class NailDesignService {
             }
         }
 
+        // 모든 프롬프트에 기본으로 들어가는 고정 지침
+        parts.add("placed with generous spacing and no overlapping, each charm must have perfectly defined sharp edges and clean precise shape");
+
         if (!mood.isBlank()) parts.add(toPromptText(mood) + " mood");
         if (!season.isBlank() && !"none".equalsIgnoreCase(season)) parts.add(toPromptText(season));
 
@@ -789,7 +987,7 @@ public class NailDesignService {
 
         parts.add("top-down flat lay view");
         parts.add("plain white background");
-        parts.add("no shadow, no hands, no fingers, no text, no watermark");
+        parts.add("no shadow, no hands, no fingers, no text, no watermark, no reflection");
         parts.add("product shot");
 
         String result = String.join(", ", parts);

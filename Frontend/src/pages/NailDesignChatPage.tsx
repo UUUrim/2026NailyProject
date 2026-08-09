@@ -24,7 +24,7 @@ import {
     type PreferenceKey,
 } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
-import { registerChatSessionGuard } from '@/utils/chatSessionGuard'
+import { registerChatSessionGuard, confirmLeaveChatIfNeeded } from '@/utils/chatSessionGuard'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
 
@@ -281,6 +281,12 @@ export function NailDesignChatPage() {
 
     const [bubbles, setBubbles] = useState<ChatBubble[]>([])
     const [activeQuickReply, setActiveQuickReply] = useState<QuickReply | null>(null)
+    // "네, 바로 생성해주세요 / 아직 더 얘기하고 싶어요" 확인 화면이 떠 있는 동안엔
+    // 자유 텍스트 입력을 막는다 — 안 그러면 아무 텍스트나 쳤을 때 "수정 요청"으로
+    // 오인돼서 의도치 않게 디자인이 재생성되는 문제가 있었다.
+    const isAwaitingGenerateConfirm =
+        activeQuickReply?.id === 'design-feedback' ||
+        !!activeQuickReply?.options?.some((o) => o.value === '__generate__')
     const [selectedInQuickReply, setSelectedInQuickReply] = useState<string[]>([])
 
     const [mode, setMode] = useState<Mode>('menu')
@@ -470,6 +476,36 @@ export function NailDesignChatPage() {
         })
         return () => registerChatSessionGuard(null)
     }, [sessionId, bubbles])
+
+    // 브라우저 기본 "뒤로가기" 버튼 방지
+    // — 클릭 이벤트가 아니라 history의 popstate라서 위 두 방식과는 다른 트릭이 필요하다.
+    // 활성화되는 순간 현재 URL을 한 번 더 쌓아둬서(더미 엔트리), 사용자가 뒤로가기를
+    // 눌러도 처음엔 그 더미만 소비되고 실제 페이지 이동은 안 일어나게 만든 다음,
+    // 그 시점에 발생하는 popstate 이벤트를 가로채서 확인창을 띄운다.
+    const hasUserActivity = bubbles.some((b) => b.role === 'user') // 매 렌더 재계산되지만 boolean이라 값이 안 바뀌면 deps 비교상 그대로 취급됨
+    useEffect(() => {
+        if (!sessionId || !hasUserActivity) return
+
+        window.history.pushState(null, '', window.location.href)
+
+        const handlePopState = () => {
+            if (confirmLeaveChatIfNeeded()) {
+                // 진짜로 나가는 것을 허용 — 리스너를 먼저 떼어내고 한 번 더 뒤로가기를 보내서
+                // 이번엔 우리가 아까 쌓아둔 더미 엔트리 말고 실제 이전 페이지로 이동시킨다.
+                window.removeEventListener('popstate', handlePopState)
+                window.history.back()
+            } else {
+                // 취소했으면 다시 더미 엔트리를 쌓아서, 다음 뒤로가기도 이 핸들러가 잡게 한다.
+                window.history.pushState(null, '', window.location.href)
+            }
+        }
+
+        window.addEventListener('popstate', handlePopState)
+        return () => window.removeEventListener('popstate', handlePopState)
+        // hasUserActivity가 false→true로 "바뀔 때"만 새로 설치되도록, bubbles 배열이 아니라
+        // 이 boolean 값 자체를 deps로 둔다 (매 메시지마다 더미 엔트리가 계속 쌓이는 것 방지).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sessionId, hasUserActivity])
 
     // ── 공통: 디자인 생성 후 이동 ───────────────────────────────────────────
     const resolveShapeId = (preferences: NailDesignPreferences): NailShapeId => {
@@ -1327,15 +1363,6 @@ export function NailDesignChatPage() {
                                                             disabled={isSending}
                                                         />
                                                     </label>
-
-                                                    <button
-                                                        type="button"
-                                                        className="design-chat__color-custom-add"
-                                                        onClick={() => toggleQuickReplyValue(customColor.toUpperCase())}
-                                                        disabled={isSending}
-                                                    >
-                                                        이 색상 추가하기
-                                                    </button>
                                                 </div>
                                             </div>
 
@@ -1606,7 +1633,7 @@ export function NailDesignChatPage() {
             <textarea
                 ref={textareaRef}
                 className="design-chat__input"
-                placeholder="또는 원하는 디자인 직접 입력"
+                placeholder={isAwaitingGenerateConfirm ? '위 버튼 중 하나를 선택해 주세요' : '또는 원하는 디자인 직접 입력'}
                 value={inputValue}
                 onChange={(e) => {
                     setInputValue(e.target.value)
@@ -1618,7 +1645,7 @@ export function NailDesignChatPage() {
                         handleSubmitInput()
                     }
                 }}
-                disabled={isSending}
+                disabled={isSending || isAwaitingGenerateConfirm}
             />
                         <div className="design-chat__inputbar-row">
                             <button
@@ -1646,7 +1673,7 @@ export function NailDesignChatPage() {
                                     className="design-chat__icon-btn design-chat__icon-btn--send"
                                     aria-label="전송"
                                     onClick={handleSubmitInput}
-                                    disabled={isSending || !inputValue.trim()}
+                                    disabled={isSending || isAwaitingGenerateConfirm || !inputValue.trim()}
                                 >
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                         <path

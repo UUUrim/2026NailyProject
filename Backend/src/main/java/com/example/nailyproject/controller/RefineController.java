@@ -26,11 +26,11 @@ public class RefineController {
             @PathVariable Long sessionId,
             @Valid @RequestBody RefineRequestDto request) {
 
-        // RefineService를 호출해서 Gemini 처리 및 DB 저장
-        List<String> keywords = refineService.extractKeywords(user, sessionId, request.getMessage());
+        // RefineService를 호출해서 Gemini 처리 및 세션에 직접 반영
+        List<String> appliedChanges = refineService.applyRevision(user, sessionId, request.getMessage());
 
         return ResponseEntity.ok(
-                ApiResponse.success(200, "키워드 추출 및 저장 성공.", keywords)
+                ApiResponse.success(200, "수정 요청이 반영되었습니다.", appliedChanges)
         );
     }
 }

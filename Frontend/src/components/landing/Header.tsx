@@ -24,7 +24,7 @@ export function Header() {
     return (
         <header className="landing-header">
             <div className="landing-header__inner">
-                <Link to="/" className="landing-header__logo">
+                <Link to="/" className="landing-header__logo" onClick={handleNavClick('/')}>
                     <img src="/images/logo.png" alt="Naily" className="landing-header__logo-image" />
                 </Link>
 
