@@ -991,6 +991,7 @@ def measure_top(image: np.ndarray, mpp: float,
     search_top = max(fy + int(8 / mpp), wl_cuticle - int(3.5 / mpp))
     search_bot = min(H, wl_cuticle + int(3.5 / mpp))
     cuticle_y  = wl_cuticle   # default fallback
+    grad_ok    = False        # True only if a real L-transition was snapped to
 
     if search_bot > search_top + 10:
         # Per-row brightness: track the finger center dynamically using the
@@ -1026,6 +1027,7 @@ def measure_top(image: np.ndarray, mpp: float,
             if cands:
                 best_idx = min(cands, key=lambda i: abs(i - wl_local))
                 cuticle_y = search_top + best_idx
+                grad_ok = True
                 sign = "drop" if grad[best_idx] < 0 else "rise"
                 print(f"  [Cuticle] gradient: y={cuticle_y} "
                       f"(L {sign}={grad[best_idx]:+.2f}, "
@@ -1041,14 +1043,48 @@ def measure_top(image: np.ndarray, mpp: float,
         print(f"  [Cuticle] W/L estimate: {w_mm_est:.1f}mm / 0.91 "
               f"= {w_mm_est/0.91:.1f}mm")
 
-    # Colour (a* minimum + b* rise) overrides the L-gradient / W-L result.  It
-    # does not depend on light direction, and unlike the 0.91 prior it does not
-    # assume a population-average nail shape.
+    # Colour (a* minimum + b* rise) normally beats both the L-gradient and the
+    # 0.91 prior: it does not depend on light direction, and it does not assume a
+    # population-average nail shape.  But its signature is NOT unique to the
+    # cuticle — the transverse creases on the fingertip pad produce the same
+    # a*-minimum-then-b*-rise, and when one falls inside the search window it can
+    # outscore the real cuticle.  It used to override unconditionally, which threw
+    # away correct gradient answers.  Two guards, both measured on the 2026-08-10
+    # five-finger set (colour error vs calipers in brackets):
+    #
+    #   • ENVELOPE — plate length in units of measured width runs 1.072-1.453
+    #     across all seven reference photos, so a candidate past ~1.45 is outside
+    #     every validated case.  pinky implied 1.67 and was a pad crease [+7.0mm].
+    #   • AGREEMENT — colour was validated to ±0.81mm, so two sound estimates
+    #     should land within ~2x that of each other.  A wider gap means one of
+    #     them latched onto the wrong feature, and it is colour that wanders, and
+    #     always downward onto a crease.  middle disagreed by 2.6mm [+3.8mm];
+    #     thumb and index agreed within 1.1mm and colour was the better of the two
+    #     there [-0.4 / +3.1mm], so the tolerance has to keep those.
+    #
+    # Only a REAL gradient detection may veto colour.  The W/L fallback may not:
+    # that prior was -3.6mm off on the reference photos, far worse than colour, so
+    # letting it win would regress the very cases colour was introduced for.
+    CUT_PLATE_RATIO_MAX = 1.45   # reference-photo envelope, see above
+    CUT_AGREE_TOL_MM    = 1.6    # 2x colour's validated ±0.81mm
     if _cut_color is not None:
-        print(f"  [Cuticle] colour: y={_cut_color} "
-              f"(length={(_cut_color-tip_y)*mpp:.1f}mm) "
-              f"[was y={cuticle_y}, {(cuticle_y-tip_y)*mpp:.1f}mm]")
-        cuticle_y = _cut_color
+        plate_ratio = (_cut_color - fy) * mpp / w_mm_est
+        disagree_mm = abs(_cut_color - cuticle_y) * mpp
+        if plate_ratio > CUT_PLATE_RATIO_MAX:
+            print(f"  [Cuticle] colour REJECTED (envelope): y={_cut_color} "
+                  f"implies plate L/W={plate_ratio:.2f} > {CUT_PLATE_RATIO_MAX} "
+                  f"— likely a fingertip crease; keeping y={cuticle_y}, "
+                  f"{(cuticle_y-tip_y)*mpp:.1f}mm")
+        elif grad_ok and disagree_mm > CUT_AGREE_TOL_MM:
+            print(f"  [Cuticle] colour REJECTED (disagreement): y={_cut_color} "
+                  f"({(_cut_color-tip_y)*mpp:.1f}mm) is {disagree_mm:.1f}mm from "
+                  f"the gradient answer > {CUT_AGREE_TOL_MM}mm; keeping gradient "
+                  f"y={cuticle_y}, {(cuticle_y-tip_y)*mpp:.1f}mm")
+        else:
+            print(f"  [Cuticle] colour: y={_cut_color} "
+                  f"(length={(_cut_color-tip_y)*mpp:.1f}mm) "
+                  f"[was y={cuticle_y}, {(cuticle_y-tip_y)*mpp:.1f}mm]")
+            cuticle_y = _cut_color
 
     cut_idx   = min(cuticle_y - tip_y, len(widths)-1)
     length_px = float(cuticle_y - tip_y)

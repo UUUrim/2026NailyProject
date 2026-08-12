@@ -1,0 +1,50 @@
+time_s,finger,width_mm,length_mm,c_curve_mm,arc_radius_mm,scan_px,poly_px,status
+1.41,thumb,0.6,0.63,2.0,1.02,5.6,4,ok
+1.81,thumb,0.66,0.63,1.29,0.69,6.2,7,ok
+2.22,thumb,0.77,0.84,1.31,0.71,7.3,7,ok
+2.62,thumb,0.74,0.74,1.39,0.74,7.1,6,ok
+3.02,thumb,0.74,0.74,1.34,0.72,7.1,8,ok
+3.41,thumb,0.76,0.73,1.36,0.73,7.3,6,ok
+3.81,thumb,0.76,0.73,1.34,0.72,7.2,10,ok
+4.22,thumb,0.69,0.73,1.28,0.69,6.6,8,ok
+4.61,thumb,0.74,0.73,1.31,0.71,7.1,6,ok
+5.02,thumb,0.6,0.63,2.0,1.02,5.8,4,ok
+5.42,thumb,0.43,0.41,2.0,1.01,4.2,3,ok
+5.81,thumb,0.87,0.82,0.85,0.54,8.5,9,ok
+6.22,thumb,0.95,1.02,0.8,0.54,9.4,9,ok
+6.62,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+7.02,thumb,1.1,1.52,0.3,0.66,10.9,10,ok
+7.61,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+8.01,thumb,1.1,1.41,0.48,0.56,10.9,13,ok
+8.62,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+9.02,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+9.61,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+10.22,thumb,0.77,1.2,1.78,0.93,7.7,3,ok
+10.61,thumb,0.78,1.11,1.78,0.93,7.7,7,ok
+11.02,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+11.42,thumb,9.99,10.58,2.1,6.99,99.2,143,ok
+12.01,thumb,10.07,12.31,2.18,6.9,99.8,136,ok
+12.41,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+12.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+13.42,thumb,14.09,15.4,2.28,9.02,119.2,139,ok
+14.01,thumb,14.0,15.52,2.28,8.92,118.3,140,ok
+14.41,thumb,13.79,15.92,2.33,8.68,117.5,139,ok
+15.02,thumb,13.44,16.12,2.41,7.96,113.2,136,ok
+15.61,thumb,12.64,14.51,2.37,7.91,112.1,128,ok
+16.22,thumb,12.74,14.61,2.38,8.35,115.9,129,ok
+16.81,thumb,12.19,14.51,2.28,8.58,115.6,124,ok
+17.21,thumb,11.87,12.28,2.12,9.36,117.9,134,ok
+17.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+18.21,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+18.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+19.21,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+19.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+20.41,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+20.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+21.21,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+21.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+22.22,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+22.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+23.21,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+23.80,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+24.20,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None

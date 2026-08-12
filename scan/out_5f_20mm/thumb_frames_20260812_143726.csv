@@ -1,0 +1,706 @@
+time_s,finger,width_mm,length_mm,c_curve_mm,arc_radius_mm,scan_px,poly_px,status
+1.21,thumb,,,,,,,No finger detected.
+1.42,thumb,,,,,,,No finger detected.
+1.61,thumb,,,,,,,No finger detected.
+1.82,thumb,,,,,,,No finger detected.
+2.01,thumb,,,,,,,No finger detected.
+2.22,thumb,,,,,,,No finger detected.
+2.41,thumb,,,,,,,No finger detected.
+2.62,thumb,,,,,,,No finger detected.
+2.81,thumb,,,,,,,No finger detected.
+3.02,thumb,,,,,,,No finger detected.
+3.21,thumb,,,,,,,No finger detected.
+3.42,thumb,,,,,,,No finger detected.
+3.61,thumb,,,,,,,No finger detected.
+3.82,thumb,,,,,,,No finger detected.
+4.01,thumb,,,,,,,No finger detected.
+4.22,thumb,,,,,,,No finger detected.
+4.41,thumb,,,,,,,No finger detected.
+4.62,thumb,,,,,,,No finger detected.
+4.81,thumb,,,,,,,No finger detected.
+5.02,thumb,,,,,,,No finger detected.
+5.21,thumb,,,,,,,No finger detected.
+5.82,thumb,11.5,12.84,2.03,9.15,112.8,163,ok
+6.22,thumb,12.9,16.16,2.22,10.48,126.9,146,ok
+6.81,thumb,14.09,15.59,2.29,9.7,123.7,139,ok
+7.42,thumb,12.38,14.73,2.07,9.72,118.9,130,ok
+7.82,thumb,11.83,15.19,2.05,9.56,117.6,132,ok
+8.41,thumb,11.83,16.7,2.18,9.11,117.6,141,ok
+9.02,thumb,11.88,15.36,2.03,9.71,118.4,143,ok
+9.42,thumb,11.83,11.94,1.89,10.2,117.9,129,ok
+10.01,thumb,14.55,16.06,2.11,9.11,116.2,150,ok
+10.41,thumb,103.47,113.91,1.64,816.91,78.1,103,ok
+10.81,thumb,12.38,15.17,2.24,9.67,123.2,136,ok
+11.42,thumb,12.17,15.17,2.14,9.72,121.1,128,ok
+12.01,thumb,11.96,14.85,1.99,9.97,119.1,136,ok
+12.62,thumb,11.72,11.94,1.85,10.2,116.7,133,ok
+13.21,thumb,13.59,15.15,1.85,10.18,116.6,135,ok
+13.82,thumb,14.0,15.46,1.9,9.83,115.8,157,ok
+14.22,thumb,11.66,12.04,1.81,10.29,116.1,135,ok
+15.02,thumb,11.68,15.15,1.86,10.1,116.4,145,ok
+15.42,thumb,11.63,11.94,1.8,10.29,115.9,134,ok
+16.01,thumb,11.55,11.94,1.8,10.16,115.1,130,ok
+16.62,thumb,13.45,11.04,2.88,9.29,134.0,94,ok
+17.02,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+17.42,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+17.82,thumb,17.23,19.42,1.56,24.56,171.2,134,ok
+18.41,thumb,7.17,8.14,1.57,4.88,71.4,87,ok
+18.81,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+19.61,thumb,51.1,56.24,1.21,295.21,530.8,577,ok
+20.01,thumb,10.04,11.04,1.44,9.47,100.0,66,ok
+20.62,thumb,9.6,10.02,1.72,7.56,95.8,67,ok
+21.02,thumb,,,,,,,No finger detected.
+21.21,thumb,,,,,,,No finger detected.
+21.42,thumb,,,,,,,No finger detected.
+21.61,thumb,,,,,,,No finger detected.
+21.82,thumb,,,,,,,No finger detected.
+22.01,thumb,,,,,,,No finger detected.
+22.22,thumb,,,,,,,No finger detected.
+22.41,thumb,,,,,,,No finger detected.
+22.62,thumb,,,,,,,No finger detected.
+22.81,thumb,,,,,,,No finger detected.
+23.02,thumb,,,,,,,No finger detected.
+23.21,thumb,,,,,,,No finger detected.
+23.42,thumb,,,,,,,No finger detected.
+23.61,thumb,,,,,,,No finger detected.
+23.82,thumb,,,,,,,No finger detected.
+24.01,thumb,,,,,,,No finger detected.
+24.22,thumb,,,,,,,No finger detected.
+24.41,thumb,,,,,,,No finger detected.
+24.62,thumb,,,,,,,No finger detected.
+25.21,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+25.61,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+26.20,thumb,11.52,32.56,0.3,31.08,85.7,268,ok
+26.62,thumb,11.21,37.18,3.18,6.53,111.5,307,ok
+27.21,thumb,,,,,,,No finger detected.
+27.40,thumb,,,,,,,No finger detected.
+27.61,thumb,,,,,,,No finger detected.
+27.80,thumb,,,,,,,No finger detected.
+28.02,thumb,,,,,,,No finger detected.
+28.21,thumb,,,,,,,No finger detected.
+28.41,thumb,,,,,,,No finger detected.
+28.60,thumb,,,,,,,No finger detected.
+29.21,thumb,12.4,13.87,2.0,10.01,119.5,126,ok
+29.80,thumb,14.04,17.08,2.24,9.26,120.2,140,ok
+30.20,thumb,11.77,12.16,2.07,9.71,119.2,123,ok
+30.81,thumb,12.29,11.93,2.0,10.44,122.6,135,ok
+31.21,thumb,12.26,14.43,1.92,10.74,122.3,134,ok
+31.80,thumb,12.68,14.64,2.0,9.95,119.4,130,ok
+32.41,thumb,11.74,14.52,1.93,9.89,117.2,132,ok
+33.00,thumb,11.73,14.52,1.97,9.71,117.1,133,ok
+33.61,thumb,12.62,14.92,1.98,9.83,118.2,128,ok
+34.01,thumb,11.78,14.44,1.91,10.04,117.5,135,ok
+34.81,thumb,11.68,14.64,1.91,9.89,116.5,138,ok
+35.21,thumb,11.63,14.62,1.91,9.8,116.1,137,ok
+35.80,thumb,12.6,15.22,1.93,10.02,118.1,141,ok
+36.41,thumb,11.62,14.82,1.99,9.47,116.0,135,ok
+37.00,thumb,13.31,15.02,1.88,10.15,117.5,136,ok
+37.40,thumb,12.37,15.03,2.19,8.5,112.9,127,ok
+38.01,thumb,15.18,17.18,2.17,9.07,117.2,153,ok
+38.60,thumb,11.52,11.94,2.12,8.89,114.8,120,ok
+39.00,thumb,13.47,14.74,1.75,9.68,110.8,137,ok
+39.61,thumb,12.78,14.74,1.94,9.88,117.3,130,ok
+40.20,thumb,11.74,14.84,2.05,9.43,117.1,132,ok
+40.81,thumb,11.36,12.13,2.15,8.58,113.3,122,ok
+41.40,thumb,12.78,14.94,2.22,8.47,114.1,131,ok
+42.01,thumb,12.66,14.85,2.21,8.61,114.8,129,ok
+42.41,thumb,12.81,14.63,2.17,8.52,113.4,134,ok
+43.00,thumb,12.34,14.63,2.2,8.61,114.7,126,ok
+43.61,thumb,13.97,15.62,2.25,8.4,114.3,142,ok
+44.20,thumb,12.97,14.74,2.21,8.43,113.5,132,ok
+44.81,thumb,12.82,14.92,2.24,8.64,115.9,136,ok
+45.40,thumb,12.75,14.82,2.05,9.2,115.6,129,ok
+46.01,thumb,12.99,14.94,1.98,9.54,116.1,131,ok
+46.60,thumb,13.23,15.04,2.02,10.04,120.5,142,ok
+47.21,thumb,12.85,14.94,2.02,9.9,119.6,130,ok
+47.81,thumb,13.1,15.02,2.0,9.34,115.4,130,ok
+48.41,thumb,11.85,15.02,2.06,9.56,118.4,148,ok
+49.00,thumb,13.28,14.92,2.04,9.74,119.1,139,ok
+49.61,thumb,11.63,15.02,2.03,9.35,116.2,144,ok
+50.20,thumb,13.29,15.12,2.05,9.83,120.1,131,ok
+50.81,thumb,12.86,14.92,2.0,9.42,115.9,130,ok
+51.40,thumb,11.63,12.13,1.9,9.84,116.0,132,ok
+52.01,thumb,11.64,12.23,1.94,9.7,116.1,134,ok
+52.60,thumb,12.96,14.94,2.01,9.47,116.4,132,ok
+53.21,thumb,12.98,14.84,2.02,9.59,117.5,133,ok
+54.00,thumb,13.11,15.22,2.05,9.88,120.4,129,ok
+54.61,thumb,14.04,15.02,2.02,9.75,118.7,151,ok
+55.40,thumb,11.71,12.14,1.92,9.89,116.7,134,ok
+56.00,thumb,12.95,15.04,2.08,9.93,121.3,139,ok
+56.80,thumb,12.98,14.94,2.01,9.46,116.3,131,ok
+57.60,thumb,12.99,15.04,2.01,9.66,117.7,140,ok
+58.20,thumb,11.82,15.04,2.04,9.58,117.9,143,ok
+59.00,thumb,12.98,15.12,2.04,9.71,118.9,129,ok
+59.60,thumb,13.04,15.14,2.06,9.59,118.5,140,ok
+60.21,thumb,12.92,15.02,2.02,9.64,118.0,132,ok
+61.01,thumb,11.91,15.02,2.07,9.59,118.9,147,ok
+61.80,thumb,13.1,15.12,2.06,9.52,118.1,134,ok
+62.40,thumb,13.05,15.12,2.05,9.5,117.8,135,ok
+63.20,thumb,12.86,15.1,2.01,9.71,118.3,131,ok
+64.00,thumb,12.98,15.1,2.06,10.04,121.9,132,ok
+64.80,thumb,13.22,15.14,2.05,9.59,118.2,134,ok
+65.60,thumb,13.12,15.24,2.06,9.54,118.2,133,ok
+66.40,thumb,13.1,15.14,2.05,9.64,118.6,133,ok
+67.20,thumb,13.24,15.24,2.08,10.26,123.6,141,ok
+68.00,thumb,13.31,15.22,2.06,9.7,119.4,134,ok
+68.80,thumb,11.95,12.31,2.02,9.85,119.4,133,ok
+69.41,thumb,13.09,15.24,2.05,9.76,119.4,135,ok
+70.21,thumb,12.49,15.22,2.12,10.26,124.8,148,ok
+70.80,thumb,13.33,15.22,2.1,9.7,120.4,135,ok
+71.60,thumb,13.27,15.2,2.12,9.9,122.5,136,ok
+72.20,thumb,11.96,12.51,2.06,9.71,119.5,135,ok
+72.80,thumb,13.07,15.22,2.14,10.02,123.7,133,ok
+73.19,thumb,13.21,15.24,2.2,8.62,114.8,137,ok
+73.80,thumb,12.96,15.34,2.29,9.27,121.7,138,ok
+74.39,thumb,,,,,,,No finger detected.
+74.60,thumb,,,,,,,No finger detected.
+74.79,thumb,,,,,,,No finger detected.
+75.00,thumb,,,,,,,No finger detected.
+75.19,thumb,,,,,,,No finger detected.
+75.41,thumb,,,,,,,No finger detected.
+75.60,thumb,,,,,,,No finger detected.
+75.80,thumb,,,,,,,No finger detected.
+75.99,thumb,,,,,,,No finger detected.
+76.20,thumb,,,,,,,No finger detected.
+76.39,thumb,,,,,,,No finger detected.
+76.60,thumb,,,,,,,No finger detected.
+77.00,thumb,,,,,,,No finger detected.
+77.19,thumb,,,,,,,No finger detected.
+77.40,thumb,,,,,,,No finger detected.
+77.59,thumb,,,,,,,No finger detected.
+77.80,thumb,,,,,,,No finger detected.
+77.99,thumb,,,,,,,No finger detected.
+78.20,thumb,,,,,,,No finger detected.
+78.40,thumb,,,,,,,No finger detected.
+78.60,thumb,,,,,,,No finger detected.
+78.80,thumb,,,,,,,No finger detected.
+79.00,thumb,,,,,,,No finger detected.
+79.40,thumb,,,,,,,No finger detected.
+79.80,thumb,,,,,,,No finger detected.
+80.00,thumb,,,,,,,No finger detected.
+80.20,thumb,,,,,,,No finger detected.
+80.40,thumb,,,,,,,No finger detected.
+80.60,thumb,,,,,,,No finger detected.
+80.80,thumb,,,,,,,No finger detected.
+81.00,thumb,,,,,,,No finger detected.
+81.19,thumb,,,,,,,No finger detected.
+81.79,thumb,1.65,4.61,0.3,1.29,16.5,10,ok
+81.99,thumb,,,,,,,No finger detected.
+82.20,thumb,,,,,,,No finger detected.
+82.39,thumb,,,,,,,No finger detected.
+82.58,thumb,,,,,,,No finger detected.
+82.80,thumb,,,,,,,No finger detected.
+82.99,thumb,,,,,,,No finger detected.
+83.19,thumb,,,,,,,No finger detected.
+83.60,thumb,,,,,,,No finger detected.
+83.79,thumb,,,,,,,No finger detected.
+84.00,thumb,,,,,,,No finger detected.
+84.19,thumb,,,,,,,No finger detected.
+84.39,thumb,,,,,,,No finger detected.
+84.59,thumb,,,,,,,No finger detected.
+84.80,thumb,,,,,,,No finger detected.
+84.99,thumb,,,,,,,No finger detected.
+85.19,thumb,,,,,,,No finger detected.
+85.38,thumb,,,,,,,No finger detected.
+85.59,thumb,,,,,,,No finger detected.
+85.78,thumb,,,,,,,No finger detected.
+86.00,thumb,,,,,,,No finger detected.
+86.19,thumb,,,,,,,No finger detected.
+86.39,thumb,,,,,,,No finger detected.
+86.58,thumb,,,,,,,No finger detected.
+86.99,thumb,,,,,,,No finger detected.
+87.20,thumb,,,,,,,No finger detected.
+87.39,thumb,,,,,,,No finger detected.
+87.60,thumb,,,,,,,No finger detected.
+87.79,thumb,,,,,,,No finger detected.
+87.99,thumb,,,,,,,No finger detected.
+88.19,thumb,,,,,,,No finger detected.
+88.39,thumb,,,,,,,No finger detected.
+88.58,thumb,,,,,,,No finger detected.
+88.79,thumb,,,,,,,No finger detected.
+88.99,thumb,,,,,,,No finger detected.
+89.19,thumb,,,,,,,No finger detected.
+89.38,thumb,,,,,,,No finger detected.
+89.60,thumb,,,,,,,No finger detected.
+89.79,thumb,,,,,,,No finger detected.
+89.99,thumb,,,,,,,No finger detected.
+90.19,thumb,,,,,,,No finger detected.
+90.40,thumb,,,,,,,No finger detected.
+90.58,thumb,,,,,,,No finger detected.
+90.79,thumb,,,,,,,No finger detected.
+90.98,thumb,,,,,,,No finger detected.
+91.20,thumb,,,,,,,No finger detected.
+91.39,thumb,,,,,,,No finger detected.
+91.60,thumb,,,,,,,No finger detected.
+91.79,thumb,,,,,,,No finger detected.
+92.00,thumb,,,,,,,No finger detected.
+92.19,thumb,,,,,,,No finger detected.
+92.39,thumb,,,,,,,No finger detected.
+92.58,thumb,,,,,,,No finger detected.
+92.80,thumb,,,,,,,No finger detected.
+93.38,thumb,2.59,9.72,0.3,2.94,25.8,26,ok
+93.60,thumb,,,,,,,No finger detected.
+93.79,thumb,,,,,,,No finger detected.
+94.19,thumb,2.59,9.92,0.3,2.94,25.8,17,ok
+94.40,thumb,,,,,,,No finger detected.
+94.59,thumb,,,,,,,No finger detected.
+94.79,thumb,,,,,,,No finger detected.
+94.99,thumb,,,,,,,No finger detected.
+95.20,thumb,,,,,,,No finger detected.
+95.39,thumb,,,,,,,No finger detected.
+95.60,thumb,,,,,,,No finger detected.
+95.99,thumb,,,,,,,No finger detected.
+96.18,thumb,,,,,,,No finger detected.
+96.39,thumb,,,,,,,No finger detected.
+96.59,thumb,,,,,,,No finger detected.
+96.79,thumb,,,,,,,No finger detected.
+96.99,thumb,,,,,,,No finger detected.
+97.19,thumb,,,,,,,No finger detected.
+97.38,thumb,,,,,,,No finger detected.
+97.59,thumb,,,,,,,No finger detected.
+97.79,thumb,,,,,,,No finger detected.
+98.00,thumb,,,,,,,No finger detected.
+98.19,thumb,,,,,,,No finger detected.
+98.39,thumb,,,,,,,No finger detected.
+98.58,thumb,,,,,,,No finger detected.
+98.79,thumb,,,,,,,No finger detected.
+98.98,thumb,,,,,,,No finger detected.
+99.19,thumb,,,,,,,No finger detected.
+99.39,thumb,,,,,,,No finger detected.
+99.59,thumb,,,,,,,No finger detected.
+99.99,thumb,,,,,,,No finger detected.
+100.18,thumb,,,,,,,No finger detected.
+100.40,thumb,,,,,,,No finger detected.
+100.59,thumb,,,,,,,No finger detected.
+100.79,thumb,,,,,,,No finger detected.
+100.99,thumb,,,,,,,No finger detected.
+101.20,thumb,,,,,,,No finger detected.
+101.38,thumb,,,,,,,No finger detected.
+101.60,thumb,,,,,,,No finger detected.
+101.78,thumb,,,,,,,No finger detected.
+102.00,thumb,,,,,,,No finger detected.
+102.19,thumb,,,,,,,No finger detected.
+102.39,thumb,,,,,,,No finger detected.
+102.59,thumb,,,,,,,No finger detected.
+102.79,thumb,,,,,,,No finger detected.
+102.98,thumb,,,,,,,No finger detected.
+103.19,thumb,,,,,,,No finger detected.
+103.39,thumb,,,,,,,No finger detected.
+103.59,thumb,,,,,,,No finger detected.
+103.79,thumb,,,,,,,No finger detected.
+103.99,thumb,,,,,,,No finger detected.
+104.18,thumb,,,,,,,No finger detected.
+104.39,thumb,,,,,,,No finger detected.
+104.59,thumb,,,,,,,No finger detected.
+104.79,thumb,,,,,,,No finger detected.
+104.98,thumb,,,,,,,No finger detected.
+105.20,thumb,,,,,,,No finger detected.
+105.39,thumb,,,,,,,No finger detected.
+105.60,thumb,,,,,,,No finger detected.
+105.79,thumb,,,,,,,No finger detected.
+105.99,thumb,,,,,,,No finger detected.
+106.18,thumb,,,,,,,No finger detected.
+106.39,thumb,,,,,,,No finger detected.
+106.58,thumb,,,,,,,No finger detected.
+106.79,thumb,,,,,,,No finger detected.
+106.99,thumb,,,,,,,No finger detected.
+107.19,thumb,,,,,,,No finger detected.
+107.39,thumb,,,,,,,No finger detected.
+107.59,thumb,,,,,,,No finger detected.
+107.79,thumb,,,,,,,No finger detected.
+108.00,thumb,,,,,,,No finger detected.
+108.19,thumb,,,,,,,No finger detected.
+108.39,thumb,,,,,,,No finger detected.
+108.59,thumb,,,,,,,No finger detected.
+108.79,thumb,,,,,,,No finger detected.
+108.99,thumb,,,,,,,No finger detected.
+109.18,thumb,,,,,,,No finger detected.
+109.38,thumb,,,,,,,No finger detected.
+109.59,thumb,,,,,,,No finger detected.
+109.78,thumb,,,,,,,No finger detected.
+110.00,thumb,,,,,,,No finger detected.
+110.19,thumb,,,,,,,No finger detected.
+110.38,thumb,,,,,,,No finger detected.
+110.58,thumb,,,,,,,No finger detected.
+110.78,thumb,,,,,,,No finger detected.
+110.99,thumb,,,,,,,No finger detected.
+111.18,thumb,,,,,,,No finger detected.
+111.38,thumb,,,,,,,No finger detected.
+111.58,thumb,,,,,,,No finger detected.
+111.78,thumb,,,,,,,No finger detected.
+111.98,thumb,,,,,,,No finger detected.
+112.19,thumb,,,,,,,No finger detected.
+112.38,thumb,,,,,,,No finger detected.
+112.59,thumb,,,,,,,No finger detected.
+112.78,thumb,,,,,,,No finger detected.
+112.99,thumb,,,,,,,No finger detected.
+113.18,thumb,,,,,,,No finger detected.
+113.39,thumb,,,,,,,No finger detected.
+113.58,thumb,,,,,,,No finger detected.
+113.79,thumb,,,,,,,No finger detected.
+113.98,thumb,,,,,,,No finger detected.
+114.19,thumb,,,,,,,No finger detected.
+114.38,thumb,,,,,,,No finger detected.
+114.58,thumb,,,,,,,No finger detected.
+114.99,thumb,,,,,,,No finger detected.
+115.18,thumb,,,,,,,No finger detected.
+115.38,thumb,,,,,,,No finger detected.
+115.98,thumb,0.46,4.1,2.0,1.01,4.6,9,ok
+116.18,thumb,,,,,,,No finger detected.
+116.38,thumb,,,,,,,No finger detected.
+116.59,thumb,,,,,,,No finger detected.
+116.78,thumb,,,,,,,No finger detected.
+116.99,thumb,,,,,,,No finger detected.
+117.18,thumb,,,,,,,No finger detected.
+117.58,thumb,1.94,8.73,0.3,1.72,19.3,13,ok
+117.79,thumb,,,,,,,No finger detected.
+117.98,thumb,,,,,,,No finger detected.
+118.18,thumb,,,,,,,No finger detected.
+118.38,thumb,,,,,,,No finger detected.
+118.59,thumb,,,,,,,No finger detected.
+118.78,thumb,,,,,,,No finger detected.
+118.99,thumb,,,,,,,No finger detected.
+119.39,thumb,,,,,,,No finger detected.
+119.58,thumb,,,,,,,No finger detected.
+119.78,thumb,,,,,,,No finger detected.
+119.98,thumb,,,,,,,No finger detected.
+120.19,thumb,,,,,,,No finger detected.
+120.38,thumb,,,,,,,No finger detected.
+120.58,thumb,,,,,,,No finger detected.
+120.78,thumb,,,,,,,No finger detected.
+120.99,thumb,,,,,,,No finger detected.
+121.18,thumb,,,,,,,No finger detected.
+121.39,thumb,,,,,,,No finger detected.
+121.58,thumb,,,,,,,No finger detected.
+121.78,thumb,,,,,,,No finger detected.
+121.98,thumb,,,,,,,No finger detected.
+122.19,thumb,,,,,,,No finger detected.
+122.38,thumb,,,,,,,No finger detected.
+122.58,thumb,,,,,,,No finger detected.
+122.78,thumb,,,,,,,No finger detected.
+122.99,thumb,,,,,,,No finger detected.
+123.18,thumb,,,,,,,No finger detected.
+123.38,thumb,,,,,,,No finger detected.
+123.98,thumb,,,,,,,No finger detected.
+124.18,thumb,,,,,,,No finger detected.
+124.78,thumb,1.94,8.94,0.3,1.72,19.3,15,ok
+124.99,thumb,,,,,,,No finger detected.
+125.18,thumb,,,,,,,No finger detected.
+125.38,thumb,,,,,,,No finger detected.
+125.58,thumb,,,,,,,No finger detected.
+126.18,thumb,,,,,,,No finger detected.
+126.38,thumb,,,,,,,No finger detected.
+126.58,thumb,,,,,,,No finger detected.
+127.18,thumb,1.94,9.02,0.3,1.71,19.3,14,ok
+127.58,thumb,,,,,,,No finger detected.
+127.78,thumb,,,,,,,Not enough finger rows detected in top photo.
+128.38,thumb,,,,,,,No finger detected.
+128.59,thumb,,,,,,,No finger detected.
+128.78,thumb,,,,,,,No finger detected.
+128.99,thumb,,,,,,,No finger detected.
+129.18,thumb,,,,,,,No finger detected.
+129.38,thumb,,,,,,,No finger detected.
+129.58,thumb,,,,,,,No finger detected.
+129.78,thumb,,,,,,,No finger detected.
+130.38,thumb,1.92,8.63,0.3,1.69,19.1,17,ok
+130.78,thumb,,,,,,,No finger detected.
+130.98,thumb,,,,,,,No finger detected.
+131.58,thumb,,,,,,,No finger detected.
+131.79,thumb,,,,,,,No finger detected.
+131.98,thumb,,,,,,,No finger detected.
+132.59,thumb,0.58,0.6,2.0,1.02,5.8,4,ok
+133.18,thumb,0.58,0.6,2.0,1.02,5.8,4,ok
+133.38,thumb,,,,,,,No finger detected.
+133.58,thumb,,,,,,,No finger detected.
+133.79,thumb,,,,,,,No finger detected.
+133.98,thumb,,,,,,,No finger detected.
+134.18,thumb,,,,,,,No finger detected.
+134.78,thumb,0.58,0.6,2.0,1.02,5.8,4,ok
+134.99,thumb,,,,,,,No finger detected.
+135.18,thumb,,,,,,,No finger detected.
+135.79,thumb,1.91,9.23,0.3,1.68,19.1,12,ok
+135.98,thumb,,,,,,,Not enough finger rows detected in top photo.
+136.19,thumb,,,,,,,No finger detected.
+136.38,thumb,,,,,,,No finger detected.
+136.57,thumb,,,,,,,No finger detected.
+136.78,thumb,,,,,,,No finger detected.
+137.39,thumb,1.94,9.12,0.3,1.71,19.3,14,ok
+137.58,thumb,,,,,,,No finger detected.
+137.98,thumb,1.91,8.92,0.3,1.67,19.1,25,ok
+138.17,thumb,,,,,,,No finger detected.
+138.38,thumb,,,,,,,No finger detected.
+138.57,thumb,,,,,,,No finger detected.
+138.78,thumb,,,,,,,No finger detected.
+139.18,thumb,,,,,,,No finger detected.
+139.37,thumb,,,,,,,No finger detected.
+139.58,thumb,,,,,,,No finger detected.
+139.77,thumb,,,,,,,No finger detected.
+139.98,thumb,,,,,,,No finger detected.
+140.38,thumb,,,,,,,No finger detected.
+140.97,thumb,,,,,,,No finger detected.
+141.58,thumb,,,,,,,No finger detected.
+141.78,thumb,,,,,,,No finger detected.
+141.98,thumb,,,,,,,No finger detected.
+142.17,thumb,,,,,,,No finger detected.
+142.57,thumb,,,,,,,No finger detected.
+142.78,thumb,,,,,,,No finger detected.
+143.37,thumb,1.94,8.84,0.3,1.72,19.3,12,ok
+143.77,thumb,1.91,8.92,0.3,1.67,19.1,12,ok
+144.38,thumb,,,,,,,No finger detected.
+144.97,thumb,1.94,9.04,0.3,1.72,19.3,13,ok
+145.37,thumb,1.91,9.22,0.3,1.67,19.1,13,ok
+145.58,thumb,,,,,,,No finger detected.
+145.77,thumb,,,,,,,No finger detected.
+146.17,thumb,1.91,9.13,0.3,1.68,19.1,21,ok
+146.57,thumb,1.91,9.22,0.3,1.67,19.1,44,ok
+146.78,thumb,,,,,,,No finger detected.
+146.97,thumb,,,,,,,No finger detected.
+147.18,thumb,,,,,,,No finger detected.
+147.37,thumb,,,,,,,No finger detected.
+147.77,thumb,1.94,8.83,0.3,1.72,19.3,16,ok
+147.98,thumb,,,,,,,No finger detected.
+148.17,thumb,,,,,,,No finger detected.
+148.38,thumb,,,,,,,No finger detected.
+148.57,thumb,,,,,,,No finger detected.
+149.18,thumb,2.0,9.52,0.3,1.81,19.9,47,ok
+149.77,thumb,,,,,,,UNUSABLE c_curve_mm=nan; arc_radius_mm=None
+149.98,thumb,,,,,,,No finger detected.
+150.17,thumb,,,,,,,No finger detected.
+150.38,thumb,,,,,,,No finger detected.
+150.57,thumb,,,,,,,No finger detected.
+150.78,thumb,,,,,,,No finger detected.
+150.97,thumb,,,,,,,No finger detected.
+151.18,thumb,,,,,,,No finger detected.
+151.37,thumb,,,,,,,No finger detected.
+151.58,thumb,,,,,,,No finger detected.
+151.77,thumb,,,,,,,No finger detected.
+151.98,thumb,,,,,,,No finger detected.
+152.17,thumb,,,,,,,No finger detected.
+152.38,thumb,,,,,,,No finger detected.
+152.57,thumb,,,,,,,No finger detected.
+152.78,thumb,,,,,,,No finger detected.
+152.97,thumb,,,,,,,No finger detected.
+153.18,thumb,,,,,,,No finger detected.
+153.37,thumb,,,,,,,No finger detected.
+153.58,thumb,,,,,,,No finger detected.
+153.77,thumb,,,,,,,No finger detected.
+153.98,thumb,,,,,,,No finger detected.
+154.17,thumb,,,,,,,No finger detected.
+154.38,thumb,,,,,,,No finger detected.
+154.78,thumb,,,,,,,No finger detected.
+154.97,thumb,,,,,,,No finger detected.
+155.18,thumb,,,,,,,No finger detected.
+155.37,thumb,,,,,,,No finger detected.
+155.58,thumb,,,,,,,No finger detected.
+155.98,thumb,,,,,,,No finger detected.
+156.17,thumb,,,,,,,No finger detected.
+156.38,thumb,,,,,,,No finger detected.
+156.57,thumb,,,,,,,No finger detected.
+156.78,thumb,,,,,,,No finger detected.
+156.97,thumb,,,,,,,No finger detected.
+157.18,thumb,,,,,,,No finger detected.
+157.58,thumb,,,,,,,No finger detected.
+157.77,thumb,,,,,,,No finger detected.
+157.98,thumb,,,,,,,No finger detected.
+158.17,thumb,,,,,,,No finger detected.
+158.78,thumb,0.66,2.11,0.46,0.35,6.6,11,ok
+158.97,thumb,,,,,,,No finger detected.
+159.18,thumb,,,,,,,No finger detected.
+159.37,thumb,,,,,,,No finger detected.
+159.58,thumb,,,,,,,No finger detected.
+159.98,thumb,,,,,,,No finger detected.
+160.17,thumb,,,,,,,No finger detected.
+160.38,thumb,,,,,,,No finger detected.
+160.57,thumb,,,,,,,No finger detected.
+160.78,thumb,,,,,,,No finger detected.
+160.97,thumb,,,,,,,No finger detected.
+161.18,thumb,,,,,,,No finger detected.
+161.37,thumb,,,,,,,No finger detected.
+161.58,thumb,,,,,,,No finger detected.
+161.77,thumb,,,,,,,No finger detected.
+161.98,thumb,,,,,,,No finger detected.
+162.17,thumb,,,,,,,No finger detected.
+162.38,thumb,,,,,,,No finger detected.
+162.57,thumb,,,,,,,No finger detected.
+162.78,thumb,,,,,,,No finger detected.
+162.97,thumb,,,,,,,No finger detected.
+163.18,thumb,,,,,,,No finger detected.
+163.37,thumb,,,,,,,No finger detected.
+163.58,thumb,,,,,,,No finger detected.
+163.77,thumb,,,,,,,No finger detected.
+163.97,thumb,,,,,,,No finger detected.
+164.17,thumb,,,,,,,No finger detected.
+164.37,thumb,,,,,,,No finger detected.
+164.57,thumb,,,,,,,No finger detected.
+164.97,thumb,,,,,,,No finger detected.
+165.16,thumb,,,,,,,No finger detected.
+165.37,thumb,,,,,,,No finger detected.
+165.56,thumb,,,,,,,No finger detected.
+165.77,thumb,,,,,,,No finger detected.
+165.97,thumb,,,,,,,No finger detected.
+166.17,thumb,,,,,,,No finger detected.
+166.36,thumb,,,,,,,No finger detected.
+166.57,thumb,,,,,,,No finger detected.
+166.76,thumb,,,,,,,No finger detected.
+166.97,thumb,,,,,,,No finger detected.
+167.16,thumb,,,,,,,No finger detected.
+167.37,thumb,,,,,,,No finger detected.
+167.56,thumb,,,,,,,No finger detected.
+167.96,thumb,,,,,,,No finger detected.
+168.17,thumb,,,,,,,No finger detected.
+168.36,thumb,,,,,,,No finger detected.
+168.57,thumb,,,,,,,index 5 is out of bounds for axis 0 with size 5
+168.76,thumb,,,,,,,No finger detected.
+168.97,thumb,,,,,,,No finger detected.
+169.16,thumb,,,,,,,No finger detected.
+169.37,thumb,,,,,,,No finger detected.
+169.56,thumb,,,,,,,No finger detected.
+169.77,thumb,,,,,,,No finger detected.
+169.97,thumb,,,,,,,No finger detected.
+170.18,thumb,,,,,,,No finger detected.
+170.36,thumb,,,,,,,No finger detected.
+170.57,thumb,,,,,,,No finger detected.
+170.76,thumb,,,,,,,No finger detected.
+170.97,thumb,,,,,,,No finger detected.
+171.17,thumb,,,,,,,No finger detected.
+171.37,thumb,,,,,,,No finger detected.
+171.56,thumb,,,,,,,No finger detected.
+171.77,thumb,,,,,,,No finger detected.
+172.17,thumb,,,,,,,No finger detected.
+172.36,thumb,,,,,,,No finger detected.
+172.57,thumb,,,,,,,No finger detected.
+172.76,thumb,,,,,,,No finger detected.
+173.17,thumb,,,,,,,No finger detected.
+173.37,thumb,,,,,,,No finger detected.
+173.56,thumb,,,,,,,No finger detected.
+174.17,thumb,0.46,0.5,2.0,1.01,4.6,4,ok
+174.57,thumb,0.51,0.5,2.0,1.02,5.0,4,ok
+174.97,thumb,,,,,,,Not enough finger rows detected in top photo.
+175.16,thumb,,,,,,,No finger detected.
+175.37,thumb,,,,,,,No finger detected.
+175.56,thumb,,,,,,,No finger detected.
+176.17,thumb,,,,,,,No finger detected.
+176.57,thumb,,,,,,,index 5 is out of bounds for axis 0 with size 5
+176.76,thumb,,,,,,,No finger detected.
+177.37,thumb,0.51,0.5,2.0,1.02,5.0,4,ok
+177.77,thumb,0.51,0.5,2.0,1.02,5.0,4,ok
+178.36,thumb,0.51,0.5,2.0,1.02,5.0,4,ok
+178.57,thumb,,,,,,,No finger detected.
+178.97,thumb,0.46,0.5,2.0,1.01,4.6,4,ok
+179.16,thumb,,,,,,,No finger detected.
+179.77,thumb,0.51,0.5,2.0,1.02,5.0,4,ok
+179.96,thumb,,,,,,,No finger detected.
+180.17,thumb,,,,,,,No finger detected.
+180.36,thumb,,,,,,,No finger detected.
+180.57,thumb,,,,,,,No finger detected.
+180.76,thumb,,,,,,,No finger detected.
+180.97,thumb,,,,,,,No finger detected.
+181.37,thumb,,,,,,,No finger detected.
+181.56,thumb,,,,,,,No finger detected.
+181.77,thumb,,,,,,,No finger detected.
+181.96,thumb,,,,,,,No finger detected.
+182.17,thumb,,,,,,,No finger detected.
+182.36,thumb,,,,,,,No finger detected.
+182.57,thumb,,,,,,,No finger detected.
+182.76,thumb,,,,,,,No finger detected.
+182.97,thumb,,,,,,,No finger detected.
+183.17,thumb,,,,,,,No finger detected.
+183.37,thumb,,,,,,,No finger detected.
+183.56,thumb,,,,,,,No finger detected.
+183.77,thumb,,,,,,,No finger detected.
+183.96,thumb,,,,,,,No finger detected.
+184.17,thumb,,,,,,,No finger detected.
+184.36,thumb,,,,,,,No finger detected.
+184.57,thumb,,,,,,,No finger detected.
+184.76,thumb,,,,,,,No finger detected.
+184.97,thumb,,,,,,,No finger detected.
+185.17,thumb,,,,,,,No finger detected.
+185.37,thumb,,,,,,,No finger detected.
+185.57,thumb,,,,,,,No finger detected.
+185.77,thumb,,,,,,,No finger detected.
+185.97,thumb,,,,,,,No finger detected.
+186.17,thumb,,,,,,,No finger detected.
+186.36,thumb,,,,,,,No finger detected.
+186.57,thumb,,,,,,,No finger detected.
+186.76,thumb,,,,,,,No finger detected.
+186.97,thumb,,,,,,,No finger detected.
+187.16,thumb,,,,,,,No finger detected.
+187.37,thumb,,,,,,,No finger detected.
+187.57,thumb,,,,,,,No finger detected.
+187.77,thumb,,,,,,,No finger detected.
+187.97,thumb,,,,,,,No finger detected.
+188.17,thumb,,,,,,,No finger detected.
+188.36,thumb,,,,,,,No finger detected.
+188.57,thumb,,,,,,,No finger detected.
+188.76,thumb,,,,,,,No finger detected.
+188.97,thumb,,,,,,,No finger detected.
+189.17,thumb,,,,,,,No finger detected.
+189.37,thumb,,,,,,,No finger detected.
+189.57,thumb,,,,,,,No finger detected.
+189.77,thumb,,,,,,,No finger detected.
+189.96,thumb,,,,,,,No finger detected.
+190.17,thumb,,,,,,,No finger detected.
+190.37,thumb,,,,,,,No finger detected.
+190.57,thumb,,,,,,,No finger detected.
+190.76,thumb,,,,,,,No finger detected.
+190.97,thumb,,,,,,,No finger detected.
+191.16,thumb,,,,,,,No finger detected.
+191.37,thumb,,,,,,,No finger detected.
+191.56,thumb,,,,,,,No finger detected.
+191.76,thumb,,,,,,,No finger detected.
+191.96,thumb,,,,,,,No finger detected.
+192.17,thumb,,,,,,,No finger detected.
+192.36,thumb,,,,,,,No finger detected.
+192.57,thumb,,,,,,,No finger detected.
+192.76,thumb,,,,,,,No finger detected.
+192.96,thumb,,,,,,,No finger detected.
+193.16,thumb,,,,,,,No finger detected.
+193.35,thumb,,,,,,,No finger detected.
+193.56,thumb,,,,,,,No finger detected.
+193.75,thumb,,,,,,,No finger detected.
+193.96,thumb,,,,,,,No finger detected.
+194.37,thumb,,,,,,,No finger detected.
+194.95,thumb,,,,,,,No finger detected.
+195.17,thumb,,,,,,,No finger detected.
+195.35,thumb,,,,,,,No finger detected.
+195.56,thumb,,,,,,,No finger detected.
+195.75,thumb,,,,,,,No finger detected.
+195.96,thumb,,,,,,,No finger detected.
+196.15,thumb,,,,,,,No finger detected.
+196.37,thumb,,,,,,,No finger detected.
+196.55,thumb,,,,,,,No finger detected.
+196.76,thumb,,,,,,,No finger detected.
+196.96,thumb,,,,,,,No finger detected.
+197.17,thumb,,,,,,,No finger detected.
+197.35,thumb,,,,,,,No finger detected.
+197.56,thumb,,,,,,,No finger detected.
+197.75,thumb,,,,,,,No finger detected.
+197.96,thumb,,,,,,,No finger detected.
+198.36,thumb,,,,,,,No finger detected.
+198.55,thumb,,,,,,,No finger detected.
+198.76,thumb,,,,,,,No finger detected.
+198.95,thumb,,,,,,,No finger detected.
+199.16,thumb,,,,,,,No finger detected.
+199.35,thumb,,,,,,,No finger detected.
+199.56,thumb,,,,,,,No finger detected.
+199.76,thumb,,,,,,,No finger detected.
+200.36,thumb,12.25,12.98,1.23,17.16,126.8,125,ok
+200.76,thumb,13.59,14.87,1.82,13.6,135.3,163,ok
+201.16,thumb,18.08,18.91,1.99,11.6,129.2,179,ok
+201.75,thumb,13.98,15.38,1.95,10.36,120.4,144,ok
+202.16,thumb,15.14,17.08,1.72,10.95,117.3,150,ok
+202.76,thumb,15.0,16.66,1.77,10.82,118.2,150,ok
+203.35,thumb,14.05,15.37,1.73,11.06,118.2,148,ok
+203.76,thumb,15.24,16.76,1.66,11.46,118.4,150,ok
+204.36,thumb,15.24,16.76,1.6,11.72,117.8,150,ok
+204.96,thumb,11.9,12.13,1.51,12.48,118.7,132,ok
+205.36,thumb,11.82,12.14,1.52,12.25,117.8,131,ok
+205.96,thumb,14.3,15.76,1.64,11.56,118.3,144,ok
+206.55,thumb,14.65,16.14,1.62,11.72,118.6,148,ok
+206.96,thumb,11.98,12.23,1.53,12.5,119.5,134,ok
+207.57,thumb,13.99,15.34,1.6,11.94,119.1,142,ok
+208.15,thumb,12.04,12.53,1.5,12.82,120.1,139,ok
+208.56,thumb,13.08,15.15,1.38,13.87,120.2,132,ok
+209.16,thumb,13.34,15.04,1.35,14.1,120.1,135,ok
+209.75,thumb,13.03,15.04,1.34,14.0,119.3,132,ok
+210.36,thumb,12.03,12.41,1.51,12.73,120.1,135,ok
