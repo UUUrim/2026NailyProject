@@ -91,3 +91,7 @@ cloud:
 python:
   server:
     url: http://localhost:8000
+
+printer:
+  server:
+    url: https://sermon-friction-unequal.ngrok-free.dev

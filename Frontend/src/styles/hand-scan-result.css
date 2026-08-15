@@ -527,3 +527,40 @@
   font-size: 0.95rem;
   line-height: 1.5;
 }
+
+/* 스캔 분석 진행 중 스켈레톤 */
+@keyframes scan-skeleton-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.scan-metric-card--skeleton,
+.scan-tone-card--skeleton,
+.scan-season-card--skeleton {
+  animation: scan-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+.scan-metric-card--skeleton .scan-metric-card__value {
+  color: #c9c9d0;
+}
+
+.scan-tone-card--skeleton .scan-tone-card__hex {
+  color: #c9c9d0;
+}
+
+.scan-palette__chip--skeleton {
+  background: #ececf1;
+}
+
+.scan-shape-card--skeleton {
+  animation: scan-skeleton-pulse 1.6s ease-in-out infinite;
+  cursor: default;
+}
+
+.scan-shape-card__img-skeleton {
+  width: 100%;
+  height: 60px;
+  margin: 0 auto 0.5rem;
+  background: #ececf1;
+  border-radius: 8px;
+}

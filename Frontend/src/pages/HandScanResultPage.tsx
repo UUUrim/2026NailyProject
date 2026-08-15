@@ -105,7 +105,6 @@ export function HandScanResultPage() {
             const combinedShape = pickHandField('shape', leftRes, rightRes)
             if (combinedShape) setSelectedShape(combinedShape)
 
-            setIsLoading(false)
             return [leftRes?.status ?? null, rightRes?.status ?? null]
         }
 
@@ -114,7 +113,13 @@ export function HandScanResultPage() {
             if (cancelled) return
             const leftDone = !leftScanId || (leftStatus && TERMINAL_STATUSES.includes(leftStatus))
             const rightDone = !rightScanId || (rightStatus && TERMINAL_STATUSES.includes(rightStatus))
-            if (!(leftDone && rightDone)) {
+            if (leftDone && rightDone) {
+                // 양손 다 최종 상태(측정 완료 또는 실패)가 됐을 때만 로딩을 끝낸다.
+                // 예전엔 fetchBoth() 안에서 매 폴링마다 setIsLoading(false)를 호출해서,
+                // 왼손이 먼저 끝나고 오른손이 아직 분석 중일 때도 "결과 화면"이 왼손
+                // 데이터(+부족한 오른손은 Mock)만으로 미리 떠버리는 문제가 있었다.
+                setIsLoading(false)
+            } else {
                 timer = setTimeout(() => void poll(), 3000)
             }
         }
@@ -138,6 +143,12 @@ export function HandScanResultPage() {
             seasonNameKo: pickHandField('seasonNameKo', leftResult, rightResult) ?? baseResult.seasonNameKo,
         }
         : null
+
+    // 요청한 손이 전부 FAILED로 끝났으면 — 측정이 하나도 안 된 상태이므로
+    // Mock 값으로 채운 화면을 "정상 완료"처럼 보여주면 안 된다.
+    const leftFailed = !leftScanId || leftResult?.status === 'FAILED'
+    const rightFailed = !rightScanId || rightResult?.status === 'FAILED'
+    const scanFailed = !isLoading && leftFailed && rightFailed && !!(leftScanId || rightScanId)
 
     const handleGoToDesign = () => {
         navigate('/design/chat', {
@@ -171,17 +182,7 @@ export function HandScanResultPage() {
         }
     }
 
-    if (isLoading) {
-        return (
-            <AppShell>
-                <div className="scan-result-empty">
-                    <p>결과를 불러오는 중...</p>
-                </div>
-            </AppShell>
-        )
-    }
-
-    if ((!leftScanId && !rightScanId) || !result || error) {
+    if (!leftScanId && !rightScanId) {
         return (
             <AppShell>
                 <PageBackLink to="/scan/hand" label="손 촬영" />
@@ -195,9 +196,23 @@ export function HandScanResultPage() {
         )
     }
 
-    const recommended = getNailShape(result.shape)
-    const seasonRow = SEASON_ROWS.find(r => r.code === result.seasonCode)
-    const personalColorSwatches = result.seasonCode ? (PERSONAL_COLOR_SWATCHES[result.seasonCode] ?? []) : []
+    if (error) {
+        return (
+            <AppShell>
+                <PageBackLink to="/scan/hand" label="손 촬영" />
+                <div className="scan-result-empty">
+                    <p>{error}</p>
+                    <button type="button" className="scan-result-cta" onClick={() => navigate('/scan/hand')}>
+                        손 촬영하러 가기
+                    </button>
+                </div>
+            </AppShell>
+        )
+    }
+
+    const recommended = result ? getNailShape(result.shape) : null
+    const seasonRow = result ? SEASON_ROWS.find(r => r.code === result.seasonCode) : undefined
+    const personalColorSwatches = result?.seasonCode ? (PERSONAL_COLOR_SWATCHES[result.seasonCode] ?? []) : []
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락
     const apiFingers = [...(leftResult?.fingers ?? []), ...(rightResult?.fingers ?? [])]
@@ -291,6 +306,36 @@ export function HandScanResultPage() {
         },
     }
 
+    if (scanFailed) {
+        return (
+            <AppShell mainClassName="scan-result-page">
+                {fromMypage
+                    ? <PageBackLink to="/mypage" label="손 분석 기록" state={{ tab: 'scan' }} />
+                    : <PageBackLink to="/scan/hand" label="손 촬영" />
+                }
+
+                <header className="scan-result-hero">
+                    <p className="scan-result-hero__eyebrow">Hand Scan Analysis</p>
+                    <h1>손 스캔 분석 실패</h1>
+                    <p>
+                        손톱 측정에 실패했어요. 마커가 잘 보이도록 다시 촬영해 주세요.
+                        (조명, 초점, 마커가 프레임 안에 온전히 들어왔는지 확인해 주세요.)
+                    </p>
+                </header>
+
+                <div style={{ padding: '2rem 0' }}>
+                    <button
+                        type="button"
+                        className="scan-result-cta"
+                        onClick={() => navigate('/scan/hand')}
+                    >
+                        다시 촬영하기
+                    </button>
+                </div>
+            </AppShell>
+        )
+    }
+
     return (
         <AppShell mainClassName="scan-result-page">
             {fromMypage
@@ -301,7 +346,7 @@ export function HandScanResultPage() {
             <header className="scan-result-hero">
                 <p className="scan-result-hero__eyebrow">Hand Scan Analysis</p>
                 <h1>손 스캔 분석 결과</h1>
-                <p>손 스캔이 완료되었습니다.</p>
+                <p>{isLoading ? '분석중...' : '손 스캔이 완료되었습니다.'}</p>
             </header>
 
             <section className="scan-result-section">
@@ -314,13 +359,32 @@ export function HandScanResultPage() {
                     )}
                 </div>
                 <div className="scan-result-metrics">
-                    <MetricCard title="길이 (Length)" metric={AVERAGE_METRICS.length} hint="손톱 끝에서 베이스까지 평균 길이" />
-                    <MetricCard title="너비 (Width)" metric={AVERAGE_METRICS.width} hint="손톱 최대 너비 평균" />
-                    <MetricCard
-                        title="곡률 (C-curve)"
-                        metric={AVERAGE_METRICS.cCurve}
-                        hint="손톱 측면 곡률 지수 (0~1)"
-                    />
+                    {isLoading ? (
+                        <>
+                            <article className="scan-metric-card scan-metric-card--skeleton" aria-hidden="true">
+                                <h3>길이 (Length)</h3>
+                                <p className="scan-metric-card__value">···</p>
+                            </article>
+                            <article className="scan-metric-card scan-metric-card--skeleton" aria-hidden="true">
+                                <h3>너비 (Width)</h3>
+                                <p className="scan-metric-card__value">···</p>
+                            </article>
+                            <article className="scan-metric-card scan-metric-card--skeleton" aria-hidden="true">
+                                <h3>곡률 (C-curve)</h3>
+                                <p className="scan-metric-card__value">···</p>
+                            </article>
+                        </>
+                    ) : (
+                        <>
+                            <MetricCard title="길이 (Length)" metric={AVERAGE_METRICS.length} hint="손톱 끝에서 베이스까지 평균 길이" />
+                            <MetricCard title="너비 (Width)" metric={AVERAGE_METRICS.width} hint="손톱 최대 너비 평균" />
+                            <MetricCard
+                                title="곡률 (C-curve)"
+                                metric={AVERAGE_METRICS.cCurve}
+                                hint="손톱 측면 곡률 지수 (0~1)"
+                            />
+                        </>
+                    )}
                 </div>
                 {/*<div className="scan-result-metrics">*/}
                 {/*    <MetricCard title="전체 크기" value={result.overallSize ?? '-'} hint="손톱 전체 크기 분류" />*/}
@@ -329,100 +393,131 @@ export function HandScanResultPage() {
                 {/*</div>*/}
             </section>
 
-            {result.seasonCode && (
-                <section className="scan-result-section scan-result-section--grid">
-                    <article className="scan-tone-card">
+            {isLoading ? (
+                <section className="scan-result-section scan-result-section--grid" aria-hidden="true">
+                    <article className="scan-tone-card scan-tone-card--skeleton">
                         <h2>퍼스널 컬러</h2>
                         <p className="scan-tone-card__hex" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                            {result.seasonNameKo ?? result.seasonCode}
+                            분석중...
                         </p>
-                        {seasonRow && (
-                            <p className="scan-tone-card__desc">
-                                {seasonRow.tone} 톤 · {seasonRow.brightness} · {seasonRow.saturation}
-                            </p>
-                        )}
-                        {/*{result.skinToneHex && (*/}
-                        {/*    <>*/}
-                        {/*        <div className="scan-tone-card__swatch" style={{ background: result.skinToneHex }} />*/}
-                        {/*        <p className="scan-tone-card__hex">{result.skinToneHex}</p>*/}
-                        {/*    </>*/}
-                        {/*)}*/}
                     </article>
-
-                    {personalColorSwatches.length > 0 && (
-                        <article className="scan-season-card">
-                            <h2>추천 컬러</h2>
-                            <div className="scan-palette">
-                                {personalColorSwatches.map((hex) => (
-                                    <button
-                                        key={hex}
-                                        type="button"
-                                        className="scan-palette__chip"
-                                        style={{ background: hex }}
-                                        title={hex}
-                                        aria-label={`팔레트 색 ${hex}`}
-                                    />
-                                ))}
-                            </div>
-                            <p className="scan-season-card__desc">
-                                {result.seasonNameKo} 타입에 어울리는 추천 컬러 팔레트입니다.
-                            </p>
-                        </article>
-                    )}
+                    <article className="scan-season-card scan-season-card--skeleton">
+                        <h2>추천 컬러</h2>
+                        <div className="scan-palette">
+                            {Array.from({ length: 8 }).map((_, i) => (
+                                <span key={i} className="scan-palette__chip scan-palette__chip--skeleton" />
+                            ))}
+                        </div>
+                    </article>
                 </section>
+            ) : (
+                result?.seasonCode && (
+                    <section className="scan-result-section scan-result-section--grid">
+                        <article className="scan-tone-card">
+                            <h2>퍼스널 컬러</h2>
+                            <p className="scan-tone-card__hex" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+                                {result.seasonNameKo ?? result.seasonCode}
+                            </p>
+                            {seasonRow && (
+                                <p className="scan-tone-card__desc">
+                                    {seasonRow.tone} 톤 · {seasonRow.brightness} · {seasonRow.saturation}
+                                </p>
+                            )}
+                        </article>
+
+                        {personalColorSwatches.length > 0 && (
+                            <article className="scan-season-card">
+                                <h2>추천 컬러</h2>
+                                <div className="scan-palette">
+                                    {personalColorSwatches.map((hex) => (
+                                        <button
+                                            key={hex}
+                                            type="button"
+                                            className="scan-palette__chip"
+                                            style={{ background: hex }}
+                                            title={hex}
+                                            aria-label={`팔레트 색 ${hex}`}
+                                        />
+                                    ))}
+                                </div>
+                                <p className="scan-season-card__desc">
+                                    {result.seasonNameKo} 타입에 어울리는 추천 컬러 팔레트입니다.
+                                </p>
+                            </article>
+                        )}
+                    </section>
+                )
             )}
 
-            <section className="scan-result-section">
-                <h2>네일팁 모양 선택</h2>
-                <p className="scan-result-section__sub">
-                    {recommended ? (
-                        <>추천 쉐입은 <strong>{recommended.labelKo}</strong>입니다. 원하는 모양을 선택해 주세요.</>
-                    ) : (
-                        <>AI가 추천 쉐입을 분석하고 있어요. 분석이 끝나면 자동으로 추천 배지가 표시됩니다. 먼저 원하는 모양을 선택해 주세요.</>
-                    )}
-                </p>
-                <div className="scan-shape-grid">
-                    {NAIL_SHAPES.map((shape) => {
-                        const isRecommended = shape.id === result.shape
-                        const isSelected = shape.id === selectedShape
-                        return (
-                            <article
-                                key={shape.id}
-                                className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''}`}
-                                onClick={() => setSelectedShape(shape.id)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(e) => e.key === 'Enter' && setSelectedShape(shape.id)}
-                                aria-pressed={isSelected}
-                                style={{ cursor: 'pointer' }}
-                            >
-                                {isRecommended && <span className="scan-shape-card__badge">추천</span>}
-                                <img src={shape.image} alt={shape.labelKo} />
-                                <h3>{shape.labelKo}</h3>
-                                <p>{shape.labelEn}</p>
+            {isLoading ? (
+                <section className="scan-result-section" aria-hidden="true">
+                    <h2>네일팁 모양 선택</h2>
+                    <p className="scan-result-section__sub">분석중...</p>
+                    <div className="scan-shape-grid">
+                        {NAIL_SHAPES.map((shape) => (
+                            <article key={shape.id} className="scan-shape-card scan-shape-card--skeleton">
+                                <div className="scan-shape-card__img-skeleton" />
+                                <h3>&nbsp;</h3>
+                                <p>&nbsp;</p>
                             </article>
-                        )
-                    })}
-                </div>
-            </section>
+                        ))}
+                    </div>
+                </section>
+            ) : (
+                <>
+                    <section className="scan-result-section">
+                        <h2>네일팁 모양 선택</h2>
+                        <p className="scan-result-section__sub">
+                            {recommended ? (
+                                <>추천 쉐입은 <strong>{recommended.labelKo}</strong>입니다. 원하는 모양을 선택해 주세요.</>
+                            ) : (
+                                <>AI가 추천 쉐입을 분석하고 있어요. 분석이 끝나면 자동으로 추천 배지가 표시됩니다. 먼저 원하는 모양을 선택해 주세요.</>
+                            )}
+                        </p>
+                        <div className="scan-shape-grid">
+                            {NAIL_SHAPES.map((shape) => {
+                                const isRecommended = !!result && shape.id === result.shape
+                                const isSelected = shape.id === selectedShape
+                                return (
+                                    <article
+                                        key={shape.id}
+                                        className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''}`}
+                                        onClick={() => setSelectedShape(shape.id)}
+                                        role="button"
+                                        tabIndex={0}
+                                        onKeyDown={(e) => e.key === 'Enter' && setSelectedShape(shape.id)}
+                                        aria-pressed={isSelected}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        {isRecommended && <span className="scan-shape-card__badge">추천</span>}
+                                        <img src={shape.image} alt={shape.labelKo} />
+                                        <h3>{shape.labelKo}</h3>
+                                        <p>{shape.labelEn}</p>
+                                    </article>
+                                )
+                            })}
+                        </div>
+                    </section>
 
-            <div className="scan-result-actions">
-                <button
-                    type="button"
-                    className="scan-result-cta"
-                    onClick={() => void handleGenerateStl()}
-                    disabled={printConfirmed || isGeneratingStl}
-                >
-                    {isGeneratingStl ? 'STL 생성 중...' : printConfirmed ? '출력 신청 완료 ✓' : '네일팁 출력하기'}
-                </button>
-                <button
-                    type="button"
-                    className="scan-result-cta"
-                    onClick={handleGoToDesign}
-                >
-                    네일 디자인 생성하기
-                </button>
-            </div>
+                    <div className="scan-result-actions">
+                        <button
+                            type="button"
+                            className="scan-result-cta"
+                            onClick={() => void handleGenerateStl()}
+                            disabled={printConfirmed || isGeneratingStl}
+                        >
+                            {isGeneratingStl ? 'STL 생성 중...' : printConfirmed ? '출력 신청 완료 ✓' : '네일팁 출력하기'}
+                        </button>
+                        <button
+                            type="button"
+                            className="scan-result-cta"
+                            onClick={handleGoToDesign}
+                        >
+                            네일 디자인 생성하기
+                        </button>
+                    </div>
+                </>
+            )}
 
             {showFingerModal && apiFingers.length > 0 && (
                 <FingerDetailModal fingers={fingerDetails} onClose={() => setShowFingerModal(false)} />

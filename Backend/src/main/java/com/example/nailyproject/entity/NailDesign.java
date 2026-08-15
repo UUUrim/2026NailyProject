@@ -61,6 +61,9 @@ public class NailDesign {
     @Column(name = "color_palette", columnDefinition = "JSON")
     private String colorPalette; // 컬러 워크플로우(ComfyUI)가 뽑아낸 hex 리스트 JSON 배열, 예: ["#FDE2EA", "#DE869F"]
 
+    @Column(name = "reference_image_url")
+    private String referenceImageUrl; // 사진 기반 생성일 때, 사용자가 업로드한 원본 참고 이미지 S3 URL (채팅 이력 재연용)
+
     public void updateImageUrls(List<String> imageUrls) {
         this.imageUrls = imageUrls;
     }
@@ -75,5 +78,9 @@ public class NailDesign {
 
     public void updateColorPalette(String colorPalette) {
         this.colorPalette = colorPalette;
+    }
+
+    public void updateReferenceImageUrl(String referenceImageUrl) {
+        this.referenceImageUrl = referenceImageUrl;
     }
 }

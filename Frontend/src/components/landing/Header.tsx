@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthNav } from '@/components/layout/AuthNav'
 import { useAuth } from '@/hooks/useAuth'
-import { confirmLeaveChatIfNeeded } from '@/utils/chatSessionGuard'
+import { confirmLeaveChatIfNeeded, markIntentionalNavigation } from '@/utils/chatSessionGuard'
 import '@/styles/landing.css'
 
 export function Header() {
@@ -12,7 +12,15 @@ export function Header() {
     const handleNavClick = (to: string) => (e: React.MouseEvent) => {
         e.preventDefault()
         if (confirmLeaveChatIfNeeded()) {
-            navigate(to)
+            if (location.pathname === to) {
+                // 이미 같은 경로에 있으면 navigate()는 아무 일도 안 일어난 것처럼 보인다
+                // (React Router가 경로 변화 없음으로 판단). 세션을 진짜로 초기화하려면
+                // 완전한 새로고침이 필요하다.
+                markIntentionalNavigation()
+                window.location.href = to
+            } else {
+                navigate(to)
+            }
         }
     }
 

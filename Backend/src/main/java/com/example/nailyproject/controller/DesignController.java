@@ -54,6 +54,37 @@ public class DesignController {
     }
 
     /**
+     * 디자인 확정 PATCH /designs/{designId}/confirm
+     * 채팅에서 "네, 이 디자인으로 할게요"를 눌렀을 때 호출 — 이때부터 마이페이지 이력에 노출된다.
+     */
+    @PatchMapping("/{designId}/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmDesign(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        nailDesignService.confirmDesign(user, designId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "디자인이 확정되었습니다.", null)
+        );
+    }
+
+    /**
+     * 이 디자인이 만들어진 채팅 세션의 대화 내역 조회 GET /designs/{designId}/chat-history
+     */
+    @GetMapping("/{designId}/chat-history")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.ChatMessageResponseDto>>> getDesignChatHistory(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        var data = nailDesignService.getDesignChatHistory(user, designId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "채팅 이력 조회 성공.", data)
+        );
+    }
+
+    /**
      * 디자인 완전 삭제 DELETE /designs/{designId}
      */
     @DeleteMapping("/{designId}")

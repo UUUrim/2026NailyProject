@@ -12,6 +12,9 @@ public interface NailDesignRepository extends JpaRepository<NailDesign, Long> {
     // '수정하고 싶어요' 흐름에서 직전 플랜을 이어서 편집하기 위해, 같은 세션의 가장 최근 디자인을 조회
     java.util.Optional<NailDesign> findTopBySessionIdOrderByGeneratedAtDesc(Long sessionId);
 
+    // 채팅 이력 재연 시, 이 세션에서 나왔던 모든 디자인(중간 시도 포함)을 시간순으로 조회
+    java.util.List<NailDesign> findBySessionIdOrderByGeneratedAtAsc(Long sessionId);
+
     //User의 Id로 모든 디자인을 찾아서(findAllByUserId), 생성일자 기준 내림차순으로 정렬해라(OrderByCreatedAtDesc)
     List<NailDesign> findAllByUserIdOrderByGeneratedAtDesc(Long userId);
 

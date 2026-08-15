@@ -218,13 +218,13 @@
 <<<<<<< HEAD
     /* aspect-ratio: 1; */
     /* object-fit: cover; */
-    height: auto;
+height: auto;
     max-width: 350px; /* 원하는 최대 가로 크기로 숫자를 조절해 주세요 (예: 100px, 150px) */
 =======
-    aspect-ratio: 1;
+aspect-ratio: 1;
     object-fit: cover;
 >>>>>>> origin/dogyeong
-    border-radius: 12px;
+border-radius: 12px;
     border: 1px solid rgba(0, 0, 0, 0.06);
     display: block;
 }
@@ -882,4 +882,15 @@
     font-size: 0.75rem;
     color: #8a8a8a;
     text-align: center;
+}
+
+/* 채팅 속 이미지 확대 모달 — MyPage의 상세보기(--lg, 880px)보다 작게 */
+.design-chat__image-zoom-panel {
+    width: min(90vw, 560px);
+    max-height: 80vh;
+    padding: 1rem;
+}
+
+.design-chat__image-zoom-viewport {
+    height: min(50vh, 420px);
 }

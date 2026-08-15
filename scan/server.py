@@ -50,17 +50,24 @@ def _s3_client():
     )
 
 
-# ── S3에서 사진 5장 다운로드 ────────────────────────────────────
+# ── S3에서 사진 다운로드 (손가락당 top/side 2장, 항상 세트로 온다고 가정) ─────
 def download_photos(userid: str, session: str, hand: str):
     client = _s3_client()
     local_dir = os.path.join(BASE, "photos", userid, session, hand)
     os.makedirs(local_dir, exist_ok=True)
 
     for finger in FINGER_ORDER:
-        s3_key = f"photos/{userid}/{session}/{hand}/{finger}.jpg"
-        local_path = os.path.join(local_dir, f"{finger}.jpg")
-        print(f"  Downloading s3://{BUCKET}/{s3_key} -> {local_path}")
-        client.download_file(BUCKET, s3_key, local_path)
+        # 정면(위에서 본) 사진 — 너비/길이 측정용
+        top_key = f"photos/{userid}/{session}/{hand}/{finger}_top.jpg"
+        top_local = os.path.join(local_dir, f"{finger}_top.jpg")
+        print(f"  Downloading s3://{BUCKET}/{top_key} -> {top_local}")
+        client.download_file(BUCKET, top_key, top_local)
+
+        # 측면(끝에서 본) 사진 — C-curve(곡률) 측정용, top과 항상 세트로 업로드됨
+        side_key = f"photos/{userid}/{session}/{hand}/{finger}_side.jpg"
+        side_local = os.path.join(local_dir, f"{finger}_side.jpg")
+        print(f"  Downloading s3://{BUCKET}/{side_key} -> {side_local}")
+        client.download_file(BUCKET, side_key, side_local)
 
 
 # ── crop + measure만 실행 (STL/S3 없음) ────────────────────────
@@ -69,11 +76,12 @@ def run_measure_only(userid: str, session: str, hand: str):
     results_root = os.path.join(BASE, "results", userid, session, hand)
 
     for finger in FINGER_ORDER:
-        photo_path = os.path.join(photos_root, f"{finger}.jpg")
+        photo_path = os.path.join(photos_root, f"{finger}_top.jpg")
+        side_path = os.path.join(photos_root, f"{finger}_side.jpg")
         finger_out = os.path.join(results_root, finger)
         os.makedirs(finger_out, exist_ok=True)
 
-        # Step 1: Crop
+        # Step 1: Crop (정면 사진만 크롭 — 측면 사진은 원본 그대로 C-curve용으로 사용)
         import cv2
         img = cv2.imread(photo_path)
         if img is None:
@@ -85,16 +93,19 @@ def run_measure_only(userid: str, session: str, hand: str):
         cv2.imwrite(cropped_path, cropped)
         print(f"  [{finger}] Cropped: {h}x{w} -> {cut}x{w}")
 
-        # Step 2: Measure
+        # Step 2: Measure (top/side 항상 세트이므로 --ccurve-top도 항상 같이 넘긴다)
+        cmd = [
+            sys.executable,
+            os.path.join(BASE, "nail_measurer.py"),
+            "--top",        cropped_path,
+            "--finger",     finger,
+            "--aruco-size", "20.0",
+            "--output",     finger_out,
+            "--ccurve-top", side_path,
+        ]
+
         result = subprocess.run(
-            [
-                sys.executable,
-                os.path.join(BASE, "nail_measurer.py"),
-                "--top",        cropped_path,
-                "--finger",     finger,
-                "--aruco-size", "20.0",
-                "--output",     finger_out,
-            ],
+            cmd,
             cwd=BASE,
             capture_output=True,
             text=True,
@@ -178,7 +189,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     from personal_color import diagnose_personal_color
 
     for finger in ("index", "middle", "ring", "thumb"):
-        photo_path = os.path.join(photos_root, f"{finger}.jpg")
+        photo_path = os.path.join(photos_root, f"{finger}_top.jpg")
         diagnosis = diagnose_personal_color(photo_path)
         if diagnosis and "error" not in diagnosis:
             skin_tone_hex = diagnosis["skinToneHex"]
@@ -285,11 +296,48 @@ class StlRequest(BaseModel):
     shape: str
     callbackUrl: str
 
+class StartScanRequest(BaseModel):
+    userid: str
+    session: str
+    hand: str
+    shapes: list[str] = []       # 요청한 쉐입들 (없으면 STL은 생성 안 하고 측정까지만)
+    callbackUrl: str
+
 
 # ── 엔드포인트 ──────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/start-scan")
+def start_scan(request: StartScanRequest):
+    """
+    프론트(카메라 박스에 붙어있는 브라우저)가 로컬로 호출.
+    nail_live.py를 별도 프로세스로 띄워서 카메라 GUI를 연다 — 촬영/측정/STL/
+    S3 업로드/콜백까지 전부 그 프로세스 안에서 알아서 끝낸다(nail_live.py의
+    finalize_and_upload 참고). 이 엔드포인트는 그냥 "시작만" 시키고 바로 응답한다.
+    """
+    print(f"\n[Server] Starting nail_live.py for {request.userid}/{request.session}/{request.hand}")
+
+    cmd = [
+        sys.executable,
+        os.path.join(BASE, "nail_live.py"),
+        "--fingers", "thumb", "index", "middle", "ring", "pinky",
+        "--userid", request.userid,
+        "--session", request.session,
+        "--hand", request.hand,
+        "--callback-url", request.callbackUrl,
+    ]
+    if request.shapes:
+        cmd += ["--shape", *request.shapes]
+
+    # 카메라 창이 뜨는 긴 작업이라 서버 요청/응답 흐름을 막지 않도록 별도 프로세스로 실행.
+    # (analyze/measure, analyze/stl과 달리 이건 subprocess.run이 아니라 Popen — 사람이
+    #  카메라 앞에서 ENTER를 누를 때까지 몇 분이고 걸릴 수 있어서 절대 여기서 기다리면 안 됨)
+    subprocess.Popen(cmd, cwd=BASE)
+
+    return {"status": "started", "message": "카메라 스캔이 시작되었습니다."}
 
 
 @app.post("/analyze/measure")

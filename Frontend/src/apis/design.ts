@@ -101,6 +101,25 @@ export async function deleteDesign(designId: number): Promise<void> {
     await apiClient.delete(`/designs/${designId}`)
 }
 
+/** PATCH /designs/{designId}/confirm — "네, 이 디자인으로 할게요" 눌렀을 때 확정. 이때부터 마이페이지 이력에 노출됨 */
+export async function confirmDesign(designId: number): Promise<void> {
+    await apiClient.patch(`/designs/${designId}/confirm`)
+}
+
+export interface DesignChatMessage {
+    role: 'user' | 'assistant'
+    content: string
+    sentAt: string
+    imageUrls?: string[]
+    designId?: number
+}
+
+/** GET /designs/{designId}/chat-history — 이 디자인이 만들어진 채팅 세션의 대화 내역 */
+export async function getDesignChatHistory(designId: number): Promise<DesignChatMessage[]> {
+    const res = await apiClient.get<DesignChatMessage[]>(`/designs/${designId}/chat-history`)
+    return res.data
+}
+
 // ─── 찜하기 ───────────────────────────────────────────────────────────────────
 
 /** POST /designs/{designId}/likes — 찜하기 */

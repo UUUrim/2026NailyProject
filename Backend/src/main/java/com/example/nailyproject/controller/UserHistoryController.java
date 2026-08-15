@@ -11,11 +11,7 @@ import com.example.nailyproject.service.PrintOrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -84,6 +80,22 @@ public class UserHistoryController {
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "네일팁 출력 내역 조회 성공.", data)
+        );
+    }
+
+    /**
+     * 병합 결과(MERGED 상태) 확인 후 "진짜 출력하기" POST /users/me/prints/{orderId}/confirm
+     * 슬라이싱 + 프린터 업로드/출력 시작을 트리거한다.
+     */
+    @PostMapping("/prints/{orderId}/confirm")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> confirmPrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.confirmPrint(user, orderId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "출력이 시작되었습니다.", data)
         );
     }
 }

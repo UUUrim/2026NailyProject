@@ -60,8 +60,15 @@ public class DesignSession {
     @Column(name = "refine_keywords", columnDefinition = "JSON")
     private String refineKeywords; // 자유입력 키워드 JSON 배열
 
+    @Column(name = "reference_image_url")
+    private String referenceImageUrl; // 사진 기반 흐름에서 최초 업로드한 참고 이미지 S3 URL — 재생성 시 재사용
+
     public void updateRefineKeywords(String refineKeywords) {
         this.refineKeywords = refineKeywords;
+    }
+
+    public void updateReferenceImageUrl(String referenceImageUrl) {
+        this.referenceImageUrl = referenceImageUrl;
     }
 
     public void updateExtractedPreferences(String extractedPreferences) {

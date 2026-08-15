@@ -17,8 +17,10 @@ import {
   likeDesign,
   unlikeDesign,
   deleteDesign,
+  getDesignChatHistory,
   type DesignImageResponse,
   type SavedDesignResponse,
+  type DesignChatMessage,
 } from '@/apis/design'
 import { getMyScans, getScanResult, type ScanHistoryItem, type ScanResultResponse } from '@/apis/scan'
 import { getNailShape } from '@/constants/nailShapes'
@@ -26,6 +28,7 @@ import { SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
 import { downloadImage } from '@/utils/downloadImage'
 import '@/styles/mypage.css'
+import '@/styles/design-chat.css'
 
 type SectionId = 'dashboard' | 'profile' | 'timeline' | 'scans' | 'prints' | 'designs' | 'favorites'
 
@@ -278,6 +281,36 @@ export function MyPage() {
   const [arTryOnImageUrl, setArTryOnImageUrl] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
 
+  // ── 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글) ──────
+  const [showChatHistory, setShowChatHistory] = useState(false)
+  const [chatHistory, setChatHistory] = useState<DesignChatMessage[]>([])
+  const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
+  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
+  // 모달을 열었을 때의 "확정된 디자인" id를 고정해둔다. 채팅 속 중간 시안 이미지를
+  // 눌러서 확대해도(=detailImage.designId가 그 시안으로 바뀌어도) 이 값은 안 바뀌어야
+  // "최종 확정" 표시가 엉뚱한 시안으로 옮겨붙지 않는다.
+  const [confirmedDesignId, setConfirmedDesignId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!showChatHistory || confirmedDesignId == null) return
+    let cancelled = false
+    setIsChatHistoryLoading(true)
+    setChatHistoryError(null)
+    getDesignChatHistory(confirmedDesignId)
+        .then((data) => {
+          if (!cancelled) setChatHistory(data)
+        })
+        .catch(() => {
+          if (!cancelled) setChatHistoryError('채팅 이력을 불러오지 못했어요.')
+        })
+        .finally(() => {
+          if (!cancelled) setIsChatHistoryLoading(false)
+        })
+    return () => {
+      cancelled = true
+    }
+  }, [showChatHistory, confirmedDesignId])
+
   // ── 이미지 확대/축소/이동 ──────
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -291,6 +324,9 @@ export function MyPage() {
   const openDetailImage = (img: DetailImage) => {
     setZoom(1)
     setPan({ x: 0, y: 0 })
+    setShowChatHistory(false)
+    setChatHistory([])
+    setConfirmedDesignId(img.designId ?? null)
     setDetailImage(img)
   }
 
@@ -298,6 +334,9 @@ export function MyPage() {
     setDetailImage(null)
     setZoom(1)
     setPan({ x: 0, y: 0 })
+    setShowChatHistory(false)
+    setChatHistory([])
+    setConfirmedDesignId(null)
   }
 
   const WHEEL_ZOOM_SENSITIVITY = 0.0015
@@ -1090,62 +1129,120 @@ export function MyPage() {
                   ✕
                 </button>
 
-                <div
-                    ref={imageViewportRef}
-                    className={`mypage-x__modal-image-viewport${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
-                    onMouseUp={stopDragging}
-                    onMouseLeave={stopDragging}
-                >
-                  <img
-                      src={detailImage.imageUrl}
-                      alt="네일 디자인 확대"
-                      className="mypage-x__modal-image"
-                      draggable={false}
-                      style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-                      onMouseDown={handleImagePointerDown}
-                      onMouseMove={handleImagePointerMove}
-                  />
+                {showChatHistory ? (
+                    <div className="mypage-x__modal-image-viewport" style={{ overflowY: 'auto', height: 'min(70vh, 620px)' }}>
+                      <div className="design-chat__messages" style={{ padding: '0.5rem' }}>
+                        {isChatHistoryLoading && <p style={{ textAlign: 'center', color: '#999' }}>불러오는 중…</p>}
+                        {chatHistoryError && <p style={{ textAlign: 'center', color: '#c0392b' }}>{chatHistoryError}</p>}
+                        {!isChatHistoryLoading && !chatHistoryError && chatHistory.length === 0 && (
+                            <p style={{ textAlign: 'center', color: '#999' }}>
+                              이 디자인은 채팅 없이 만들어졌거나, 저장된 대화 이력이 없어요.
+                            </p>
+                        )}
+                        {chatHistory.map((msg, i) => (
+                            <div key={i} className={`design-chat__row design-chat__row--${msg.role}`}>
+                              {msg.role === 'assistant' && (
+                                  <img src="/images/logo.png" alt="" className="design-chat__avatar" />
+                              )}
+                              <div className={`design-chat__bubble design-chat__bubble--${msg.role}`}>
+                                {msg.content.split('\n').map((line, j) => (
+                                    <p key={j}>{line}</p>
+                                ))}
+                                {msg.imageUrls && msg.imageUrls.length > 0 && (
+                                    <div className="design-chat__bubble-images">
+                                      {msg.imageUrls.map((url, k) => (
+                                          <div key={k} className="design-chat__bubble-image-wrap">
+                                            <img
+                                                src={url}
+                                                alt={`생성된 네일 디자인 ${k + 1}`}
+                                                style={{ cursor: 'zoom-in' }}
+                                                onClick={() => {
+                                                  setZoom(1)
+                                                  setPan({ x: 0, y: 0 })
+                                                  // 찜하기/삭제는 "지금 보고 있는 이미지" 개별로 작동해야 하므로
+                                                  // designId를 이 이미지 것으로 바꾼다. 반면 confirmedDesignId는
+                                                  // 안 건드려서 "최종 확정" 표시는 처음 연 디자인 기준으로 고정된다.
+                                                  const newDesignId = msg.designId ?? detailImage?.designId ?? null
+                                                  const liked = likedKeySet.has(`${newDesignId}-${url}`)
+                                                  setDetailImage((prev) =>
+                                                      prev ? { ...prev, imageUrl: url, designId: newDesignId, liked } : prev,
+                                                  )
+                                                  setShowChatHistory(false)
+                                                }}
+                                            />
+                                          </div>
+                                      ))}
+                                    </div>
+                                )}
+                              </div>
+                            </div>
+                        ))}
+                      </div>
+                    </div>
+                ) : (
+                    <div
+                        ref={imageViewportRef}
+                        className={`mypage-x__modal-image-viewport${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
+                        onMouseUp={stopDragging}
+                        onMouseLeave={stopDragging}
+                    >
+                      <img
+                          src={detailImage.imageUrl}
+                          alt="네일 디자인 확대"
+                          className="mypage-x__modal-image"
+                          draggable={false}
+                          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+                          onMouseDown={handleImagePointerDown}
+                          onMouseMove={handleImagePointerMove}
+                      />
 
-                  <div className="mypage-x__modal-zoom-controls">
-                    <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
-                  </div>
-                </div>
+                      <div className="mypage-x__modal-zoom-controls">
+                        <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
+                      </div>
+                    </div>
+                )}
 
                 <div className="mypage-x__modal-info">
                   {detailImage.createdAt && <p className="mypage-x__modal-date">{detailImage.createdAt}</p>}
                 </div>
                 <div className="mypage-x__modal-actions">
-                  <button
-                      type="button"
-                      className="mypage-x__modal-action--accent"
-                      onClick={() => setArTryOnImageUrl(detailImage.imageUrl)}
-                  >
-                    AR로 미리보기
-                  </button>
-                  <button
-                      type="button"
-                      onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
-                  >
-                    로컬에 저장
-                  </button>
-                  <button
-                      type="button"
-                      className={detailImage.liked ? 'is-active' : ''}
-                      onClick={() => void handleModalToggleLike()}
-                      disabled={isBusy || detailImage.designId == null}
-                  >
-                    {detailImage.liked ? '♥ 찜 해제' : '♡ 찜하기'}
-                  </button>
-                  {detailImage.isFavoriteView ? (
-                      <button type="button" className="danger" onClick={() => void handleModalUnfavorite()} disabled={isBusy}>
-                        찜 목록에서 제거
+                  {detailImage.designId != null && (
+                      <button
+                          type="button"
+                          className="mypage-x__modal-action--accent"
+                          onClick={() => setShowChatHistory((prev) => !prev)}
+                      >
+                        {showChatHistory ? '🖼 디자인으로 돌아가기' : '💬 채팅 이력 보기'}
                       </button>
-                  ) : (
-                      detailImage.canDelete && (
-                          <button type="button" className="danger" onClick={() => void handleModalDelete()} disabled={isBusy}>
-                            이미지 삭제
-                          </button>
-                      )
+                  )}
+                  {!showChatHistory && (
+                      <>
+                        <button
+                            type="button"
+                            onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
+                        >
+                          로컬에 저장
+                        </button>
+                        <button
+                            type="button"
+                            className={detailImage.liked ? 'is-active' : ''}
+                            onClick={() => void handleModalToggleLike()}
+                            disabled={isBusy || detailImage.designId == null}
+                        >
+                          {detailImage.liked ? '♥ 찜 해제' : '♡ 찜하기'}
+                        </button>
+                        {detailImage.isFavoriteView ? (
+                            <button type="button" className="danger" onClick={() => void handleModalUnfavorite()} disabled={isBusy}>
+                              찜 목록에서 제거
+                            </button>
+                        ) : (
+                            detailImage.canDelete && (
+                                <button type="button" className="danger" onClick={() => void handleModalDelete()} disabled={isBusy}>
+                                  이미지 삭제
+                                </button>
+                            )
+                        )}
+                      </>
                   )}
                 </div>
               </div>

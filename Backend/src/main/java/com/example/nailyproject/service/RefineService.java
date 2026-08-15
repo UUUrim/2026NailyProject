@@ -1,9 +1,11 @@
 package com.example.nailyproject.service;
 
 import com.example.nailyproject.dto.SlotData;
+import com.example.nailyproject.entity.ChatMessage;
 import com.example.nailyproject.entity.DesignSession;
 import com.example.nailyproject.entity.NailDesign;
 import com.example.nailyproject.entity.User;
+import com.example.nailyproject.repository.ChatMessageRepository;
 import com.example.nailyproject.repository.DesignSessionRepository;
 import com.example.nailyproject.repository.NailDesignRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,6 +35,7 @@ public class RefineService {
 
     private final DesignSessionRepository designSessionRepository;
     private final NailDesignRepository nailDesignRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
 
@@ -162,6 +165,22 @@ public class RefineService {
         mergeFingerDislikes(resultJson.path("fingerDislikes"), session.getFingerDislikes(), session::updateFingerDislikes);
 
         designSessionRepository.save(session);
+
+        // 이 수정 요청도 채팅 이력에 남겨야, 나중에 마이페이지에서 "채팅 이력 보기"로
+        // 다시 볼 때 이 turn이 빠지지 않는다. (예전엔 슬롯 반영만 하고 메시지 저장을
+        // 안 해서, 재생성 전 수정 요청 대화가 재연에서 통째로 누락되는 문제가 있었다.)
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session)
+                .role(ChatMessage.MessageRole.user)
+                .content(message)
+                .build());
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session)
+                .role(ChatMessage.MessageRole.assistant)
+                .content(appliedChanges.isEmpty()
+                        ? "네, 알겠습니다! 요청하신 내용으로 다시 만들어드릴게요."
+                        : "네, 알겠습니다! 말씀하신 대로 반영해서 다시 만들어드릴게요.")
+                .build());
 
         return appliedChanges;
     }

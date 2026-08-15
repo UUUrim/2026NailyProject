@@ -35,6 +35,7 @@ public class NailDesignService {
     private final FingerDesignPlanService fingerDesignPlanService;
     private final WebClient.Builder webClientBuilder;
     private final ColorNameService colorNameService;
+    private final ChatMessageRepository chatMessageRepository;
 
     //    ComfyUI URL을 공유받은 ngrok 주소로 변경 (기본적으로 작성되어있음)
     private static final String COMFY_URL = "https://scalded-lard-seduce.ngrok-free.dev";
@@ -53,7 +54,8 @@ public class NailDesignService {
                              SavedDesignRepository savedDesignRepository,
                              FingerDesignPlanService fingerDesignPlanService,
                              WebClient.Builder webClientBuilder,
-                             ColorNameService colorNameService) {
+                             ColorNameService colorNameService,
+                             ChatMessageRepository chatMessageRepository) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -63,6 +65,7 @@ public class NailDesignService {
         this.fingerDesignPlanService = fingerDesignPlanService;
         this.webClientBuilder = webClientBuilder;
         this.colorNameService = colorNameService;
+        this.chatMessageRepository = chatMessageRepository;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -185,7 +188,7 @@ public class NailDesignService {
                 .imageUrls(s3Urls)
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1")
-                .status(NailDesign.DesignStatus.COMPLETED)
+                .status(NailDesign.DesignStatus.DRAFT)
                 .colorPalette(colorPaletteJson)
                 .build();
 
@@ -254,6 +257,8 @@ public class NailDesignService {
     }
 
     /** 컬러_워크플로우.json 구조 그대로 재현. LoadImage(1)만 방금 업로드한 파일명으로 채운다. */
+    private static final String COLOR_WORKFLOW_SHOWTEXT_NODE_ID = "30";
+
     private Map<String, Object> buildColorPaletteWorkflow(String comfyFilename) {
         Map<String, Object> workflow = new HashMap<>();
 
@@ -261,34 +266,53 @@ public class NailDesignService {
                 "inputs", Map.of("image", comfyFilename),
                 "class_type", "LoadImage"
         ));
-        workflow.put("6", Map.of(
-                "inputs", Map.of(
-                        "crop_region", Map.of("x", 30, "y", 150, "width", 700, "height", 260),
-                        "image", new Object[]{"1", 0}
+        workflow.put("26", Map.of(
+                "inputs", Map.ofEntries(
+                        Map.entry("prompt", "nail tip"),
+                        Map.entry("sam_model", "sam_vit_h (2.56GB)"),
+                        Map.entry("dino_model", "GroundingDINO_SwinT_OGC (694MB)"),
+                        Map.entry("threshold", 0.35),
+                        Map.entry("mask_blur", 0),
+                        Map.entry("mask_offset", 0),
+                        Map.entry("invert_output", false),
+                        Map.entry("background", "Color"),
+                        Map.entry("background_color", "#ffffff"),
+                        Map.entry("image", new Object[]{"1", 0})
                 ),
-                "class_type", "ImageCropV2"
+                "class_type", "SegmentV2"
         ));
-        workflow.put("2", Map.of(
+        workflow.put("27", Map.of(
+                "inputs", Map.of(
+                        "filename_prefix", "nail",
+                        "images", new Object[]{"26", 0}
+                ),
+                "class_type", "SaveImage"
+        ));
+        workflow.put("28", Map.of(
                 "inputs", Map.of(
                         "colors", 8,
                         "mode", "Chart",
-                        "image", new Object[]{"6", 0}
+                        "image", new Object[]{"26", 0}
                 ),
                 "class_type", "Image Color Palette"
         ));
-        workflow.put("4", Map.of(
+        workflow.put("29", Map.of(
                 "inputs", Map.of(
                         "delimiter", ", ",
-                        "text_list", new Object[]{"2", 1}
+                        "text_list", new Object[]{"28", 1}
                 ),
                 "class_type", "Text List to Text"
         ));
-        workflow.put("5", Map.of(
+        workflow.put(COLOR_WORKFLOW_SHOWTEXT_NODE_ID, Map.of(
                 "inputs", Map.of(
                         "text_0", "",
-                        "text", new Object[]{"4", 0}
+                        "text", new Object[]{"29", 0}
                 ),
                 "class_type", "ShowText|pysssss"
+        ));
+        workflow.put("31", Map.of(
+                "inputs", Map.of("images", new Object[]{"28", 0}),
+                "class_type", "PreviewImage"
         ));
 
         return workflow;
@@ -296,7 +320,7 @@ public class NailDesignService {
 
     /**
      * waitForImage와 같은 폴링 패턴이지만, 이미지(노드 9)가 아니라
-     * ShowText 노드(5)의 텍스트 출력을 기다린다.
+     * ShowText 노드(COLOR_WORKFLOW_SHOWTEXT_NODE_ID)의 텍스트 출력을 기다린다.
      */
     private String waitForColorPaletteText(String promptId) throws Exception {
         for (int i = 0; i < 60; i++) {
@@ -314,9 +338,9 @@ public class NailDesignService {
             if (!history.has(promptId)) continue;
 
             JsonNode outputs = history.get(promptId).get("outputs");
-            if (outputs == null || !outputs.has("5")) continue;
+            if (outputs == null || !outputs.has(COLOR_WORKFLOW_SHOWTEXT_NODE_ID)) continue;
 
-            JsonNode node5Output = outputs.get("5");
+            JsonNode node5Output = outputs.get(COLOR_WORKFLOW_SHOWTEXT_NODE_ID);
             // pysssss ShowText 계열은 보통 "text" 키에 문자열 배열을 담아 돌려준다.
             // 혹시 다른 키를 쓰는 버전이면, 배열 형태인 첫 번째 필드를 폴백으로 사용한다.
             JsonNode textArray = node5Output.has("text") ? node5Output.get("text") : null;
@@ -573,9 +597,13 @@ public class NailDesignService {
     /**
      * '내 디자인' 전체 이미지 목록 조회 (각각의 이미지를 개별 아이템으로 펼쳐서 반환)
      * sessionId, promptSummary도 함께 내려줘서 마이페이지에서 "이 디자인은 이런 취향으로 만들어졌어요"를 보여줄 수 있음
+     * DRAFT(생성만 하고 "이 디자인으로 할게요"를 안 누른 것)는 제외한다 — 채팅 중 나온
+     * 모든 시도가 아니라, 사용자가 실제로 확정한 디자인만 이력에 남기기 위함.
      */
     public List<DesignImageResponseDto> getUserDesignHistory(Long userId) {
-        List<NailDesign> designs = nailDesignRepository.findAllByUserIdOrderByGeneratedAtDesc(userId);
+        List<NailDesign> designs = nailDesignRepository.findAllByUserIdOrderByGeneratedAtDesc(userId).stream()
+                .filter(d -> d.getStatus() != NailDesign.DesignStatus.DRAFT)
+                .toList();
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
         List<DesignImageResponseDto> resultList = new ArrayList<>();
@@ -600,6 +628,107 @@ public class NailDesignService {
         }
         return resultList;
     }
+
+    /**
+     * 채팅에서 "네, 이 디자인으로 할게요"를 눌렀을 때 호출 — 이때부터 마이페이지 이력에 노출된다.
+     * POST/PATCH /designs/{designId}/confirm
+     */
+    public void confirmDesign(User user, Long designId) {
+        NailDesign design = nailDesignRepository.findById(designId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 디자인을 찾을 수 없습니다."));
+
+        if (!design.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("본인의 디자인만 확정할 수 있습니다.");
+        }
+
+        if (design.getStatus() == NailDesign.DesignStatus.DRAFT) {
+            design.updateStatus(NailDesign.DesignStatus.CONFIRMED);
+            nailDesignRepository.save(design);
+        }
+        // 이미 CONFIRMED 이상이면 그대로 둔다 (중복 확정 눌러도 상태가 뒤로 안 가게)
+    }
+
+    /**
+     * 이 디자인이 만들어진 채팅 세션의 대화 내역을 시간순으로 조회.
+     * 텍스트 대화(ChatMessage)뿐 아니라, 이 세션에서 나왔던 중간 디자인 이미지들
+     * (NailDesign, 재생성 시도 포함)도 "짜잔! 이런 디자인은 어떠세요?" 형태의
+     * 합성 assistant 메시지로 만들어서 같이 시간순으로 섞어 넣는다.
+     * GET /designs/{designId}/chat-history
+     */
+    public List<com.example.nailyproject.dto.response.ChatMessageResponseDto> getDesignChatHistory(User user, Long designId) {
+        NailDesign design = nailDesignRepository.findById(designId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 디자인을 찾을 수 없습니다."));
+
+        if (!design.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("본인의 디자인만 조회할 수 있습니다.");
+        }
+
+        if (design.getSession() == null) {
+            return List.of(); // 세션 없이 만들어진 디자인(레거시 등)이면 빈 목록
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+        Long sessionId = design.getSession().getId();
+
+        record TimelineEntry(java.time.LocalDateTime time, com.example.nailyproject.dto.response.ChatMessageResponseDto dto) {}
+
+        List<TimelineEntry> timeline = new ArrayList<>();
+
+        for (ChatMessage m : chatMessageRepository.findBySessionOrderBySentAtAsc(design.getSession())) {
+            timeline.add(new TimelineEntry(
+                    m.getSentAt(),
+                    com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
+                            .role(m.getRole().name())
+                            .content(m.getContent())
+                            .sentAt(m.getSentAt() != null ? m.getSentAt().format(formatter) : "")
+                            .build()
+            ));
+        }
+
+        boolean referencePhotoAlreadyShown = false;
+        for (NailDesign d : nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(sessionId)) {
+            if (d.getImageUrls() == null || d.getImageUrls().isEmpty()) continue;
+            boolean isFinalConfirmed = d.getId().equals(designId);
+
+            // 사진 기반 생성이었다면, "이 사진으로 만들어줘" 사용자 메시지를 결과 이미지 직전에 끼워 넣는다.
+            // 단, 같은 세션에서 "수정하고 싶어요"로 재생성할 때마다 같은 사진이 다시 업로드/저장되므로,
+            // 세션당 딱 한 번(가장 처음 나온 것)만 보여준다 — 안 그러면 재생성 횟수만큼 이 사진
+            // 메시지가 중복으로 계속 나온다.
+            if (!referencePhotoAlreadyShown && d.getReferenceImageUrl() != null && !d.getReferenceImageUrl().isBlank()) {
+                referencePhotoAlreadyShown = true;
+                java.time.LocalDateTime referenceTime = d.getGeneratedAt() != null
+                        ? d.getGeneratedAt().minusSeconds(1) : null;
+                timeline.add(new TimelineEntry(
+                        referenceTime,
+                        com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
+                                .role("user")
+                                .content("이 사진으로 만들어줘")
+                                .sentAt(referenceTime != null ? referenceTime.format(formatter) : "")
+                                .imageUrls(List.of(d.getReferenceImageUrl()))
+                                .build()
+                ));
+            }
+
+            timeline.add(new TimelineEntry(
+                    d.getGeneratedAt(),
+                    com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
+                            .role("assistant")
+                            .content(isFinalConfirmed ? "짜잔! 이런 디자인은 어떠세요? (최종 확정)" : "짜잔! 이런 디자인은 어떠세요?")
+                            .sentAt(d.getGeneratedAt() != null ? d.getGeneratedAt().format(formatter) : "")
+                            .imageUrls(d.getImageUrls())
+                            .designId(d.getId())
+                            .build()
+            ));
+        }
+
+        return timeline.stream()
+                .sorted(Comparator.comparing(
+                        e -> e.time() != null ? e.time() : java.time.LocalDateTime.MIN))
+                .map(TimelineEntry::dto)
+                .toList();
+    }
+
+
 
     /**
      * '둘러보기' 커뮤니티 갤러리 GET /designs/community
@@ -773,6 +902,32 @@ public class NailDesignService {
         NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session);
 
         nailDesign.updateDesignPlan(plan.toString());
+
+        // 사진 기반 생성이면, 사용자가 업로드한 원본 참고 이미지를 S3에 올려서 저장해둔다.
+        // (이걸 안 해두면 이 요청이 끝나는 즉시 imageBase64는 버려져서, 나중에 마이페이지에서
+        // "채팅 이력 보기"로 재연할 때 사용자가 올렸던 사진을 다시 보여줄 방법이 없다.)
+        // 세션에 이미 저장된 참고 이미지 URL이 있으면(=이전에 한 번 업로드한 적 있으면)
+        // 그대로 재사용하고, 매 재생성마다 같은 사진을 S3에 또 올리지 않는다.
+        if (imageBase64 != null && !imageBase64.isBlank()) {
+            String existingReferenceUrl = session != null ? session.getReferenceImageUrl() : null;
+            if (existingReferenceUrl != null && !existingReferenceUrl.isBlank()) {
+                nailDesign.updateReferenceImageUrl(existingReferenceUrl);
+            } else {
+                try {
+                    byte[] referenceImageBytes = Base64.getDecoder().decode(imageBase64);
+                    String extension = imageMimeType != null && imageMimeType.contains("png") ? ".png" : ".jpg";
+                    String s3Key = "designs/user_" + user.getId() + "/reference_" + UUID.randomUUID() + extension;
+                    String referenceImageUrl = s3Service.uploadImageBytes(referenceImageBytes, s3Key);
+                    nailDesign.updateReferenceImageUrl(referenceImageUrl);
+                    if (session != null) {
+                        session.updateReferenceImageUrl(referenceImageUrl);
+                    }
+                } catch (Exception e) {
+                    System.err.println("참고 이미지 S3 업로드 실패, 채팅 이력 재연에서는 빠지지만 디자인 생성 자체는 계속 진행: " + e.getMessage());
+                }
+            }
+        }
+
         nailDesignRepository.save(nailDesign);
 
         sendPlanToPartsGenerator(user.getId(), handScan != null ? handScan.getId() : null, nailDesign.getId(), plan);
@@ -965,6 +1120,12 @@ public class NailDesignService {
             parts.add(toPromptText(overallMotif) + " motif");
         }
 
+        // 사용자가 특정 글자/텍스트를 요청했는지 확인 (FingerDesignPlanService가 그 경우
+        // design_type/parts를 큰따옴표로 감싸서 채워두기로 약속돼 있음). 그런 요청이 있는데도
+        // "no text"를 그대로 넣으면 "글자 넣어줘"와 "글자 넣지 마"가 같은 프롬프트 안에서
+        // 서로 상쇄돼버리므로, 이 경우엔 "no text"만 빼고 나머지 negative는 그대로 둔다.
+        boolean hasExplicitTextRequest = parts.stream().anyMatch(p -> p.contains("\""));
+
         for (String fingerName : List.of("thumb", "index", "middle", "ring", "pinky")) {
             JsonNode finger = plan.get(fingerName);
             if (finger == null) continue;
@@ -972,6 +1133,7 @@ public class NailDesignService {
             String desc = describeFingerForPrompt(fingerName, finger, fingerDislikes);
             if (desc != null) {
                 parts.add(desc);
+                if (desc.contains("\"")) hasExplicitTextRequest = true;
             }
         }
 
@@ -987,10 +1149,18 @@ public class NailDesignService {
 
         parts.add("top-down flat lay view");
         parts.add("plain white background");
-        parts.add("no shadow, no hands, no fingers, no text, no watermark, no reflection");
+        parts.add(hasExplicitTextRequest
+                ? "no shadow, no hands, no fingers, no watermark, no reflection"
+                : "no shadow, no hands, no fingers, no text, no watermark, no reflection");
         parts.add("product shot");
 
-        String result = String.join(", ", parts);
+        // 방어적 정리: 특정 글자 요청("E" 등)을 처리할 때 Gemini가 가끔 \"E\" 처럼
+        // 불필요한 백슬래시를 끼워 넣는 경우가 있어서, 최종 조립 직전에 한 번 걸러낸다.
+        List<String> sanitizedParts = parts.stream()
+                .map(p -> p.replace("\\\"", "\""))
+                .toList();
+
+        String result = String.join(", ", sanitizedParts);
         System.out.println("최종 완성 프롬프트(통합): " + result);
         return result;
     }
@@ -1011,10 +1181,20 @@ public class NailDesignService {
         if (!designType.isBlank()) descriptors.add(toPromptText(designType));
         if (!baseColor.isBlank()) descriptors.add(toPromptText(baseColor));
 
+        String designTypeLower = designType.toLowerCase();
         if (hasParts) {
             List<String> partTags = new ArrayList<>();
-            partsList.forEach(p -> partTags.add(toPromptText(p.asText())));
-            descriptors.add("with " + String.join(" and ", partTags));
+            partsList.forEach(p -> {
+                String tag = toPromptText(p.asText());
+                // design_type 문구 안에 이미 같은 내용이 들어있으면 중복 표기하지 않는다
+                // (예: 글자 요청을 Gemini가 design_type과 parts 양쪽에 다 써버리는 경우 방지).
+                if (!tag.isBlank() && !designTypeLower.contains(tag.toLowerCase())) {
+                    partTags.add(tag);
+                }
+            });
+            if (!partTags.isEmpty()) {
+                descriptors.add("with " + String.join(" and ", partTags));
+            }
         } else if (!"none".equalsIgnoreCase(motif)) {
             descriptors.add("with " + toPromptText(motif));
         }

@@ -10,7 +10,7 @@ import {
     savePreferences,
     refineKeywords,
 } from '@/apis/chat'
-import { generateDesign, generateDesignFromImage, type DesignExtractedDetails } from '@/apis/design'
+import { generateDesign, generateDesignFromImage, confirmDesign, type DesignExtractedDetails } from '@/apis/design'
 import { getNailShape, type NailShapeId } from '@/constants/nailShapes'
 import { NailPreview3D } from '@/components/nail3d/NailPreview3D'
 import {
@@ -24,9 +24,10 @@ import {
     type PreferenceKey,
 } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
-import { registerChatSessionGuard, confirmLeaveChatIfNeeded } from '@/utils/chatSessionGuard'
+import { registerChatSessionGuard, confirmLeaveChatIfNeeded, shouldBypassBeforeUnload } from '@/utils/chatSessionGuard'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
+import '@/styles/mypage.css'
 
 // ── 타입 ──────────────────────────────────────────────────────────────────
 
@@ -284,9 +285,7 @@ export function NailDesignChatPage() {
     // "네, 바로 생성해주세요 / 아직 더 얘기하고 싶어요" 확인 화면이 떠 있는 동안엔
     // 자유 텍스트 입력을 막는다 — 안 그러면 아무 텍스트나 쳤을 때 "수정 요청"으로
     // 오인돼서 의도치 않게 디자인이 재생성되는 문제가 있었다.
-    const isAwaitingGenerateConfirm =
-        activeQuickReply?.id === 'design-feedback' ||
-        !!activeQuickReply?.options?.some((o) => o.value === '__generate__')
+    const isAwaitingGenerateConfirm = !!activeQuickReply?.options?.some((o) => o.value === '__generate__')
     const [selectedInQuickReply, setSelectedInQuickReply] = useState<string[]>([])
 
     const [mode, setMode] = useState<Mode>('menu')
@@ -299,6 +298,9 @@ export function NailDesignChatPage() {
     const [lastDesign, setLastDesign] = useState<GeneratedDesign | null>(null)
     const [generationSource, setGenerationSource] = useState<GenerationSource>('scan-auto')
     const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(null)
+    // 사진 기반 흐름에서 스캔 없이 "랜덤 모양으로 진행하기"를 고르면, 3D 미리보기에라도
+    // 실제로 랜덤하게 고른 쉐입을 보여주기 위한 값 (백엔드로 별도 전송되진 않음 - 아래 참고)
+    const [randomPhotoShapeId, setRandomPhotoShapeId] = useState<NailShapeId | null>(null)
     const [selectedPhotoPreviewUrl, setSelectedPhotoPreviewUrl] = useState<string | null>(null)
     const photoInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -312,6 +314,70 @@ export function NailDesignChatPage() {
 
     const [showAnalysisPanel, setShowAnalysisPanel] = useState(false)
     const [preview3DImage, setPreview3DImage] = useState<string | null>(null)
+    const [zoomedImage, setZoomedImage] = useState<string | null>(null)
+
+    // ── 확대 이미지 확대/축소/이동 (MyPage의 디테일 이미지 확대 방식과 동일) ──────
+    const [imageZoom, setImageZoom] = useState(1)
+    const [imagePan, setImagePan] = useState({ x: 0, y: 0 })
+    const [isImageDragging, setIsImageDragging] = useState(false)
+    const imageDragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
+    const zoomedImageViewportRef = useRef<HTMLDivElement | null>(null)
+
+    const IMAGE_ZOOM_MIN = 1
+    const IMAGE_ZOOM_MAX = 4
+    const IMAGE_WHEEL_ZOOM_SENSITIVITY = 0.0015
+
+    const openZoomedImage = (url: string) => {
+        setImageZoom(1)
+        setImagePan({ x: 0, y: 0 })
+        setZoomedImage(url)
+    }
+
+    const closeZoomedImage = () => {
+        setZoomedImage(null)
+        setImageZoom(1)
+        setImagePan({ x: 0, y: 0 })
+    }
+
+    // 마우스 휠로 확대/축소 (passive 리스너에서는 preventDefault가 무시되므로
+    // 네이티브 이벤트 리스너를 { passive: false }로 직접 등록한다)
+    useEffect(() => {
+        const viewport = zoomedImageViewportRef.current
+        if (!viewport || !zoomedImage) return
+
+        const onWheel = (e: WheelEvent) => {
+            e.preventDefault()
+            setImageZoom((z) => {
+                const next = Math.min(
+                    IMAGE_ZOOM_MAX,
+                    Math.max(IMAGE_ZOOM_MIN, Number((z - e.deltaY * IMAGE_WHEEL_ZOOM_SENSITIVITY).toFixed(2))),
+                )
+                if (next === IMAGE_ZOOM_MIN) setImagePan({ x: 0, y: 0 })
+                return next
+            })
+        }
+
+        viewport.addEventListener('wheel', onWheel, { passive: false })
+        return () => viewport.removeEventListener('wheel', onWheel)
+    }, [zoomedImage])
+
+    const handleZoomedImagePointerDown = (e: ReactMouseEvent<HTMLImageElement>) => {
+        if (imageZoom <= IMAGE_ZOOM_MIN) return
+        setIsImageDragging(true)
+        imageDragStartRef.current.x = e.clientX
+        imageDragStartRef.current.y = e.clientY
+        imageDragStartRef.current.panX = imagePan.x
+        imageDragStartRef.current.panY = imagePan.y
+    }
+
+    const handleZoomedImagePointerMove = (e: ReactMouseEvent<HTMLImageElement>) => {
+        if (!isImageDragging) return
+        const dx = e.clientX - imageDragStartRef.current.x
+        const dy = e.clientY - imageDragStartRef.current.y
+        setImagePan({ x: imageDragStartRef.current.panX + dx, y: imageDragStartRef.current.panY + dy })
+    }
+
+    const stopZoomedImageDragging = () => setIsImageDragging(false)
     const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(null)
     const [rightAnalysis, setRightAnalysis] = useState<ScanResultResponse | null>(null)
 
@@ -452,6 +518,7 @@ export function NailDesignChatPage() {
         if (!sessionId || !bubbles.some((b) => b.role === 'user')) return
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (shouldBypassBeforeUnload()) return // 이미 우리 확인창에서 동의받은 이동이면 중복으로 안 물어봄
             e.preventDefault()
             e.returnValue = '' // 크롬 등 일부 브라우저는 빈 문자열 지정이 필요함
         }
@@ -604,7 +671,7 @@ export function NailDesignChatPage() {
                 prompt: data.generatedPrompt,
                 preferences: INITIAL_PREFERENCES,
                 source: 'photo',
-                shapeId: resolveShapeId(INITIAL_PREFERENCES),
+                shapeId: randomPhotoShapeId ?? resolveShapeId(INITIAL_PREFERENCES),
                 details: data.details,
             })
             pushAssistantImages('짜잔! 이런 디자인은 어떠세요?', data.imageUrls)
@@ -644,19 +711,48 @@ export function NailDesignChatPage() {
                 setMode('photo')
                 setSelectedPhotoFile(null)
                 setSelectedPhotoPreviewUrl(null)
+                setRandomPhotoShapeId(null)
+                if (!scanId) {
+                    pushAssistant(
+                        '원하는 스타일의 참고 사진을 올려주세요!\n스캔 정보가 있으면 어울리는 네일팁 모양과 함께 만들 수 있어요! 스캔 싫으시면 랜덤 팁 모양으로 만들어드려요.',
+                    )
+                    setActiveQuickReply({
+                        id: `photo-scan-choice-${makeId()}`,
+                        question: '네일팁 모양은 어떻게 할까요?',
+                        options: [
+                            { value: '__go_to_scan__', label: '📷 스캔하러 가기' },
+                            { value: '__continue_photo_random__', label: '🎲 랜덤 모양으로 진행하기' },
+                        ],
+                        multi: false,
+                        limit: 1,
+                        layout: 'list',
+                    })
+                    break
+                }
                 pushAssistant(
-                    '원하는 스타일의 참고 사진을 올려주세요! 제 손 스캔 정보가 있다면 함께 반영해서 만들어드릴게요.',
+                    '원하는 스타일의 참고 사진을 올려주세요! 손 스캔 정보를 반영해서 어울리는 네일팁 모양과 함께 만들어드릴게요.',
                 )
                 setActiveQuickReply(PHOTO_UPLOAD_QUICK_REPLY)
                 break
             }
             case 'scan-auto': {
                 setMode('scan-auto')
-                pushAssistant(
-                    scanId
-                        ? '내 손 스캔 정보를 바탕으로 어울리는 디자인을 자동으로 만들어드릴게요.'
-                        : '아직 손 스캔 정보가 없어서, 기본 추천값으로 디자인을 만들어드릴게요.',
-                )
+                if (!scanId) {
+                    pushAssistant('아직 손 스캔 정보가 없어서 이 방식으로는 디자인을 만들 수 없어요. 먼저 손 스캔을 진행해 주세요!')
+                    setActiveQuickReply({
+                        id: `scan-required-${makeId()}`,
+                        question: '스캔 정보가 필요해요',
+                        options: [
+                            { value: '__go_to_scan__', label: '📷 스캔하러 가기' },
+                            { value: '__back_to_menu__', label: '💬 다른 방법으로 진행하기' },
+                        ],
+                        multi: false,
+                        limit: 1,
+                        layout: 'list',
+                    })
+                    break
+                }
+                pushAssistant('내 손 스캔 정보를 바탕으로 어울리는 디자인을 자동으로 만들어드릴게요.')
                 void runGenerateDesign(INITIAL_PREFERENCES, 'scan-auto')
                 break
             }
@@ -806,6 +902,10 @@ export function NailDesignChatPage() {
 
         if (option.value === 'accept') {
             if (!lastDesign) return
+            confirmDesign(lastDesign.designId).catch((err) => {
+                // 확정 API가 실패해도 결과 화면 이동 자체는 막지 않되, 콘솔에는 남긴다
+                console.error('디자인 확정(confirm) 실패:', err)
+            })
             navigate('/design/result', {
                 state: {
                     designId: lastDesign.designId,
@@ -987,6 +1087,26 @@ export function NailDesignChatPage() {
 
     const handleQuickReplyClick = (option: QuickReplyOption) => {
         if (isSending) return
+        if (option.value === '__go_to_scan__') {
+            navigate('/process')
+            return
+        }
+        if (option.value === '__back_to_menu__') {
+            pushUser(option.label)
+            setMode('menu')
+            pushAssistant('알겠어요! 다른 방식으로 진행해볼까요?')
+            setActiveQuickReply(MENU_QUICK_REPLY)
+            return
+        }
+        if (option.value === '__continue_photo_random__') {
+            pushUser(option.label)
+            const shapeOptions = PREFERENCE_OPTIONS.shape
+            const randomShape = shapeOptions[Math.floor(Math.random() * shapeOptions.length)]
+            setRandomPhotoShapeId(randomShape.value as NailShapeId)
+            pushAssistant('알겠어요! 팁 모양은 랜덤하게 정해서 만들어드릴게요. 참고하고 싶은 사진을 올려주세요 🎨')
+            setActiveQuickReply(PHOTO_UPLOAD_QUICK_REPLY)
+            return
+        }
         if (activeQuickReply?.id === 'menu') {
             handleMenuSelect(option)
             return
@@ -1212,7 +1332,12 @@ export function NailDesignChatPage() {
                                         >
                                             {bubble.imageUrls.map((url, i) => (
                                                 <div key={i} className="design-chat__bubble-image-wrap">
-                                                    <img src={url} alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'} />
+                                                    <img
+                                                        src={url}
+                                                        alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'}
+                                                        onClick={() => openZoomedImage(url)}
+                                                        style={{ cursor: 'zoom-in' }}
+                                                    />
                                                     {bubble.isDesignResult && (
                                                         <button
                                                             type="button"
@@ -1363,6 +1488,15 @@ export function NailDesignChatPage() {
                                                             disabled={isSending}
                                                         />
                                                     </label>
+
+                                                    <button
+                                                        type="button"
+                                                        className="design-chat__color-custom-add"
+                                                        onClick={() => toggleQuickReplyValue(customColor.toUpperCase())}
+                                                        disabled={isSending}
+                                                    >
+                                                        이 색상 추가하기
+                                                    </button>
                                                 </div>
                                             </div>
 
@@ -1709,6 +1843,48 @@ export function NailDesignChatPage() {
                             {getNailShape(lastDesign.shapeId)?.labelKo ?? lastDesign.shapeId} 쉐입에 디자인을 입힌 모습이에요.
                         </p>
                         <NailPreview3D textureUrl={preview3DImage} shapeId={lastDesign.shapeId} />
+                    </div>
+                </div>
+            )}
+
+            {zoomedImage && (
+                <div className="mypage-x__modal" role="dialog" aria-modal="true">
+                    <button
+                        type="button"
+                        className="mypage-x__modal-backdrop"
+                        aria-label="닫기"
+                        onClick={closeZoomedImage}
+                    />
+                    <div className="mypage-x__modal-panel design-chat__image-zoom-panel">
+                        <button
+                            type="button"
+                            className="mypage-x__modal-close"
+                            onClick={closeZoomedImage}
+                            aria-label="닫기"
+                        >
+                            ✕
+                        </button>
+
+                        <div
+                            ref={zoomedImageViewportRef}
+                            className={`mypage-x__modal-image-viewport design-chat__image-zoom-viewport${imageZoom > 1 ? ' is-zoomed' : ''}${isImageDragging ? ' is-dragging' : ''}`}
+                            onMouseUp={stopZoomedImageDragging}
+                            onMouseLeave={stopZoomedImageDragging}
+                        >
+                            <img
+                                src={zoomedImage}
+                                alt="확대된 이미지"
+                                className="mypage-x__modal-image"
+                                draggable={false}
+                                style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
+                                onMouseDown={handleZoomedImagePointerDown}
+                                onMouseMove={handleZoomedImagePointerMove}
+                            />
+
+                            <div className="mypage-x__modal-zoom-controls">
+                                <span className="mypage-x__modal-zoom-value">{Math.round(imageZoom * 100)}%</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
