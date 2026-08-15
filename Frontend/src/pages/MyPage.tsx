@@ -10,26 +10,38 @@ import { NailArTryOnModal } from '@/components/ar/NailArTryOnModal'
 import { AppShell } from '@/components/layout/AppShell'
 import { useAuth } from '@/hooks/useAuth'
 import { getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/apis/prints'
-import { getMyProfile, updateNickname, updatePassword, type UserProfileResponse } from '@/apis/user'
+import { getMyProfile, updateNickname, updatePassword, verifyCurrentPassword, type UserProfileResponse } from '@/apis/user'
 import {
-  getMyDesigns,
-  getLikedDesigns,
-  likeDesign,
-  unlikeDesign,
-  deleteDesign,
-  getDesignChatHistory,
-  type DesignImageResponse,
-  type SavedDesignResponse,
-  type DesignChatMessage,
+    getMyDesigns,
+    getLikedDesigns,
+    getSavedFolders,
+    reorderSavedFolders,
+    likeDesign,
+    moveLikedDesign,
+    unlikeDesign,
+    deleteDesign,
+    getDesignChatHistory,
+    deleteSavedFolder,
+    getDesignDetail,
+    shareDesign,
+    unshareDesign,
+    type DesignImageResponse,
+    type SavedDesignResponse,
+    type SavedFolderResponse,
+    type DesignExtractedDetails,
+    type DesignChatMessage,
 } from '@/apis/design'
+import { FavoriteFolderModal } from '@/components/mypage/FavoriteFolderModal'
+import { DesignDetailsPanel } from '@/components/design/DesignDetailsPanel'
+import { ModalActionIcons } from '@/components/design/ModalActionIcons'
 import { getMyScans, getScanResult, type ScanHistoryItem, type ScanResultResponse } from '@/apis/scan'
 import { getNailShape } from '@/constants/nailShapes'
-import { SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
+import { PERSONAL_COLOR_SWATCHES, SEASON_ROWS, SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
 import { downloadImage } from '@/utils/downloadImage'
 import '@/styles/mypage.css'
 import '@/styles/design-chat.css'
-
+import '@/styles/nail-design.css'
 type SectionId = 'dashboard' | 'profile' | 'timeline' | 'scans' | 'prints' | 'designs' | 'favorites'
 
 type DetailImage = {
@@ -40,6 +52,17 @@ type DetailImage = {
   liked: boolean
   canDelete: boolean
   isFavoriteView: boolean
+  owner?: boolean
+  folder?: { folderId: number; name: string } | null
+  shared?: boolean
+  details?: DesignExtractedDetails | null
+}
+
+type LikeModalTarget = {
+  designId: number
+  imageUrl: string
+  mode: 'like' | 'move'
+  currentFolderId?: number | null
 }
 
 const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
@@ -48,14 +71,26 @@ const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   COMPLETED: '완료',
 }
 
-// 손 스캔 상태값을 사용자가 이해할 수 있는 한글 문구로
+const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
+  QUEUED: '프린터 대기열에 등록되어 있어요.',
+  PRINTING: '네일팁을 출력하고 있어요.',
+  COMPLETED: '네일팁 출력이 완료되었어요.',
+}
+
+// 손 스캔 분석 상태 (네일팁 출력 관련 상태는 출력 이력에서만 표시)
 const SCAN_STATUS_LABEL: Record<string, string> = {
   READY: '분석 대기 중',
   ANALYZING: '분석 진행 중',
   MEASURED: '분석 완료',
-  GENERATING_STL: '네일팁 제작 중',
+  GENERATING_STL: '분석 완료',
   COMPLETED: '분석 완료',
   FAILED: '분석 실패',
+}
+
+function scanStatusBadgeClass(status: string | null | undefined): string {
+  const raw = (status ?? '').toLowerCase()
+  if (raw === 'generating_stl') return 'measured'
+  return raw || 'ready'
 }
 
 // 한 번의 촬영에서 나온 왼손/오른손 스캔 기록을 하나로 묶은 단위
@@ -64,15 +99,46 @@ type ScanSession = {
   scannedAt: string
   leftScanId: number | null
   rightScanId: number | null
+  seasonCode: string | null
   seasonNameKo: string | null
   shape: string | null
   status: string | null
+  avgLengthMm: number | null
+  avgWidthMm: number | null
+  avgCurve: number | null
 }
 
-type FingerStat = { label: string; lengthMm: number; widthMm: number; cCurve: number }
+function avgNullable(a: number | null | undefined, b: number | null | undefined): number | null {
+  if (a == null && b == null) return null
+  if (a == null) return b ?? null
+  if (b == null) return a
+  return Number(((a + b) / 2).toFixed(2))
+}
+
+/** 퍼스널컬러 팔레트의 대표색(두 번째 스와치, 없으면 첫 색) */
+function representativePersonalColor(seasonCode: string | null | undefined): string {
+  const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : undefined
+  if (!palette?.length) return '#de869f'
+  return palette[1] ?? palette[0]
+}
+
+function pickPalettePreview(seasonCode: string | null | undefined, count = 5): string[] {
+  const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : undefined
+  if (!palette?.length) return []
+  return palette.slice(0, count)
+}
+
+function formatMetricCurve(value: number | null | undefined): string {
+  if (value == null) return '-'
+  const fixed = Number(value).toFixed(2).replace(/\.?0+$/, '')
+  return fixed
+}
+
+type FingerStat = { label: string; hand: 'L' | 'R'; partLabel: string; lengthMm: number; widthMm: number; cCurve: number }
 
 type ScanDetail = {
   scannedAt: string
+  seasonCode: string | null
   seasonNameKo: string | null
   shapeId: string | null
   avgLength: number
@@ -114,10 +180,14 @@ function buildScanDetail(left: ScanResultResponse | null, right: ScanResultRespo
   const fingers: FingerStat[] = [
     ...(left?.fingers ?? []).map((f) => ({
       label: `${FINGER_LABEL_KO[f.finger] ?? f.finger}(L)`,
+      hand: 'L' as const,
+      partLabel: FINGER_LABEL_KO[f.finger] ?? f.finger,
       ...parseFingerMeasurements(f.measurements),
     })),
     ...(right?.fingers ?? []).map((f) => ({
       label: `${FINGER_LABEL_KO[f.finger] ?? f.finger}(R)`,
+      hand: 'R' as const,
+      partLabel: FINGER_LABEL_KO[f.finger] ?? f.finger,
       ...parseFingerMeasurements(f.measurements),
     })),
   ]
@@ -133,6 +203,7 @@ function buildScanDetail(left: ScanResultResponse | null, right: ScanResultRespo
 
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
+    seasonCode: left?.seasonCode || right?.seasonCode || null,
     seasonNameKo: left?.seasonNameKo || right?.seasonNameKo || null,
     shapeId: left?.shape || right?.shape || null,
     avgLength,
@@ -166,11 +237,48 @@ const Icon = {
   print: (
       <svg viewBox="0 0 24 24" fill="none"><path d="M7 8V4h10v4M6 17h12a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><rect x="8" y="14" width="8" height="6" stroke="currentColor" strokeWidth="1.6" /></svg>
   ),
+  calendar: (
+      <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" stroke="currentColor" strokeWidth="1.6" /><path d="M8 3.5v3M16 3.5v3M3.5 9.5h17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+  ),
   logout: (
       <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 16l4-4-4-4M19 12H9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
   chevron: (
       <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  chevronLeft: (
+      <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="m15 6-6 6 6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  chevronRight: (
+      <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  chevronDown: (
+      <svg viewBox="0 0 24 24" fill="none" width="13" height="13"><path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  trash: ModalActionIcons.trash,
+  folder: (
+      <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M3.5 6.2A1.7 1.7 0 0 1 5.2 4.5h4.1c.5 0 .97.22 1.3.6l1.05 1.2c.32.38.8.6 1.3.6h5.35a1.7 1.7 0 0 1 1.7 1.7v9.7a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7V6.2z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>
+  ),
+  lengthIcon: (
+      <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 4v16M12 4l-3 3.2M12 4l3 3.2M12 20l-3-3.2M12 20l3-3.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  widthIcon: (
+      <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M4 12h16M4 12l3.2-3.2M4 12l3.2 3.2M20 12l-3.2-3.2M20 12l-3.2 3.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  curveIcon: (
+      <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M3.5 14.8c3.2-2.4 6.2-3.2 8.5-3.2s5.3.8 8.5 3.2" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
+  summaryIcon: (
+      <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" /><path d="M12 7.6v5.2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /><circle cx="12" cy="16.4" r="1.05" fill="currentColor" /></svg>
+  ),
+  palette: (
+      <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+        <path d="M12 3.5c-4.7 0-8.5 3.4-8.5 8.1 0 3.3 2.2 5.4 4.4 5.4.7 0 1.3-.3 1.7-.8.3-.4.8-.7 1.4-.7h1.1c2.9 0 5.4-2.3 5.4-5.3C17.5 6.4 15.1 3.5 12 3.5z" stroke="currentColor" strokeWidth="1.55" strokeLinejoin="round" />
+        <circle cx="8.2" cy="10.2" r="1.05" fill="currentColor" />
+        <circle cx="11.1" cy="7.8" r="1.05" fill="currentColor" />
+        <circle cx="14.3" cy="8.6" r="1.05" fill="currentColor" />
+        <circle cx="15.2" cy="11.8" r="1.05" fill="currentColor" />
+      </svg>
   ),
 }
 
@@ -197,42 +305,71 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   },
 ]
 
-const SECTION_META: Record<SectionId, { title: string; subtitle: string }> = {
+const SECTION_META: Record<SectionId, { subtitle: string; title: string; description: string }> = {
   dashboard: {
+    subtitle: 'My Naily',
     title: '대시보드',
-    subtitle: '지금까지의 네일리 활동을 한눈에 확인해보세요.',
+    description: '지금까지의 네일리 활동을 한눈에 확인해보세요.',
   },
   profile: {
+    subtitle: 'Profile',
     title: '프로필 설정',
-    subtitle: '닉네임과 비밀번호를 관리할 수 있어요.',
+    description: '닉네임과 비밀번호를 관리할 수 있어요.',
   },
   timeline: {
+    subtitle: 'Timeline',
     title: '활동 타임라인',
-    subtitle: '손 촬영·분석, 네일팁 출력, 디자인 생성까지 날짜별로 모아봤어요.',
+    description: '날짜별로 손 분석, 네일팁 출력, 디자인 생성 활동을 한눈에 살펴보세요.',
   },
   scans: {
+    subtitle: 'Hand Analysis',
     title: '손 분석 이력',
-    subtitle: '진행한 손 스캔 분석 결과예요. 항목을 누르면 상세 결과를 볼 수 있어요.',
+    description: '양손 촬영을 모두 마친 손 스캔 분석 결과예요. 항목을 누르면 상세 결과를 볼 수 있어요.',
   },
   designs: {
+    subtitle: 'Design',
     title: '디자인 이력',
-    subtitle: '생성한 모든 네일 디자인이에요. 이미지를 눌러 확대·저장·AR 미리보기가 가능해요.',
+    description: '생성한 모든 네일 디자인이에요. 이미지를 눌러 확대·저장·AR 미리보기가 가능해요.',
   },
   prints: {
+    subtitle: 'Nail Tip Print',
     title: '네일팁 출력 내역',
-    subtitle: '3D 네일팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
+    description: '3D 네일팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
   },
   favorites: {
+    subtitle: 'Liked',
     title: '찜 목록',
-    subtitle: '마음에 들어 찜해 둔 디자인만 모아뒀어요.',
+    description: 'ㅇㅇ 님이 찜해두신 디자인만 모아놨어요.',
   },
 }
 
-// 백엔드가 주는 "yyyy. M. d." 형식이든 ISO 문자열이든 안전하게 Date로 변환
-function parseDateFlexible(raw: string): Date | null {
-  const dotMatch = raw.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})/)
+// 백엔드가 주는 "yyyy. M. d." / "yyyy. M. d. HH:mm:ss" 형식이든 ISO 문자열이든 안전하게 Date로 변환
+function parseDateFlexible(raw: string | number[] | null | undefined): Date | null {
+  if (raw == null) return null
+  // Jackson이 LocalDateTime을 배열로 내려주는 경우: [y, m, d, h, mi, s]
+  if (Array.isArray(raw) && raw.length >= 3) {
+    return new Date(
+        Number(raw[0]),
+        Number(raw[1]) - 1,
+        Number(raw[2]),
+        Number(raw[3] ?? 0),
+        Number(raw[4] ?? 0),
+        Number(raw[5] ?? 0),
+    )
+  }
+  if (typeof raw !== 'string' || !raw) return null
+  const dotMatch = raw.match(
+      /(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+  )
   if (dotMatch) {
-    return new Date(Number(dotMatch[1]), Number(dotMatch[2]) - 1, Number(dotMatch[3]))
+    return new Date(
+        Number(dotMatch[1]),
+        Number(dotMatch[2]) - 1,
+        Number(dotMatch[3]),
+        Number(dotMatch[4] ?? 0),
+        Number(dotMatch[5] ?? 0),
+        Number(dotMatch[6] ?? 0),
+    )
   }
   const d = new Date(raw)
   return isNaN(d.getTime()) ? null : d
@@ -251,24 +388,158 @@ function dateLabelOf(key: string): string {
   return date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })
 }
 
+function formatTimeHms(raw: string): string {
+  const d = parseDateFlexible(raw)
+  if (!d) return ''
+  // 표시용: HH:MM (저장 형식은 그대로 두고 화면에서만 초 단위를 생략)
+  if (typeof raw === 'string' && !/\d{1,2}:\d{2}/.test(raw) && !raw.includes('T')) {
+    return ''
+  }
+  return [d.getHours(), d.getMinutes()]
+      .map((n) => String(n).padStart(2, '0'))
+      .join(':')
+}
+
+function formatDateOnly(raw: string): string {
+  const d = parseDateFlexible(raw)
+  if (!d) return typeof raw === 'string' ? raw : ''
+  return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`
+}
+
+function formatDateTimeFull(raw: string): string {
+  const d = parseDateFlexible(raw)
+  if (!d) return raw
+  const time = formatTimeHms(raw)
+  const date = formatDateOnly(raw)
+  return time ? `${date} ${time}` : date
+}
+
+function compareByTime(aRaw: string, bRaw: string, order: 'newest' | 'oldest') {
+  const ta = parseDateFlexible(aRaw)?.getTime() ?? 0
+  const tb = parseDateFlexible(bRaw)?.getTime() ?? 0
+  return order === 'newest' ? tb - ta : ta - tb
+}
+
+function laterScannedAt(a: string, b: string): string {
+  const ta = parseDateFlexible(a)?.getTime() ?? 0
+  const tb = parseDateFlexible(b)?.getTime() ?? 0
+  return tb >= ta ? b : a
+}
+
+function pickAnalysisStatus(leftStatus: string | null | undefined, rightStatus: string | null | undefined): string | null {
+  const statuses = [leftStatus, rightStatus].filter(Boolean) as string[]
+  if (statuses.length === 0) return null
+  const order = ['FAILED', 'READY', 'ANALYZING', 'MEASURED', 'GENERATING_STL', 'COMPLETED']
+  for (const s of order) {
+    if (statuses.includes(s)) return s
+  }
+  return statuses[0]
+}
+
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function todayKey(): string {
+  return toDateKey(new Date())
+}
+
+function shiftDateKey(key: string, delta: number): string {
+  const [y, m, d] = key.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  date.setDate(date.getDate() + delta)
+  return toDateKey(date)
+}
+
+function formatNavDate(key: string): string {
+  if (!key || key === 'unknown') return '날짜 정보 없음'
+  const [y, m, d] = key.split('-').map(Number)
+  return `${y}년 ${m}월 ${d}일`
+}
+
+function buildCalendarCells(year: number, month: number) {
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: Array<{ key: string; day: number; inMonth: boolean } | null> = []
+  for (let i = 0; i < firstDay; i += 1) cells.push(null)
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({
+      key: `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+      day,
+      inMonth: true,
+    })
+  }
+  while (cells.length % 7 !== 0) cells.push(null)
+  return cells
+}
+
+type TimelineDayGroup = {
+  scans: ScanSession[]
+  designs: DesignImageResponse[]
+  prints: NailTipPrintOrder[]
+}
+
+type TimelineEventKind = 'scan' | 'print' | 'design'
+
+type TimelineDayEvent = {
+  id: string
+  kind: TimelineEventKind
+  at: string
+  timeMs: number
+}
+
+// ── 새 비밀번호 규칙 체크리스트 ──────
+type PasswordRuleCheck = { key: string; label: string; passed: boolean }
+
+function getPasswordRuleChecks(pw: string): PasswordRuleCheck[] {
+  return [
+    { key: 'length', label: '8자 이상', passed: pw.length >= 8 },
+    { key: 'upper', label: '영문 대문자 포함', passed: /[A-Z]/.test(pw) },
+    { key: 'lower', label: '영문 소문자 포함', passed: /[a-z]/.test(pw) },
+    { key: 'digit', label: '숫자 포함', passed: /[0-9]/.test(pw) },
+    { key: 'special', label: '특수문자 포함', passed: /[^A-Za-z0-9]/.test(pw) },
+  ]
+}
+
+function isPasswordValid(pw: string): boolean {
+  return getPasswordRuleChecks(pw).every((rule) => rule.passed)
+}
+
 export function MyPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { logout } = useAuth()
 
-  // ── 프로필 ──────
+  // ── 프로필: 닉네임 변경 (1단계: 현재 비밀번호 확인 → 2단계: 새 닉네임 입력) ──────
   const [profile, setProfile] = useState<UserProfileResponse | null>(null)
-  const [editing, setEditing] = useState(false)
+  const [isEditingNickname, setIsEditingNickname] = useState(false)
+  const [nicknameStage, setNicknameStage] = useState<'password' | 'nickname' | 'done'>('password')
+  const [nicknamePassword, setNicknamePassword] = useState('')
+  const [nicknamePasswordError, setNicknamePasswordError] = useState('')
+  const [isVerifyingNicknamePassword, setIsVerifyingNicknamePassword] = useState(false)
   const [nickname, setNickname] = useState('')
+  const [nicknameError, setNicknameError] = useState('')
+  const [isSavingNickname, setIsSavingNickname] = useState(false)
+
+  // ── 프로필: 비밀번호 변경 (1단계: 현재 비밀번호 확인 → 2단계: 새 비밀번호 입력) ──────
+  const [isEditingPassword, setIsEditingPassword] = useState(false)
+  const [passwordStage, setPasswordStage] = useState<'password' | 'new' | 'done'>('password')
   const [currentPassword, setCurrentPassword] = useState('')
+  const [currentPasswordError, setCurrentPasswordError] = useState('')
+  const [isVerifyingCurrentPassword, setIsVerifyingCurrentPassword] = useState(false)
   const [newPassword, setNewPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
-  const [profileMessage, setProfileMessage] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
+  const [newPasswordSubmitError, setNewPasswordSubmitError] = useState('')
+  const [isSavingPassword, setIsSavingPassword] = useState(false)
 
   // ── 섹션 ───────
   const initialSection = (location.state as { tab?: SectionId } | null)?.tab ?? 'dashboard'
   const [section, setSection] = useState<SectionId>(initialSection)
+
+  useEffect(() => {
+    const tab = (location.state as { tab?: SectionId } | null)?.tab
+    if (tab) setSection(tab)
+  }, [location.state])
 
   // ── 데이터 ──────
   const [designs, setDesigns] = useState<DesignImageResponse[]>([])
@@ -278,38 +549,62 @@ export function MyPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   const [detailImage, setDetailImage] = useState<DetailImage | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [showDesignDetails, setShowDesignDetails] = useState(false)
   const [arTryOnImageUrl, setArTryOnImageUrl] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState(false)
 
-  // ── 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글) ──────
-  const [showChatHistory, setShowChatHistory] = useState(false)
-  const [chatHistory, setChatHistory] = useState<DesignChatMessage[]>([])
-  const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
-  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
-  // 모달을 열었을 때의 "확정된 디자인" id를 고정해둔다. 채팅 속 중간 시안 이미지를
-  // 눌러서 확대해도(=detailImage.designId가 그 시안으로 바뀌어도) 이 값은 안 바뀌어야
-  // "최종 확정" 표시가 엉뚱한 시안으로 옮겨붙지 않는다.
-  const [confirmedDesignId, setConfirmedDesignId] = useState<number | null>(null)
+// ── 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글) ──────
+    const [showChatHistory, setShowChatHistory] = useState(false)
+    const [chatHistory, setChatHistory] = useState<DesignChatMessage[]>([])
+    const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
+    const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
+    const [confirmedDesignId, setConfirmedDesignId] = useState<number | null>(null)
 
-  useEffect(() => {
-    if (!showChatHistory || confirmedDesignId == null) return
-    let cancelled = false
-    setIsChatHistoryLoading(true)
-    setChatHistoryError(null)
-    getDesignChatHistory(confirmedDesignId)
-        .then((data) => {
-          if (!cancelled) setChatHistory(data)
-        })
-        .catch(() => {
-          if (!cancelled) setChatHistoryError('채팅 이력을 불러오지 못했어요.')
-        })
-        .finally(() => {
-          if (!cancelled) setIsChatHistoryLoading(false)
-        })
-    return () => {
-      cancelled = true
-    }
-  }, [showChatHistory, confirmedDesignId])
+    useEffect(() => {
+        if (!showChatHistory || confirmedDesignId == null) return
+        let cancelled = false
+        setIsChatHistoryLoading(true)
+        setChatHistoryError(null)
+        getDesignChatHistory(confirmedDesignId)
+            .then((data) => {
+                if (!cancelled) setChatHistory(data)
+            })
+            .catch(() => {
+                if (!cancelled) setChatHistoryError('채팅 이력을 불러오지 못했어요.')
+            })
+            .finally(() => {
+                if (!cancelled) setIsChatHistoryLoading(false)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [showChatHistory, confirmedDesignId])
+
+    // ── 활동 타임라인 ──────
+    const [selectedTimelineDate, setSelectedTimelineDate] = useState(todayKey)
+    const [calendarOpen, setCalendarOpen] = useState(false)
+    const [calendarMonth, setCalendarMonth] = useState(() => {
+        const now = new Date()
+        return { year: now.getFullYear(), month: now.getMonth() }
+    })
+    const calendarRef = useRef<HTMLDivElement | null>(null)
+    const dayBodyRef = useRef<HTMLDivElement | null>(null)
+    const sortMenuRef = useRef<HTMLDivElement | null>(null)
+    const timelineDateInitialized = useRef(false)
+    const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null)
+    const [pinnedActivityId, setPinnedActivityId] = useState<string | null>(null)
+    const [listSortOrder, setListSortOrder] = useState<'newest' | 'oldest'>('newest')
+    const [folderSortOrder, setFolderSortOrder] = useState<'name' | 'lastSaved'>('lastSaved')
+    const [folderSortMenuOpen, setFolderSortMenuOpen] = useState(false)
+    const [sortMenuOpen, setSortMenuOpen] = useState(false)
+    const [listPage, setListPage] = useState(1)
+    const [savedFolders, setSavedFolders] = useState<SavedFolderResponse[]>([])
+    const [likeModalTarget, setLikeModalTarget] = useState<LikeModalTarget | null>(null)
+    const [selectedFavoriteFolderId, setSelectedFavoriteFolderId] = useState<number | null>(null)
+    const mainPanelRef = useRef<HTMLElement | null>(null)
+    const folderSortMenuRef = useRef<HTMLDivElement | null>(null)
 
   // ── 이미지 확대/축소/이동 ──────
   const [zoom, setZoom] = useState(1)
@@ -321,22 +616,69 @@ export function MyPage() {
   const ZOOM_MIN = 1
   const ZOOM_MAX = 4
 
-  const openDetailImage = (img: DetailImage) => {
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
-    setShowChatHistory(false)
-    setChatHistory([])
-    setConfirmedDesignId(img.designId ?? null)
-    setDetailImage(img)
+    const openDetailImage = (img: DetailImage) => {
+        setZoom(1)
+        setPan({ x: 0, y: 0 })
+        setShowChatHistory(false)
+        setChatHistory([])
+        setConfirmedDesignId(img.designId ?? null)
+        setShowDesignDetails(false)
+        setDetailImage(img)
+        if (img.designId == null) return
+    setDetailLoading(true)
+    void getDesignDetail(img.designId)
+        .then((detail) => {
+          setDetailImage((prev) =>
+              prev && prev.designId === img.designId
+                  ? {
+                    ...prev,
+                    shared: detail.shared,
+                    owner: detail.owner,
+                    canDelete: detail.owner,
+                    details: detail.details ?? null,
+                    createdAt: detail.createdAt || prev.createdAt,
+                  }
+                  : prev,
+          )
+        })
+        .catch(() => {
+          /* 상세 실패해도 이미지는 볼 수 있게 유지 */
+        })
+        .finally(() => setDetailLoading(false))
   }
 
   const closeDetailImage = () => {
     setDetailImage(null)
+    setDetailLoading(false)
+    setShareBusy(false)
+    setShowDesignDetails(false)
     setZoom(1)
     setPan({ x: 0, y: 0 })
     setShowChatHistory(false)
     setChatHistory([])
     setConfirmedDesignId(null)
+  }
+
+  const handleToggleShare = async () => {
+    if (!detailImage?.designId || !detailImage.owner || shareBusy) return
+    setShareBusy(true)
+    try {
+      const next = detailImage.shared
+          ? await unshareDesign(detailImage.designId)
+          : await shareDesign(detailImage.designId)
+      setDetailImage((prev) =>
+          prev ? { ...prev, shared: next.shared, details: next.details ?? prev.details } : prev,
+      )
+      setDesigns((prev) =>
+          prev.map((d) =>
+              d.designId === detailImage.designId ? { ...d, shared: next.shared } : d,
+          ),
+      )
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : '공유 처리에 실패했습니다.')
+    } finally {
+      setShareBusy(false)
+    }
   }
 
   const WHEEL_ZOOM_SENSITIVITY = 0.0015
@@ -390,12 +732,21 @@ export function MyPage() {
         .catch(() => {})
 
     setIsLoading(true)
-    Promise.allSettled([getMyDesigns(), getLikedDesigns(), getMyScans(), getMyPrintOrders()]).then(
-        ([designsRes, favoritesRes, scansRes, printsRes]) => {
+    Promise.allSettled([getMyDesigns(), getLikedDesigns(), getMyScans(), getMyPrintOrders(), getSavedFolders()]).then(
+        ([designsRes, favoritesRes, scansRes, printsRes, foldersRes]) => {
           if (designsRes.status === 'fulfilled') setDesigns(designsRes.value)
-          if (favoritesRes.status === 'fulfilled') setFavorites(favoritesRes.value)
+          if (favoritesRes.status === 'fulfilled') {
+            setFavorites(favoritesRes.value)
+          } else {
+            console.error('찜 목록 조회 실패', favoritesRes.reason)
+          }
           if (scansRes.status === 'fulfilled') setScans(scansRes.value)
           if (printsRes.status === 'fulfilled') setPrints(printsRes.value)
+          if (foldersRes.status === 'fulfilled') {
+            setSavedFolders(foldersRes.value)
+          } else {
+            console.error('찜 폴더 조회 실패', foldersRes.reason)
+          }
           setIsLoading(false)
         },
     )
@@ -425,19 +776,41 @@ export function MyPage() {
         const otherTime = parseDateFlexible(other.scannedAt)?.getTime() ?? 0
         return Math.abs(otherTime - scanTime) < 90 * 60 * 1000
       })
-      if (partner) used.add(partner.scanId)
+      // 양손 촬영을 모두 마친 경우만 이력으로 저장·표시
+      if (!partner) return
+      used.add(partner.scanId)
 
-      const left = scan.handSide === 'LEFT' ? scan : partner?.handSide === 'LEFT' ? partner : null
-      const right = scan.handSide === 'RIGHT' ? scan : partner?.handSide === 'RIGHT' ? partner : null
+      const left = scan.handSide === 'LEFT' ? scan : partner.handSide === 'LEFT' ? partner : null
+      const right = scan.handSide === 'RIGHT' ? scan : partner.handSide === 'RIGHT' ? partner : null
+      if (!left || !right) return
+
+      const status = pickAnalysisStatus(left.status, right.status)
+      const seasonCode = left.seasonCode ?? right.seasonCode ?? null
+      const seasonNameKo = left.seasonNameKo ?? right.seasonNameKo ?? null
+      const shape = left.shape ?? right.shape ?? null
+      const avgLengthMm = avgNullable(left.avgLengthMm, right.avgLengthMm)
+      const avgWidthMm = avgNullable(left.avgWidthMm, right.avgWidthMm)
+      const avgCurve = avgNullable(left.avgCurve, right.avgCurve)
+
+      // '분석 완료'는 상태 문자열이 아니라, 손 분석 결과 페이지에 실제로 표시되는 값들이
+      // 전부 채워졌는지로 판단한다 — 퍼스널 컬러 + 추천 쉐입 + 길이/너비/곡률까지 모두 나와야
+      // 마이페이지 손 분석 이력에 노출한다. (상태값만 "완료"고 실제 값은 비어 있는 경우를 걸러낸다)
+      const isFullyAnalyzed =
+          seasonCode != null && shape != null && avgLengthMm != null && avgWidthMm != null && avgCurve != null
+      if (!isFullyAnalyzed) return
 
       sessions.push({
-        key: `${scan.scanId}-${partner?.scanId ?? 'solo'}`,
-        scannedAt: scan.scannedAt,
-        leftScanId: left?.scanId ?? null,
-        rightScanId: right?.scanId ?? null,
-        seasonNameKo: left?.seasonNameKo ?? right?.seasonNameKo ?? null,
-        shape: left?.shape ?? right?.shape ?? null,
-        status: left?.status ?? right?.status ?? scan.status,
+        key: `${left.scanId}-${right.scanId}`,
+        scannedAt: laterScannedAt(left.scannedAt, right.scannedAt),
+        leftScanId: left.scanId,
+        rightScanId: right.scanId,
+        seasonCode,
+        seasonNameKo,
+        shape,
+        status,
+        avgLengthMm,
+        avgWidthMm,
+        avgCurve,
       })
     })
 
@@ -448,20 +821,34 @@ export function MyPage() {
   const [scanDetailSession, setScanDetailSession] = useState<ScanSession | null>(null)
   const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null)
   const [isLoadingScanDetail, setIsLoadingScanDetail] = useState(false)
+  const [scanFingerDetailOpen, setScanFingerDetailOpen] = useState(false)
+  const [scanFingerHand, setScanFingerHand] = useState<'L' | 'R'>('L')
+  const [scanPaletteOpen, setScanPaletteOpen] = useState(false)
 
   const openScanDetail = async (session: ScanSession) => {
     setScanDetailSession(session)
     setScanDetail(null)
+    setScanFingerDetailOpen(false)
+    setScanFingerHand('L')
+    setScanPaletteOpen(false)
     setIsLoadingScanDetail(true)
     try {
       const [left, right] = await Promise.all([
         session.leftScanId ? getScanResult(session.leftScanId).catch(() => null) : Promise.resolve(null),
         session.rightScanId ? getScanResult(session.rightScanId).catch(() => null) : Promise.resolve(null),
       ])
-      setScanDetail(buildScanDetail(left, right))
+      const detail = buildScanDetail(left, right)
+      setScanDetail(detail)
+      setScanFingerHand(detail.fingers.some((f) => f.hand === 'L') ? 'L' : 'R')
     } finally {
       setIsLoadingScanDetail(false)
     }
+  }
+
+  const closeScanDetail = () => {
+    setScanDetailSession(null)
+    setScanFingerDetailOpen(false)
+    setScanPaletteOpen(false)
   }
 
   // ── 네일팁 출력 상세 모달 ──────
@@ -472,7 +859,10 @@ export function MyPage() {
   const openPrintDetail = async (order: NailTipPrintOrder) => {
     setPrintDetailOrder(order)
     setPrintDetailScan(null)
-    if (!order.leftScanId && !order.rightScanId) return
+    if (!order.leftScanId && !order.rightScanId) {
+      setIsLoadingPrintDetail(false)
+      return
+    }
     setIsLoadingPrintDetail(true)
     try {
       const [left, right] = await Promise.all([
@@ -485,36 +875,145 @@ export function MyPage() {
     }
   }
 
-  const handleSaveProfile = async () => {
-    if (newPassword && newPassword !== passwordConfirm) {
-      setProfileMessage('비밀번호가 일치하지 않습니다.')
-      return
-    }
-    if (newPassword && newPassword.length < 8) {
-      setProfileMessage('비밀번호는 8자 이상이어야 합니다.')
-      return
-    }
+  const closePrintDetail = () => {
+    setPrintDetailOrder(null)
+    setPrintDetailScan(null)
+    setIsLoadingPrintDetail(false)
+  }
 
-    setIsSaving(true)
-    setProfileMessage('')
+  // ── 닉네임 변경: 1단계(비밀번호 확인) → 2단계(새 닉네임) → 완료 ──────
+  const handleStartEditNickname = () => {
+    setNicknameStage('password')
+    setNicknamePassword('')
+    setNicknamePasswordError('')
+    setNickname('')
+    setNicknameError('')
+    setIsEditingNickname(true)
+  }
+
+  const handleCloseNicknameForm = () => {
+    setIsEditingNickname(false)
+    setNicknameStage('password')
+    setNicknamePassword('')
+    setNicknamePasswordError('')
+    setNickname('')
+    setNicknameError('')
+  }
+
+  const handleVerifyNicknamePassword = async () => {
+    if (!nicknamePassword) {
+      setNicknamePasswordError('현재 비밀번호를 입력해 주세요.')
+      return
+    }
+    if (!profile?.email) return
+
+    setIsVerifyingNicknamePassword(true)
+    setNicknamePasswordError('')
 
     try {
-      if (nickname.trim() && nickname !== profile?.nickname) {
-        const updated = await updateNickname(nickname.trim())
-        setProfile(updated)
+      const isCorrect = await verifyCurrentPassword(profile.email, nicknamePassword)
+      if (!isCorrect) {
+        setNicknamePasswordError('현재 비밀번호가 일치하지 않습니다. 다시 입력해 주세요.')
+        setNicknamePassword('')
+        return
       }
-      if (newPassword && currentPassword) {
-        await updatePassword(currentPassword, newPassword)
-      }
-      setEditing(false)
-      setCurrentPassword('')
-      setNewPassword('')
-      setPasswordConfirm('')
-      setProfileMessage('프로필이 저장되었습니다.')
+      setNickname(profile.nickname ?? '')
+      setNicknameStage('nickname')
     } catch (e) {
-      setProfileMessage(e instanceof ApiError ? e.message : '저장에 실패했습니다.')
+      setNicknamePasswordError(e instanceof ApiError ? e.message : '비밀번호 확인에 실패했습니다.')
     } finally {
-      setIsSaving(false)
+      setIsVerifyingNicknamePassword(false)
+    }
+  }
+
+  const handleSaveNickname = async () => {
+    const trimmed = nickname.trim()
+    if (!trimmed) {
+      setNicknameError('닉네임을 입력해 주세요.')
+      return
+    }
+
+    setIsSavingNickname(true)
+    setNicknameError('')
+
+    try {
+      const updated = await updateNickname(trimmed)
+      setProfile(updated)
+      setNicknameStage('done')
+    } catch (e) {
+      setNicknameError(e instanceof ApiError ? e.message : '닉네임 변경에 실패했습니다.')
+    } finally {
+      setIsSavingNickname(false)
+    }
+  }
+
+  // ── 비밀번호 변경: 1단계(현재 비밀번호 확인) → 2단계(새 비밀번호) → 완료 ──────
+  const handleStartEditPassword = () => {
+    setPasswordStage('password')
+    setCurrentPassword('')
+    setCurrentPasswordError('')
+    setNewPassword('')
+    setPasswordConfirm('')
+    setNewPasswordSubmitError('')
+    setIsEditingPassword(true)
+  }
+
+  const handleClosePasswordForm = () => {
+    setIsEditingPassword(false)
+    setPasswordStage('password')
+    setCurrentPassword('')
+    setCurrentPasswordError('')
+    setNewPassword('')
+    setPasswordConfirm('')
+    setNewPasswordSubmitError('')
+  }
+
+  const handleVerifyCurrentPassword = async () => {
+    if (!currentPassword) {
+      setCurrentPasswordError('현재 비밀번호를 입력해 주세요.')
+      return
+    }
+    if (!profile?.email) return
+
+    setIsVerifyingCurrentPassword(true)
+    setCurrentPasswordError('')
+
+    try {
+      const isCorrect = await verifyCurrentPassword(profile.email, currentPassword)
+      if (!isCorrect) {
+        setCurrentPasswordError('현재 비밀번호가 일치하지 않습니다. 다시 입력해 주세요.')
+        setCurrentPassword('')
+        return
+      }
+      setPasswordStage('new')
+    } catch (e) {
+      setCurrentPasswordError(e instanceof ApiError ? e.message : '비밀번호 확인에 실패했습니다.')
+    } finally {
+      setIsVerifyingCurrentPassword(false)
+    }
+  }
+
+  const handleSavePassword = async () => {
+    // 저장 버튼이 이 조건에서 비활성화되어 있어 사실상 도달하지 않지만, 방어적으로 한 번 더 확인한다.
+    if (!isPasswordValid(newPassword) || newPassword !== passwordConfirm) return
+
+    setIsSavingPassword(true)
+    setNewPasswordSubmitError('')
+
+    try {
+      await updatePassword(currentPassword, newPassword)
+      setPasswordStage('done')
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        // 확인 이후 시점에 뒤늦게 현재 비밀번호 불일치가 감지된 경우 — 1단계로 되돌려서 다시 확인하게 한다.
+        setPasswordStage('password')
+        setCurrentPassword('')
+        setCurrentPasswordError('현재 비밀번호가 일치하지 않습니다. 다시 입력해 주세요.')
+      } else {
+        setNewPasswordSubmitError(e instanceof ApiError ? e.message : '비밀번호 변경에 실패했습니다.')
+      }
+    } finally {
+      setIsSavingPassword(false)
     }
   }
 
@@ -523,22 +1022,53 @@ export function MyPage() {
     navigate('/')
   }
 
+  const findFavoriteFolder = (designId: number, imageUrl: string) =>
+      favorites.find((f) => f.designId === designId && f.imageUrl === imageUrl)?.folder ?? null
+
+  const openLikeFolderModal = (designId: number, imageUrl: string) => {
+    setLikeModalTarget({ designId, imageUrl, mode: 'like' })
+  }
+
+  const openMoveFolderModal = (designId: number, imageUrl: string) => {
+    setLikeModalTarget({
+      designId,
+      imageUrl,
+      mode: 'move',
+      currentFolderId: findFavoriteFolder(designId, imageUrl)?.folderId ?? null,
+    })
+  }
+
   const toggleLikeFromGrid = async (designId: number, imageUrl: string) => {
     const key = `${designId}-${imageUrl}`
     const isLiked = likedKeySet.has(key)
-    try {
-      if (isLiked) {
+    if (isLiked) {
+      try {
         await unlikeDesign(designId, imageUrl)
         setFavorites((prev) => prev.filter((f) => !(f.designId === designId && f.imageUrl === imageUrl)))
-      } else {
-        await likeDesign(designId, imageUrl)
-        setFavorites((prev) => [
-          { designId, imageUrl, savedAt: new Date().toISOString(), folder: null },
-          ...prev,
-        ])
+        void getSavedFolders().then(setSavedFolders).catch(() => {})
+        if (detailImage && detailImage.designId === designId && detailImage.imageUrl === imageUrl) {
+          setDetailImage({ ...detailImage, liked: false, folder: null })
+        }
+      } catch (e) {
+        alert(e instanceof ApiError ? e.message : '요청에 실패했습니다.')
       }
-    } catch (e) {
-      alert(e instanceof ApiError ? e.message : '요청에 실패했습니다.')
+      return
+    }
+    openLikeFolderModal(designId, imageUrl)
+  }
+
+  const confirmLikeWithFolder = async (choice: { folderId?: number; newFolderName?: string }) => {
+    if (!likeModalTarget) return
+    const { designId, imageUrl, mode } = likeModalTarget
+    const saved =
+        mode === 'move'
+            ? await moveLikedDesign(designId, imageUrl, choice)
+            : await likeDesign(designId, imageUrl, choice)
+    setFavorites((prev) => [saved, ...prev.filter((f) => !(f.designId === designId && f.imageUrl === imageUrl))])
+    const folders = await getSavedFolders()
+    setSavedFolders(folders)
+    if (detailImage && detailImage.designId === designId && detailImage.imageUrl === imageUrl) {
+      setDetailImage({ ...detailImage, liked: true, folder: saved.folder })
     }
   }
 
@@ -546,8 +1076,11 @@ export function MyPage() {
     if (!detailImage || detailImage.designId == null || isBusy) return
     setIsBusy(true)
     try {
-      await toggleLikeFromGrid(detailImage.designId, detailImage.imageUrl)
-      setDetailImage({ ...detailImage, liked: !detailImage.liked })
+      if (detailImage.liked) {
+        await toggleLikeFromGrid(detailImage.designId, detailImage.imageUrl)
+      } else {
+        await toggleLikeFromGrid(detailImage.designId, detailImage.imageUrl)
+      }
     } finally {
       setIsBusy(false)
     }
@@ -577,6 +1110,7 @@ export function MyPage() {
       setFavorites((prev) =>
           prev.filter((f) => !(f.designId === detailImage.designId && f.imageUrl === detailImage.imageUrl)),
       )
+      void getSavedFolders().then(setSavedFolders).catch(() => {})
       setDetailImage(null)
     } catch (e) {
       alert(e instanceof ApiError ? e.message : '요청에 실패했습니다.')
@@ -586,8 +1120,8 @@ export function MyPage() {
   }
 
   // ── 전체 활동 타임라인: 손 스캔 + 디자인 생성 + 네일팁 출력을 날짜별로 통합 ──────
-  const timelineGroups = useMemo(() => {
-    const map = new Map<string, { scans: ScanSession[]; designs: DesignImageResponse[]; prints: NailTipPrintOrder[] }>()
+  const timelineByDate = useMemo(() => {
+    const map = new Map<string, TimelineDayGroup>()
 
     const ensure = (key: string) => {
       if (!map.has(key)) map.set(key, { scans: [], designs: [], prints: [] })
@@ -598,39 +1132,289 @@ export function MyPage() {
     designs.forEach((d) => ensure(dateKeyOf(d.createdAt)).designs.push(d))
     prints.forEach((p) => ensure(dateKeyOf(p.orderedAt)).prints.push(p))
 
-    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))
+    return map
   }, [scanSessions, designs, prints])
 
-  const renderScanSessionRow = (session: ScanSession, compact = false) => {
-    const hasResult = Boolean(session.seasonNameKo && session.shape)
-    const shapeLabel = session.shape ? getNailShape(session.shape)?.labelKo ?? session.shape : null
-    const handLabel = session.leftScanId && session.rightScanId ? '양손' : session.leftScanId ? '왼손' : '오른손'
+  const timelineActivityDates = useMemo(
+      () => new Set(timelineByDate.keys()),
+      [timelineByDate],
+  )
+
+  const hasAnyTimelineActivity = timelineActivityDates.size > 0
+
+  useEffect(() => {
+    if (timelineDateInitialized.current || isLoading) return
+    timelineDateInitialized.current = true
+    if (timelineActivityDates.size > 0) {
+      const latest = [...timelineActivityDates].sort((a, b) => (a < b ? 1 : -1))[0]
+      setSelectedTimelineDate(latest)
+      const [y, m] = latest.split('-').map(Number)
+      setCalendarMonth({ year: y, month: m - 1 })
+    }
+  }, [isLoading, timelineActivityDates])
+
+  useEffect(() => {
+    if (!calendarOpen && !sortMenuOpen && !folderSortMenuOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (calendarOpen && !calendarRef.current?.contains(target)) {
+        setCalendarOpen(false)
+      }
+      if (sortMenuOpen && !sortMenuRef.current?.contains(target)) {
+        setSortMenuOpen(false)
+      }
+      if (folderSortMenuOpen && !folderSortMenuRef.current?.contains(target)) {
+        setFolderSortMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [calendarOpen, sortMenuOpen, folderSortMenuOpen])
+
+  useEffect(() => {
+    setListPage(1)
+  }, [section, listSortOrder, folderSortOrder, selectedFavoriteFolderId])
+
+  useEffect(() => {
+    if (section !== 'favorites') setSelectedFavoriteFolderId(null)
+  }, [section])
+
+  useEffect(() => {
+    mainPanelRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [listPage, section])
+
+  useEffect(() => {
+    setPinnedActivityId(null)
+    setHoveredActivityId(null)
+  }, [selectedTimelineDate])
+
+  useEffect(() => {
+    if (section !== 'timeline') {
+      setPinnedActivityId(null)
+      setHoveredActivityId(null)
+    }
+  }, [section])
+
+  const selectedDayGroup = useMemo<TimelineDayGroup>(
+      () => timelineByDate.get(selectedTimelineDate) ?? { scans: [], designs: [], prints: [] },
+      [timelineByDate, selectedTimelineDate],
+  )
+
+  const timelineScansOldest = useMemo(
+      () => [...selectedDayGroup.scans].sort((a, b) => compareByTime(a.scannedAt, b.scannedAt, 'oldest')),
+      [selectedDayGroup.scans],
+  )
+  const timelinePrintsOldest = useMemo(
+      () => [...selectedDayGroup.prints].sort((a, b) => compareByTime(a.orderedAt, b.orderedAt, 'oldest')),
+      [selectedDayGroup.prints],
+  )
+  const timelineDesignsOldest = useMemo(
+      () => [...selectedDayGroup.designs].sort((a, b) => compareByTime(a.createdAt, b.createdAt, 'oldest')),
+      [selectedDayGroup.designs],
+  )
+
+  const sortedScanSessions = useMemo(
+      () => [...scanSessions].sort((a, b) => compareByTime(a.scannedAt, b.scannedAt, listSortOrder)),
+      [scanSessions, listSortOrder],
+  )
+  const sortedPrints = useMemo(
+      () => [...prints].sort((a, b) => compareByTime(a.orderedAt, b.orderedAt, listSortOrder)),
+      [prints, listSortOrder],
+  )
+  const sortedDesigns = useMemo(
+      () => [...designs].sort((a, b) => compareByTime(a.createdAt, b.createdAt, listSortOrder)),
+      [designs, listSortOrder],
+  )
+  const sortedFavorites = useMemo(
+      () => [...favorites].sort((a, b) => compareByTime(a.savedAt, b.savedAt, listSortOrder)),
+      [favorites, listSortOrder],
+  )
+
+  const dayEvents = useMemo<TimelineDayEvent[]>(() => {
+    const events: TimelineDayEvent[] = [
+      ...timelineScansOldest.map((s) => ({
+        id: `scan-${s.key}`,
+        kind: 'scan' as const,
+        at: s.scannedAt,
+        timeMs: parseDateFlexible(s.scannedAt)?.getTime() ?? 0,
+      })),
+      ...timelinePrintsOldest.map((p) => ({
+        id: `print-${p.id}`,
+        kind: 'print' as const,
+        at: p.orderedAt,
+        timeMs: parseDateFlexible(p.orderedAt)?.getTime() ?? 0,
+      })),
+      ...timelineDesignsOldest.map((d) => ({
+        id: `design-${d.designId}-${d.imageUrl}`,
+        kind: 'design' as const,
+        at: d.createdAt,
+        timeMs: parseDateFlexible(d.createdAt)?.getTime() ?? 0,
+      })),
+    ]
+    return events.sort((a, b) => a.timeMs - b.timeMs)
+  }, [timelineScansOldest, timelinePrintsOldest, timelineDesignsOldest])
+
+  const dayTotalCount =
+      selectedDayGroup.scans.length + selectedDayGroup.designs.length + selectedDayGroup.prints.length
+
+  const activeActivityId = pinnedActivityId ?? hoveredActivityId
+
+  const scrollToRightActivity = (id: string) => {
+    const root = dayBodyRef.current
+    if (!root) return
+    const nodes = root.querySelectorAll<HTMLElement>('[data-activity-side="right"]')
+    for (const el of nodes) {
+      if (el.dataset.activityId === id) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        break
+      }
+    }
+  }
+
+  const handleActivityHover = (id: string | null) => {
+    if (pinnedActivityId) return
+    setHoveredActivityId(id)
+  }
+
+  const handleActivitySelect = (id: string) => {
+    setPinnedActivityId((prev) => {
+      if (prev === id) {
+        setHoveredActivityId(null)
+        return null
+      }
+      return id
+    })
+    scrollToRightActivity(id)
+  }
+
+  const moveTimelineDate = (delta: number) => {
+    const next = shiftDateKey(selectedTimelineDate, delta)
+    setSelectedTimelineDate(next)
+    const [y, m] = next.split('-').map(Number)
+    setCalendarMonth({ year: y, month: m - 1 })
+  }
+
+  const openTimelineCalendar = () => {
+    const [y, m] = selectedTimelineDate.split('-').map(Number)
+    setCalendarMonth({ year: y, month: m - 1 })
+    setCalendarOpen((prev) => !prev)
+  }
+
+  const selectTimelineDate = (key: string) => {
+    setSelectedTimelineDate(key)
+    setCalendarOpen(false)
+  }
+
+  const shiftCalendarMonth = (delta: number) => {
+    setCalendarMonth((prev) => {
+      const date = new Date(prev.year, prev.month + delta, 1)
+      return { year: date.getFullYear(), month: date.getMonth() }
+    })
+  }
+
+  const renderScanSessionRow = (
+      session: ScanSession,
+      options?: { activityId?: string; interactive?: boolean },
+  ) => {
+    const activityId = options?.activityId ?? `scan-${session.key}`
+    const timeLabel = formatDateTimeFull(session.scannedAt)
+    const highlighted = options?.interactive ? activeActivityId === activityId : false
+    const shapeLabel = session.shape
+        ? getNailShape(session.shape)?.labelKo ?? session.shape
+        : null
+    const repColor = representativePersonalColor(session.seasonCode)
+    const palettePreview = pickPalettePreview(session.seasonCode, 5)
+    const metricsLine = [
+      `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
+      `너비 ${session.avgWidthMm != null ? `${Number(session.avgWidthMm).toFixed(1).replace(/\.0$/, '')}mm` : '-'}`,
+      `곡률 ${formatMetricCurve(session.avgCurve)}`,
+    ].join(' · ')
 
     return (
         <button
             key={session.key}
             type="button"
-            className={`mypage-x__scan-row${compact ? ' mypage-x__scan-row--compact' : ''}`}
-            onClick={() => void openScanDetail(session)}
+            data-activity-id={options?.interactive ? activityId : undefined}
+            data-activity-side={options?.interactive ? 'right' : undefined}
+            className={`mypage-x__scan-row mypage-x__scan-row--rich${highlighted ? ' is-highlighted' : ''}`}
+            onClick={() => {
+              if (options?.interactive) handleActivitySelect(activityId)
+              void openScanDetail(session)
+            }}
+            onMouseEnter={() => options?.interactive && handleActivityHover(activityId)}
+            onMouseLeave={() => options?.interactive && handleActivityHover(null)}
         >
-          <span className="mypage-x__scan-hand" aria-hidden="true">{handLabel.charAt(0)}</span>
+          <span
+              className="mypage-x__scan-swatch mypage-x__scan-swatch--lg"
+              style={{ background: repColor }}
+              aria-hidden="true"
+          />
           <div className="mypage-x__scan-info">
-            {hasResult ? (
-                <p className="mypage-x__scan-title">
-                  {session.seasonNameKo} · {shapeLabel} 추천
-                </p>
-            ) : (
-                <p className="mypage-x__scan-title mypage-x__scan-title--pending">
-                  {SCAN_STATUS_LABEL[session.status ?? ''] ?? '분석 결과를 기다리고 있어요'}
-                </p>
+            <p className="mypage-x__scan-season" style={{ color: repColor }}>
+              {session.seasonNameKo ?? '미분석'}
+            </p>
+            <p className="mypage-x__scan-metrics">{metricsLine}</p>
+            <p className="mypage-x__scan-shape-line">추천 쉐입: {shapeLabel ?? '미정'}</p>
+            {palettePreview.length > 0 && (
+                <div className="mypage-x__scan-palette" aria-label="퍼스널컬러 팔레트">
+                  {palettePreview.map((hex, idx) => (
+                      <i key={`${hex}-${idx}`} style={{ background: hex }} />
+                  ))}
+                </div>
             )}
-            {!compact && <p className="mypage-x__scan-date">{handLabel} 촬영 · {session.scannedAt}</p>}
           </div>
-          <span className={`mypage-x__badge mypage-x__badge--${(session.status ?? '').toLowerCase()}`}>
-            {SCAN_STATUS_LABEL[session.status ?? ''] ?? session.status ?? '-'}
-          </span>
+          {timeLabel && <span className="mypage-x__scan-date-end">{timeLabel}</span>}
         </button>
     )
+  }
+
+  const renderPrintOrderRow = (
+      order: NailTipPrintOrder,
+      options?: { activityId?: string; interactive?: boolean },
+  ) => {
+    const activityId = options?.activityId ?? `print-${order.id}`
+    const highlighted = options?.interactive ? activeActivityId === activityId : false
+    const timeLabel = formatDateTimeFull(order.orderedAt)
+
+    return (
+        <button
+            key={order.id}
+            type="button"
+            data-activity-id={options?.interactive ? activityId : undefined}
+            data-activity-side={options?.interactive ? 'right' : undefined}
+            className={`mypage-x__print-row${highlighted ? ' is-highlighted' : ''}`}
+            onMouseEnter={() => options?.interactive && handleActivityHover(activityId)}
+            onMouseLeave={() => options?.interactive && handleActivityHover(null)}
+            onClick={() => {
+              if (options?.interactive) handleActivitySelect(activityId)
+              void openPrintDetail(order)
+            }}
+        >
+          <div className="mypage-x__print-icon" aria-hidden="true">
+            {SHAPE_PREVIEW_IMAGES[order.shapeId] ? (
+                <img src={SHAPE_PREVIEW_IMAGES[order.shapeId]} alt="" />
+            ) : (
+                Icon.print
+            )}
+          </div>
+          <div className="mypage-x__scan-info">
+            <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일팁 출력</p>
+          </div>
+          <div className="mypage-x__print-meta-end">
+            <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>
+              {PRINT_STATUS_LABEL[order.status]}
+            </span>
+            {timeLabel && <span className="mypage-x__item-meta">{timeLabel}</span>}
+          </div>
+        </button>
+    )
+  }
+
+  const eventKindMeta: Record<TimelineEventKind, { label: string; icon: keyof typeof Icon }> = {
+    scan: { label: '손 촬영 · 분석', icon: 'hand' },
+    print: { label: '네일팁 출력', icon: 'print' },
+    design: { label: '디자인 생성', icon: 'design' },
   }
 
   const totalDesignCount = designs.length
@@ -653,16 +1437,267 @@ export function MyPage() {
     }
   }
 
+  const renderSortControl = () => (
+      <div className="mypage-x__sort" ref={sortMenuRef}>
+        <button
+            type="button"
+            className={`mypage-x__sort-trigger${sortMenuOpen ? ' is-open' : ''}`}
+            onClick={() => setSortMenuOpen((prev) => !prev)}
+            aria-haspopup="listbox"
+            aria-expanded={sortMenuOpen}
+        >
+          <span>{listSortOrder === 'newest' ? '최신순' : '오래된순'}</span>
+          <span className="mypage-x__sort-caret" aria-hidden="true">{Icon.chevron}</span>
+        </button>
+        {sortMenuOpen && (
+            <div className="mypage-x__sort-menu" role="listbox">
+              <button
+                  type="button"
+                  role="option"
+                  aria-selected={listSortOrder === 'newest'}
+                  className={`mypage-x__sort-option${listSortOrder === 'newest' ? ' is-selected' : ''}`}
+                  onClick={() => {
+                    setListSortOrder('newest')
+                    setSortMenuOpen(false)
+                  }}
+              >
+                최신순
+              </button>
+              <button
+                  type="button"
+                  role="option"
+                  aria-selected={listSortOrder === 'oldest'}
+                  className={`mypage-x__sort-option${listSortOrder === 'oldest' ? ' is-selected' : ''}`}
+                  onClick={() => {
+                    setListSortOrder('oldest')
+                    setSortMenuOpen(false)
+                  }}
+              >
+                오래된순
+              </button>
+            </div>
+        )}
+      </div>
+  )
+
+  const pageSizeForSection = (id: SectionId) => (id === 'designs' ? 12 : 10)
+
+  const paginate = <T,>(items: T[], id: SectionId) => {
+    const size = pageSizeForSection(id)
+    const totalPages = Math.max(1, Math.ceil(items.length / size))
+    const page = Math.min(listPage, totalPages)
+    const start = (page - 1) * size
+    return {
+      page,
+      totalPages,
+      slice: items.slice(start, start + size),
+      total: items.length,
+    }
+  }
+
+  const renderPagination = (totalPages: number) => {
+    if (totalPages <= 1) return null
+    const current = Math.min(listPage, totalPages)
+    return (
+        <div className="mypage-x__pagination">
+          <button
+              type="button"
+              className="mypage-x__page-arrow"
+              disabled={current <= 1}
+              onClick={() => setListPage((p) => Math.max(1, p - 1))}
+              aria-label="이전 페이지"
+          >
+            {Icon.chevronLeft}
+          </button>
+          <div className="mypage-x__page-numbers">
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                <button
+                    key={pageNum}
+                    type="button"
+                    className={`mypage-x__page-num${pageNum === current ? ' is-active' : ''}`}
+                    onClick={() => setListPage(pageNum)}
+                    aria-current={pageNum === current ? 'page' : undefined}
+                >
+                  {pageNum}
+                </button>
+            ))}
+          </div>
+          <button
+              type="button"
+              className="mypage-x__page-arrow"
+              disabled={current >= totalPages}
+              onClick={() => setListPage((p) => Math.min(totalPages, p + 1))}
+              aria-label="다음 페이지"
+          >
+            {Icon.chevronRight}
+          </button>
+        </div>
+    )
+  }
+
+  const renderFolderSortControl = () => {
+    const label = folderSortOrder === 'name' ? '이름순' : '최근 저장순'
+    return (
+        <div className="mypage-x__sort" ref={folderSortMenuRef}>
+          <button
+              type="button"
+              className={`mypage-x__sort-trigger${folderSortMenuOpen ? ' is-open' : ''}`}
+              onClick={() => setFolderSortMenuOpen((prev) => !prev)}
+              aria-haspopup="listbox"
+              aria-expanded={folderSortMenuOpen}
+          >
+            <span>{label}</span>
+            <span className="mypage-x__sort-caret" aria-hidden="true">{Icon.chevron}</span>
+          </button>
+          {folderSortMenuOpen && (
+              <div className="mypage-x__sort-menu" role="listbox">
+                {([
+                  ['lastSaved', '최근 저장순'],
+                  ['name', '이름순'],
+                ] as const).map(([value, textLabel]) => (
+                    <button
+                        key={value}
+                        type="button"
+                        role="option"
+                        aria-selected={folderSortOrder === value}
+                        className={`mypage-x__sort-option${folderSortOrder === value ? ' is-selected' : ''}`}
+                        onClick={() => {
+                          setFolderSortOrder(value)
+                          setFolderSortMenuOpen(false)
+                        }}
+                    >
+                      {textLabel}
+                    </button>
+                ))}
+              </div>
+          )}
+        </div>
+    )
+  }
+
+  const sortedFolders = (() => {
+    const list = [...savedFolders]
+    if (folderSortOrder === 'name') {
+      list.sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    } else {
+      list.sort((a, b) => {
+        const ta = parseDateFlexible(a.lastSavedAt ?? '')?.getTime() ?? 0
+        const tb = parseDateFlexible(b.lastSavedAt ?? '')?.getTime() ?? 0
+        return tb - ta
+      })
+    }
+    return list
+  })()
+
+  const moveFolderOrder = async (folderId: number, direction: -1 | 1) => {
+    const ids = sortedFolders.map((f) => f.folderId)
+    const idx = ids.indexOf(folderId)
+    const next = idx + direction
+    if (idx < 0 || next < 0 || next >= ids.length) return
+        ;[ids[idx], ids[next]] = [ids[next], ids[idx]]
+    setSavedFolders((prev) => {
+      const byId = new Map(prev.map((f) => [f.folderId, f]))
+      return ids.map((id, order) => {
+        const folder = byId.get(id)!
+        return { ...folder, sortOrder: order }
+      })
+    })
+    try {
+      await reorderSavedFolders(ids)
+    } catch {
+      void getSavedFolders().then(setSavedFolders).catch(() => {})
+    }
+  }
+
+  const [folderToDelete, setFolderToDelete] = useState<SavedFolderResponse | null>(null)
+  const [folderDeleteError, setFolderDeleteError] = useState<string | null>(null)
+
+  const openDeleteFolderModal = (folder: SavedFolderResponse) => {
+    setFolderDeleteError(null)
+    setFolderToDelete(folder)
+  }
+
+  const closeDeleteFolderModal = () => {
+    if (isBusy) return
+    setFolderToDelete(null)
+    setFolderDeleteError(null)
+  }
+
+  const confirmDeleteFolder = async () => {
+    if (!folderToDelete || isBusy) return
+    setIsBusy(true)
+    setFolderDeleteError(null)
+    try {
+      await deleteSavedFolder(folderToDelete.folderId)
+      if (selectedFavoriteFolderId === folderToDelete.folderId) {
+        setSelectedFavoriteFolderId(null)
+      }
+      const [folders, likedDesigns] = await Promise.all([getSavedFolders(), getLikedDesigns()])
+      setSavedFolders(folders)
+      setFavorites(likedDesigns)
+      setFolderToDelete(null)
+    } catch (e) {
+      setFolderDeleteError(e instanceof ApiError ? e.message : '폴더 삭제에 실패했습니다.')
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   const renderPageHeader = (id: SectionId) => {
     const meta = SECTION_META[id]
+    const sortable = id === 'scans' || id === 'prints' || id === 'designs'
+    const totalCount =
+        id === 'scans' ? totalScanCount
+            : id === 'prints' ? totalPrintCount
+                : id === 'designs' ? totalDesignCount
+                    : 0
+    const description =
+        id === 'favorites'
+            ? meta.description.replace('ㅇㅇ', profile?.nickname ?? '회원')
+            : meta.description
     return (
         <header className="mypage-x__page-header">
-          <p className="mypage-x__page-eyebrow">My Naily</p>
+          <p className="mypage-x__page-subtitle">{meta.subtitle}</p>
           <h1 className="mypage-x__title">{meta.title}</h1>
-          <p className="mypage-x__subtitle">{meta.subtitle}</p>
+          <p className="mypage-x__desc">{description}</p>
+          {sortable && (
+              <div className="mypage-x__list-toolbar">
+                <p className="mypage-x__list-count">총 {totalCount}개</p>
+                <div className="mypage-x__list-toolbar-actions">
+                  {renderSortControl()}
+                </div>
+              </div>
+          )}
         </header>
     )
   }
+
+  const renderFavBlockToolbar = (
+      title: string,
+      count: number,
+      sortKind: 'folder' | 'image',
+      options?: { onBack?: () => void },
+  ) => (
+      <div className="mypage-x__fav-block-toolbar">
+        <div className="mypage-x__fav-block-title">
+          {options?.onBack && (
+              <button
+                  type="button"
+                  className="mypage-x__fav-back"
+                  onClick={options.onBack}
+                  aria-label="폴더 목록으로"
+              >
+                {Icon.chevronLeft}
+              </button>
+          )}
+          <h3 className="mypage-x__section-heading mypage-x__section-heading--inline">{title}</h3>
+          <p className="mypage-x__list-count">총 {count}개</p>
+        </div>
+        <div className="mypage-x__list-toolbar-actions">
+          {sortKind === 'folder' ? renderFolderSortControl() : renderSortControl()}
+        </div>
+      </div>
+  )
 
   const renderEmptyState = ({
                               icon,
@@ -693,6 +1728,11 @@ export function MyPage() {
       items: DesignImageResponse[] | SavedDesignResponse[],
       isFavoriteView: boolean,
       empty?: { title: string; description: string; actionLabel?: string; onAction?: () => void },
+      options?: {
+        dateMode?: 'time' | 'date' | 'datetime'
+        interactive?: boolean
+        getActivityId?: (item: DesignImageResponse | SavedDesignResponse) => string
+      },
   ) => {
     if (items.length === 0) {
       if (empty) {
@@ -709,42 +1749,100 @@ export function MyPage() {
         onAction: () => navigate('/design/chat'),
       })
     }
+    const dateMode = options?.dateMode ?? 'date'
     return (
         <div className="mypage-x__grid">
           {items.map((item) => {
             const key = `${item.designId}-${item.imageUrl}`
             const liked = likedKeySet.has(key)
-            const createdAt = 'createdAt' in item ? item.createdAt : new Date(item.savedAt).toLocaleDateString('ko-KR')
+            const rawDate = 'createdAt' in item ? item.createdAt : item.savedAt
+            const cardDate =
+                dateMode === 'time'
+                    ? (formatTimeHms(rawDate) || formatDateOnly(rawDate))
+                    : dateMode === 'datetime'
+                        ? formatDateTimeFull(rawDate)
+                        : formatDateOnly(rawDate)
+            const modalDate = formatDateTimeFull(rawDate)
+            const activityId = options?.getActivityId?.(item)
+            const highlighted = Boolean(options?.interactive && activityId && activeActivityId === activityId)
+            const folder =
+                'folder' in item
+                    ? item.folder
+                    : liked
+                        ? findFavoriteFolder(item.designId, item.imageUrl)
+                        : null
+            const isShared =
+                'shared' in item
+                    ? Boolean(item.shared)
+                    : designs.some((d) => d.designId === item.designId && d.shared)
             return (
-                <article key={key} className="mypage-x__card">
+                <article
+                    key={key}
+                    data-activity-id={options?.interactive ? activityId : undefined}
+                    data-activity-side={options?.interactive ? 'right' : undefined}
+                    className={`mypage-x__card${highlighted ? ' is-highlighted' : ''}`}
+                    onMouseEnter={() => options?.interactive && activityId && handleActivityHover(activityId)}
+                    onMouseLeave={() => options?.interactive && handleActivityHover(null)}
+                >
                   <button
                       type="button"
                       className="mypage-x__card-image-btn"
-                      onClick={() =>
-                          openDetailImage({
-                            designId: item.designId,
-                            imageUrl: item.imageUrl,
-                            createdAt,
-                            promptSummary: 'promptSummary' in item ? item.promptSummary : undefined,
-                            liked,
-                            canDelete: !isFavoriteView,
-                            isFavoriteView,
-                          })
-                      }
+                      onClick={() => {
+                        if (options?.interactive && activityId) handleActivitySelect(activityId)
+                        openDetailImage({
+                          designId: item.designId,
+                          imageUrl: item.imageUrl,
+                          createdAt: modalDate,
+                          promptSummary: 'promptSummary' in item ? item.promptSummary : undefined,
+                          liked,
+                          canDelete: !isFavoriteView,
+                          isFavoriteView,
+                          owner: !isFavoriteView,
+                          folder,
+                          shared: isShared,
+                        })
+                      }}
                   >
                     <img src={item.imageUrl} alt="네일 디자인" />
+                    {isShared && (
+                        <span className="mypage-x__card-share-badge" aria-label="둘러보기에 공유 중">
+                          공유 중
+                        </span>
+                    )}
                     <span className="mypage-x__card-zoom-hint">확대해서 보기</span>
                   </button>
                   <div className="mypage-x__card-footer">
-                    <span className="mypage-x__card-date">{createdAt}</span>
-                    <button
-                        type="button"
-                        className={`mypage-x__heart-btn${liked ? ' is-liked' : ''}`}
-                        onClick={() => void toggleLikeFromGrid(item.designId, item.imageUrl)}
-                        aria-label={liked ? '찜 해제' : '찜하기'}
-                    >
-                      {Icon.heart}
-                    </button>
+                    <span className="mypage-x__card-date">{cardDate}</span>
+                    {liked && folder ? (
+                        <div className="mypage-x__like-pill">
+                          <button
+                              type="button"
+                              className="mypage-x__like-pill-folder"
+                              onClick={() => openMoveFolderModal(item.designId, item.imageUrl)}
+                              title="저장 위치 변경"
+                          >
+                            {folder.name}
+                          </button>
+                          <span className="mypage-x__like-pill-divider" aria-hidden="true" />
+                          <button
+                              type="button"
+                              className="mypage-x__like-pill-heart is-liked"
+                              onClick={() => void toggleLikeFromGrid(item.designId, item.imageUrl)}
+                              aria-label="찜 해제"
+                          >
+                            {Icon.heart}
+                          </button>
+                        </div>
+                    ) : (
+                        <button
+                            type="button"
+                            className={`mypage-x__heart-btn${liked ? ' is-liked' : ''}`}
+                            onClick={() => void toggleLikeFromGrid(item.designId, item.imageUrl)}
+                            aria-label={liked ? '찜 해제' : '찜하기'}
+                        >
+                          {Icon.heart}
+                        </button>
+                    )}
                   </div>
                 </article>
             )
@@ -803,12 +1901,12 @@ export function MyPage() {
           </aside>
 
           {/* ── 메인 콘텐츠 ─────────────────────────────────────────── */}
-          <main className="mypage-x__main">
+          <main className="mypage-x__main" ref={mainPanelRef}>
             {section === 'dashboard' && (
                 <section className="mypage-x__panel">
                   <div className="mypage-x__hero">
                     <div className="mypage-x__hero-copy">
-                      <p className="mypage-x__hero-eyebrow">Welcome back</p>
+                      <p className="mypage-x__hero-subtitle">My Naily</p>
                       <h1 className="mypage-x__hero-title">
                         {profile?.nickname ?? '회원'} 님,<br />
                         오늘도 네일리와 함께해요!
@@ -881,63 +1979,193 @@ export function MyPage() {
                       {profile?.nickname.charAt(0) ?? '?'}
                     </div>
                     <div className="mypage-x__profile-body">
-                      {!editing ? (
-                          <>
-                            <h2>{profile?.nickname ?? '-'}</h2>
-                            <p>{profile?.email ?? '-'}</p>
-                            <p className="mypage-x__muted">{profile?.name ?? '-'}</p>
-                            <button type="button" className="mypage-x__edit-btn" onClick={() => setEditing(true)}>
-                              프로필 수정
+                      <h2>{profile?.nickname ?? '-'}</h2>
+                      <p>{profile?.email ?? '-'}</p>
+                      <p className="mypage-x__muted">{profile?.name ?? '-'}</p>
+
+                      {!isEditingNickname && !isEditingPassword && (
+                          <div className="mypage-x__profile-actions">
+                            <button type="button" className="mypage-x__edit-btn" onClick={handleStartEditNickname}>
+                              닉네임 변경
                             </button>
-                          </>
-                      ) : (
-                          <div className="mypage-x__edit-form">
-                            <label>
-                              닉네임
-                              <input value={nickname} onChange={(e) => setNickname(e.target.value)} />
-                            </label>
-                            <label>
-                              현재 비밀번호
-                              <input
-                                  type="password"
-                                  value={currentPassword}
-                                  onChange={(e) => setCurrentPassword(e.target.value)}
-                                  placeholder="비밀번호 변경 시에만 입력"
-                              />
-                            </label>
-                            <label>
-                              새 비밀번호
-                              <input
-                                  type="password"
-                                  value={newPassword}
-                                  onChange={(e) => setNewPassword(e.target.value)}
-                                  placeholder="변경 시에만 입력"
-                              />
-                            </label>
-                            <label>
-                              비밀번호 확인
-                              <input
-                                  type="password"
-                                  value={passwordConfirm}
-                                  onChange={(e) => setPasswordConfirm(e.target.value)}
-                              />
-                            </label>
-                            <div className="mypage-x__edit-actions">
-                              <button type="button" onClick={() => setEditing(false)}>
-                                취소
-                              </button>
-                              <button
-                                  type="button"
-                                  className="primary"
-                                  onClick={() => void handleSaveProfile()}
-                                  disabled={isSaving}
-                              >
-                                {isSaving ? '저장 중...' : '저장'}
-                              </button>
-                            </div>
+                            <button type="button" className="mypage-x__edit-btn" onClick={handleStartEditPassword}>
+                              비밀번호 변경
+                            </button>
                           </div>
                       )}
-                      {profileMessage && <p className="mypage-x__message">{profileMessage}</p>}
+
+                      {isEditingNickname && (
+                          <div className="mypage-x__edit-form">
+                            {nicknameStage === 'password' && (
+                                <>
+                                  <label>
+                                    현재 비밀번호
+                                    <input
+                                        type="password"
+                                        value={nicknamePassword}
+                                        onChange={(e) => setNicknamePassword(e.target.value)}
+                                        placeholder="본인 확인을 위해 입력해 주세요"
+                                        autoComplete="current-password"
+                                    />
+                                  </label>
+                                  {nicknamePasswordError && (
+                                      <p className="mypage-x__field-error">{nicknamePasswordError}</p>
+                                  )}
+                                  <div className="mypage-x__edit-actions">
+                                    <button type="button" onClick={handleCloseNicknameForm}>
+                                      취소
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="primary"
+                                        onClick={() => void handleVerifyNicknamePassword()}
+                                        disabled={isVerifyingNicknamePassword}
+                                    >
+                                      {isVerifyingNicknamePassword ? '확인 중...' : '확인'}
+                                    </button>
+                                  </div>
+                                </>
+                            )}
+
+                            {nicknameStage === 'nickname' && (
+                                <>
+                                  <label>
+                                    새 닉네임
+                                    <input value={nickname} onChange={(e) => setNickname(e.target.value)} autoFocus />
+                                  </label>
+                                  {nicknameError && <p className="mypage-x__field-error">{nicknameError}</p>}
+                                  <div className="mypage-x__edit-actions">
+                                    <button type="button" onClick={handleCloseNicknameForm}>
+                                      취소
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="primary"
+                                        onClick={() => void handleSaveNickname()}
+                                        disabled={isSavingNickname || !nickname.trim()}
+                                    >
+                                      {isSavingNickname ? '저장 중...' : '저장'}
+                                    </button>
+                                  </div>
+                                </>
+                            )}
+
+                            {nicknameStage === 'done' && (
+                                <>
+                                  <p className="mypage-x__field-hint is-ok">닉네임이 변경되었습니다.</p>
+                                  <div className="mypage-x__edit-actions">
+                                    <button type="button" className="primary" onClick={handleCloseNicknameForm}>
+                                      확인
+                                    </button>
+                                  </div>
+                                </>
+                            )}
+                          </div>
+                      )}
+
+                      {isEditingPassword && (
+                          <div className="mypage-x__edit-form">
+                            {passwordStage === 'password' && (
+                                <>
+                                  <label>
+                                    현재 비밀번호
+                                    <input
+                                        type="password"
+                                        value={currentPassword}
+                                        onChange={(e) => setCurrentPassword(e.target.value)}
+                                        autoComplete="current-password"
+                                    />
+                                  </label>
+                                  {currentPasswordError && (
+                                      <p className="mypage-x__field-error">{currentPasswordError}</p>
+                                  )}
+                                  <div className="mypage-x__edit-actions">
+                                    <button type="button" onClick={handleClosePasswordForm}>
+                                      취소
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="primary"
+                                        onClick={() => void handleVerifyCurrentPassword()}
+                                        disabled={isVerifyingCurrentPassword}
+                                    >
+                                      {isVerifyingCurrentPassword ? '확인 중...' : '확인'}
+                                    </button>
+                                  </div>
+                                </>
+                            )}
+
+                            {passwordStage === 'new' && (
+                                <>
+                                  <label>
+                                    새 비밀번호
+                                    <input
+                                        type="password"
+                                        value={newPassword}
+                                        onChange={(e) => setNewPassword(e.target.value)}
+                                        autoComplete="new-password"
+                                        autoFocus
+                                    />
+                                  </label>
+                                  <ul className="mypage-x__password-rules">
+                                    {getPasswordRuleChecks(newPassword).map((rule) => (
+                                        <li key={rule.key} className={rule.passed ? 'is-met' : 'is-unmet'}>
+                                          <span aria-hidden="true">{rule.passed ? '✓' : '✕'}</span>
+                                          {rule.label}
+                                        </li>
+                                    ))}
+                                  </ul>
+
+                                  <label>
+                                    새 비밀번호 확인
+                                    <input
+                                        type="password"
+                                        value={passwordConfirm}
+                                        onChange={(e) => setPasswordConfirm(e.target.value)}
+                                        autoComplete="new-password"
+                                    />
+                                  </label>
+                                  {passwordConfirm.length > 0 && (
+                                      <p
+                                          className={`mypage-x__field-hint ${
+                                              newPassword === passwordConfirm ? 'is-ok' : 'is-error'
+                                          }`}
+                                      >
+                                        {newPassword === passwordConfirm ? '비밀번호가 일치합니다.' : '비밀번호가 일치하지 않습니다.'}
+                                      </p>
+                                  )}
+                                  {newPasswordSubmitError && (
+                                      <p className="mypage-x__field-error">{newPasswordSubmitError}</p>
+                                  )}
+
+                                  <div className="mypage-x__edit-actions">
+                                    <button type="button" onClick={handleClosePasswordForm}>
+                                      취소
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="primary"
+                                        onClick={() => void handleSavePassword()}
+                                        disabled={isSavingPassword || !isPasswordValid(newPassword) || newPassword !== passwordConfirm}
+                                    >
+                                      {isSavingPassword ? '변경 중...' : '변경'}
+                                    </button>
+                                  </div>
+                                </>
+                            )}
+
+                            {passwordStage === 'done' && (
+                                <>
+                                  <p className="mypage-x__field-hint is-ok">비밀번호가 변경되었습니다.</p>
+                                  <div className="mypage-x__edit-actions">
+                                    <button type="button" className="primary" onClick={handleClosePasswordForm}>
+                                      확인
+                                    </button>
+                                  </div>
+                                </>
+                            )}
+                          </div>
+                      )}
                     </div>
                   </div>
                 </section>
@@ -948,7 +2176,7 @@ export function MyPage() {
                   {renderPageHeader('scans')}
                   {isLoading ? (
                       <p className="mypage-x__loading">불러오는 중...</p>
-                  ) : scanSessions.length === 0 ? (
+                  ) : sortedScanSessions.length === 0 ? (
                       renderEmptyState({
                         icon: 'hand',
                         title: '손 분석 이력이 없어요',
@@ -957,9 +2185,19 @@ export function MyPage() {
                         onAction: () => navigate('/scan/hand'),
                       })
                   ) : (
-                      <div className="mypage-x__scan-list">
-                        {scanSessions.map((session) => renderScanSessionRow(session))}
-                      </div>
+                      <>
+                        {(() => {
+                          const { slice, totalPages } = paginate(sortedScanSessions, 'scans')
+                          return (
+                              <>
+                                <div className="mypage-x__scan-list">
+                                  {slice.map((session) => renderScanSessionRow(session))}
+                                </div>
+                                {renderPagination(totalPages)}
+                              </>
+                          )
+                        })()}
+                      </>
                   )}
                 </section>
             )}
@@ -970,7 +2208,17 @@ export function MyPage() {
                   {isLoading ? (
                       <p className="mypage-x__loading">불러오는 중...</p>
                   ) : (
-                      renderImageGrid(designs, false)
+                      <>
+                        {(() => {
+                          const { slice, totalPages } = paginate(sortedDesigns, 'designs')
+                          return (
+                              <>
+                                {renderImageGrid(slice, false, undefined, { dateMode: 'date' })}
+                                {renderPagination(totalPages)}
+                              </>
+                          )
+                        })()}
+                      </>
                   )}
                 </section>
             )}
@@ -980,7 +2228,7 @@ export function MyPage() {
                   {renderPageHeader('timeline')}
                   {isLoading ? (
                       <p className="mypage-x__loading">불러오는 중...</p>
-                  ) : timelineGroups.length === 0 ? (
+                  ) : !hasAnyTimelineActivity ? (
                       renderEmptyState({
                         icon: 'timeline',
                         title: '아직 활동 기록이 없어요',
@@ -989,63 +2237,205 @@ export function MyPage() {
                         onAction: () => navigate('/scan/hand'),
                       })
                   ) : (
-                      <div className="mypage-x__timeline">
-                        {timelineGroups.map(([key, group]) => {
-                          const total = group.scans.length + group.designs.length + group.prints.length
-                          if (total === 0) return null
-                          return (
-                              <div key={key} className="mypage-x__timeline-day">
-                                <div className="mypage-x__timeline-dot" aria-hidden="true" />
-                                <div className="mypage-x__timeline-content">
-                                  <h3 className="mypage-x__timeline-date">{dateLabelOf(key)}</h3>
+                      <div className="mypage-x__day-timeline">
+                        <div className="mypage-x__day-nav" ref={calendarRef}>
+                          <div className="mypage-x__day-nav-main">
+                            <button
+                                type="button"
+                                className="mypage-x__day-nav-arrow"
+                                onClick={() => moveTimelineDate(-1)}
+                                aria-label="이전 날"
+                            >
+                              {Icon.chevronLeft}
+                            </button>
+                            <button
+                                type="button"
+                                className={`mypage-x__day-nav-date-btn${calendarOpen ? ' is-open' : ''}`}
+                                onClick={openTimelineCalendar}
+                                aria-label="날짜 선택"
+                                aria-expanded={calendarOpen}
+                            >
+                              {formatNavDate(selectedTimelineDate)}
+                            </button>
+                            <button
+                                type="button"
+                                className="mypage-x__day-nav-arrow"
+                                onClick={() => moveTimelineDate(1)}
+                                aria-label="다음 날"
+                            >
+                              {Icon.chevronRight}
+                            </button>
+                          </div>
 
-                                  {group.scans.length > 0 && (
-                                      <div className="mypage-x__timeline-block">
-                                        <p className="mypage-x__timeline-block-title">
-                                          {Icon.hand} 손 촬영 · 분석 <span>{group.scans.length}건</span>
-                                        </p>
-                                        <div className="mypage-x__scan-list">
-                                          {group.scans.map((session) => renderScanSessionRow(session, true))}
-                                        </div>
-                                      </div>
-                                  )}
+                          {calendarOpen && (
+                              <div className="mypage-x__naily-cal" role="dialog" aria-label="날짜 선택 달력">
+                                <div className="mypage-x__naily-cal-head">
+                                  <div className="mypage-x__naily-cal-month-nav">
+                                    <button
+                                        type="button"
+                                        className="mypage-x__naily-cal-month-btn"
+                                        onClick={() => shiftCalendarMonth(-1)}
+                                        aria-label="이전 달"
+                                    >
+                                      {Icon.chevronLeft}
+                                    </button>
+                                    <p className="mypage-x__naily-cal-month">
+                                      {calendarMonth.year}년 {calendarMonth.month + 1}월
+                                    </p>
+                                    <button
+                                        type="button"
+                                        className="mypage-x__naily-cal-month-btn"
+                                        onClick={() => shiftCalendarMonth(1)}
+                                        aria-label="다음 달"
+                                    >
+                                      {Icon.chevronRight}
+                                    </button>
+                                  </div>
+                                </div>
 
-                                  {group.designs.length > 0 && (
-                                      <div className="mypage-x__timeline-block">
-                                        <p className="mypage-x__timeline-block-title">
-                                          {Icon.design} 디자인 생성 <span>{group.designs.length}건</span>
-                                        </p>
-                                        {renderImageGrid(group.designs, false)}
-                                      </div>
-                                  )}
+                                <div className="mypage-x__naily-cal-weekdays">
+                                  {['일', '월', '화', '수', '목', '금', '토'].map((w) => (
+                                      <span key={w}>{w}</span>
+                                  ))}
+                                </div>
 
-                                  {group.prints.length > 0 && (
-                                      <div className="mypage-x__timeline-block">
-                                        <p className="mypage-x__timeline-block-title">
-                                          {Icon.print} 네일팁 출력 <span>{group.prints.length}건</span>
-                                        </p>
-                                        <div className="mypage-x__print-list">
-                                          {group.prints.map((order) => (
-                                              <article key={order.id} className="mypage-x__print-row">
-                                                <div className="mypage-x__print-icon" aria-hidden="true">{Icon.print}</div>
-                                                <div>
-                                                  <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일팁</p>
-                                                  <p className="mypage-x__print-date">
-                                                    {order.orderedAt}
-                                                  </p>
-                                                </div>
-                                                <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>
-                                                  {PRINT_STATUS_LABEL[order.status]}
-                                                </span>
-                                              </article>
-                                          ))}
-                                        </div>
-                                      </div>
-                                  )}
+                                <div className="mypage-x__naily-cal-grid">
+                                  {buildCalendarCells(calendarMonth.year, calendarMonth.month).map((cell, idx) => {
+                                    if (!cell) {
+                                      return <span key={`empty-${idx}`} className="mypage-x__naily-cal-empty" />
+                                    }
+                                    const isSelected = cell.key === selectedTimelineDate
+                                    const isToday = cell.key === todayKey()
+                                    const hasActivity = timelineActivityDates.has(cell.key)
+                                    return (
+                                        <button
+                                            key={cell.key}
+                                            type="button"
+                                            className={[
+                                              'mypage-x__naily-cal-day',
+                                              isSelected ? 'is-selected' : '',
+                                              isToday ? 'is-today' : '',
+                                              hasActivity ? 'has-activity' : '',
+                                            ].filter(Boolean).join(' ')}
+                                            onClick={() => selectTimelineDate(cell.key)}
+                                        >
+                                          {cell.day}
+                                          {hasActivity && <i aria-hidden="true" />}
+                                        </button>
+                                    )
+                                  })}
+                                </div>
+
+                                <div className="mypage-x__naily-cal-footer">
+                                  <button
+                                      type="button"
+                                      className="mypage-x__naily-cal-today"
+                                      onClick={() => selectTimelineDate(todayKey())}
+                                  >
+                                    오늘로 이동
+                                  </button>
                                 </div>
                               </div>
-                          )
-                        })}
+                          )}
+                        </div>
+
+                        <div className="mypage-x__day-body" ref={dayBodyRef}>
+                          <aside className="mypage-x__day-rail">
+                            <div className="mypage-x__day-rail-head">
+                              <p className="mypage-x__day-rail-title">하루 활동 타임라인</p>
+                              <span>{dayTotalCount}건</span>
+                            </div>
+                            {dayEvents.length === 0 ? (
+                                <p className="mypage-x__day-overview-empty">이 날에는 아직 활동이 없어요.</p>
+                            ) : (
+                                <div className="mypage-x__day-rail-list" role="list">
+                                  {dayEvents.map((event) => {
+                                    const meta = eventKindMeta[event.kind]
+                                    const timeLabel = formatTimeHms(event.at)
+                                    const highlighted = activeActivityId === event.id
+                                    return (
+                                        <button
+                                            key={event.id}
+                                            type="button"
+                                            data-activity-id={event.id}
+                                            data-activity-side="left"
+                                            className={`mypage-x__day-rail-item mypage-x__day-rail-item--${event.kind}${highlighted ? ' is-highlighted' : ''}`}
+                                            onMouseEnter={() => handleActivityHover(event.id)}
+                                            onMouseLeave={() => handleActivityHover(null)}
+                                            onClick={() => handleActivitySelect(event.id)}
+                                        >
+                                          <div className="mypage-x__day-rail-marker" aria-hidden="true">
+                                            <span className="mypage-x__day-rail-dot" />
+                                          </div>
+                                          <div className="mypage-x__day-rail-content">
+                                            {timeLabel && (
+                                                <p className="mypage-x__day-rail-time">{timeLabel}</p>
+                                            )}
+                                            <p className="mypage-x__day-rail-label">
+                                              <span className="mypage-x__day-rail-icon">{Icon[meta.icon]}</span>
+                                              {meta.label}
+                                            </p>
+                                          </div>
+                                        </button>
+                                    )
+                                  })}
+                                </div>
+                            )}
+                          </aside>
+
+                          <div className="mypage-x__day-sections">
+                            <div className="mypage-x__timeline-block mypage-x__timeline-block--scan">
+                              <p className="mypage-x__timeline-block-title">
+                                {Icon.hand} 손 촬영 · 분석 <span>{timelineScansOldest.length}건</span>
+                              </p>
+                              {timelineScansOldest.length === 0 ? (
+                                  <p className="mypage-x__day-section-empty">이 날의 손 분석 기록이 없어요.</p>
+                              ) : (
+                                  <div className="mypage-x__scan-list">
+                                    {timelineScansOldest.map((session) =>
+                                        renderScanSessionRow(session, {
+                                          activityId: `scan-${session.key}`,
+                                          interactive: true,
+                                        }),
+                                    )}
+                                  </div>
+                              )}
+                            </div>
+
+                            <div className="mypage-x__timeline-block mypage-x__timeline-block--print">
+                              <p className="mypage-x__timeline-block-title">
+                                {Icon.print} 네일팁 출력 <span>{timelinePrintsOldest.length}건</span>
+                              </p>
+                              {timelinePrintsOldest.length === 0 ? (
+                                  <p className="mypage-x__day-section-empty">이 날의 네일팁 출력 기록이 없어요.</p>
+                              ) : (
+                                  <div className="mypage-x__print-list">
+                                    {timelinePrintsOldest.map((order) =>
+                                        renderPrintOrderRow(order, {
+                                          activityId: `print-${order.id}`,
+                                          interactive: true,
+                                        }),
+                                    )}
+                                  </div>
+                              )}
+                            </div>
+
+                            <div className="mypage-x__timeline-block mypage-x__timeline-block--design">
+                              <p className="mypage-x__timeline-block-title">
+                                {Icon.design} 디자인 생성 <span>{timelineDesignsOldest.length}건</span>
+                              </p>
+                              {timelineDesignsOldest.length === 0 ? (
+                                  <p className="mypage-x__day-section-empty">이 날의 디자인 생성 기록이 없어요.</p>
+                              ) : (
+                                  renderImageGrid(timelineDesignsOldest, false, undefined, {
+                                    dateMode: 'time',
+                                    interactive: true,
+                                    getActivityId: (item) => `design-${item.designId}-${item.imageUrl}`,
+                                  })
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                   )}
                 </section>
@@ -1056,21 +2446,114 @@ export function MyPage() {
                   {renderPageHeader('favorites')}
                   {isLoading ? (
                       <p className="mypage-x__loading">불러오는 중...</p>
-                  ) : (
-                      renderImageGrid(favorites, true, {
-                        title: '찜한 디자인이 없어요',
-                        description: '마음에 드는 디자인에 ♥를 눌러 모아보세요.',
-                        actionLabel: '디자인 둘러보기',
-                        onAction: () => setSection('designs'),
-                      })
-                  )}
+                  ) : (() => {
+                    const selectedFolder = selectedFavoriteFolderId != null
+                        ? sortedFolders.find((f) => f.folderId === selectedFavoriteFolderId) ?? null
+                        : null
+                    const folderImages = selectedFolder
+                        ? sortedFavorites.filter((f) => f.folder?.folderId === selectedFolder.folderId)
+                        : sortedFavorites
+
+                    if (selectedFolder) {
+                      const { slice, totalPages } = paginate(folderImages, 'favorites')
+                      return (
+                          <div className="mypage-x__fav-block">
+                            {renderFavBlockToolbar(selectedFolder.name, folderImages.length, 'image', {
+                              onBack: () => setSelectedFavoriteFolderId(null),
+                            })}
+                            {renderImageGrid(slice, true, {
+                              title: '이 폴더에 찜한 이미지가 없어요',
+                              description: '다른 폴더로 이동하거나 새 디자인을 찜해보세요.',
+                              actionLabel: '전체 찜 보기',
+                              onAction: () => setSelectedFavoriteFolderId(null),
+                            }, { dateMode: 'date' })}
+                            {renderPagination(totalPages)}
+                          </div>
+                      )
+                    }
+
+                    return (
+                        <>
+                          <div className="mypage-x__fav-block">
+                            {renderFavBlockToolbar('폴더', sortedFolders.length, 'folder')}
+                            {sortedFolders.length === 0 ? (
+                                <p className="mypage-x__day-section-empty">폴더를 불러오는 중이거나 아직 없어요.</p>
+                            ) : (
+                                <div className="mypage-x__folder-strip">
+                                  {sortedFolders.map((folder) => {
+                                    const thumbs = folder.recentImageUrls ?? []
+                                    return (
+                                        <div key={folder.folderId} className="mypage-x__folder-card">
+                                          <button
+                                              type="button"
+                                              className="mypage-x__folder-card-open"
+                                              onClick={() => setSelectedFavoriteFolderId(folder.folderId)}
+                                          >
+                                            <div className="mypage-x__folder-thumbs" aria-hidden="true">
+                                              <div className="mypage-x__folder-thumb-main">
+                                                {thumbs[0] ? <img src={thumbs[0]} alt="" /> : <span />}
+                                              </div>
+                                              <div className="mypage-x__folder-thumb-side">
+                                                <div>{thumbs[1] ? <img src={thumbs[1]} alt="" /> : <span />}</div>
+                                                <div>{thumbs[2] ? <img src={thumbs[2]} alt="" /> : <span />}</div>
+                                              </div>
+                                            </div>
+                                            <div className="mypage-x__folder-meta">
+                                              <div className="mypage-x__folder-meta-row">
+                                                <p className="mypage-x__folder-name">{folder.name}</p>
+                                              </div>
+                                              <p className="mypage-x__folder-count">{folder.itemCount}개</p>
+                                            </div>
+                                          </button>
+                                          {!folder.isDefault && (
+                                              <button
+                                                  type="button"
+                                                  className="mypage-x__folder-delete-btn"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    openDeleteFolderModal(folder)
+                                                  }}
+                                                  disabled={isBusy}
+                                                  title="폴더 삭제"
+                                                  aria-label={`${folder.name} 폴더 삭제`}
+                                              >
+                                                {Icon.trash}
+                                              </button>
+                                          )}
+                                        </div>
+                                    )
+                                  })}
+                                </div>
+                            )}
+                          </div>
+
+                          <div className="mypage-x__fav-block">
+                            {renderFavBlockToolbar('전체 찜 이미지', sortedFavorites.length, 'image')}
+                            {(() => {
+                              const { slice, totalPages } = paginate(sortedFavorites, 'favorites')
+                              return (
+                                  <>
+                                    {renderImageGrid(slice, true, {
+                                      title: '찜한 디자인이 없어요',
+                                      description: '마음에 드는 디자인에 ♥를 눌러 모아보세요.',
+                                      actionLabel: '디자인 둘러보기',
+                                      onAction: () => setSection('designs'),
+                                    }, { dateMode: 'date' })}
+                                    {renderPagination(totalPages)}
+                                  </>
+                              )
+                            })()}
+                          </div>
+                        </>
+                    )
+                  })()}
                 </section>
             )}
 
             {section === 'prints' && (
                 <section className="mypage-x__panel">
                   {renderPageHeader('prints')}
-                  {prints.length === 0 ? (
+                  {sortedPrints.length === 0 ? (
                       renderEmptyState({
                         icon: 'print',
                         title: '출력 신청 내역이 없어요',
@@ -1079,31 +2562,19 @@ export function MyPage() {
                         onAction: () => navigate('/scan/hand'),
                       })
                   ) : (
-                      <div className="mypage-x__print-list">
-                        {prints.map((order) => (
-                            <button
-                                key={order.id}
-                                type="button"
-                                className="mypage-x__print-row"
-                                onClick={() => void openPrintDetail(order)}
-                            >
-                              <div className="mypage-x__print-icon" aria-hidden="true">
-                                {SHAPE_PREVIEW_IMAGES[order.shapeId] ? (
-                                    <img src={SHAPE_PREVIEW_IMAGES[order.shapeId]} alt="" />
-                                ) : (
-                                    Icon.print
-                                )}
-                              </div>
-                              <div>
-                                <p className="mypage-x__print-shape">{order.shapeLabelKo} 쉐입 네일팁 10개 출력</p>
-                                <p className="mypage-x__print-date">{order.orderedAt}</p>
-                              </div>
-                              <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>
-                                {PRINT_STATUS_LABEL[order.status]}
-                              </span>
-                            </button>
-                        ))}
-                      </div>
+                      <>
+                        {(() => {
+                          const { slice, totalPages } = paginate(sortedPrints, 'prints')
+                          return (
+                              <>
+                                <div className="mypage-x__print-list">
+                                  {slice.map((order) => renderPrintOrderRow(order))}
+                                </div>
+                                {renderPagination(totalPages)}
+                              </>
+                          )
+                        })()}
+                      </>
                   )}
                 </section>
             )}
@@ -1112,142 +2583,305 @@ export function MyPage() {
 
         {/* ── 이미지 상세 모달 ───────────────────────────────────────── */}
         {detailImage && (
-            <div className="mypage-x__modal" role="dialog" aria-modal="true">
+            <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="디자인 상세">
               <button
                   type="button"
                   className="mypage-x__modal-backdrop"
                   aria-label="닫기"
                   onClick={closeDetailImage}
               />
-              <div className="mypage-x__modal-panel mypage-x__modal-panel--lg">
+              <div className="mypage-x__modal-panel mypage-x__modal-panel--lg mypage-x__modal-panel--image">
                 <button
                     type="button"
-                    className="mypage-x__modal-close"
+                    className="mypage-x__modal-close mypage-x__modal-close--plain"
                     onClick={closeDetailImage}
                     aria-label="닫기"
                 >
                   ✕
                 </button>
 
-                {showChatHistory ? (
-                    <div className="mypage-x__modal-image-viewport" style={{ overflowY: 'auto', height: 'min(70vh, 620px)' }}>
-                      <div className="design-chat__messages" style={{ padding: '0.5rem' }}>
-                        {isChatHistoryLoading && <p style={{ textAlign: 'center', color: '#999' }}>불러오는 중…</p>}
-                        {chatHistoryError && <p style={{ textAlign: 'center', color: '#c0392b' }}>{chatHistoryError}</p>}
-                        {!isChatHistoryLoading && !chatHistoryError && chatHistory.length === 0 && (
-                            <p style={{ textAlign: 'center', color: '#999' }}>
-                              이 디자인은 채팅 없이 만들어졌거나, 저장된 대화 이력이 없어요.
-                            </p>
+
+    {showChatHistory ? (
+        <div className="mypage-x__modal-image-viewport" style={{ overflowY: 'auto', height: 'min(70vh, 620px)' }}>
+            <div className="design-chat__messages" style={{ padding: '0.5rem' }}>
+                {isChatHistoryLoading && <p style={{ textAlign: 'center', color: '#999' }}>불러오는 중…</p>}
+                {chatHistoryError && <p style={{ textAlign: 'center', color: '#c0392b' }}>{chatHistoryError}</p>}
+                {!isChatHistoryLoading && !chatHistoryError && chatHistory.length === 0 && (
+                    <p style={{ textAlign: 'center', color: '#999' }}>
+                        이 디자인은 채팅 없이 만들어졌거나, 저장된 대화 이력이 없어요.
+                    </p>
+                )}
+                {chatHistory.map((msg, i) => (
+                    <div key={i} className={`design-chat__row design-chat__row--${msg.role}`}>
+                        {msg.role === 'assistant' && (
+                            <img src="/images/logo.png" alt="" className="design-chat__avatar" />
                         )}
-                        {chatHistory.map((msg, i) => (
-                            <div key={i} className={`design-chat__row design-chat__row--${msg.role}`}>
-                              {msg.role === 'assistant' && (
-                                  <img src="/images/logo.png" alt="" className="design-chat__avatar" />
-                              )}
-                              <div className={`design-chat__bubble design-chat__bubble--${msg.role}`}>
-                                {msg.content.split('\n').map((line, j) => (
-                                    <p key={j}>{line}</p>
-                                ))}
-                                {msg.imageUrls && msg.imageUrls.length > 0 && (
-                                    <div className="design-chat__bubble-images">
-                                      {msg.imageUrls.map((url, k) => (
-                                          <div key={k} className="design-chat__bubble-image-wrap">
+                        <div className={`design-chat__bubble design-chat__bubble--${msg.role}`}>
+                            {msg.content.split('\n').map((line, j) => (
+                                <p key={j}>{line}</p>
+                            ))}
+                            {msg.imageUrls && msg.imageUrls.length > 0 && (
+                                <div className="design-chat__bubble-images">
+                                    {msg.imageUrls.map((url, k) => (
+                                        <div key={k} className="design-chat__bubble-image-wrap">
                                             <img
                                                 src={url}
                                                 alt={`생성된 네일 디자인 ${k + 1}`}
                                                 style={{ cursor: 'zoom-in' }}
                                                 onClick={() => {
-                                                  setZoom(1)
-                                                  setPan({ x: 0, y: 0 })
-                                                  // 찜하기/삭제는 "지금 보고 있는 이미지" 개별로 작동해야 하므로
-                                                  // designId를 이 이미지 것으로 바꾼다. 반면 confirmedDesignId는
-                                                  // 안 건드려서 "최종 확정" 표시는 처음 연 디자인 기준으로 고정된다.
-                                                  const newDesignId = msg.designId ?? detailImage?.designId ?? null
-                                                  const liked = likedKeySet.has(`${newDesignId}-${url}`)
-                                                  setDetailImage((prev) =>
-                                                      prev ? { ...prev, imageUrl: url, designId: newDesignId, liked } : prev,
-                                                  )
-                                                  setShowChatHistory(false)
+                                                    setZoom(1)
+                                                    setPan({ x: 0, y: 0 })
+                                                    const newDesignId = msg.designId ?? detailImage?.designId ?? null
+                                                    const liked = likedKeySet.has(`${newDesignId}-${url}`)
+                                                    setDetailImage((prev) =>
+                                                        prev ? { ...prev, imageUrl: url, designId: newDesignId, liked } : prev,
+                                                    )
+                                                    setShowChatHistory(false)
                                                 }}
                                             />
-                                          </div>
-                                      ))}
-                                    </div>
-                                )}
-                              </div>
-                            </div>
-                        ))}
-                      </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
-                ) : (
-                    <div
-                        ref={imageViewportRef}
-                        className={`mypage-x__modal-image-viewport${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
-                        onMouseUp={stopDragging}
-                        onMouseLeave={stopDragging}
-                    >
-                      <img
-                          src={detailImage.imageUrl}
-                          alt="네일 디자인 확대"
-                          className="mypage-x__modal-image"
-                          draggable={false}
-                          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-                          onMouseDown={handleImagePointerDown}
-                          onMouseMove={handleImagePointerMove}
-                      />
+                ))}
+            </div>
+        </div>
+    ) : (
+        <div
+            ref={imageViewportRef}
+            className={`mypage-x__modal-image-viewport mypage-x__modal-image-viewport--fit${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
+            onMouseUp={stopDragging}
+            onMouseLeave={stopDragging}
+        >
+            <img
+                src={detailImage.imageUrl}
+                alt="네일 디자인 확대"
+                className="mypage-x__modal-image"
+                draggable={false}
+                style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+                onMouseDown={handleImagePointerDown}
+                onMouseMove={handleImagePointerMove}
+            />
 
-                      <div className="mypage-x__modal-zoom-controls">
-                        <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
-                      </div>
+            <div className="mypage-x__modal-image-tools">
+                <button
+                    type="button"
+                    className={`mypage-x__modal-heart${detailImage.liked ? ' is-liked' : ''}`}
+                    onClick={() => void handleModalToggleLike()}
+                    disabled={isBusy || detailImage.designId == null}
+                    aria-label={detailImage.liked ? '찜 해제' : '찜하기'}
+                >
+                    {Icon.heart}
+                </button>
+                {detailImage.liked && detailImage.designId != null && (
+                    <button
+                        type="button"
+                        className="mypage-x__modal-folder-pill"
+                        onClick={() => openMoveFolderModal(detailImage.designId!, detailImage.imageUrl)}
+                        title="저장 위치 변경"
+                        aria-label={`저장 위치 변경 (현재: ${detailImage.folder?.name
+                        ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
+                        ?? '기본'})`}
+                    >
+                              <span className="mypage-x__modal-folder-pill-text">
+                                {detailImage.folder?.name
+                                    ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
+                                    ?? '기본'}
+                              </span>
+                        <span className="mypage-x__modal-folder-pill-icon" aria-hidden="true">
+                                {Icon.chevronDown}
+                              </span>
+                    </button>
+                )}
+            </div>
+
+            {(detailImage.owner ?? detailImage.canDelete) && (
+                <span className={`mypage-x__modal-share-corner mypage-x__share-badge${detailImage.shared ? ' is-on' : ''}`}>
+                            {detailImage.shared ? '둘러보기에 공유 중' : '비공개'}
+                          </span>
+            )}
+
+            <div className="mypage-x__modal-zoom-controls">
+                <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
+            </div>
+        </div>
+    )}
+
+                {showDesignDetails && (
+                    <div id="mypage-design-details" className="mypage-x__modal-design-details">
+                      <DesignDetailsPanel details={detailImage.details} loading={detailLoading} />
                     </div>
                 )}
 
                 <div className="mypage-x__modal-info">
                   {detailImage.createdAt && <p className="mypage-x__modal-date">{detailImage.createdAt}</p>}
+                  <button
+                      type="button"
+                      className={`mypage-x__modal-details-btn mypage-x__modal-details-btn--inline${showDesignDetails ? ' is-open' : ''}`}
+                      onClick={() => setShowDesignDetails((prev) => !prev)}
+                      aria-expanded={showDesignDetails}
+                      aria-controls="mypage-design-details"
+                  >
+                    {ModalActionIcons.details}
+                    <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
+                  </button>
                 </div>
-                <div className="mypage-x__modal-actions">
-                  {detailImage.designId != null && (
-                      <button
-                          type="button"
-                          className="mypage-x__modal-action--accent"
-                          onClick={() => setShowChatHistory((prev) => !prev)}
-                      >
-                        {showChatHistory ? '🖼 디자인으로 돌아가기' : '💬 채팅 이력 보기'}
-                      </button>
-                  )}
-                  {!showChatHistory && (
-                      <>
-                        <button
-                            type="button"
-                            onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
-                        >
-                          로컬에 저장
-                        </button>
-                        <button
-                            type="button"
-                            className={detailImage.liked ? 'is-active' : ''}
-                            onClick={() => void handleModalToggleLike()}
-                            disabled={isBusy || detailImage.designId == null}
-                        >
-                          {detailImage.liked ? '♥ 찜 해제' : '♡ 찜하기'}
-                        </button>
-                        {detailImage.isFavoriteView ? (
-                            <button type="button" className="danger" onClick={() => void handleModalUnfavorite()} disabled={isBusy}>
-                              찜 목록에서 제거
-                            </button>
-                        ) : (
-                            detailImage.canDelete && (
-                                <button type="button" className="danger" onClick={() => void handleModalDelete()} disabled={isBusy}>
-                                  이미지 삭제
-                                </button>
-                            )
-                        )}
-                      </>
-                  )}
-                </div>
+                  <div className="mypage-x__modal-actions">
+                      {detailImage.designId != null && (
+                          <button
+                              type="button"
+                              className="mypage-x__modal-action--accent"
+                              onClick={() => setShowChatHistory((prev) => !prev)}
+                          >
+                              {showChatHistory ? '🖼 디자인으로 돌아가기' : '💬 채팅 이력 보기'}
+                          </button>
+                      )}
+                      {!showChatHistory && (
+                          <>
+                              {detailImage.designId != null && (
+                                  <button
+                                      type="button"
+                                      className="mypage-x__modal-action--danger"
+                                      onClick={() => void handleModalDelete()}
+                                      disabled={isBusy || !(detailImage.owner ?? detailImage.canDelete)}
+                                      title={
+                                          !(detailImage.owner ?? detailImage.canDelete)
+                                              ? '내 디자인만 삭제할 수 있어요'
+                                              : undefined
+                                      }
+                                  >
+                                      {ModalActionIcons.trash}
+                                      <span>이미지 삭제</span>
+                                  </button>
+                              )}
+                              <button
+                                  type="button"
+                                  className="mypage-x__modal-action--ghost"
+                                  onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
+                              >
+                                  {ModalActionIcons.download}
+                                  <span>이미지 다운로드</span>
+                              </button>
+                              {detailImage.designId != null && (
+                                  <button
+                                      type="button"
+                                      className={`mypage-x__modal-action--ghost${detailImage.shared ? ' is-active' : ''}`}
+                                      onClick={() => void handleToggleShare()}
+                                      disabled={shareBusy || !(detailImage.owner ?? detailImage.canDelete)}
+                                      title={
+                                          !(detailImage.owner ?? detailImage.canDelete)
+                                              ? '내 디자인만 공유할 수 있어요'
+                                              : undefined
+                                      }
+                                  >
+                                      {ModalActionIcons.share}
+                                      <span>
+                                {shareBusy ? '처리 중...' : detailImage.shared ? '공유 해제' : '공유하기'}
+                              </span>
+                                  </button>
+                              )}
+                              <button
+                                  type="button"
+                                  className="mypage-x__modal-action--accent"
+                                  onClick={() => setArTryOnImageUrl(detailImage.imageUrl)}
+                              >
+                                  {ModalActionIcons.ar}
+                                  <span>AR로 미리보기</span>
+                              </button>
+                          </>
+                      )}
+                  </div>
               </div>
             </div>
         )}
+
+          <FavoriteFolderModal
+              open={!!likeModalTarget}
+              onClose={() => setLikeModalTarget(null)}
+              onConfirm={confirmLikeWithFolder}
+              mode={likeModalTarget?.mode ?? 'like'}
+              initialFolderId={likeModalTarget?.currentFolderId ?? null}
+          />
+
+          {/* ── 찜 폴더 삭제 확인 모달 ───────────────────────────────────── */}
+          {folderToDelete && (
+              <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="폴더 삭제 확인">
+                  <button
+                      type="button"
+                      className="mypage-x__modal-backdrop"
+                      aria-label="닫기"
+                      onClick={closeDeleteFolderModal}
+                  />
+                  <div className="mypage-x__modal-panel mypage-x__confirm-panel">
+                      <button
+                          type="button"
+                          className="mypage-x__modal-close mypage-x__modal-close--plain"
+                          onClick={closeDeleteFolderModal}
+                          aria-label="닫기"
+                          disabled={isBusy}
+                      >
+                          ✕
+                      </button>
+
+                      <div className="mypage-x__confirm-icon mypage-x__confirm-icon--danger" aria-hidden="true">
+                          {Icon.trash}
+                      </div>
+
+                      <h2 className="mypage-x__confirm-title">
+                          <strong>{folderToDelete.name}</strong> 폴더를 삭제할까요?
+                      </h2>
+
+                      <p className="mypage-x__confirm-desc">
+                          폴더만 사라지고, 안에 있던 찜 이미지{' '}
+                          {folderToDelete.itemCount > 0 && <strong>{folderToDelete.itemCount}개</strong>}는{' '}
+                          <strong>기본</strong> 폴더로 자동 이동돼요.
+                      </p>
+
+                      {folderToDelete.itemCount > 0 && (
+                          <div className="mypage-x__confirm-flow" aria-hidden="true">
+                              <div className="mypage-x__confirm-flow-folder">
+                                  <div className="mypage-x__confirm-flow-thumbs">
+                                      {(folderToDelete.recentImageUrls ?? []).slice(0, 3).map((url, i) => (
+                                          <img key={i} src={url} alt="" />
+                                      ))}
+                                      {(folderToDelete.recentImageUrls ?? []).length === 0 && (
+                                          <span className="mypage-x__confirm-flow-empty">{Icon.folder}</span>
+                                      )}
+                                  </div>
+                                  <span className="mypage-x__confirm-flow-label">{folderToDelete.name}</span>
+                              </div>
+
+                              <span className="mypage-x__confirm-flow-arrow">{Icon.chevronRight}</span>
+
+                              <div className="mypage-x__confirm-flow-folder mypage-x__confirm-flow-folder--default">
+                                  <div className="mypage-x__confirm-flow-thumbs mypage-x__confirm-flow-thumbs--default">
+                                      <span className="mypage-x__confirm-flow-heart">{Icon.heart}</span>
+                                  </div>
+                                  <span className="mypage-x__confirm-flow-label">기본</span>
+                              </div>
+                          </div>
+                      )}
+
+                      {folderDeleteError && <p className="mypage-x__message">{folderDeleteError}</p>}
+
+                      <div className="mypage-x__modal-actions">
+                          <button type="button" onClick={closeDeleteFolderModal} disabled={isBusy}>
+                              취소
+                          </button>
+                          <button
+                              type="button"
+                              className="danger"
+                              onClick={() => void confirmDeleteFolder()}
+                              disabled={isBusy}
+                          >
+                              {isBusy ? '삭제 중...' : '폴더 삭제'}
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          )}
 
         {arTryOnImageUrl && (
             <NailArTryOnModal
@@ -1258,18 +2892,18 @@ export function MyPage() {
 
         {/* ── 손 분석 결과 상세 모달 ───────────────────────────────────── */}
         {scanDetailSession && (
-            <div className="mypage-x__modal" role="dialog" aria-modal="true">
+            <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="손 분석 상세 결과">
               <button
                   type="button"
                   className="mypage-x__modal-backdrop"
                   aria-label="닫기"
-                  onClick={() => setScanDetailSession(null)}
+                  onClick={closeScanDetail}
               />
-              <div className="mypage-x__modal-panel mypage-x__scan-detail-panel">
+              <div className="mypage-x__modal-panel mypage-x__scanx-panel">
                 <button
                     type="button"
-                    className="mypage-x__modal-close"
-                    onClick={() => setScanDetailSession(null)}
+                    className="mypage-x__modal-close mypage-x__modal-close--plain"
+                    onClick={closeScanDetail}
                     aria-label="닫기"
                 >
                   ✕
@@ -1277,144 +2911,364 @@ export function MyPage() {
 
                 {isLoadingScanDetail || !scanDetail ? (
                     <p className="mypage-x__empty">분석 결과를 불러오는 중...</p>
-                ) : (
-                    <>
-                      <p className="mypage-x__scan-detail-heading">
-                        <strong>{dateLabelOf(dateKeyOf(scanDetail.scannedAt))}</strong>에 스캔했던{' '}
-                        <strong>{profile?.nickname ?? '회원'}</strong>님의 손 분석 결과입니다.
-                      </p>
+                ) : (() => {
+                  const seasonRow = SEASON_ROWS.find((r) => r.code === scanDetail.seasonCode)
+                  const repColor = representativePersonalColor(scanDetail.seasonCode)
+                  const palette = pickPalettePreview(scanDetail.seasonCode, 24)
+                  const shapeLabel = scanDetail.shapeId
+                      ? getNailShape(scanDetail.shapeId)?.labelKo ?? scanDetail.shapeId
+                      : null
+                  const shapeEn = scanDetail.shapeId
+                      ? getNailShape(scanDetail.shapeId)?.labelEn ?? scanDetail.shapeId
+                      : null
+                  const lengthPct = Math.min(100, Math.max(8, (scanDetail.avgLength / 18) * 100))
+                  const widthPct = Math.min(100, Math.max(8, (scanDetail.avgWidth / 14) * 100))
+                  const curvePct = Math.min(100, Math.max(8, scanDetail.avgCurve * 100))
+                  const fingerList = scanDetail.fingers.filter((f) => f.hand === scanFingerHand)
+                  const hasLeft = scanDetail.fingers.some((f) => f.hand === 'L')
+                  const hasRight = scanDetail.fingers.some((f) => f.hand === 'R')
 
-                      <div className="mypage-x__scan-detail-summary">
-                        <div className="mypage-x__scan-detail-summary-item">
-                          <span className="mypage-x__scan-detail-summary-label">퍼스널컬러</span>
-                          <span className="mypage-x__scan-detail-summary-value">{scanDetail.seasonNameKo ?? '분석 결과 없음'}</span>
-                        </div>
-                        <div className="mypage-x__scan-detail-summary-item">
-                          {scanDetail.shapeId && SHAPE_PREVIEW_IMAGES[scanDetail.shapeId] && (
-                              <img
-                                  src={SHAPE_PREVIEW_IMAGES[scanDetail.shapeId]}
-                                  alt=""
-                                  className="mypage-x__scan-detail-shape-img"
-                              />
-                          )}
-                          <span className="mypage-x__scan-detail-summary-label">추천 네일팁 모양</span>
-                          <span className="mypage-x__scan-detail-summary-value">
-                            {scanDetail.shapeId ? getNailShape(scanDetail.shapeId)?.labelKo ?? scanDetail.shapeId : '분석 결과 없음'}
-                          </span>
-                        </div>
-                      </div>
+                  return (
+                      <>
+                        <header className="mypage-x__scanx-head">
+                          <p className="mypage-x__scanx-eyebrow">Hand Analysis</p>
+                          <h2 className="mypage-x__scanx-title">손 분석 결과</h2>
+                          <p className="mypage-x__scanx-date">
+                            {formatDateTimeFull(scanDetail.scannedAt) || formatNavDate(dateKeyOf(scanDetail.scannedAt))}
+                          </p>
+                        </header>
 
-                      <div className="mypage-x__scan-detail-metrics">
-                        <div className="mypage-x__scan-detail-metric">
-                          <span>평균 길이</span>
-                          <strong>{scanDetail.avgLength}mm</strong>
-                        </div>
-                        <div className="mypage-x__scan-detail-metric">
-                          <span>평균 너비</span>
-                          <strong>{scanDetail.avgWidth}mm</strong>
-                        </div>
-                        <div className="mypage-x__scan-detail-metric">
-                          <span>평균 곡률 (C-curve)</span>
-                          <strong>{scanDetail.avgCurve}</strong>
-                        </div>
-                      </div>
-                      <p className="mypage-x__scan-detail-comment">{scanDetail.comment}</p>
-
-                      {scanDetail.fingers.length > 0 && (
-                          <div className="mypage-x__scan-detail-finger-table">
-                            <div className="mypage-x__scan-detail-finger-row mypage-x__scan-detail-finger-row--head">
-                              <span>손가락</span><span>길이</span><span>너비</span><span>곡률</span>
-                            </div>
-                            {scanDetail.fingers.map((f) => (
-                                <div key={f.label} className="mypage-x__scan-detail-finger-row">
-                                  <span>{f.label}</span>
-                                  <span>{f.lengthMm.toFixed(1)}mm</span>
-                                  <span>{f.widthMm.toFixed(1)}mm</span>
-                                  <span>{f.cCurve.toFixed(2)}</span>
+                        <section
+                            className="mypage-x__scanx-hero"
+                            style={{
+                              background: `linear-gradient(145deg, ${repColor}22 0%, #fff 48%, ${repColor}14 100%)`,
+                            }}
+                        >
+                          {palette.length > 0 && (
+                              <div className={`mypage-x__scanx-palette-wrap${scanPaletteOpen ? ' is-open' : ''}`}>
+                                <button
+                                    type="button"
+                                    className="mypage-x__scanx-palette-btn"
+                                    aria-label="퍼스널컬러 팔레트 보기"
+                                    aria-expanded={scanPaletteOpen}
+                                    aria-haspopup="true"
+                                    onClick={() => setScanPaletteOpen((prev) => !prev)}
+                                >
+                                  {Icon.palette}
+                                </button>
+                                <div className="mypage-x__scanx-palette-pop" role="tooltip">
+                                  <p className="mypage-x__scanx-palette-pop-title">컬러 팔레트</p>
+                                  <div className="mypage-x__scanx-palette" aria-label="퍼스널컬러 팔레트 24색">
+                                    {palette.map((hex, idx) => (
+                                        <i key={`${hex}-${idx}`} style={{ background: hex }} title={hex} />
+                                    ))}
+                                  </div>
                                 </div>
-                            ))}
+                              </div>
+                          )}
+                          <div className="mypage-x__scanx-hero-top">
+                            <span
+                                className="mypage-x__scanx-color-orb"
+                                style={{ background: repColor }}
+                                aria-hidden="true"
+                            />
+                            <div className="mypage-x__scanx-hero-copy">
+                              <p className="mypage-x__scanx-kicker">퍼스널 컬러</p>
+                              <h3 className="mypage-x__scanx-season" style={{ color: repColor }}>
+                                {scanDetail.seasonNameKo ?? '분석 결과 없음'}
+                              </h3>
+                              {seasonRow && (
+                                  <div className="mypage-x__scanx-chips">
+                                    <span>{seasonRow.tone} 톤</span>
+                                    <span>{seasonRow.brightness}</span>
+                                    <span>{seasonRow.saturation}</span>
+                                  </div>
+                              )}
+                            </div>
                           </div>
-                      )}
-                    </>
-                )}
+                        </section>
+
+                        <section className="mypage-x__scanx-shape">
+                          <div className="mypage-x__scanx-shape-copy">
+                            <p className="mypage-x__scanx-kicker">추천 네일팁 쉐입</p>
+                            <strong>{shapeLabel ?? '미정'}</strong>
+                            {shapeEn && <span>{shapeEn}</span>}
+                          </div>
+                          <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
+                            {scanDetail.shapeId && SHAPE_PREVIEW_IMAGES[scanDetail.shapeId] ? (
+                                <img src={SHAPE_PREVIEW_IMAGES[scanDetail.shapeId]} alt="" />
+                            ) : (
+                                Icon.design
+                            )}
+                          </div>
+                        </section>
+
+                        <section className="mypage-x__scanx-metrics" aria-label="양손 평균 손톱 지표">
+                          <p className="mypage-x__scanx-section-label">손톱 평균 수치</p>
+                          <div className="mypage-x__scanx-metric-grid">
+                            <article className="mypage-x__scanx-metric">
+                              <div className="mypage-x__scanx-metric-top">
+                                <div className="mypage-x__scanx-metric-copy">
+                                  <p>길이</p>
+                                  <strong>{scanDetail.avgLength.toFixed(1)}<em>mm</em></strong>
+                                </div>
+                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.lengthIcon}</span>
+                              </div>
+                              <div className="mypage-x__scanx-meter" aria-hidden="true">
+                                <i style={{ width: `${lengthPct}%` }} />
+                              </div>
+                              <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
+                            </article>
+                            <article className="mypage-x__scanx-metric">
+                              <div className="mypage-x__scanx-metric-top">
+                                <div className="mypage-x__scanx-metric-copy">
+                                  <p>너비</p>
+                                  <strong>{scanDetail.avgWidth.toFixed(1)}<em>mm</em></strong>
+                                </div>
+                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.widthIcon}</span>
+                              </div>
+                              <div className="mypage-x__scanx-meter" aria-hidden="true">
+                                <i style={{ width: `${widthPct}%` }} />
+                              </div>
+                              <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
+                            </article>
+                            <article className="mypage-x__scanx-metric">
+                              <div className="mypage-x__scanx-metric-top">
+                                <div className="mypage-x__scanx-metric-copy">
+                                  <p>곡률</p>
+                                  <strong>{scanDetail.avgCurve.toFixed(2)}</strong>
+                                </div>
+                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.curveIcon}</span>
+                              </div>
+                              <div className="mypage-x__scanx-meter" aria-hidden="true">
+                                <i style={{ width: `${curvePct}%` }} />
+                              </div>
+                              <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
+                            </article>
+                          </div>
+                        </section>
+
+                        <p className="mypage-x__scanx-comment">
+                          <span className="mypage-x__scanx-comment-label">
+                            한줄 요약
+                            <i aria-hidden="true">{Icon.summaryIcon}</i>
+                          </span>
+                          {scanDetail.comment}
+                        </p>
+
+                        {scanDetail.fingers.length > 0 && (
+                            <div className="mypage-x__scanx-detail-toggle-wrap">
+                              <button
+                                  type="button"
+                                  className={`mypage-x__scanx-detail-toggle${scanFingerDetailOpen ? ' is-open' : ''}`}
+                                  onClick={() => setScanFingerDetailOpen((prev) => !prev)}
+                                  aria-expanded={scanFingerDetailOpen}
+                              >
+                                손가락별 상세 측정값 {scanFingerDetailOpen ? '접기' : '보기'}
+                                <span className="mypage-x__scanx-detail-toggle-icon" aria-hidden="true">
+                                  {Icon.chevronDown}
+                                </span>
+                              </button>
+
+                              {scanFingerDetailOpen && (
+                                  <div className="mypage-x__scanx-finger-panel">
+                                    <div
+                                        className={`mypage-x__scanx-hand-tabs${hasLeft && hasRight ? '' : ' is-single'}`}
+                                        role="tablist"
+                                        aria-label="손 선택"
+                                    >
+                                      {hasLeft && (
+                                          <button
+                                              type="button"
+                                              role="tab"
+                                              aria-selected={scanFingerHand === 'L'}
+                                              className={scanFingerHand === 'L' ? 'is-active' : ''}
+                                              onClick={() => setScanFingerHand('L')}
+                                          >
+                                            <em>L</em>
+                                            <span>왼손</span>
+                                          </button>
+                                      )}
+                                      {hasRight && (
+                                          <button
+                                              type="button"
+                                              role="tab"
+                                              aria-selected={scanFingerHand === 'R'}
+                                              className={scanFingerHand === 'R' ? 'is-active' : ''}
+                                              onClick={() => setScanFingerHand('R')}
+                                          >
+                                            <em>R</em>
+                                            <span>오른손</span>
+                                          </button>
+                                      )}
+                                    </div>
+                                    <div className="mypage-x__scanx-hand-rows">
+                                      <div className="mypage-x__scanx-hand-row mypage-x__scanx-hand-row--head">
+                                        <span>손가락</span>
+                                        <span>길이</span>
+                                        <span>너비</span>
+                                        <span>곡률</span>
+                                      </div>
+                                      {fingerList.map((f) => (
+                                          <div key={f.label} className="mypage-x__scanx-hand-row">
+                                            <span className="mypage-x__scanx-hand-name">{f.partLabel}</span>
+                                            <span>{f.lengthMm.toFixed(1)}<small>mm</small></span>
+                                            <span>{f.widthMm.toFixed(1)}<small>mm</small></span>
+                                            <span>{f.cCurve.toFixed(2)}</span>
+                                          </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                              )}
+                            </div>
+                        )}
+                      </>
+                  )
+                })()}
               </div>
             </div>
         )}
 
         {/* ── 네일팁 출력 상세 모달 ───────────────────────────────────── */}
-        {printDetailOrder && (
-            <div className="mypage-x__modal" role="dialog" aria-modal="true">
-              <button
-                  type="button"
-                  className="mypage-x__modal-backdrop"
-                  aria-label="닫기"
-                  onClick={() => setPrintDetailOrder(null)}
-              />
-              <div className="mypage-x__modal-panel mypage-x__scan-detail-panel">
+        {printDetailOrder && (() => {
+          const shapeLabel = getNailShape(printDetailOrder.shapeId)?.labelKo
+              ?? printDetailOrder.shapeLabelKo
+              ?? printDetailOrder.shapeId
+          const shapeEn = getNailShape(printDetailOrder.shapeId)?.labelEn ?? null
+          const statusKey = printDetailOrder.status.toLowerCase()
+          const hasLinkedScan = Boolean(printDetailOrder.leftScanId || printDetailOrder.rightScanId)
+          const lengthPct = printDetailScan
+              ? Math.min(100, Math.max(8, (printDetailScan.avgLength / 18) * 100))
+              : 0
+          const widthPct = printDetailScan
+              ? Math.min(100, Math.max(8, (printDetailScan.avgWidth / 14) * 100))
+              : 0
+          const curvePct = printDetailScan
+              ? Math.min(100, Math.max(8, printDetailScan.avgCurve * 100))
+              : 0
+
+          return (
+              <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="네일팁 출력 상세">
                 <button
                     type="button"
-                    className="mypage-x__modal-close"
-                    onClick={() => setPrintDetailOrder(null)}
+                    className="mypage-x__modal-backdrop"
                     aria-label="닫기"
-                >
-                  ✕
-                </button>
+                    onClick={closePrintDetail}
+                />
+                <div className="mypage-x__modal-panel mypage-x__scanx-panel">
+                  <button
+                      type="button"
+                      className="mypage-x__modal-close mypage-x__modal-close--plain"
+                      onClick={closePrintDetail}
+                      aria-label="닫기"
+                  >
+                    ✕
+                  </button>
 
-                <p className="mypage-x__scan-detail-heading">
-                  <strong>{printDetailOrder.orderedAt}</strong>에{' '}
-                  <strong>{printDetailOrder.shapeLabelKo}</strong> 쉐입으로 네일팁 10개(양손) 출력을 신청했어요.
-                </p>
-
-                <div className="mypage-x__scan-detail-summary">
-                  <div className="mypage-x__scan-detail-summary-item">
-                    {SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId] && (
-                        <img
-                            src={SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId]}
-                            alt=""
-                            className="mypage-x__scan-detail-shape-img"
-                        />
-                    )}
-                    <span className="mypage-x__scan-detail-summary-label">신청한 네일팁 모양</span>
-                    <span className="mypage-x__scan-detail-summary-value">
-                      {getNailShape(printDetailOrder.shapeId)?.labelKo ?? printDetailOrder.shapeId}
-                    </span>
-                  </div>
-                  <div className="mypage-x__scan-detail-summary-item">
-                    <span className="mypage-x__scan-detail-summary-label">진행 상태</span>
-                    <span className="mypage-x__scan-detail-summary-value">{PRINT_STATUS_LABEL[printDetailOrder.status]}</span>
-                  </div>
-                </div>
-
-                {!printDetailOrder.leftScanId && !printDetailOrder.rightScanId ? (
-                    <p className="mypage-x__scan-detail-comment">
-                      이 출력 신청에는 연결된 손 분석 기록 정보가 없어요. (예전에 신청한 건일 수 있어요)
+                  <header className="mypage-x__scanx-head">
+                    <p className="mypage-x__scanx-eyebrow">Nail Tip Print</p>
+                    <h2 className="mypage-x__scanx-title">네일팁 출력</h2>
+                    <p className="mypage-x__scanx-date">
+                      {formatDateTimeFull(printDetailOrder.orderedAt)
+                        || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))}
                     </p>
-                ) : isLoadingPrintDetail || !printDetailScan ? (
-                    <p className="mypage-x__empty">연결된 손 분석 결과를 불러오는 중...</p>
-                ) : (
-                    <>
-                      <p className="mypage-x__scan-detail-comment">
-                        이 출력은 <strong>{dateLabelOf(dateKeyOf(printDetailScan.scannedAt))}</strong>에 스캔한 손 분석 결과를 바탕으로 신청됐어요.
-                      </p>
-                      <div className="mypage-x__scan-detail-metrics">
-                        <div className="mypage-x__scan-detail-metric">
-                          <span>평균 길이</span>
-                          <strong>{printDetailScan.avgLength}mm</strong>
-                        </div>
-                        <div className="mypage-x__scan-detail-metric">
-                          <span>평균 너비</span>
-                          <strong>{printDetailScan.avgWidth}mm</strong>
-                        </div>
-                        <div className="mypage-x__scan-detail-metric">
-                          <span>평균 곡률 (C-curve)</span>
-                          <strong>{printDetailScan.avgCurve}</strong>
-                        </div>
-                      </div>
-                    </>
-                )}
+                  </header>
+
+                  <section className={`mypage-x__printx-status mypage-x__printx-status--${statusKey}`}>
+                    <div className="mypage-x__printx-status-copy">
+                      <p className="mypage-x__scanx-kicker">진행 상태</p>
+                      <strong>{PRINT_STATUS_LABEL[printDetailOrder.status]}</strong>
+                      <span>{PRINT_STATUS_HINT[printDetailOrder.status]}</span>
+                    </div>
+                    <span className={`mypage-x__badge mypage-x__badge--${statusKey}`}>
+                      {PRINT_STATUS_LABEL[printDetailOrder.status]}
+                    </span>
+                  </section>
+
+                  <section className="mypage-x__scanx-shape">
+                    <div className="mypage-x__scanx-shape-copy">
+                      <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>
+                      <strong>{shapeLabel}</strong>
+                      {shapeEn && <span>{shapeEn}</span>}
+                    </div>
+                    <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
+                      {SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId] ? (
+                          <img src={SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId]} alt="" />
+                      ) : (
+                          Icon.print
+                      )}
+                    </div>
+                  </section>
+
+                  <p className="mypage-x__scanx-comment">
+                    <span className="mypage-x__scanx-comment-label">
+                      출력 요약
+                      <i aria-hidden="true">{Icon.summaryIcon}</i>
+                    </span>
+                    {shapeLabel} 쉐입으로 네일팁 10개(양손) 출력을 신청했어요.
+                  </p>
+
+                  <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">
+                    <p className="mypage-x__scanx-section-label">출력에 사용된 손톱 수치</p>
+                    {!hasLinkedScan ? (
+                        <p className="mypage-x__printx-empty-note">
+                          연결된 손 분석 기록이 없어요. 예전에 신청한 건일 수 있어요.
+                        </p>
+                    ) : isLoadingPrintDetail || !printDetailScan ? (
+                        <p className="mypage-x__empty">연결된 손 분석 결과를 불러오는 중...</p>
+                    ) : (
+                        <>
+                          <p className="mypage-x__printx-scan-note">
+                            {formatNavDate(dateKeyOf(printDetailScan.scannedAt))} 손 분석 결과 사용
+                          </p>
+                          <div className="mypage-x__scanx-metric-grid">
+                            <article className="mypage-x__scanx-metric">
+                              <div className="mypage-x__scanx-metric-top">
+                                <div className="mypage-x__scanx-metric-copy">
+                                  <p>길이</p>
+                                  <strong>{printDetailScan.avgLength.toFixed(1)}<em>mm</em></strong>
+                                </div>
+                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.lengthIcon}</span>
+                              </div>
+                              <div className="mypage-x__scanx-meter" aria-hidden="true">
+                                <i style={{ width: `${lengthPct}%` }} />
+                              </div>
+                              <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
+                            </article>
+                            <article className="mypage-x__scanx-metric">
+                              <div className="mypage-x__scanx-metric-top">
+                                <div className="mypage-x__scanx-metric-copy">
+                                  <p>너비</p>
+                                  <strong>{printDetailScan.avgWidth.toFixed(1)}<em>mm</em></strong>
+                                </div>
+                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.widthIcon}</span>
+                              </div>
+                              <div className="mypage-x__scanx-meter" aria-hidden="true">
+                                <i style={{ width: `${widthPct}%` }} />
+                              </div>
+                              <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
+                            </article>
+                            <article className="mypage-x__scanx-metric">
+                              <div className="mypage-x__scanx-metric-top">
+                                <div className="mypage-x__scanx-metric-copy">
+                                  <p>곡률</p>
+                                  <strong>{printDetailScan.avgCurve.toFixed(2)}</strong>
+                                </div>
+                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.curveIcon}</span>
+                              </div>
+                              <div className="mypage-x__scanx-meter" aria-hidden="true">
+                                <i style={{ width: `${curvePct}%` }} />
+                              </div>
+                              <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
+                            </article>
+                          </div>
+                        </>
+                    )}
+                  </section>
+                </div>
               </div>
-            </div>
-        )}
+          )
+        })()}
       </AppShell>
   )
 }

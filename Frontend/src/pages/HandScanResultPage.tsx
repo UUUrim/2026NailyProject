@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
@@ -7,10 +7,45 @@ import { FingerDetailModal } from '@/components/handScan/FingerDetailModal'
 import { getNailShape, NAIL_SHAPES } from '@/constants/nailShapes'
 import { createPrintOrder } from '@/apis/prints'
 import { getScanResult, generateStl, type ScanResultResponse } from '@/apis/scan'
+import { getMyProfile } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
 import { PERSONAL_COLOR_SWATCHES, SEASON_ROWS } from '@/constants/designPreferences'
 import '@/styles/hand-scan-result.css'
 import type { FingerDetail } from '@/utils/handScanAnalysis'
+
+// 이 페이지 상태를 모듈 스코프에 스냅샷으로 저장해서, 디자인 채팅 등 다른 페이지로 이동했다가
+// (뒤로가기 포함) 돌아와도 분석 결과·선택한 쉐입·출력 신청 상태가 초기화되지 않도록 한다.
+// 다른 스캔 결과를 보러 온 경우(scanId가 다름)까지 잘못 복원하지 않도록 scanId가 일치할 때만 사용한다.
+type HandScanResultSnapshot = {
+    leftScanId: number | null
+    rightScanId: number | null
+    leftResult: ScanResultResponse | null
+    rightResult: ScanResultResponse | null
+    selectedShape: string
+    printConfirmed: boolean
+    userName: string
+}
+
+let handScanResultSnapshot: HandScanResultSnapshot | null = null
+
+// 네일팁 출력 페이지(PrintPage)의 출력 신청 모달과 아이콘을 통일한다.
+const PrinterIcon = (
+    <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
+        <path
+            d="M7 8V4h10v4M6 17h12a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+        />
+        <rect x="8" y="14" width="8" height="6" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+)
+
+const CheckIcon = (
+    <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
+        <path d="M5 12.5 10 17.5 19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+)
 
 function MetricCard({
                         title,
@@ -46,15 +81,27 @@ export function HandScanResultPage() {
         | null) ?? {}
     const fromMypage = !!(location.state as { fromMypage?: boolean } | null)?.fromMypage
 
-    const [leftResult, setLeftResult] = useState<ScanResultResponse | null>(null)
-    const [rightResult, setRightResult] = useState<ScanResultResponse | null>(null)
-    const [isLoading, setIsLoading] = useState(true)
+    // 지금 보려는 scanId와 스냅샷에 저장된 scanId가 일치할 때만 "돌아온 것"으로 보고 복원한다.
+    const wasRestoredRef = useRef(
+        !!handScanResultSnapshot &&
+            handScanResultSnapshot.leftScanId === (leftScanId ?? null) &&
+            handScanResultSnapshot.rightScanId === (rightScanId ?? null),
+    )
+    const snapshot = wasRestoredRef.current ? handScanResultSnapshot : null
+
+    const [leftResult, setLeftResult] = useState<ScanResultResponse | null>(snapshot?.leftResult ?? null)
+    const [rightResult, setRightResult] = useState<ScanResultResponse | null>(snapshot?.rightResult ?? null)
+    const [isLoading, setIsLoading] = useState(!wasRestoredRef.current)
     const [error, setError] = useState<string | null>(null)
     const [showFingerModal, setShowFingerModal] = useState(false)
-    const [selectedShape, setSelectedShape] = useState<string>('round')
+    const [selectedShape, setSelectedShape] = useState<string>(snapshot?.selectedShape ?? 'round')
     const [isGeneratingStl, setIsGeneratingStl] = useState(false)
-    const [showPrintModal, setShowPrintModal] = useState(false)
-    const [printConfirmed, setPrintConfirmed] = useState(false)
+    const [printModalStep, setPrintModalStep] = useState<'confirm' | 'done' | null>(null)
+    const [printConfirmed, setPrintConfirmed] = useState(snapshot?.printConfirmed ?? false)
+    const [userName, setUserName] = useState(snapshot?.userName ?? '')
+    // 분석 결과를 아직 기다리는 중인지(폴링이 끝나지 않았는지) — 이 사이에 페이지를 벗어나면
+    // 분석이 완료되지 않아 결과가 저장되지 않고, 손 촬영을 다시 해야 한다.
+    const [isAnalyzing, setIsAnalyzing] = useState(false)
 
     const TERMINAL_STATUSES = ['MEASURED', 'COMPLETED', 'FAILED']
 
@@ -81,10 +128,28 @@ export function HandScanResultPage() {
     }
 
     useEffect(() => {
+        if (wasRestoredRef.current) return // 이미 복원된 이름이 있으므로 다시 불러오지 않는다
+        let cancelled = false
+        void getMyProfile()
+            .then((profile) => {
+                if (!cancelled) setUserName(profile.nickname || profile.name || '')
+            })
+            .catch(() => {
+                // 이름 못 가져와도 진행
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [])
+
+    useEffect(() => {
         if (!leftScanId && !rightScanId) return
+        // 이미 복원된 결과가 있으므로 다시 폴링하지 않는다 — 안 그러면 선택해 둔 쉐입이 재조회 결과로 덮어써진다.
+        if (wasRestoredRef.current) return
 
         let cancelled = false // 언마운트되면 true로 바뀌어서, 예약된 다음 poll()이 실행돼도 즉시 멈춘다
         let timer: ReturnType<typeof setTimeout> | null = null
+        setIsAnalyzing(true)
 
         const fetchBoth = async (): Promise<[string | null, string | null]> => {
             const [leftRes, rightRes] = await Promise.all([
@@ -115,10 +180,8 @@ export function HandScanResultPage() {
             const rightDone = !rightScanId || (rightStatus && TERMINAL_STATUSES.includes(rightStatus))
             if (leftDone && rightDone) {
                 // 양손 다 최종 상태(측정 완료 또는 실패)가 됐을 때만 로딩을 끝낸다.
-                // 예전엔 fetchBoth() 안에서 매 폴링마다 setIsLoading(false)를 호출해서,
-                // 왼손이 먼저 끝나고 오른손이 아직 분석 중일 때도 "결과 화면"이 왼손
-                // 데이터(+부족한 오른손은 Mock)만으로 미리 떠버리는 문제가 있었다.
                 setIsLoading(false)
+                setIsAnalyzing(false)
             } else {
                 timer = setTimeout(() => void poll(), 3000)
             }
@@ -132,6 +195,54 @@ export function HandScanResultPage() {
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [leftScanId, rightScanId, fromMypage])
+
+    // 분석 결과를 기다리는 동안 페이지를 벗어나면 분석이 완료되지 않아 결과가 저장되지 않고
+    // 손 촬영을 다시 해야 하므로, 새로고침/탭 닫기와 브라우저 뒤로가기 모두 경고로 막는다.
+    useEffect(() => {
+        if (!isAnalyzing) return
+
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault()
+            e.returnValue = '' // 커스텀 문구는 브라우저 정책상 표시되지 않고 기본 확인창만 뜬다
+        }
+        window.addEventListener('beforeunload', handleBeforeUnload)
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+    }, [isAnalyzing])
+
+    useEffect(() => {
+        if (!isAnalyzing) return
+
+        window.history.pushState(null, '', window.location.href)
+
+        const handlePopState = () => {
+            const confirmed = window.confirm(
+                '지금 나가면 분석이 완료되지 않아 결과가 저장되지 않아요. 손 촬영을 다시 진행해야 해요. 그래도 나가시겠어요?',
+            )
+            if (confirmed) {
+                window.removeEventListener('popstate', handlePopState)
+                window.history.back()
+            } else {
+                window.history.pushState(null, '', window.location.href)
+            }
+        }
+
+        window.addEventListener('popstate', handlePopState)
+        return () => window.removeEventListener('popstate', handlePopState)
+    }, [isAnalyzing])
+
+    // 분석 결과·선택한 쉐입·출력 신청 상태를 모듈 스코프 스냅샷에 반영해 둔다.
+    // 다른 페이지로 이동했다가(디자인 채팅 등) 돌아와도 위 useState 초기값이 여기서 복원된다.
+    useEffect(() => {
+        handScanResultSnapshot = {
+            leftScanId: leftScanId ?? null,
+            rightScanId: rightScanId ?? null,
+            leftResult,
+            rightResult,
+            selectedShape,
+            printConfirmed,
+            userName,
+        }
+    }, [leftScanId, rightScanId, leftResult, rightResult, selectedShape, printConfirmed, userName])
 
     // 왼손 결과를 베이스로 하고, shape/seasonCode/seasonNameKo는 양손 결과를 함께 반영해서 병합
     const baseResult = leftResult ?? rightResult
@@ -161,7 +272,17 @@ export function HandScanResultPage() {
         })
     }
 
-    const handleGenerateStl = async () => {
+    const handleOpenPrintConfirm = () => {
+        if (printConfirmed || isGeneratingStl) return
+        setPrintModalStep('confirm')
+    }
+
+    const handleClosePrintModal = () => {
+        if (isGeneratingStl) return
+        setPrintModalStep(null)
+    }
+
+    const handleConfirmPrint = async () => {
         if (!leftScanId && !rightScanId) return
         setIsGeneratingStl(true)
         try {
@@ -173,7 +294,7 @@ export function HandScanResultPage() {
             const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
             await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId })
             setPrintConfirmed(true)
-            setShowPrintModal(true)
+            setPrintModalStep('done')
         } catch (e) {
             const msg = e instanceof ApiError ? e.message : 'STL 생성 요청에 실패했습니다.'
             alert(msg)
@@ -339,7 +460,7 @@ export function HandScanResultPage() {
     return (
         <AppShell mainClassName="scan-result-page">
             {fromMypage
-                ? <PageBackLink to="/mypage" label="손 분석 기록" state={{ tab: 'scan' }} />
+                ? <PageBackLink to="/mypage" label="손 분석 기록" state={{ tab: 'scans' }} />
                 : <PageBackLink to="/scan/hand" label="손 촬영" />
             }
 
@@ -449,98 +570,165 @@ export function HandScanResultPage() {
                 )
             )}
 
-            {isLoading ? (
-                <section className="scan-result-section" aria-hidden="true">
-                    <h2>네일팁 모양 선택</h2>
-                    <p className="scan-result-section__sub">분석중...</p>
-                    <div className="scan-shape-grid">
-                        {NAIL_SHAPES.map((shape) => (
-                            <article key={shape.id} className="scan-shape-card scan-shape-card--skeleton">
-                                <div className="scan-shape-card__img-skeleton" />
-                                <h3>&nbsp;</h3>
-                                <p>&nbsp;</p>
-                            </article>
-                        ))}
-                    </div>
-                </section>
-            ) : (
-                <>
-                    <section className="scan-result-section">
-                        <h2>네일팁 모양 선택</h2>
-                        <p className="scan-result-section__sub">
-                            {recommended ? (
-                                <>추천 쉐입은 <strong>{recommended.labelKo}</strong>입니다. 원하는 모양을 선택해 주세요.</>
-                            ) : (
-                                <>AI가 추천 쉐입을 분석하고 있어요. 분석이 끝나면 자동으로 추천 배지가 표시됩니다. 먼저 원하는 모양을 선택해 주세요.</>
+    {isLoading ? (
+        <section className="scan-result-section" aria-hidden="true">
+            <h2>네일팁 모양 선택</h2>
+            <p className="scan-result-section__sub">분석중...</p>
+            <div className="scan-shape-grid">
+                {NAIL_SHAPES.map((shape) => (
+                    <article key={shape.id} className="scan-shape-card scan-shape-card--skeleton">
+                        <div className="scan-shape-card__img-skeleton" />
+                        <h3>&nbsp;</h3>
+                        <p>&nbsp;</p>
+                    </article>
+                ))}
+            </div>
+        </section>
+    ) : (
+        <section className="scan-result-section">
+            <div className="scan-result-section__head">
+                <h2>네일팁 모양 선택</h2>
+                <button
+                    type="button"
+                    className="scan-shape-print-btn"
+                    onClick={handleOpenPrintConfirm}
+                    disabled={printConfirmed || isGeneratingStl}
+                >
+                    {printConfirmed ? '출력 신청 완료 ✓' : '네일팁 출력하기'}
+                </button>
+            </div>
+            <p className="scan-result-section__sub">
+                {recommended ? (
+                    <>추천 쉐입은 <strong>{recommended.labelKo}</strong>입니다. 원하는 모양을 선택해 주세요.</>
+                ) : (
+                    <>AI가 추천 쉐입을 분석하고 있어요. 분석이 끝나면 자동으로 추천 배지가 표시됩니다. 먼저 원하는 모양을 선택해 주세요.</>
+                )}
+            </p>
+            <div className={`scan-shape-grid ${printConfirmed ? 'is-locked' : ''}`}>
+                {NAIL_SHAPES.map((shape) => {
+                    const isRecommended = !!result && shape.id === result.shape
+                    const isSelected = shape.id === selectedShape
+                    return (
+                        <article
+                            key={shape.id}
+                            className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''} ${printConfirmed ? 'is-locked' : ''}`}
+                            onClick={() => {
+                                if (printConfirmed) return
+                                setSelectedShape(shape.id)
+                            }}
+                            role="button"
+                            tabIndex={printConfirmed ? -1 : 0}
+                            onKeyDown={(e) => {
+                                if (printConfirmed) return
+                                if (e.key === 'Enter') setSelectedShape(shape.id)
+                            }}
+                            aria-pressed={isSelected}
+                            aria-disabled={printConfirmed}
+                        >
+                            {isRecommended && (
+                                <span className="scan-shape-card__badge scan-shape-card__badge--recommend">추천</span>
                             )}
-                        </p>
-                        <div className="scan-shape-grid">
-                            {NAIL_SHAPES.map((shape) => {
-                                const isRecommended = !!result && shape.id === result.shape
-                                const isSelected = shape.id === selectedShape
-                                return (
-                                    <article
-                                        key={shape.id}
-                                        className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''}`}
-                                        onClick={() => setSelectedShape(shape.id)}
-                                        role="button"
-                                        tabIndex={0}
-                                        onKeyDown={(e) => e.key === 'Enter' && setSelectedShape(shape.id)}
-                                        aria-pressed={isSelected}
-                                        style={{ cursor: 'pointer' }}
-                                    >
-                                        {isRecommended && <span className="scan-shape-card__badge">추천</span>}
-                                        <img src={shape.image} alt={shape.labelKo} />
-                                        <h3>{shape.labelKo}</h3>
-                                        <p>{shape.labelEn}</p>
-                                    </article>
-                                )
-                            })}
-                        </div>
-                    </section>
+                            {isSelected && (
+                                <span className="scan-shape-card__badge scan-shape-card__badge--selected">선택</span>
+                            )}
+                            <img src={shape.image} alt={shape.labelKo} />
+                            <h3>{shape.labelKo}</h3>
+                            <p>{shape.labelEn}</p>
+                        </article>
+                    )
+                })}
+            </div>
+        </section>
+    )}
 
-                    <div className="scan-result-actions">
-                        <button
-                            type="button"
-                            className="scan-result-cta"
-                            onClick={() => void handleGenerateStl()}
-                            disabled={printConfirmed || isGeneratingStl}
-                        >
-                            {isGeneratingStl ? 'STL 생성 중...' : printConfirmed ? '출력 신청 완료 ✓' : '네일팁 출력하기'}
-                        </button>
-                        <button
-                            type="button"
-                            className="scan-result-cta"
-                            onClick={handleGoToDesign}
-                        >
-                            네일 디자인 생성하기
-                        </button>
-                    </div>
-                </>
-            )}
+            <div className="scan-result-actions">
+            <button
+            type="button"
+            className="scan-result-next"
+            onClick={handleGoToDesign}
+            >
+            다음 단계로
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+            d="M5 12h12M13 6l6 6-6 6"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            />
+        </svg>
+</button>
+</div>
 
             {showFingerModal && apiFingers.length > 0 && (
                 <FingerDetailModal fingers={fingerDetails} onClose={() => setShowFingerModal(false)} />
             )}
 
-            {showPrintModal && createPortal(
+            {printModalStep && createPortal(
                 <div className="print-modal">
-                    <button type="button" className="print-modal__backdrop" onClick={() => setShowPrintModal(false)} />
+                    <button
+                        type="button"
+                        className="print-modal__backdrop"
+                        onClick={handleClosePrintModal}
+                        disabled={isGeneratingStl}
+                    />
                     <div className="print-modal__panel" role="dialog" aria-modal="true">
-                        <p className="print-modal__icon">🖨️</p>
-                        <h2>출력 신청 완료</h2>
-                        <p>
-                            당신의 네일팁이{' '}
-                            <strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape}</strong>
-                            {' '}(으)로 출력 신청되었습니다.
-                        </p>
-                        <button
-                            type="button"
-                            className="scan-result-cta"
-                            onClick={() => setShowPrintModal(false)}
-                        >
-                            확인
-                        </button>
+                        {printModalStep === 'confirm' ? (
+                            <>
+                                <span className="print-modal__icon-badge" aria-hidden="true">{PrinterIcon}</span>
+                                <h2>네일팁 출력 안내</h2>
+                                <p>
+                                    {userName || '회원'} 님의 손 스캔 정보를 기반으로 만든
+                                    <br />
+                                    <strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape} 네일팁이 3D 프린터로 출력</strong>됩니다.
+                                    <br />
+                                    출력을 진행하시겠습니까?
+                                </p>
+                                <div className="print-modal__actions">
+                                    <button
+                                        type="button"
+                                        className="print-modal__btn print-modal__btn--ghost"
+                                        onClick={handleClosePrintModal}
+                                        disabled={isGeneratingStl}
+                                    >
+                                        취소
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="print-modal__btn"
+                                        onClick={() => void handleConfirmPrint()}
+                                        disabled={isGeneratingStl}
+                                    >
+                                        {isGeneratingStl ? '출력 요청 중...' : '출력하기'}
+                                    </button>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <span className="print-modal__icon-badge print-modal__icon-badge--success" aria-hidden="true">
+                                  {CheckIcon}
+                                </span>
+                                <h2>출력 신청 완료</h2>
+                                <p>
+                                    당신의 네일팁이{' '}
+                                    <br />
+                                    <strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape}</strong>
+                                    {' '}(으)로 출력 신청되었습니다.
+                                    <br />
+                                    <br />
+                                    출력을 기다리는 동안 다음 단계로 넘어가
+                                    <br />
+                                    네일 디자인을 생성해 보세요!
+                                </p>
+                                <button
+                                    type="button"
+                                    className="print-modal__btn"
+                                    onClick={handleClosePrintModal}
+                                >
+                                    확인
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>,
                 document.body,

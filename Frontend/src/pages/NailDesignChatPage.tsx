@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
@@ -16,12 +16,14 @@ import { NailPreview3D } from '@/components/nail3d/NailPreview3D'
 import {
     INITIAL_PREFERENCES,
     PREFERENCE_OPTIONS,
+    PREFERENCE_OPTION_INFO,
     PREFERENCE_SECTION_LABELS,
     PERSONAL_COLOR_SWATCHES,
     SEASON_ROWS,
     SHAPE_PREVIEW_IMAGES,
     type NailDesignPreferences,
     type PreferenceKey,
+    type PreferenceOptionInfo,
 } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
 import { registerChatSessionGuard, confirmLeaveChatIfNeeded, shouldBypassBeforeUnload } from '@/utils/chatSessionGuard'
@@ -59,6 +61,21 @@ type Mode = 'menu' | 'preference' | 'freeform' | 'scan-auto' | 'photo' | 'revise
 
 type GenerationSource = 'preference' | 'freeform' | 'scan-auto' | 'photo'
 
+// 결과 페이지에서 "이 디자인이 어떻게 만들어졌는지" 보여주기 위한 생성 맥락 정보.
+type GenerationContext = {
+    source: GenerationSource
+    keywords: string[] // 선택지/자유입력 대화에서 뽑은 키워드 (scan-auto·photo는 비움)
+    referenceImageUrl: string | null // 사진 기반 생성일 때, 사용자가 업로드한 참고 사진
+    handSummary: {
+        seasonNameKo: string
+        shapeLabel: string
+        avgLength: number
+        avgWidth: number
+        avgCurve: number
+    } | null // 손 스캔 기반 자동 생성일 때, 참고한 손 분석 정보
+    revisionKeywords: string[] // 생성 방식에 상관없이, "수정하고 싶어요" 흐름에서 추가로 요청한 내용
+}
+
 type GeneratedDesign = {
     designId: number
     imageUrls: string[]
@@ -67,7 +84,37 @@ type GeneratedDesign = {
     source: GenerationSource
     shapeId: NailShapeId
     details?: DesignExtractedDetails
+    context: GenerationContext
 }
+
+// 채팅 진행 상태를 컴포넌트 바깥(모듈 스코프)에 스냅샷으로 저장해 둔다.
+// 결과 페이지로 이동했다가(브라우저 뒤로가기 포함) 다시 이 페이지로 돌아오면, 여기서 그대로
+// 복원해서 채팅 세션·대화 내역·진행 상태가 전혀 초기화되지 않도록 한다.
+// 탭이 살아있는 동안만 메모리에 남고, 새로고침하거나 새 탭에서 열면 사라진다(=새 세션으로 시작).
+type ChatSessionSnapshot = {
+    userName: string
+    sessionId: number | null
+    scanId: number | null
+    scanHandSide: 'LEFT' | 'RIGHT' | null
+    leftAnalysis: ScanResultResponse | null
+    rightAnalysis: ScanResultResponse | null
+    bubbles: ChatBubble[]
+    activeQuickReply: QuickReply | null
+    selectedInQuickReply: string[]
+    mode: Mode
+    preferenceStepIndex: number
+    preferenceStepBubbleIds: Record<number, string>
+    collectedPreferences: NailDesignPreferences
+    freeformLog: string[]
+    reviseLog: string[]
+    lastDesign: GeneratedDesign | null
+    generationSource: GenerationSource
+    selectedPhotoFile: File | null
+    selectedPhotoPreviewUrl: string | null
+    manualSeasonCode: string
+}
+
+let chatSessionSnapshot: ChatSessionSnapshot | null = null
 
 const DESIGN_FEEDBACK_QUICK_REPLY: QuickReply = {
     id: 'design-feedback',
@@ -95,6 +142,64 @@ const MENU_OPTIONS: QuickReplyOption[] = [
     { value: 'freeform', label: '자유 입력으로 만들기' },
     { value: 'photo', label: '사진 기반으로 만들기' },
     { value: 'scan-auto', label: '내 스캔 정보 기반으로 자동 생성' },
+]
+
+// 생성 방식 선택 화면(4분할 카드)에서 각 방식이 "어떻게" 디자인을 만드는지 한눈에 보여주기 위한 설명 + 아이콘
+const MENU_ITEMS: {
+    value: string
+    label: string
+    title: string
+    desc: string
+    icon: ReactElement
+}[] = [
+    {
+        value: 'preference',
+        label: '선택지 기반으로 만들기',
+        title: '선택지로 빠르게',
+        desc: '컬러·쉐입 등 준비된 선택지를 골라 순서대로 답하면 완성돼요.',
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
+                <path d="M8 6h11M8 12h11M8 18h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                <path d="m4 5.3 1 1L6.5 4.5M4 11.3l1 1 1.5-1.8M4 17.3l1 1 1.5-1.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        ),
+    },
+    {
+        value: 'freeform',
+        label: '자유 입력으로 만들기',
+        title: '채팅으로 자유롭게',
+        desc: '원하는 느낌을 문장으로 설명하면 AI가 그대로 디자인해 줘요.',
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
+                <path d="M4 19.5 5.2 15 16 4.2a1.7 1.7 0 0 1 2.4 0l1.4 1.4a1.7 1.7 0 0 1 0 2.4L9 19l-5 .5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                <path d="M13.5 6.7 17.3 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+        ),
+    },
+    {
+        value: 'photo',
+        label: '사진 기반으로 만들기',
+        title: '사진으로 참고',
+        desc: '마음에 드는 레퍼런스 사진을 올리면 그 느낌으로 만들어 줘요.',
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
+                <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="1.6" />
+                <path d="m8 14 2.5-3 2 2L16 9l2 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="9" cy="9" r="1.1" fill="currentColor" />
+            </svg>
+        ),
+    },
+    {
+        value: 'scan-auto',
+        label: '내 스캔 정보 기반으로 자동 생성',
+        title: '내 스캔 정보로 자동',
+        desc: '저장된 손 분석 결과를 바탕으로 어울리는 디자인을 알아서 추천해요.',
+        icon: (
+            <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
+                <path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11.5V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6.5 7C6.7 20 5 17 5 14.2v-2a1.4 1.4 0 0 1 2.8 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+        ),
+    },
 ]
 
 const MENU_QUICK_REPLY: QuickReply = {
@@ -255,6 +360,14 @@ function makeId() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+// 선택지 라벨 옆에 작게 병기할 영문 표기 (계절/컬러 단계는 값 자체가 영단어가 아니라서 제외).
+// mood/designType/motif/shape의 value는 이미 영단어(예: lovely, polka dot)라 그대로 타이틀케이스로 바꿔 쓴다.
+const ENGLISH_SUBLABEL_STEPS: PreferenceKey[] = ['mood', 'designType', 'motif', 'shape']
+
+function toEnglishTitleCase(value: string): string {
+    return value.replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function buildPreferenceQuickReply(step: PreferenceKey): QuickReply {
     const limit = STEP_LIMIT[step]
     return {
@@ -274,40 +387,132 @@ export function NailDesignChatPage() {
         | { leftScanId?: number | null; rightScanId?: number | null; scanId?: number | null }
         | null) ?? null
 
-    const [userName, setUserName] = useState('')
-    const [isInitReady, setIsInitReady] = useState(false)
-    const [sessionId, setSessionId] = useState<number | null>(null)
-    const [scanId, setScanId] = useState<number | null>(null)
-    const [scanHandSide, setScanHandSide] = useState<'LEFT' | 'RIGHT' | null>(null)
+    // 마운트되는 시점에 이미 저장된 스냅샷이 있었는지(= 다른 페이지에 갔다가 돌아온 것인지)를
+    // 딱 한 번만 기억해 둔다. 이후 아래 useState들의 초기값 복원과, 초기화 로직 분기에 함께 쓰인다.
+    const wasRestoredRef = useRef(!!chatSessionSnapshot)
 
-    const [bubbles, setBubbles] = useState<ChatBubble[]>([])
-    const [activeQuickReply, setActiveQuickReply] = useState<QuickReply | null>(null)
+    const [userName, setUserName] = useState(chatSessionSnapshot?.userName ?? '')
+    const [isInitReady, setIsInitReady] = useState(false)
+    const [sessionId, setSessionId] = useState<number | null>(chatSessionSnapshot?.sessionId ?? null)
+    const [scanId, setScanId] = useState<number | null>(chatSessionSnapshot?.scanId ?? null)
+    const [scanHandSide, setScanHandSide] = useState<'LEFT' | 'RIGHT' | null>(chatSessionSnapshot?.scanHandSide ?? null)
+
+    const [bubbles, setBubbles] = useState<ChatBubble[]>(chatSessionSnapshot?.bubbles ?? [])
+    const [activeQuickReply, setActiveQuickReply] = useState<QuickReply | null>(chatSessionSnapshot?.activeQuickReply ?? null)
     // "네, 바로 생성해주세요 / 아직 더 얘기하고 싶어요" 확인 화면이 떠 있는 동안엔
     // 자유 텍스트 입력을 막는다 — 안 그러면 아무 텍스트나 쳤을 때 "수정 요청"으로
     // 오인돼서 의도치 않게 디자인이 재생성되는 문제가 있었다.
-    const isAwaitingGenerateConfirm = !!activeQuickReply?.options?.some((o) => o.value === '__generate__')
-    const [selectedInQuickReply, setSelectedInQuickReply] = useState<string[]>([])
+    const isAwaitingGenerateConfirm =
+        activeQuickReply?.id === 'design-feedback' ||
+        !!activeQuickReply?.options?.some((o) => o.value === '__generate__')
+    const [selectedInQuickReply, setSelectedInQuickReply] = useState<string[]>(chatSessionSnapshot?.selectedInQuickReply ?? [])
 
-    const [mode, setMode] = useState<Mode>('menu')
-    const [preferenceStepIndex, setPreferenceStepIndex] = useState(0)
-    const [preferenceStepBubbleIds, setPreferenceStepBubbleIds] = useState<Record<number, string>>({})
-    const [collectedPreferences, setCollectedPreferences] = useState<NailDesignPreferences>(
-        INITIAL_PREFERENCES,
+    const [mode, setMode] = useState<Mode>(chatSessionSnapshot?.mode ?? 'menu')
+    const [preferenceStepIndex, setPreferenceStepIndex] = useState(chatSessionSnapshot?.preferenceStepIndex ?? 0)
+    const [preferenceStepBubbleIds, setPreferenceStepBubbleIds] = useState<Record<number, string>>(
+        chatSessionSnapshot?.preferenceStepBubbleIds ?? {},
     )
-    const freeformLogRef = useRef<string[]>([])
-    const [lastDesign, setLastDesign] = useState<GeneratedDesign | null>(null)
-    const [generationSource, setGenerationSource] = useState<GenerationSource>('scan-auto')
-    const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(null)
+    const [collectedPreferences, setCollectedPreferences] = useState<NailDesignPreferences>(
+        chatSessionSnapshot?.collectedPreferences ?? INITIAL_PREFERENCES,
+    )
+    const freeformLogRef = useRef<string[]>(chatSessionSnapshot?.freeformLog ?? [])
+    // 생성 방식과 무관하게, "수정하고 싶어요" 흐름에서 사용자가 채팅으로 추가 요청한 문장들을 모아둔다.
+    const reviseLogRef = useRef<string[]>(chatSessionSnapshot?.reviseLog ?? [])
+    const [lastDesign, setLastDesign] = useState<GeneratedDesign | null>(chatSessionSnapshot?.lastDesign ?? null)
+    const [generationSource, setGenerationSource] = useState<GenerationSource>(chatSessionSnapshot?.generationSource ?? 'scan-auto')
+    const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(chatSessionSnapshot?.selectedPhotoFile ?? null)
     // 사진 기반 흐름에서 스캔 없이 "랜덤 모양으로 진행하기"를 고르면, 3D 미리보기에라도
-    // 실제로 랜덤하게 고른 쉐입을 보여주기 위한 값 (백엔드로 별도 전송되진 않음 - 아래 참고)
+    // 실제로 랜덤하게 고른 쉐입을 보여주기 위한 값 (백엔드로 별도 전송되진 않음)
     const [randomPhotoShapeId, setRandomPhotoShapeId] = useState<NailShapeId | null>(null)
-    const [selectedPhotoPreviewUrl, setSelectedPhotoPreviewUrl] = useState<string | null>(null)
+    const [selectedPhotoPreviewUrl, setSelectedPhotoPreviewUrl] = useState<string | null>(
+        chatSessionSnapshot?.selectedPhotoPreviewUrl ?? null,
+    )
     const photoInputRef = useRef<HTMLInputElement | null>(null)
 
     const [inputValue, setInputValue] = useState('')
     const [isSending, setIsSending] = useState(false)
     const [customColor, setCustomColor] = useState('#DE869F')
     const [isQuickReplyCollapsed, setIsQuickReplyCollapsed] = useState(false)
+
+    // 옵션 설명 툴팁: 웹은 호버로, 모바일(터치)에서는 "i" 배지를 탭했을 때 뜬다.
+    // 선택지 창(overflow: auto)에 잘리지 않도록, DOM 트리 밖(document.body)으로 포탈해서
+    // 뷰포트 좌표(getBoundingClientRect) 기준 고정 위치로 띄운다.
+    const [tooltipAnchor, setTooltipAnchor] = useState<{
+        key: string
+        label: string
+        info: PreferenceOptionInfo
+        top: number
+        left: number
+    } | null>(null)
+    const [tooltipImgError, setTooltipImgError] = useState(false)
+    // i 버튼으로 "고정"해 둔 툴팁의 key. 고정된 동안은 마우스가 벗어나거나 포커스가 빠져도 안 닫힌다.
+    const [pinnedTooltipKey, setPinnedTooltipKey] = useState<string | null>(null)
+
+    const computeTooltipAnchor = (
+        e: ReactMouseEvent<HTMLElement> | React.FocusEvent<HTMLElement>,
+        key: string,
+        label: string,
+        info: PreferenceOptionInfo,
+    ) => {
+        const anchorEl = (e.currentTarget.closest('.design-chat__quickreply-item-wrap') as HTMLElement) ?? e.currentTarget
+        const rect = anchorEl.getBoundingClientRect()
+        return { key, label, info, top: rect.top, left: rect.left + rect.width / 2 }
+    }
+
+    const showOptionTooltip = (
+        e: ReactMouseEvent<HTMLElement> | React.FocusEvent<HTMLElement>,
+        key: string,
+        label: string,
+        info: PreferenceOptionInfo,
+    ) => {
+        // 다른 옵션이 이미 고정돼 있으면, 호버만으로 그 위에 다른 툴팁을 겹쳐 띄우지 않는다.
+        if (pinnedTooltipKey && pinnedTooltipKey !== key) return
+        setTooltipImgError(false)
+        setTooltipAnchor(computeTooltipAnchor(e, key, label, info))
+    }
+
+    const hideOptionTooltip = (key: string) => {
+        if (pinnedTooltipKey === key) return // 고정된 툴팁은 마우스/포커스가 벗어나도 유지
+        setTooltipAnchor((prev) => (prev?.key === key ? null : prev))
+    }
+
+    // i 버튼 클릭: 안 고정된 상태면 고정하고, 이미 고정돼 있으면 고정을 풀고 닫는다.
+    const toggleOptionTooltip = (
+        e: ReactMouseEvent<HTMLElement>,
+        key: string,
+        label: string,
+        info: PreferenceOptionInfo,
+    ) => {
+        if (pinnedTooltipKey === key) {
+            setPinnedTooltipKey(null)
+            setTooltipAnchor((prev) => (prev?.key === key ? null : prev))
+            return
+        }
+        setPinnedTooltipKey(key)
+        setTooltipImgError(false)
+        setTooltipAnchor(computeTooltipAnchor(e, key, label, info))
+    }
+
+    // 다른 질문 단계로 넘어가면 이전 단계에서 열어둔(고정한) 툴팁은 자동으로 닫는다.
+    useEffect(() => {
+        setTooltipAnchor(null)
+        setPinnedTooltipKey(null)
+    }, [activeQuickReply?.id])
+
+    // 스크롤/리사이즈가 일어나면 앵커 위치가 어긋나므로 열려 있던 툴팁을 닫는다.
+    useEffect(() => {
+        if (!tooltipAnchor) return
+        const close = () => {
+            setTooltipAnchor(null)
+            setPinnedTooltipKey(null)
+        }
+        window.addEventListener('scroll', close, true)
+        window.addEventListener('resize', close)
+        return () => {
+            window.removeEventListener('scroll', close, true)
+            window.removeEventListener('resize', close)
+        }
+    }, [tooltipAnchor])
     // 자유입력(Gemini) 흐름에서 "컬러/쉐입은 고정 UI로 고르고 싶을 때"를 위한 보조 픽커
     const [freeformColorPickerOpen, setFreeformColorPickerOpen] = useState(false)
     const [freeformShapePickerOpen, setFreeformShapePickerOpen] = useState(false)
@@ -339,8 +544,6 @@ export function NailDesignChatPage() {
         setImagePan({ x: 0, y: 0 })
     }
 
-    // 마우스 휠로 확대/축소 (passive 리스너에서는 preventDefault가 무시되므로
-    // 네이티브 이벤트 리스너를 { passive: false }로 직접 등록한다)
     useEffect(() => {
         const viewport = zoomedImageViewportRef.current
         if (!viewport || !zoomedImage) return
@@ -378,8 +581,8 @@ export function NailDesignChatPage() {
     }
 
     const stopZoomedImageDragging = () => setIsImageDragging(false)
-    const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(null)
-    const [rightAnalysis, setRightAnalysis] = useState<ScanResultResponse | null>(null)
+    const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.leftAnalysis ?? null)
+    const [rightAnalysis, setRightAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.rightAnalysis ?? null)
 
     const messagesRef = useRef<HTMLDivElement | null>(null)
     const chatContainerRef = useRef<HTMLDivElement | null>(null)
@@ -422,6 +625,14 @@ export function NailDesignChatPage() {
 
     // ── 초기화 ─────────────────────────────────────────────────────────────
     useEffect(() => {
+        // 스냅샷에서 복원된 마운트라면(다른 페이지에 갔다가 뒤로가기 등으로 돌아온 경우),
+        // 이미 세션·대화 내역이 다 남아있으므로 새 세션을 만들거나 프로필/스캔 정보를
+        // 다시 불러오지 않는다 — 그대로 이어서 쓴다.
+        if (wasRestoredRef.current) {
+            setIsInitReady(true)
+            return
+        }
+
         let cancelled = false
 
         const init = async () => {
@@ -479,7 +690,8 @@ export function NailDesignChatPage() {
     }, [])
 
     useEffect(() => {
-        if (!isInitReady) return
+        // 복원된 마운트에서는 이미 인사말을 포함한 이전 대화가 남아있으므로 다시 붙이지 않는다.
+        if (!isInitReady || wasRestoredRef.current) return
         const greetingName = userName ? `${userName}님` : '회원'
         setBubbles((prev) => [
             {
@@ -511,6 +723,34 @@ export function NailDesignChatPage() {
         setIsQuickReplyCollapsed(false)
     }, [activeQuickReply?.id])
 
+    // 렌더될 때마다 현재 채팅 진행 상태를 모듈 스코프 스냅샷에 그대로 반영해 둔다.
+    // 이렇게 해야 이 페이지를 벗어났다가(결과 페이지 이동, 브라우저 뒤로가기 등) 다시 돌아왔을 때
+    // 위 useState 초기값들이 이 스냅샷에서 그대로 복원된다.
+    useEffect(() => {
+        chatSessionSnapshot = {
+            userName,
+            sessionId,
+            scanId,
+            scanHandSide,
+            leftAnalysis,
+            rightAnalysis,
+            bubbles,
+            activeQuickReply,
+            selectedInQuickReply,
+            mode,
+            preferenceStepIndex,
+            preferenceStepBubbleIds,
+            collectedPreferences,
+            freeformLog: freeformLogRef.current,
+            reviseLog: reviseLogRef.current,
+            lastDesign,
+            generationSource,
+            selectedPhotoFile,
+            selectedPhotoPreviewUrl,
+            manualSeasonCode,
+        }
+    })
+
     // 채팅 중 새로고침/탭 닫기 방지: 세션이 있고 대화가 어느 정도 진행됐을 때만 경고
     // (주의: "지금 세션이 날라갑니다 괜찮나요?" 같은 커스텀 문구는 브라우저 보안 정책상
     //  최신 브라우저에서 표시가 안 되고, 브라우저 기본 확인 문구만 뜬다. 확인창 자체는 뜸.)
@@ -527,58 +767,35 @@ export function NailDesignChatPage() {
         return () => window.removeEventListener('beforeunload', handleBeforeUnload)
     }, [sessionId, bubbles])
 
-    // 채팅 중 상단 nav(scan/design 등) 클릭으로 앱 내부 이동할 때 방지
-    // — beforeunload와 달리 이건 우리가 직접 만든 확인창이라 문구를 자유롭게 쓸 수 있다.
-    useEffect(() => {
-        registerChatSessionGuard(() => {
-            const hasUserActivity = bubbles.some((b) => b.role === 'user')
-            if (!sessionId || !hasUserActivity) return true
 
-            const hasGeneratedDesign = bubbles.some((b) => b.isDesignResult)
-            const message = hasGeneratedDesign
-                ? '이미 생성된 디자인은 저장돼요. 다만 지금 나가면 여기까지 나눈 대화 내용은 사라져요. 그래도 나가시겠어요?'
-                : '지금 나가면 진행 중인 채팅 내용이 저장되지 않아요. 그래도 나가시겠어요?'
-
-            return window.confirm(message)
-        })
-        return () => registerChatSessionGuard(null)
-    }, [sessionId, bubbles])
-
-    // 브라우저 기본 "뒤로가기" 버튼 방지
-    // — 클릭 이벤트가 아니라 history의 popstate라서 위 두 방식과는 다른 트릭이 필요하다.
-    // 활성화되는 순간 현재 URL을 한 번 더 쌓아둬서(더미 엔트리), 사용자가 뒤로가기를
-    // 눌러도 처음엔 그 더미만 소비되고 실제 페이지 이동은 안 일어나게 만든 다음,
-    // 그 시점에 발생하는 popstate 이벤트를 가로채서 확인창을 띄운다.
-    const hasUserActivity = bubbles.some((b) => b.role === 'user') // 매 렌더 재계산되지만 boolean이라 값이 안 바뀌면 deps 비교상 그대로 취급됨
-    useEffect(() => {
-        if (!sessionId || !hasUserActivity) return
-
-        window.history.pushState(null, '', window.location.href)
-
-        const handlePopState = () => {
-            if (confirmLeaveChatIfNeeded()) {
-                // 진짜로 나가는 것을 허용 — 리스너를 먼저 떼어내고 한 번 더 뒤로가기를 보내서
-                // 이번엔 우리가 아까 쌓아둔 더미 엔트리 말고 실제 이전 페이지로 이동시킨다.
-                window.removeEventListener('popstate', handlePopState)
-                window.history.back()
-            } else {
-                // 취소했으면 다시 더미 엔트리를 쌓아서, 다음 뒤로가기도 이 핸들러가 잡게 한다.
-                window.history.pushState(null, '', window.location.href)
-            }
-        }
-
-        window.addEventListener('popstate', handlePopState)
-        return () => window.removeEventListener('popstate', handlePopState)
-        // hasUserActivity가 false→true로 "바뀔 때"만 새로 설치되도록, bubbles 배열이 아니라
-        // 이 boolean 값 자체를 deps로 둔다 (매 메시지마다 더미 엔트리가 계속 쌓이는 것 방지).
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionId, hasUserActivity])
+    // 예전에는 여기서 "지금 나가면 채팅 내용이 사라져요"라며 nav 클릭/뒤로가기를 막는 확인창을
+    // 띄웠지만, 이제 채팅 진행 상태가 모듈 스코프 스냅샷으로 항상 보존되어 실제로 사라지지 않으므로
+    // 더 이상 필요 없다 — 제거해서 다른 페이지 이동과 뒤로가기가 막힘 없이 바로 동작하게 한다.
 
     // ── 공통: 디자인 생성 후 이동 ───────────────────────────────────────────
     const resolveShapeId = (preferences: NailDesignPreferences): NailShapeId => {
         const fromPrefs = preferences.shape[0]
         const fromScan = leftAnalysis?.shape || rightAnalysis?.shape
         return (fromPrefs || fromScan || 'oval') as NailShapeId
+    }
+
+    // 선택지 기반 흐름에서 고른 값들을 결과 페이지에 보여줄 "키워드" 칩으로 변환한다.
+    // (색상은 팔레트 패널에서 이미 스와치로 보여주므로 여기서는 제외)
+    const buildPreferenceKeywords = (preferences: NailDesignPreferences): string[] => {
+        const keys: PreferenceKey[] = ['mood', 'designType', 'season', 'motif', 'shape']
+        const labels = keys.flatMap((key) =>
+            (preferences[key] ?? []).map((value) => PREFERENCE_OPTIONS[key].find((o) => o.value === value)?.label ?? value),
+        )
+        return Array.from(new Set(labels)).filter((label) => label && label !== '상관없음' && label !== '없음')
+    }
+
+    // 자유입력 흐름에서 사용자가 실제로 입력한 문장들을 짧은 키워드 단위로 쪼갠다.
+    const buildFreeformKeywords = (log: string[]): string[] => {
+        const phrases = log
+            .flatMap((message) => message.split(/[,，./!?\n]+/))
+            .map((phrase) => phrase.trim())
+            .filter((phrase) => phrase.length >= 2)
+        return Array.from(new Set(phrases)).slice(0, 12)
     }
 
     const buildScanAutoIntro = (): { text: string; colorSwatches: string[] } => {
@@ -612,6 +829,43 @@ export function NailDesignChatPage() {
 
         try {
             const data = await generateDesign({ sessionId, scanId })
+
+            // "수정하고 싶어요" 흐름을 거쳐 재생성된 경우, 그동안 추가로 요청한 내용도 함께 담는다.
+            const revisionKeywords = buildFreeformKeywords(reviseLogRef.current)
+
+            const context: GenerationContext =
+                source === 'scan-auto'
+                    ? {
+                          source,
+                          keywords: [],
+                          referenceImageUrl: null,
+                          handSummary: analysisSummary
+                              ? {
+                                    seasonNameKo: analysisSummary.seasonNameKo,
+                                    shapeLabel: analysisSummary.shapeLabel,
+                                    avgLength: analysisSummary.avgLength,
+                                    avgWidth: analysisSummary.avgWidth,
+                                    avgCurve: analysisSummary.avgCurve,
+                                }
+                              : null,
+                          revisionKeywords,
+                      }
+                    : source === 'freeform'
+                      ? {
+                            source,
+                            keywords: buildFreeformKeywords(freeformLogRef.current),
+                            referenceImageUrl: null,
+                            handSummary: null,
+                            revisionKeywords,
+                        }
+                      : {
+                            source,
+                            keywords: buildPreferenceKeywords(preferences),
+                            referenceImageUrl: null,
+                            handSummary: null,
+                            revisionKeywords,
+                        }
+
             setLastDesign({
                 designId: data.designId,
                 imageUrls: data.imageUrls,
@@ -620,6 +874,7 @@ export function NailDesignChatPage() {
                 source,
                 shapeId: resolveShapeId(preferences),
                 details: data.details,
+                context,
             })
 
             if (source === 'scan-auto') {
@@ -673,6 +928,13 @@ export function NailDesignChatPage() {
                 source: 'photo',
                 shapeId: randomPhotoShapeId ?? resolveShapeId(INITIAL_PREFERENCES),
                 details: data.details,
+                context: {
+                    source: 'photo',
+                    keywords: [],
+                    referenceImageUrl: selectedPhotoPreviewUrl,
+                    handSummary: null,
+                    revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
+                },
             })
             pushAssistantImages('짜잔! 이런 디자인은 어떠세요?', data.imageUrls)
             setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
@@ -690,6 +952,7 @@ export function NailDesignChatPage() {
     const handleMenuSelect = (option: QuickReplyOption) => {
         pushUser(option.label)
         setActiveQuickReply(null)
+        reviseLogRef.current = [] // 새 생성 방식을 고르는 시점 = 새 디자인 흐름 시작이므로, 이전 수정 요청 기록은 비운다
 
         switch (option.value) {
             case 'preference': {
@@ -914,8 +1177,7 @@ export function NailDesignChatPage() {
                     prompt: lastDesign.prompt,
                     shapeId: lastDesign.shapeId,
                     details: lastDesign.details,
-                    leftScanId: leftAnalysis?.scanId ?? null,
-                    rightScanId: rightAnalysis?.scanId ?? null,
+                    context: lastDesign.context,
                 },
             })
             return
@@ -933,6 +1195,7 @@ export function NailDesignChatPage() {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
         }
+        reviseLogRef.current.push(text)
         setIsSending(true)
         try {
             await refineKeywords(sessionId, text)
@@ -1226,22 +1489,34 @@ export function NailDesignChatPage() {
 
         // 시즌/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용
         const seasonNameKo = leftAnalysis?.seasonNameKo ?? rightAnalysis?.seasonNameKo ?? null
+        const seasonCode = leftAnalysis?.seasonCode ?? rightAnalysis?.seasonCode ?? null
+        const seasonRow = seasonCode ? SEASON_ROWS.find((r) => r.code === seasonCode) : undefined
         const shapeId = leftAnalysis?.shape ?? rightAnalysis?.shape ?? null
         const shapeInfo = shapeId ? getNailShape(shapeId) : undefined
 
+        // 지표 카드의 막대 그래프용 대략적인 정규화(정확한 모집단 통계가 아닌 시각적 가늠용)
+        const clampPct = (value: number, min: number, max: number) =>
+            Math.max(8, Math.min(100, ((value - min) / (max - min)) * 100))
+
         return {
             seasonNameKo: seasonNameKo || '분석 중',
-            shapeLabel: shapeInfo ? `${shapeInfo.labelKo} (${shapeInfo.id})` : shapeId || '분석 중',
+            seasonCode,
+            seasonDesc: seasonRow ? `${seasonRow.tone} 톤 · ${seasonRow.brightness}` : null,
+            shapeLabel: shapeInfo ? shapeInfo.labelKo : shapeId || '분석 중',
+            shapeImage: shapeInfo?.image ?? null,
             avgLength,
             avgWidth,
             avgCurve,
+            lengthPct: clampPct(avgLength, 8, 18),
+            widthPct: clampPct(avgWidth, 6, 14),
+            curvePct: clampPct(avgCurve, 0, 1),
             comment: `손톱이 ${isLong ? '길고' : '짧고'} ${isNarrow ? '좁은' : '넓은'} 편이네요!\n곡률은 ${isLowCurve ? '작은' : '큰'} 편입니다.`,
             // TODO: 전체 사용자 모집단 통계 API 완성되면 실제 값으로 교체
             percentileNote: '23%의 사용자가 이런 느낌의 손톱을 가지고 있어요!',
         }
     }, [leftAnalysis, rightAnalysis])
 
-    const [manualSeasonCode, setManualSeasonCode] = useState<string>('spring_light')
+    const [manualSeasonCode, setManualSeasonCode] = useState<string>(chatSessionSnapshot?.manualSeasonCode ?? 'spring_light')
 
     const detectedSeasonCode = leftAnalysis?.seasonCode || rightAnalysis?.seasonCode || null
     const activeSeasonCode = detectedSeasonCode || manualSeasonCode
@@ -1261,7 +1536,10 @@ export function NailDesignChatPage() {
                 {showAnalysisPanel && analysisSummary && (
                     <aside className="design-chat-sidebar">
                         <div className="design-chat-sidebar__header">
-                            <h2>{userName ? `${userName}님의 분석 결과` : '분석 결과'}</h2>
+                            <div>
+                                <p className="design-chat-sidebar__eyebrow">Hand Analysis</p>
+                                <h2>{userName ? `${userName}님의 손 분석` : '손 분석 결과'}</h2>
+                            </div>
                             <button
                                 type="button"
                                 className="design-chat-sidebar__close"
@@ -1272,35 +1550,98 @@ export function NailDesignChatPage() {
                             </button>
                         </div>
 
-                        <div className="design-chat-sidebar__section">
-                            <h3>Hand</h3>
-                            <p>Tone: {analysisSummary.seasonNameKo}</p>
+                        <div className="design-chat-sidebar__scroll">
+                            <div className="design-chat-sidebar__card">
+                                <span className="design-chat-sidebar__card-label">퍼스널 컬러</span>
+                                <div className="design-chat-sidebar__tone-row">
+                                    <span
+                                        className="design-chat-sidebar__tone-dot"
+                                        style={{ background: personalPalette[0] ?? 'var(--naily-pink, #de869f)' }}
+                                        aria-hidden="true"
+                                    />
+                                    <div>
+                                        <p className="design-chat-sidebar__tone-name">{analysisSummary.seasonNameKo}</p>
+                                        {analysisSummary.seasonDesc && (
+                                            <p className="design-chat-sidebar__tone-desc">{analysisSummary.seasonDesc}</p>
+                                        )}
+                                    </div>
+                                </div>
+                                {personalPalette.length > 0 && (
+                                    <div className="design-chat-sidebar__palette">
+                                        {personalPalette.map((hex, idx) => (
+                                            <span
+                                                key={`${hex}-${idx}`}
+                                                className="design-chat-sidebar__palette-chip"
+                                                style={{ background: hex }}
+                                                title={hex}
+                                            />
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="design-chat-sidebar__card">
+                                <span className="design-chat-sidebar__card-label">추천 네일 쉐입</span>
+                                <div className="design-chat-sidebar__shape-row">
+                                    {analysisSummary.shapeImage && (
+                                        <img
+                                            src={analysisSummary.shapeImage}
+                                            alt=""
+                                            className="design-chat-sidebar__shape-img"
+                                        />
+                                    )}
+                                    <p className="design-chat-sidebar__shape-name">{analysisSummary.shapeLabel}</p>
+                                </div>
+                            </div>
+
+                            <div className="design-chat-sidebar__card">
+                                <span className="design-chat-sidebar__card-label">손톱 측정값 평균</span>
+                                <ul className="design-chat-sidebar__metric-list">
+                                    <li className="design-chat-sidebar__metric-row">
+                                        <div className="design-chat-sidebar__metric-top">
+                                            <span className="design-chat-sidebar__metric-name">길이</span>
+                                            <span className="design-chat-sidebar__metric-value">{analysisSummary.avgLength}mm</span>
+                                        </div>
+                                        <span className="design-chat-sidebar__metric-bar" aria-hidden="true">
+                                            <span style={{ width: `${analysisSummary.lengthPct}%` }} />
+                                        </span>
+                                    </li>
+                                    <li className="design-chat-sidebar__metric-row">
+                                        <div className="design-chat-sidebar__metric-top">
+                                            <span className="design-chat-sidebar__metric-name">너비</span>
+                                            <span className="design-chat-sidebar__metric-value">{analysisSummary.avgWidth}mm</span>
+                                        </div>
+                                        <span className="design-chat-sidebar__metric-bar" aria-hidden="true">
+                                            <span style={{ width: `${analysisSummary.widthPct}%` }} />
+                                        </span>
+                                    </li>
+                                    <li className="design-chat-sidebar__metric-row">
+                                        <div className="design-chat-sidebar__metric-top">
+                                            <span className="design-chat-sidebar__metric-name">곡률 (C-curve)</span>
+                                            <span className="design-chat-sidebar__metric-value">{analysisSummary.avgCurve}</span>
+                                        </div>
+                                        <span className="design-chat-sidebar__metric-bar" aria-hidden="true">
+                                            <span style={{ width: `${analysisSummary.curvePct}%` }} />
+                                        </span>
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <div className="design-chat-sidebar__comment-card">
+                                <p className="design-chat-sidebar__comment">
+                                    {analysisSummary.comment.split('\n').map((line, i) => (
+                                        <span key={i}>
+                                            {line}
+                                            <br />
+                                        </span>
+                                    ))}
+                                </p>
+                                <p className="design-chat-sidebar__percentile">
+                                    <span aria-hidden="true">✨</span>
+                                    {analysisSummary.percentileNote}
+                                </p>
+                            </div>
                         </div>
-
-                        <div className="design-chat-sidebar__section">
-                            <h3>Nail</h3>
-                            <p>추천 팁 모양: {analysisSummary.shapeLabel}</p>
-                        </div>
-
-                        <div className="design-chat-sidebar__section">
-                            <p className="design-chat-sidebar__label">상세 분석 결과:</p>
-                            <ul className="design-chat-sidebar__list">
-                                <li>곡률: {analysisSummary.avgCurve}</li>
-                                <li>손톱길이: {analysisSummary.avgLength}mm</li>
-                                <li>손톱너비: {analysisSummary.avgWidth}mm</li>
-                            </ul>
-                        </div>
-
-                        <p className="design-chat-sidebar__comment">
-                            {analysisSummary.comment.split('\n').map((line, i) => (
-                                <span key={i}>
-                    {line}
-                                    <br />
-                  </span>
-                            ))}
-                        </p>
-
-                        <p className="design-chat-sidebar__percentile">{analysisSummary.percentileNote}</p>
                     </aside>
                 )}
 
@@ -1488,15 +1829,6 @@ export function NailDesignChatPage() {
                                                             disabled={isSending}
                                                         />
                                                     </label>
-
-                                                    <button
-                                                        type="button"
-                                                        className="design-chat__color-custom-add"
-                                                        onClick={() => toggleQuickReplyValue(customColor.toUpperCase())}
-                                                        disabled={isSending}
-                                                    >
-                                                        이 색상 추가하기
-                                                    </button>
                                                 </div>
                                             </div>
 
@@ -1652,6 +1984,24 @@ export function NailDesignChatPage() {
                                                 </button>
                                             ))}
                                         </div>
+                                    ) : activeQuickReply.id === 'menu' ? (
+                                        <div className="design-chat__menu-grid">
+                                            {MENU_ITEMS.map((item) => (
+                                                <button
+                                                    key={item.value}
+                                                    type="button"
+                                                    className="design-chat__menu-item"
+                                                    onClick={() => handleMenuSelect({ value: item.value, label: item.label })}
+                                                    disabled={isSending}
+                                                >
+                                                  <span className="design-chat__menu-icon" aria-hidden="true">
+                                                    {item.icon}
+                                                  </span>
+                                                    <span className="design-chat__menu-title">{item.title}</span>
+                                                    <span className="design-chat__menu-desc">{item.desc}</span>
+                                                </button>
+                                            ))}
+                                        </div>
                                     ) : (
                                         <div
                                             className={`design-chat__quickreply-list${
@@ -1675,14 +2025,25 @@ export function NailDesignChatPage() {
                                                 const hexInLabelMatch = option.label.match(/#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b/)
                                                 const isExactHex = /^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$/.test(option.label.trim())
 
-                                                return (
-                                                    <button
-                                                        key={option.value}
-                                                        type="button"
-                                                        className={`design-chat__quickreply-item${selected ? ' is-selected' : ''}`}
-                                                        onClick={() => handleQuickReplyClick(option)}
-                                                        disabled={isSending || isMotifMutuallyExclusiveBlocked}
-                                                    >
+
+                                                // mood/designType/motif처럼 처음 보면 감이 잘 안 오는 선택지는
+                                                // 호버(웹) 또는 "i" 배지 탭(모바일) 시 색감/질감 예시 + 짧은 설명을 보여준다.
+                                                const step = activeQuickReply.id.startsWith('pref-')
+                                                    ? (activeQuickReply.id.slice(5) as PreferenceKey)
+                                                    : null
+                                                const optionInfo = step ? PREFERENCE_OPTION_INFO[step]?.[option.value] : undefined
+                                                // 계절/컬러를 제외한 선택지 단계에서, value가 순수 영단어일 때만 툴팁 제목에 괄호로 영문을 병기한다.
+                                                const englishSubLabel =
+                                                    step && ENGLISH_SUBLABEL_STEPS.includes(step) && /^[A-Za-z\s]+$/.test(option.value)
+                                                        ? toEnglishTitleCase(option.value)
+                                                        : null
+                                                const tooltipTitle = englishSubLabel ? `${option.label} (${englishSubLabel})` : option.label
+                                                const tooltipKey = `${activeQuickReply.id}:${option.value}`
+                                                const isTooltipOpen = tooltipAnchor?.key === tooltipKey
+                                                const isTooltipPinned = pinnedTooltipKey === tooltipKey
+
+                                                const itemBody = (
+                                                    <>
                                                         {(activeQuickReply.id === 'pref-season' || activeQuickReply.id === 'menu') && (
                                                             <span className="design-chat__quickreply-index">{idx + 1}</span>
                                                         )}
@@ -1727,8 +2088,60 @@ export function NailDesignChatPage() {
                                                                 />
                                                             </span>
                                                         ) : (
-                                                            <span>{option.label}</span>
+                                                            <span className="design-chat__quickreply-item-label">{option.label}</span>
                                                         )}
+                                                    </>
+                                                )
+
+                                                if (optionInfo) {
+                                                    return (
+                                                        <div key={option.value} className="design-chat__quickreply-item-wrap">
+                                                            <button
+                                                                type="button"
+                                                                className={`design-chat__quickreply-item${selected ? ' is-selected' : ''}`}
+                                                                onClick={() => {
+                                                                    setTooltipAnchor(null)
+                                                                    setPinnedTooltipKey(null)
+                                                                    handleQuickReplyClick(option)
+                                                                }}
+                                                                onMouseEnter={(e) => showOptionTooltip(e, tooltipKey, tooltipTitle, optionInfo)}
+                                                                onMouseLeave={() => hideOptionTooltip(tooltipKey)}
+                                                                onFocus={(e) => showOptionTooltip(e, tooltipKey, tooltipTitle, optionInfo)}
+                                                                onBlur={() => hideOptionTooltip(tooltipKey)}
+                                                                disabled={isSending || isMotifMutuallyExclusiveBlocked}
+                                                            >
+                                                                {itemBody}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                className={`design-chat__option-info-badge${isTooltipPinned ? ' is-pinned' : ''}`}
+                                                                onMouseEnter={(e) => showOptionTooltip(e, tooltipKey, tooltipTitle, optionInfo)}
+                                                                onMouseLeave={() => hideOptionTooltip(tooltipKey)}
+                                                                onFocus={(e) => showOptionTooltip(e, tooltipKey, tooltipTitle, optionInfo)}
+                                                                onBlur={() => hideOptionTooltip(tooltipKey)}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation()
+                                                                    toggleOptionTooltip(e, tooltipKey, tooltipTitle, optionInfo)
+                                                                }}
+                                                                aria-label={`${option.label} 설명 ${isTooltipPinned ? '닫기' : '고정해서 보기'}`}
+                                                                aria-expanded={isTooltipOpen}
+                                                                aria-pressed={isTooltipPinned}
+                                                            >
+                                                                i
+                                                            </button>
+                                                        </div>
+                                                    )
+                                                }
+
+                                                return (
+                                                    <button
+                                                        key={option.value}
+                                                        type="button"
+                                                        className={`design-chat__quickreply-item${selected ? ' is-selected' : ''}`}
+                                                        onClick={() => handleQuickReplyClick(option)}
+                                                        disabled={isSending || isMotifMutuallyExclusiveBlocked}
+                                                    >
+                                                        {itemBody}
                                                     </button>
                                                 )
                                             })}
@@ -1742,9 +2155,23 @@ export function NailDesignChatPage() {
                                             onClick={() => confirmPreferenceStep(selectedInQuickReply)}
                                             disabled={isSending}
                                         >
-                                            {activeQuickReply.limit == null
-                                                ? `다음 (${selectedInQuickReply.length}개 선택)`
-                                                : `다음 (${selectedInQuickReply.length}/${activeQuickReply.limit})`}
+                                            {selectedInQuickReply
+                                                .map(
+                                                    (value) =>
+                                                        activeQuickReply.options.find((o) => o.value === value)?.label ?? value,
+                                                )
+                                                .map((label) => `'${label}'`)
+                                                .join(', ')}{' '}
+                                            선택
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                <path
+                                                    d="M5 12h12M13 6l6 6-6 6"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
                                         </button>
                                     )}
 
@@ -1847,47 +2274,76 @@ export function NailDesignChatPage() {
                 </div>
             )}
 
-            {zoomedImage && (
-                <div className="mypage-x__modal" role="dialog" aria-modal="true">
-                    <button
-                        type="button"
-                        className="mypage-x__modal-backdrop"
-                        aria-label="닫기"
-                        onClick={closeZoomedImage}
+    {zoomedImage && (
+        <div className="mypage-x__modal" role="dialog" aria-modal="true">
+            <button
+                type="button"
+                className="mypage-x__modal-backdrop"
+                aria-label="닫기"
+                onClick={closeZoomedImage}
+            />
+            <div className="mypage-x__modal-panel design-chat__image-zoom-panel">
+                <button
+                    type="button"
+                    className="mypage-x__modal-close"
+                    onClick={closeZoomedImage}
+                    aria-label="닫기"
+                >
+                    ✕
+                </button>
+
+                <div
+                    ref={zoomedImageViewportRef}
+                    className={`mypage-x__modal-image-viewport design-chat__image-zoom-viewport${imageZoom > 1 ? ' is-zoomed' : ''}${isImageDragging ? ' is-dragging' : ''}`}
+                    onMouseUp={stopZoomedImageDragging}
+                    onMouseLeave={stopZoomedImageDragging}
+                >
+                    <img
+                        src={zoomedImage}
+                        alt="확대된 이미지"
+                        className="mypage-x__modal-image"
+                        draggable={false}
+                        style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
+                        onMouseDown={handleZoomedImagePointerDown}
+                        onMouseMove={handleZoomedImagePointerMove}
                     />
-                    <div className="mypage-x__modal-panel design-chat__image-zoom-panel">
-                        <button
-                            type="button"
-                            className="mypage-x__modal-close"
-                            onClick={closeZoomedImage}
-                            aria-label="닫기"
-                        >
-                            ✕
-                        </button>
 
-                        <div
-                            ref={zoomedImageViewportRef}
-                            className={`mypage-x__modal-image-viewport design-chat__image-zoom-viewport${imageZoom > 1 ? ' is-zoomed' : ''}${isImageDragging ? ' is-dragging' : ''}`}
-                            onMouseUp={stopZoomedImageDragging}
-                            onMouseLeave={stopZoomedImageDragging}
-                        >
-                            <img
-                                src={zoomedImage}
-                                alt="확대된 이미지"
-                                className="mypage-x__modal-image"
-                                draggable={false}
-                                style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
-                                onMouseDown={handleZoomedImagePointerDown}
-                                onMouseMove={handleZoomedImagePointerMove}
-                            />
-
-                            <div className="mypage-x__modal-zoom-controls">
-                                <span className="mypage-x__modal-zoom-value">{Math.round(imageZoom * 100)}%</span>
-                            </div>
-                        </div>
+                    <div className="mypage-x__modal-zoom-controls">
+                        <span className="mypage-x__modal-zoom-value">{Math.round(imageZoom * 100)}%</span>
                     </div>
                 </div>
-            )}
+            </div>
+        </div>
+    )}
+
+    {tooltipAnchor &&
+        createPortal(
+            <div
+                className="design-chat__option-tooltip"
+                style={{ top: tooltipAnchor.top - 8, left: tooltipAnchor.left }}
+                role="tooltip"
+            >
+                {tooltipAnchor.info.image && !tooltipImgError ? (
+                    <img
+                        src={tooltipAnchor.info.image}
+                        alt=""
+                        className="design-chat__option-tooltip-img"
+                        onError={() => setTooltipImgError(true)}
+                    />
+                ) : (
+                    <div className="design-chat__option-tooltip-img design-chat__option-tooltip-img--placeholder" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
+                            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                            <path d="m6.5 15 3.5-4 3 3 3.5-4.5 4 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                            <circle cx="8.5" cy="9" r="1.3" fill="currentColor" />
+                        </svg>
+                    </div>
+                )}
+                <strong className="design-chat__option-tooltip-title">{tooltipAnchor.label}</strong>
+                <span className="design-chat__option-tooltip-desc">{tooltipAnchor.info.desc}</span>
+            </div>,
+            document.body,
+        )}
         </AppShell>
     )
 }

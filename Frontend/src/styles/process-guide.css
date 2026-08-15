@@ -43,8 +43,13 @@
   display: grid;
   grid-template-columns: 72px 1fr;
   gap: 1.25rem;
+  align-items: center;
   position: relative;
-  padding-bottom: 2rem;
+  margin-bottom: 2rem;
+}
+
+.process-v2__step:last-child {
+  margin-bottom: 0;
 }
 
 .process-v2__step-marker {
@@ -63,8 +68,8 @@
 .process-v2__connector {
   position: absolute;
   left: 35px;
-  top: 76px;
-  bottom: 0;
+  top: calc(50% + 38px);
+  bottom: -2rem;
   width: 2px;
   background: linear-gradient(180deg, #de869f 0%, transparent 100%);
   opacity: 0.35;
@@ -133,6 +138,6 @@
 
   .process-v2__connector {
     left: 27px;
-    top: 60px;
+    top: calc(50% + 30px);
   }
 }

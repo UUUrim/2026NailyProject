@@ -192,34 +192,53 @@
   border-radius: 14px;
   padding: 1rem;
   text-align: center;
-  cursor: pointer;                          /* 추가 */
-  transition: border-color 0.15s, box-shadow 0.15s;  /* 추가 */
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
 }
 
-.scan-shape-card:hover { /*추가*/
+.scan-shape-card:hover {
   border-color: #f0b8cb;
   box-shadow: 0 4px 12px rgba(222, 134, 159, 0.1);
 }
 
-/* .scan-shape-card.is-recommended {
-  border-color: #de869f;
-  box-shadow: 0 8px 24px rgba(222, 134, 159, 0.18);
-} */
-
 .scan-shape-card__badge {
   position: absolute;
   top: 10px;
-  right: 10px;
-  background: #de869f;
-  color: #fff;
   font-size: 0.7rem;
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
+  font-weight: 600;
 }
 
-.scan-shape-card.is-selected {          /* 추가 */
+.scan-shape-card__badge--recommend {
+  left: 10px;
+  background: #fff5f8;
+  color: #de869f;
+  border: 1px solid #f0b8cb;
+}
+
+.scan-shape-card__badge--selected {
+  right: 10px;
+  background: #de869f;
+  color: #fff;
+}
+
+.scan-shape-card.is-selected {
   border-color: #de869f;
   box-shadow: 0 8px 24px rgba(222, 134, 159, 0.18);
+}
+
+.scan-shape-grid.is-locked .scan-shape-card:not(.is-selected) {
+  opacity: 0.55;
+}
+
+.scan-shape-grid.is-locked .scan-shape-card:not(.is-selected):hover {
+  border-color: #eee;
+  box-shadow: none;
+}
+
+.scan-shape-card.is-locked {
+  cursor: default;
 }
 
 .scan-shape-card img {
@@ -241,11 +260,35 @@
   letter-spacing: 0.06em;
 }
 
+.scan-shape-print-btn {
+  flex-shrink: 0;
+  border: 1px solid #de869f;
+  border-radius: 999px;
+  background: #fff;
+  color: #de869f;
+  padding: 0.45rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.scan-shape-print-btn:hover:not(:disabled) {
+  background: #de869f;
+  color: #fff;
+}
+
+.scan-shape-print-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .scan-result-actions {
   display: flex;
   justify-content: center;
   gap: 1.50rem;
-  padding-top: 1rem;
+  padding-top: 5rem;
+  margin-bottom: 1rem;
 }
 
 .scan-result-cta {
@@ -257,6 +300,42 @@
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
+}
+
+.scan-result-next {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: none;
+  background: transparent;
+  color: #de869f;
+  padding: 0.5rem 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: gap 0.25s ease, color 0.2s ease;
+}
+
+.scan-result-next svg {
+  transition: transform 0.25s ease;
+}
+
+.scan-result-next:hover {
+  gap: 0.7rem;
+  color: #c96a86;
+}
+
+.scan-result-next:hover svg {
+  transform: translateX(5px);
+}
+
+.scan-result-next:active {
+  gap: 0.5rem;
+}
+
+.scan-result-next:active svg {
+  transform: translateX(2px);
 }
 
 .scan-result-empty {
@@ -467,6 +546,15 @@
     grid-template-columns: 1fr;
   }
 
+  .scan-result-section__head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .scan-shape-print-btn {
+    margin-left: auto;
+  }
+
   .finger-modal__list li {
     grid-template-columns: 1fr 1fr;
   }
@@ -503,7 +591,7 @@
   padding: 2.5rem 2rem;
   text-align: center;
   width: 100%;
-  max-width: 360px;
+  max-width: 390px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
@@ -511,9 +599,69 @@
   gap: 0.5rem;
 }
 
-.print-modal__icon {
-  margin: 0 0 0.25rem;
-  font-size: 2.5rem;
+.print-modal__icon-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 0 0.35rem;
+  border-radius: 999px;
+  background: linear-gradient(145deg, #de869f, #c96d88);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(222, 134, 159, 0.35);
+  animation: print-modal-icon-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* "완료됐다"는 걸 즉시 알아챌 수 있도록 성공 색(그린)으로 명확히 구분 */
+.print-modal__icon-badge--success {
+  background: linear-gradient(145deg, #4fc789, #2f9e5c);
+  box-shadow: 0 10px 24px rgba(47, 158, 92, 0.32);
+}
+
+@keyframes print-modal-icon-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.print-modal__close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 30px;
+  height: 30px;
+  min-width: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #1a1a1a;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.print-modal__close:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #000;
+}
+
+.print-modal__close:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .print-modal__panel h2 {
@@ -563,4 +711,33 @@
   margin: 0 auto 0.5rem;
   background: #ececf1;
   border-radius: 8px;
+
+  .print-modal__actions {
+    display: flex;
+    gap: 0.75rem;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .print-modal__btn {
+    border: none;
+    border-radius: 999px;
+    background: #de869f;
+    color: #fff;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 110px;
+  }
+
+  .print-modal__btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
+
+  .print-modal__btn--ghost {
+    background: #f5f5f5;
+    color: #555;
+  }
 }

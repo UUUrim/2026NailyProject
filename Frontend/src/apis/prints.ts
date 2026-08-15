@@ -5,7 +5,7 @@ export interface PrintOrderResponse {
     shapeId: string
     shapeLabelKo: string
     status: 'QUEUED' | 'PRINTING' | 'COMPLETED'
-    orderedAt: string // "yyyy. M. d. HH:mm"
+    orderedAt: string // "yyyy. M. d. HH:mm:ss"
     leftScanId: number | null
     rightScanId: number | null
 }

@@ -1,0 +1,76 @@
+/** 디자인 이미지 모달 액션 버튼용 아이콘 (아이콘 → 라벨 순서) */
+export const ModalActionIcons = {
+  ar: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9 15.5V9.2L12 8l3 1.2v6.3M9 12.2h6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
+  download: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5M6 18h12"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
+  share: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="18" cy="5" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="6" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="18" cy="19" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m8.2 10.8 7.5-4.1M8.2 13.2l7.5 4.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  ),
+  trash: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4.5 7h15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M10 7V5.5A1.5 1.5 0 0 1 11.5 4h1A1.5 1.5 0 0 1 14 5.5V7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.5 7v11.5a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 11v5.5M14 11v5.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  ),
+  like: (filled = false) => (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M7 11v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h2a2 2 0 0 1 1.6.8L14 4.5A2.5 2.5 0 0 1 18 6.3V10h2.2a1.8 1.8 0 0 1 1.76 2.2l-1.3 6A2 2 0 0 1 18.7 20H9.5"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ),
+  details: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 9h8M8 12.5h8M8 16h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  ),
+}

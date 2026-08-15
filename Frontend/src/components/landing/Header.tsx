@@ -41,6 +41,9 @@ export function Header() {
                         <Link to="/scan/hand" className={navLinkClassName('/scan')} onClick={handleNavClick('/scan/hand')}>
                             scan
                         </Link>
+                        <Link to="/print" className={navLinkClassName('/print')} onClick={handleNavClick('/print')}>
+                            print
+                        </Link>
                         <Link to="/design/chat" className={navLinkClassName('/design')} onClick={handleNavClick('/design/chat')}>
                             design
                         </Link>
