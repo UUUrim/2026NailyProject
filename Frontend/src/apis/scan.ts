@@ -96,7 +96,11 @@ export interface ScanHistoryItem {
     handSide: string | null
     status: string | null
     shape: string | null
+    seasonCode: string | null
     seasonNameKo: string | null
+    avgLengthMm: number | null
+    avgWidthMm: number | null
+    avgCurve: number | null
     scannedAt: string
 }
 

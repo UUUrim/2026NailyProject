@@ -58,6 +58,17 @@ public class NailDesign {
     @Column(name = "design_plan", columnDefinition = "JSON")
     private String designPlan; // STEP3에서 생성된 5개 손가락 상세 디자인 JSON 원문
 
+    @Column(name = "color_palette", columnDefinition = "JSON")
+    private String colorPalette; // 컬러 워크플로우(ComfyUI)가 뽑아낸 hex 리스트 JSON 배열, 예: ["#FDE2EA", "#DE869F"]
+
+    /** 메인 '둘러보기' 갤러리에 공개 공유 여부 */
+    @Column(name = "is_shared", nullable = false)
+    @Builder.Default
+    private boolean shared = false;
+
+    @Column(name = "shared_at")
+    private LocalDateTime sharedAt;
+
     public void updateImageUrls(List<String> imageUrls) {
         this.imageUrls = imageUrls;
     }
@@ -68,5 +79,19 @@ public class NailDesign {
 
     public void updateDesignPlan(String designPlan) {
         this.designPlan = designPlan;
+    }
+
+    public void updateColorPalette(String colorPalette) {
+        this.colorPalette = colorPalette;
+    }
+
+    public void share() {
+        this.shared = true;
+        this.sharedAt = LocalDateTime.now();
+    }
+
+    public void unshare() {
+        this.shared = false;
+        this.sharedAt = null;
     }
 }

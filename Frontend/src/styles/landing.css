@@ -82,6 +82,7 @@
 }
 
 .landing-header__center-link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   font-size: 0.9375rem;
@@ -97,6 +98,23 @@
 .landing-header__center-link:hover {
   background: rgba(222, 134, 159, 0.12);
   transform: translateY(-2px);
+}
+
+.landing-header__center-link--active {
+  position: relative;
+  color: var(--naily-pink);
+}
+
+.landing-header__center-link--active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--naily-pink);
 }
 
 .landing-header__nav {
@@ -1201,6 +1219,34 @@
   background: rgba(0, 0, 0, 0.55);
   color: var(--naily-pink, #de869f);
   font-size: 0.85rem;
+  line-height: 1;
+}
+
+.gallery-section__item-likes {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.gallery-section__item-likes svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+}
+
+.gallery-section__item-likes em {
+  font-style: normal;
+  font-weight: 800;
 }
 
 .gallery-section__item--skeleton {

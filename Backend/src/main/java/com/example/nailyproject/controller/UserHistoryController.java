@@ -5,9 +5,13 @@ import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
 import com.example.nailyproject.entity.HandScan;
+import com.example.nailyproject.entity.ScanImg;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.HandScanRepository;
+import com.example.nailyproject.repository.ScanImgRepository;
 import com.example.nailyproject.service.PrintOrderService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,9 +32,11 @@ import java.util.stream.Collectors;
 public class UserHistoryController {
 
     private final HandScanRepository handScanRepository;
+    private final ScanImgRepository scanImgRepository;
     private final PrintOrderService printOrderService;
+    private final ObjectMapper objectMapper;
 
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d.");
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
     /**
      * 내 손 스캔 전체 이력 조회 GET /users/me/scans
@@ -42,14 +48,21 @@ public class UserHistoryController {
         List<HandScan> scans = handScanRepository.findAllByUserOrderByScannedAtDesc(user);
 
         List<ScanHistoryItemDto> data = scans.stream()
-                .map(scan -> ScanHistoryItemDto.builder()
-                        .scanId(scan.getId())
-                        .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
-                        .status(scan.getStatus() != null ? scan.getStatus().name() : null)
-                        .shape(scan.getShape())
-                        .seasonNameKo(scan.getSeasonNameKo())
-                        .scannedAt(scan.getScannedAt() != null ? scan.getScannedAt().format(FORMATTER) : "")
-                        .build())
+                .map(scan -> {
+                    FingerAverages averages = computeFingerAverages(scan);
+                    return ScanHistoryItemDto.builder()
+                            .scanId(scan.getId())
+                            .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
+                            .status(scan.getStatus() != null ? scan.getStatus().name() : null)
+                            .shape(scan.getShape())
+                            .seasonCode(scan.getSeasonCode())
+                            .seasonNameKo(scan.getSeasonNameKo())
+                            .avgLengthMm(averages.lengthMm)
+                            .avgWidthMm(averages.widthMm)
+                            .avgCurve(averages.curve)
+                            .scannedAt(scan.getScannedAt() != null ? scan.getScannedAt().format(FORMATTER) : "")
+                            .build();
+                })
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(
@@ -86,4 +99,63 @@ public class UserHistoryController {
                 ApiResponse.success(200, "네일팁 출력 내역 조회 성공.", data)
         );
     }
+
+    private FingerAverages computeFingerAverages(HandScan scan) {
+        List<ScanImg> images = scanImgRepository.findByHandScan(scan);
+        double lengthSum = 0;
+        double widthSum = 0;
+        double curveSum = 0;
+        int count = 0;
+
+        for (ScanImg img : images) {
+            double[] values = parseMeasurements(img.getMeasurements());
+            if (values == null) continue;
+            lengthSum += values[0];
+            widthSum += values[1];
+            curveSum += values[2];
+            count++;
+        }
+
+        if (count == 0) {
+            return new FingerAverages(null, null, null);
+        }
+        return new FingerAverages(
+                round1(lengthSum / count),
+                round1(widthSum / count),
+                round2(curveSum / count)
+        );
+    }
+
+    private double[] parseMeasurements(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            double length = firstNumber(node, "lengthMm", "length");
+            double width = firstNumber(node, "widthMm", "width");
+            double curve = firstNumber(node, "cCurve", "curve");
+            return new double[]{length, width, curve};
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private double firstNumber(JsonNode node, String primary, String fallback) {
+        if (node.has(primary) && node.get(primary).isNumber()) {
+            return node.get(primary).asDouble();
+        }
+        if (node.has(fallback) && node.get(fallback).isNumber()) {
+            return node.get(fallback).asDouble();
+        }
+        return 0;
+    }
+
+    private Double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
+    }
+
+    private Double round2(double value) {
+        return Math.round(value * 100.0) / 100.0;
+    }
+
+    private record FingerAverages(Double lengthMm, Double widthMm, Double curve) {}
 }

@@ -10,7 +10,7 @@ public class PrintOrderResponseDto {
     private String shapeId;
     private String shapeLabelKo;
     private String status;
-    private String orderedAt; // yyyy. M. d. HH:mm
+    private String orderedAt; // yyyy. M. d. HH:mm:ss
     private Long leftScanId;
     private Long rightScanId;
 }

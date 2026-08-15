@@ -20,7 +20,7 @@ public class PrintOrderService {
 
     private final PrintOrderRepository printOrderRepository;
 
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm");
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
     public PrintOrderResponseDto createPrintOrder(User user, PrintOrderRequestDto request) {
         PrintOrder order = PrintOrder.builder()
