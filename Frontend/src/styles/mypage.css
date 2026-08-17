@@ -1,0 +1,498 @@
+/* .mypage-v2__profile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.25rem;
+  align-items: start;
+  background: linear-gradient(135deg, #fff5f8, #fff);
+  border: 1px solid #f3e3ea;
+  border-radius: 20px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.mypage-v2__avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: #de869f;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.mypage-v2__profile-body h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+.mypage-v2__profile-body p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.mypage-v2__name {
+  margin-top: 0.25rem !important;
+  color: #999 !important;
+}
+
+.mypage-v2__edit-btn,
+.mypage-v2__logout {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.mypage-v2__logout {
+  align-self: start;
+}
+
+.mypage-v2__edit-form {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mypage-v2__edit-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.mypage-v2__edit-form input {
+  height: 38px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.mypage-v2__edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mypage-v2__edit-actions .primary {
+  background: #de869f;
+  border-color: #de869f;
+  color: #fff;
+}
+
+.mypage-v2__message {
+  margin: 0.5rem 0 0;
+  color: #de869f;
+  font-size: 0.85rem;
+}
+
+.mypage-v2__tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.mypage-v2__tabs button {
+  border: 1px solid #eee;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.mypage-v2__tabs button.is-active {
+  background: #de869f;
+  border-color: #de869f;
+  color: #fff;
+}
+
+.mypage-v2__toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+.mypage-v2__toolbar button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.mypage-v2__toolbar .primary {
+  background: #272727;
+  border-color: #272727;
+  color: #fff;
+}
+
+.mypage-v2__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.mypage-v2__card {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.mypage-v2__card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.mypage-v2__card p {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.mypage-v2__list {
+  display: grid;
+  gap: 12px;
+}
+
+.mypage-v2__print-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.mypage-v2__print-row img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.mypage-v2__print-status {
+  font-weight: 700;
+  color: #de869f;
+}
+
+.mypage-v2__empty {
+  color: #888;
+  padding: 2rem;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .mypage-v2__profile {
+    grid-template-columns: 1fr;
+  }
+
+  .mypage-v2__logout {
+    justify-self: start;
+  }
+} */
+
+
+/*수정*/
+.mypage-v2__profile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1.25rem;
+  align-items: start;
+  background: linear-gradient(135deg, #fff5f8, #fff);
+  border: 1px solid #f3e3ea;
+  border-radius: 20px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.mypage-v2__avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  background: #de869f;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.mypage-v2__profile-body h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+.mypage-v2__profile-body p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.mypage-v2__name {
+  margin-top: 0.25rem !important;
+  color: #999 !important;
+}
+
+.mypage-v2__edit-btn,
+.mypage-v2__logout {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.mypage-v2__logout {
+  align-self: start;
+}
+
+.mypage-v2__edit-form {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mypage-v2__edit-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.mypage-v2__edit-form input {
+  height: 38px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 0 10px;
+}
+
+.mypage-v2__edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mypage-v2__edit-actions .primary {
+  background: #de869f;
+  border-color: #de869f;
+  color: #fff;
+}
+
+.mypage-v2__message {
+  margin: 0.5rem 0 0;
+  color: #de869f;
+  font-size: 0.85rem;
+}
+
+.mypage-v2__tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.mypage-v2__tabs button {
+  border: 1px solid #eee;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.mypage-v2__tabs button.is-active {
+  background: #de869f;
+  border-color: #de869f;
+  color: #fff;
+}
+
+.mypage-v2__toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+.mypage-v2__toolbar button {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+
+.mypage-v2__toolbar .primary {
+  background: #272727;
+  border-color: #272727;
+  color: #fff;
+}
+
+.mypage-v2__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.mypage-v2__card {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.mypage-v2__card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.mypage-v2__card p {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.mypage-v2__list {
+  display: grid;
+  gap: 12px;
+}
+
+.mypage-v2__print-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.mypage-v2__print-row img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.mypage-v2__print-status {
+  font-weight: 700;
+  color: #de869f;
+}
+
+.mypage-v2__empty {
+  color: #888;
+  padding: 2rem;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .mypage-v2__profile {
+    grid-template-columns: 1fr;
+  }
+
+  .mypage-v2__logout {
+    justify-self: start;
+  }
+}
+
+/* 네일팁 출력 내역 */
+.mypage-v2__print-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+  width: 56px;
+  text-align: center;
+}
+
+.mypage-v2__print-shape {
+  font-weight: 700;
+  font-size: 1rem;
+  margin: 0 0 0.2rem;
+}
+
+.mypage-v2__print-date {
+  font-size: 0.8rem;
+  color: #aaa;
+  margin: 0;
+}
+
+/* 손 분석 기록 */
+.mypage-v2__scan-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.mypage-v2__scan-swatch {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid #f0e0e8;
+}
+
+.mypage-v2__scan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mypage-v2__scan-season {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #de869f;
+  margin: 0;
+}
+
+.mypage-v2__scan-metrics,
+.mypage-v2__scan-shape {
+  font-size: 0.85rem;
+  color: #555;
+  margin: 0;
+}
+
+.mypage-v2__scan-palette {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.mypage-v2__scan-chip {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.mypage-v2__scan-date {
+  font-size: 0.78rem;
+  color: #bbb;
+  margin: 0;
+}
+
+.mypage-v2__scan-row--clickable {
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.mypage-v2__scan-row--clickable:hover {
+  border-color: #de869f;
+  box-shadow: 0 2px 12px rgba(222, 134, 159, 0.15);
+}
