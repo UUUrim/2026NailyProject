@@ -42,15 +42,54 @@ public class DesignController {
     /**
      * '둘러보기' 커뮤니티 갤러리 GET /designs/community
      * 로그인 여부와 상관없이 누구나 조회 가능 (SecurityConfig에서 permitAll 처리)
+     * user가 있으면(로그인 상태) 각 디자인에 내가 좋아요 눌렀는지(likedByMe) 함께 내려준다.
      */
     @GetMapping("/community")
-    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.CommunityDesignResponseDto>>> getCommunityDesigns() {
+    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.CommunityDesignResponseDto>>> getCommunityDesigns(
+            @AuthenticationPrincipal User user) {
 
-        var data = nailDesignService.getCommunityGallery();
+        var data = nailDesignService.getCommunityGallery(user);
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "둘러보기 갤러리 조회 성공.", data)
         );
+    }
+
+    /**
+     * 디자인 상세 조회 GET /designs/{designId}
+     * 공유된 디자인은 누구나, 미공유는 소유자만 조회 가능.
+     */
+    @GetMapping("/{designId}")
+    public ResponseEntity<ApiResponse<com.example.nailyproject.dto.response.DesignDetailResponseDto>> getDesignDetail(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        var data = nailDesignService.getDesignDetail(user, designId);
+        return ResponseEntity.ok(ApiResponse.success(200, "디자인 상세 조회 성공.", data));
+    }
+
+    /**
+     * 둘러보기에 디자인 공유 POST /designs/{designId}/share
+     */
+    @PostMapping("/{designId}/share")
+    public ResponseEntity<ApiResponse<com.example.nailyproject.dto.response.DesignDetailResponseDto>> shareDesign(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        var data = nailDesignService.shareDesign(user, designId);
+        return ResponseEntity.ok(ApiResponse.success(200, "디자인이 둘러보기에 공유되었습니다.", data));
+    }
+
+    /**
+     * 둘러보기 공유 해제 DELETE /designs/{designId}/share
+     */
+    @DeleteMapping("/{designId}/share")
+    public ResponseEntity<ApiResponse<com.example.nailyproject.dto.response.DesignDetailResponseDto>> unshareDesign(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        var data = nailDesignService.unshareDesign(user, designId);
+        return ResponseEntity.ok(ApiResponse.success(200, "둘러보기 공유가 해제되었습니다.", data));
     }
 
     /**

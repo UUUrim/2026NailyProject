@@ -13,4 +13,5 @@ public class DesignImageResponseDto {
     private String imageUrl;
     private String promptSummary; // 추가: 이 디자인을 만들 때 쓰인 최종 프롬프트
     private String createdAt;
+    private boolean shared;
 }

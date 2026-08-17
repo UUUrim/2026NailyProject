@@ -5,6 +5,8 @@ import com.example.nailyproject.dto.SlotData;
 import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.response.DesignImageResponseDto;
+import com.example.nailyproject.dto.response.DesignDetailResponseDto;
+import com.example.nailyproject.dto.response.DesignLikeResponseDto;
 import com.example.nailyproject.dto.response.CommunityDesignResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
@@ -18,6 +20,7 @@ import org.springframework.http.*;
 import org.springframework.web.reactive.function.client.WebClient;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 @Service
@@ -32,6 +35,7 @@ public class NailDesignService {
     private final ObjectMapper objectMapper;
     private final S3Service s3Service;
     private final SavedDesignRepository savedDesignRepository;
+    private final DesignLikeRepository designLikeRepository;
     private final FingerDesignPlanService fingerDesignPlanService;
     private final WebClient.Builder webClientBuilder;
     private final ColorNameService colorNameService;
@@ -52,6 +56,7 @@ public class NailDesignService {
                              HandScanRepository handScanRepository,
                              S3Service s3Service,
                              SavedDesignRepository savedDesignRepository,
+                             DesignLikeRepository designLikeRepository,
                              FingerDesignPlanService fingerDesignPlanService,
                              WebClient.Builder webClientBuilder,
                              ColorNameService colorNameService,
@@ -62,6 +67,7 @@ public class NailDesignService {
         this.handScanRepository = handScanRepository;
         this.s3Service = s3Service;
         this.savedDesignRepository = savedDesignRepository;
+        this.designLikeRepository = designLikeRepository;
         this.fingerDesignPlanService = fingerDesignPlanService;
         this.webClientBuilder = webClientBuilder;
         this.colorNameService = colorNameService;
@@ -256,9 +262,10 @@ public class NailDesignService {
         }
     }
 
-    /** 컬러_워크플로우.json 구조 그대로 재현. LoadImage(1)만 방금 업로드한 파일명으로 채운다. */
+    // 컬러 팔레트 워크플로우의 ShowText 노드 id (SegmentV2 기반 — ImageCropV2보다 정밀한 배경 제거)
     private static final String COLOR_WORKFLOW_SHOWTEXT_NODE_ID = "30";
 
+    /** 컬러_워크플로우.json 구조 그대로 재현. LoadImage(1)만 방금 업로드한 파일명으로 채운다. */
     private Map<String, Object> buildColorPaletteWorkflow(String comfyFilename) {
         Map<String, Object> workflow = new HashMap<>();
 
@@ -605,7 +612,7 @@ public class NailDesignService {
                 .filter(d -> d.getStatus() != NailDesign.DesignStatus.DRAFT)
                 .toList();
 
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
         List<DesignImageResponseDto> resultList = new ArrayList<>();
 
         for (NailDesign design : designs) {
@@ -621,6 +628,7 @@ public class NailDesignService {
                             .imageUrl(url)
                             .promptSummary(design.getPromptSummary())
                             .createdAt(formattedDate)
+                            .shared(design.isShared())
                             .build();
                     resultList.add(item);
                 }
@@ -728,16 +736,26 @@ public class NailDesignService {
                 .toList();
     }
 
-
-
     /**
      * '둘러보기' 커뮤니티 갤러리 GET /designs/community
-     * 전체 사용자가 생성한 디자인 중 완성된(COMPLETED) 것만 최신순으로 모아서 반환.
+     * 사용자가 공유(share)한 디자인만 반환. 좋아요 수가 많은 순으로 정렬.
      * 디자인 1건당 대표 이미지 1장(첫 번째 이미지)만 사용.
+     * 좋아요(DesignLike)는 찜(SavedDesign)과 분리되어 집계된다.
      */
-    public List<CommunityDesignResponseDto> getCommunityGallery() {
-        List<NailDesign> designs =
-                nailDesignRepository.findTop60ByStatusOrderByGeneratedAtDesc(NailDesign.DesignStatus.COMPLETED);
+    public List<CommunityDesignResponseDto> getCommunityGallery(User user) {
+        List<NailDesign> designs = nailDesignRepository.findTop60BySharedTrueOrderBySharedAtDesc();
+
+        List<Long> designIds = designs.stream().map(NailDesign::getId).toList();
+        Map<Long, Long> likeCountByDesignId = new HashMap<>();
+        if (!designIds.isEmpty()) {
+            for (Object[] row : designLikeRepository.countLikesByDesignIds(designIds)) {
+                likeCountByDesignId.put((Long) row[0], (Long) row[1]);
+            }
+        }
+
+        Set<Long> myLikedDesignIds = user != null
+                ? new HashSet<>(designLikeRepository.findDesignIdsByUserId(user.getId()))
+                : Set.of();
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
         List<CommunityDesignResponseDto> resultList = new ArrayList<>();
@@ -745,16 +763,124 @@ public class NailDesignService {
         for (NailDesign design : designs) {
             if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) continue;
 
-            String formattedDate = design.getGeneratedAt() != null
-                    ? design.getGeneratedAt().format(formatter) : "";
+            LocalDateTime displayAt = design.getSharedAt() != null ? design.getSharedAt() : design.getGeneratedAt();
+            String formattedDate = displayAt != null ? displayAt.format(formatter) : "";
+            long likeCount = likeCountByDesignId.getOrDefault(design.getId(), 0L);
 
             resultList.add(CommunityDesignResponseDto.builder()
                     .designId(design.getId())
                     .imageUrl(design.getImageUrls().get(0))
                     .createdAt(formattedDate)
+                    .likeCount(likeCount)
+                    .likedByMe(myLikedDesignIds.contains(design.getId()))
+                    .details(buildDetails(design))
                     .build());
         }
+
+        resultList.sort(Comparator
+                .comparingLong(CommunityDesignResponseDto::getLikeCount).reversed()
+                .thenComparing(CommunityDesignResponseDto::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())));
+
         return resultList;
+    }
+
+    /** 둘러보기 좋아요 POST /designs/{designId}/reactions */
+    @Transactional
+    public DesignLikeResponseDto addDesignLike(User user, Long designId) {
+        if (user == null) {
+            throw new IllegalArgumentException("로그인이 필요합니다.");
+        }
+        NailDesign design = nailDesignRepository.findById(designId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
+        if (!design.isShared()) {
+            throw new IllegalArgumentException("공유된 디자인만 좋아요할 수 있습니다.");
+        }
+        if (!designLikeRepository.existsByUserAndNailDesign(user, design)) {
+            designLikeRepository.save(DesignLike.builder()
+                    .user(user)
+                    .nailDesign(design)
+                    .build());
+        }
+        return DesignLikeResponseDto.builder()
+                .designId(designId)
+                .likeCount(designLikeRepository.countByNailDesign(design))
+                .liked(true)
+                .build();
+    }
+
+    /** 둘러보기 좋아요 취소 DELETE /designs/{designId}/reactions */
+    @Transactional
+    public DesignLikeResponseDto removeDesignLike(User user, Long designId) {
+        if (user == null) {
+            throw new IllegalArgumentException("로그인이 필요합니다.");
+        }
+        NailDesign design = nailDesignRepository.findById(designId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
+        designLikeRepository.findByUserAndNailDesign(user, design)
+                .ifPresent(designLikeRepository::delete);
+        return DesignLikeResponseDto.builder()
+                .designId(designId)
+                .likeCount(designLikeRepository.countByNailDesign(design))
+                .liked(false)
+                .build();
+    }
+
+    /**
+     * 디자인 상세 조회 GET /designs/{designId}
+     * - 공유된 디자인은 누구나 조회 가능
+     * - 미공유 디자인은 소유자만 조회 가능
+     */
+    public DesignDetailResponseDto getDesignDetail(User user, Long designId) {
+        NailDesign design = nailDesignRepository.findById(designId)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
+
+        boolean isOwner = user != null && design.getUser().getId().equals(user.getId());
+        if (!design.isShared() && !isOwner) {
+            throw new IllegalArgumentException("공유되지 않은 디자인입니다.");
+        }
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm");
+        String formattedDate = design.getGeneratedAt() != null
+                ? design.getGeneratedAt().format(formatter) : "";
+        String imageUrl = (design.getImageUrls() != null && !design.getImageUrls().isEmpty())
+                ? design.getImageUrls().get(0) : null;
+
+        return DesignDetailResponseDto.builder()
+                .designId(design.getId())
+                .imageUrl(imageUrl)
+                .imageUrls(design.getImageUrls())
+                .createdAt(formattedDate)
+                .shared(design.isShared())
+                .owner(isOwner)
+                .details(buildDetails(design))
+                .build();
+    }
+
+    /** 둘러보기에 디자인 공유 POST /designs/{designId}/share */
+    @Transactional
+    public DesignDetailResponseDto shareDesign(User user, Long designId) {
+        if (user == null) {
+            throw new IllegalArgumentException("로그인이 필요합니다.");
+        }
+        NailDesign design = nailDesignRepository.findByIdAndUserId(designId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("본인의 디자인만 공유할 수 있습니다."));
+        if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) {
+            throw new IllegalArgumentException("이미지가 없는 디자인은 공유할 수 없습니다.");
+        }
+        design.share();
+        return getDesignDetail(user, designId);
+    }
+
+    /** 둘러보기 공유 해제 DELETE /designs/{designId}/share */
+    @Transactional
+    public DesignDetailResponseDto unshareDesign(User user, Long designId) {
+        if (user == null) {
+            throw new IllegalArgumentException("로그인이 필요합니다.");
+        }
+        NailDesign design = nailDesignRepository.findByIdAndUserId(designId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("본인의 디자인만 공유 해제할 수 있습니다."));
+        design.unshare();
+        return getDesignDetail(user, designId);
     }
 
     /**
@@ -770,6 +896,7 @@ public class NailDesignService {
         }
 
         savedDesignRepository.deleteAllByNailDesign(design);
+        designLikeRepository.deleteAllByNailDesign(design);
 
         if (design.getImageUrls() != null) {
             for (String imageUrl : design.getImageUrls()) {
@@ -941,7 +1068,7 @@ public class NailDesignService {
                 .build();
     }
 
-    /** DesignGenerateResponseDto.Details 조립 — 지금은 colorPalette만 실제로 채워지고, 나머지는 빈 배열. */
+    /** DesignGenerateResponseDto.Details 조립 — colorPalette + designPlan에서 질감/파츠 추출 */
     private DesignGenerateResponseDto.Details buildDetails(NailDesign nailDesign) {
         List<String> colorPalette = List.of();
         if (nailDesign.getColorPalette() != null && !nailDesign.getColorPalette().isBlank()) {
@@ -952,11 +1079,46 @@ public class NailDesignService {
                 System.err.println("colorPalette 파싱 실패: " + nailDesign.getColorPalette());
             }
         }
+
+        LinkedHashSet<String> textures = new LinkedHashSet<>();
+        LinkedHashSet<String> nailParts = new LinkedHashSet<>();
+        if (nailDesign.getDesignPlan() != null && !nailDesign.getDesignPlan().isBlank()) {
+            try {
+                JsonNode plan = objectMapper.readTree(nailDesign.getDesignPlan());
+                addIfMeaningful(textures, plan.path("designType").asText(""));
+                addIfMeaningful(nailParts, plan.path("motif").asText(""));
+
+                JsonNode fingers = plan.path("fingers");
+                if (fingers.isArray()) {
+                    for (JsonNode finger : fingers) {
+                        addIfMeaningful(textures, finger.path("design_type").asText(""));
+                        addIfMeaningful(nailParts, finger.path("motif").asText(""));
+                        JsonNode parts = finger.path("parts");
+                        if (parts.isArray()) {
+                            for (JsonNode part : parts) {
+                                addIfMeaningful(nailParts, part.asText(""));
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("designPlan 파싱 실패: " + e.getMessage());
+            }
+        }
+
         return DesignGenerateResponseDto.Details.builder()
                 .colorPalette(colorPalette)
-                .textures(List.of())
-                .nailParts(List.of())
+                .textures(new ArrayList<>(textures))
+                .nailParts(new ArrayList<>(nailParts))
                 .build();
+    }
+
+    private void addIfMeaningful(Set<String> target, String value) {
+        if (value == null) return;
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) return;
+        if ("none".equalsIgnoreCase(trimmed) || "null".equalsIgnoreCase(trimmed)) return;
+        target.add(trimmed);
     }
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {

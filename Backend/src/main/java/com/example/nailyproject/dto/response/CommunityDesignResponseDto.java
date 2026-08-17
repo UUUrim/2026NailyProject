@@ -12,4 +12,7 @@ public class CommunityDesignResponseDto {
     private Long designId;
     private String imageUrl;
     private String createdAt;
+    private long likeCount;
+    private boolean likedByMe;
+    private DesignGenerateResponseDto.Details details;
 }

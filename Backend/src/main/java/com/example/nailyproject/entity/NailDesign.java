@@ -64,6 +64,14 @@ public class NailDesign {
     @Column(name = "reference_image_url")
     private String referenceImageUrl; // 사진 기반 생성일 때, 사용자가 업로드한 원본 참고 이미지 S3 URL (채팅 이력 재연용)
 
+    /** 메인 '둘러보기' 갤러리에 공개 공유 여부 */
+    @Column(name = "is_shared", nullable = false)
+    @Builder.Default
+    private boolean shared = false;
+
+    @Column(name = "shared_at")
+    private LocalDateTime sharedAt;
+
     public void updateImageUrls(List<String> imageUrls) {
         this.imageUrls = imageUrls;
     }
@@ -82,5 +90,15 @@ public class NailDesign {
 
     public void updateReferenceImageUrl(String referenceImageUrl) {
         this.referenceImageUrl = referenceImageUrl;
+    }
+
+    public void share() {
+        this.shared = true;
+        this.sharedAt = LocalDateTime.now();
+    }
+
+    public void unshare() {
+        this.shared = false;
+        this.sharedAt = null;
     }
 }

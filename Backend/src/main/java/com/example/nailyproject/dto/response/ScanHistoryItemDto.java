@@ -11,6 +11,10 @@ public class ScanHistoryItemDto {
     private String handSide;
     private String status;
     private String shape;
+    private String seasonCode;
     private String seasonNameKo;
-    private String scannedAt; // yyyy. M. d.
+    private Double avgLengthMm;
+    private Double avgWidthMm;
+    private Double avgCurve;
+    private String scannedAt; // yyyy. M. d. HH:mm:ss
 }
