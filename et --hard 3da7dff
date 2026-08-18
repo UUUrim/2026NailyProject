@@ -1,0 +1,42 @@
+[33m341312d[m[33m ([m[1;36mHEAD -> [m[1;32mnail-shape-detection[m[33m)[m HEAD@{0}: pull team nail-shape-detection: Merge made by the 'ort' strategy.
+[33m3da7dff[m[33m ([m[1;31mwonji/nail-shape-detection[m[33m)[m HEAD@{1}: commit: 불필요한 실험 파일들 제거
+[33md6003c5[m HEAD@{2}: reset: moving to d6003c5
+[33mb2f4196[m HEAD@{3}: pull team nail-shape-detection: Merge made by the 'ort' strategy.
+[33md6003c5[m HEAD@{4}: commit: nail W/D/C-curve 1.0
+[33m3da9f8f[m HEAD@{5}: commit: Remove HANDOFF.md
+[33mb49b348[m HEAD@{6}: commit: 큐티클 가이드라인 추가 및 여성 평균치 논문 레퍼 추가와, square 모양 수정 완료
+[33m0ea4f20[m HEAD@{7}: commit: 아직 라이브 버전 수정하는 중
+[33mf0909a3[m HEAD@{8}: commit: printer랑 클로드 계정 바꿈
+[33m408f621[m HEAD@{9}: commit: 실시간 측정 카메라 c-curve 제외 거의 완성
+[33m7044674[m HEAD@{10}: commit: Live-camera measurement with operator confirmation
+[33mc37e9cc[m HEAD@{11}: commit: c-curve & overall shape & rounded baseline
+[33mc5644bc[m HEAD@{12}: commit: Detect true nail outline: lateral folds, colour-based cuticle
+[33mce0d776[m[33m ([m[1;32mmain[m[33m)[m HEAD@{13}: checkout: moving from main to nail-shape-detection
+[33mce0d776[m[33m ([m[1;32mmain[m[33m)[m HEAD@{14}: commit: 쓸모없는 파일들 삭제함
+[33mf4185db[m[33m ([m[1;31mteam/wonji[m[33m)[m HEAD@{15}: commit: readme.md moved
+[33m2695fdd[m HEAD@{16}: commit: structure 공사
+[33m8295256[m HEAD@{17}: commit: create scan/ folder
+[33mb0d0bbc[m HEAD@{18}: commit: update .gitignore
+[33m891bff8[m HEAD@{19}: commit: modified
+[33mfc96a87[m HEAD@{20}: commit: added 'oval' shape
+[33mf918500[m HEAD@{21}: commit: solved problem with skin tone
+[33m0ca5c4c[m HEAD@{22}: commit: update readme.md
+[33m0a7fb2b[m HEAD@{23}: pull: Fast-forward
+[33m7b1e7c5[m HEAD@{24}: commit: add results folder into .gitignore
+[33mcc7901c[m HEAD@{25}: commit: add crop and modify measurer
+[33mab55947[m HEAD@{26}: commit: update readme.md
+[33mb5db1a0[m HEAD@{27}: commit: modified errors
+[33md3bc4f1[m HEAD@{28}: commit: succes except coffin and stiletto
+[33m5e6319a[m HEAD@{29}: commit: middle and pinky success!
+[33me59bdf9[m HEAD@{30}: commit: fix STL geometry: correct c-curve orientation and natural cuticle arc
+[33ma1b287c[m HEAD@{31}: commit: new start
+[33m19a0a3b[m HEAD@{32}: commit: nail thickness modified
+[33meea857d[m HEAD@{33}: commit: different by shape
+[33mb0e1799[m HEAD@{34}: commit: label hand as short or long and adjust stl files with c-curve condiserations
+[33mac159dc[m HEAD@{35}: commit: gitignore
+[33m6820ffa[m HEAD@{36}: commit: deleted unused files
+[33m8fc67c5[m HEAD@{37}: commit: big or small info is in print_manifest.json
+[33mdfe6da8[m HEAD@{38}: commit: added directories and standard finger size
+[33meb33f6b[m HEAD@{39}: commit: success3 generate stl files for each nails
+[33mdc870c0[m HEAD@{40}: commit: success2 with more precise nail measurements
+[33m65e5a3e[m HEAD@{41}: commit (initial): success1
