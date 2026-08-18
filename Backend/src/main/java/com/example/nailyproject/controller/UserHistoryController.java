@@ -3,6 +3,7 @@ package com.example.nailyproject.controller;
 import com.example.nailyproject.dto.request.PrintOrderRequestDto;
 import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
+import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.ScanImg;
@@ -114,6 +115,22 @@ public class UserHistoryController {
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "출력이 시작되었습니다.", data)
+        );
+    }
+
+    /**
+     * 프린터 실시간 진행 상황 조회 GET /users/me/prints/progress
+     * printer/server.py의 /print/status를 백엔드가 대신 호출해서 전달한다.
+     * 프론트는 출력 중일 때 몇 초 간격으로 이걸 폴링해서 진행률/온도를 보여준다.
+     */
+    @GetMapping("/prints/progress")
+    public ResponseEntity<ApiResponse<PrinterProgressResponseDto>> getPrinterProgress(
+            @AuthenticationPrincipal User user) {
+
+        PrinterProgressResponseDto data = printOrderService.getPrinterProgress();
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "프린터 진행 상황 조회 성공.", data)
         );
     }
 

@@ -30,11 +30,42 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 # OrcaSlicer 실행 파일 경로 (GUI용 exe 하나뿐 — 명령줄 인자를 주면 자동으로 CLI 모드로 동작함)
 ORCASLICER_PATH = r"C:\Program Files\OrcaSlicer\orca-slicer.exe"
 
-# 슬라이싱에 쓸 프로파일 (OrcaSlicer에서 내보낸 프로파일 경로)
-# 파일명은 영어로 유지할 것 — 한글 파일명이 명령줄 인자로 넘어갈 때 인코딩 깨짐 문제가 있었음
-PRINT_PROFILE_MACHINE = os.path.join(BASE, "profiles", "bambu_a1_machine.json")
-PRINT_PROFILE_PROCESS = os.path.join(BASE, "profiles", "nail_tip_process.json")
-PRINT_PROFILE_FILAMENT = os.path.join(BASE, "profiles", "filament.json")
+# 슬라이싱에 쓸 프로파일. GUI로 "내보내기"한 커스텀 파일 대신, OrcaSlicer 설치 폴더 안에
+# 이미 있는 내장 시스템 프로파일을 직접 가리킨다. 내보내기한 파일은 "type" 필드가 빠져있어
+# CLI가 "unknown config type"으로 거부하는 문제가 있었는데, 이 내장 파일들은 "type": "process"가
+# 이미 포함된 완결된 프리셋이라 이 문제가 없다.
+_ORCASLICER_RESOURCES = r"C:\Program Files\OrcaSlicer\resources\profiles\BBL"
+PRINT_PROFILE_MACHINE = _ORCASLICER_RESOURCES + r"\machine\Bambu Lab A1 0.4 nozzle.json"
+_BASE_PROCESS_PROFILE = _ORCASLICER_RESOURCES + r"\process\0.12mm High Quality @BBL A1.json"
+PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Generic PLA @BBL A1.json"
+
+# 네일팁용 서포트 오버라이드. 내장 기본 프로파일엔 이 값들이 아예 없는데, 그러면 CLI가
+# "서포트 필요성 자동 판단" 단계에서 우리 모델(작고 심하게 기울어진 형태)에 대해 비정상적으로
+# 큰 값을 계산하다가 "found slicing or export error"로 조용히 죽는 버그가 있었다.
+# GUI에서는 같은 파일로도 죽지 않는 걸 보면 CLI(헤드리스) 전용 버그로 보인다.
+SUPPORT_OVERRIDES = {
+    "enable_support": "1",
+    "support_threshold_angle": "30",
+    "brim_type": "outer_only",
+    "brim_width": "3",
+}
+
+
+def _build_patched_process_profile(output_dir: str) -> str:
+    """내장 process 프로파일을 읽어서 SUPPORT_OVERRIDES를 덮어쓴 임시 파일을 만든다.
+    매 슬라이싱 요청마다 새로 만들어서 output_dir 안에 저장 (서로 다른 요청끼리 안 겹치게)."""
+    import json
+
+    with open(_BASE_PROCESS_PROFILE, encoding="utf-8") as f:
+        data = json.load(f)
+    data.update(SUPPORT_OVERRIDES)
+
+    os.makedirs(output_dir, exist_ok=True)
+    patched_path = os.path.join(output_dir, "process_patched.json")
+    with open(patched_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=8, ensure_ascii=False)
+
+    return patched_path
 
 # 프린터 연결 정보 (Bambu Studio 앱 > 설정 > 프린터에서 확인)
 # 프린터 연결 정보 (Bambu Studio 앱 > 설정 > 프린터에서 확인)
@@ -68,10 +99,12 @@ def slice_3mf(input_3mf_path: str, output_dir: str) -> str:
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "sliced.gcode.3mf")
 
+    process_profile = _build_patched_process_profile(output_dir)
+
     cmd = [
         ORCASLICER_PATH,
         "--slice", "0",              # 0 = 플레이트 전체 슬라이싱
-        "--load-settings", f"{PRINT_PROFILE_MACHINE};{PRINT_PROFILE_PROCESS}",
+        "--load-settings", f"{PRINT_PROFILE_MACHINE};{process_profile}",
         "--load-filaments", PRINT_PROFILE_FILAMENT,
         "--export-3mf", output_path,
         input_3mf_path,
@@ -81,7 +114,11 @@ def slice_3mf(input_3mf_path: str, output_dir: str) -> str:
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        raise RuntimeError(f"슬라이싱 실패:\n{result.stderr[-1000:]}")
+        raise RuntimeError(
+            f"슬라이싱 실패 (returncode={result.returncode}):\n"
+            f"--- stdout ---\n{result.stdout[-1500:]}\n"
+            f"--- stderr ---\n{result.stderr[-1500:]}"
+        )
     if not os.path.exists(output_path):
         raise RuntimeError(f"슬라이싱은 성공했다는데 결과 파일이 없습니다: {output_path}")
 

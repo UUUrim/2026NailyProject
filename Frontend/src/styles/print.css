@@ -372,3 +372,72 @@
         width: 100%;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   프린터 실시간 진행 상황 위젯 (PrinterProgressWidget)
+   ══════════════════════════════════════════════════════════════════════ */
+
+.printer-progress {
+    padding: 1.2rem 1.4rem;
+    border-radius: 18px;
+    border: 1px solid #f0dde4;
+    background: linear-gradient(160deg, #fff8fb 0%, #fff 70%);
+}
+
+.printer-progress--loading,
+.printer-progress--error {
+    text-align: center;
+    color: #8a727c;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 1.6rem 1rem;
+}
+
+.printer-progress--error {
+    color: #c0392b;
+}
+
+.printer-progress__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+}
+
+.printer-progress__state {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #4a3540;
+}
+
+.printer-progress__percentage {
+    font-weight: 800;
+    font-size: 1.15rem;
+    color: #de869f;
+}
+
+.printer-progress__bar {
+    position: relative;
+    width: 100%;
+    height: 10px;
+    border-radius: 999px;
+    background: #f3e4ea;
+    overflow: hidden;
+    margin-bottom: 0.7rem;
+}
+
+.printer-progress__bar span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #de869f, #c77d96);
+    transition: width 0.4s ease;
+}
+
+.printer-progress__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    font-size: 0.82rem;
+    color: #8a727c;
+}

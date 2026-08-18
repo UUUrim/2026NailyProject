@@ -12,24 +12,24 @@ import { useAuth } from '@/hooks/useAuth'
 import { getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/apis/prints'
 import { getMyProfile, updateNickname, updatePassword, verifyCurrentPassword, type UserProfileResponse } from '@/apis/user'
 import {
-    getMyDesigns,
-    getLikedDesigns,
-    getSavedFolders,
-    reorderSavedFolders,
-    likeDesign,
-    moveLikedDesign,
-    unlikeDesign,
-    deleteDesign,
-    getDesignChatHistory,
-    deleteSavedFolder,
-    getDesignDetail,
-    shareDesign,
-    unshareDesign,
-    type DesignImageResponse,
-    type SavedDesignResponse,
-    type SavedFolderResponse,
-    type DesignExtractedDetails,
-    type DesignChatMessage,
+  getMyDesigns,
+  getLikedDesigns,
+  getSavedFolders,
+  reorderSavedFolders,
+  likeDesign,
+  moveLikedDesign,
+  unlikeDesign,
+  deleteDesign,
+  getDesignChatHistory,
+  deleteSavedFolder,
+  getDesignDetail,
+  shareDesign,
+  unshareDesign,
+  type DesignImageResponse,
+  type SavedDesignResponse,
+  type SavedFolderResponse,
+  type DesignExtractedDetails,
+  type DesignChatMessage,
 } from '@/apis/design'
 import { FavoriteFolderModal } from '@/components/mypage/FavoriteFolderModal'
 import { DesignDetailsPanel } from '@/components/design/DesignDetailsPanel'
@@ -39,6 +39,7 @@ import { getNailShape } from '@/constants/nailShapes'
 import { PERSONAL_COLOR_SWATCHES, SEASON_ROWS, SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
 import { downloadImage } from '@/utils/downloadImage'
+import { PrinterProgressWidget } from '@/components/mypage/PrinterProgressWidget'
 import '@/styles/mypage.css'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
@@ -67,14 +68,20 @@ type LikeModalTarget = {
 
 const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   QUEUED: '출력 대기',
+  MERGING: '모델 병합 중',
+  MERGED: '병합 완료',
   PRINTING: '출력 중',
   COMPLETED: '완료',
+  FAILED: '실패',
 }
 
 const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   QUEUED: '프린터 대기열에 등록되어 있어요.',
+  MERGING: '손톱 모델을 하나로 합치고 있어요.',
+  MERGED: '모델 병합이 끝났어요. 곧 출력이 시작돼요.',
   PRINTING: '네일팁을 출력하고 있어요.',
   COMPLETED: '네일팁 출력이 완료되었어요.',
+  FAILED: '출력 중 문제가 발생했어요.',
 }
 
 // 손 스캔 분석 상태 (네일팁 출력 관련 상태는 출력 이력에서만 표시)
@@ -556,55 +563,55 @@ export function MyPage() {
   const [isBusy, setIsBusy] = useState(false)
 
 // ── 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글) ──────
-    const [showChatHistory, setShowChatHistory] = useState(false)
-    const [chatHistory, setChatHistory] = useState<DesignChatMessage[]>([])
-    const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
-    const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
-    const [confirmedDesignId, setConfirmedDesignId] = useState<number | null>(null)
+  const [showChatHistory, setShowChatHistory] = useState(false)
+  const [chatHistory, setChatHistory] = useState<DesignChatMessage[]>([])
+  const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
+  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
+  const [confirmedDesignId, setConfirmedDesignId] = useState<number | null>(null)
 
-    useEffect(() => {
-        if (!showChatHistory || confirmedDesignId == null) return
-        let cancelled = false
-        setIsChatHistoryLoading(true)
-        setChatHistoryError(null)
-        getDesignChatHistory(confirmedDesignId)
-            .then((data) => {
-                if (!cancelled) setChatHistory(data)
-            })
-            .catch(() => {
-                if (!cancelled) setChatHistoryError('채팅 이력을 불러오지 못했어요.')
-            })
-            .finally(() => {
-                if (!cancelled) setIsChatHistoryLoading(false)
-            })
-        return () => {
-            cancelled = true
-        }
-    }, [showChatHistory, confirmedDesignId])
+  useEffect(() => {
+    if (!showChatHistory || confirmedDesignId == null) return
+    let cancelled = false
+    setIsChatHistoryLoading(true)
+    setChatHistoryError(null)
+    getDesignChatHistory(confirmedDesignId)
+        .then((data) => {
+          if (!cancelled) setChatHistory(data)
+        })
+        .catch(() => {
+          if (!cancelled) setChatHistoryError('채팅 이력을 불러오지 못했어요.')
+        })
+        .finally(() => {
+          if (!cancelled) setIsChatHistoryLoading(false)
+        })
+    return () => {
+      cancelled = true
+    }
+  }, [showChatHistory, confirmedDesignId])
 
-    // ── 활동 타임라인 ──────
-    const [selectedTimelineDate, setSelectedTimelineDate] = useState(todayKey)
-    const [calendarOpen, setCalendarOpen] = useState(false)
-    const [calendarMonth, setCalendarMonth] = useState(() => {
-        const now = new Date()
-        return { year: now.getFullYear(), month: now.getMonth() }
-    })
-    const calendarRef = useRef<HTMLDivElement | null>(null)
-    const dayBodyRef = useRef<HTMLDivElement | null>(null)
-    const sortMenuRef = useRef<HTMLDivElement | null>(null)
-    const timelineDateInitialized = useRef(false)
-    const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null)
-    const [pinnedActivityId, setPinnedActivityId] = useState<string | null>(null)
-    const [listSortOrder, setListSortOrder] = useState<'newest' | 'oldest'>('newest')
-    const [folderSortOrder, setFolderSortOrder] = useState<'name' | 'lastSaved'>('lastSaved')
-    const [folderSortMenuOpen, setFolderSortMenuOpen] = useState(false)
-    const [sortMenuOpen, setSortMenuOpen] = useState(false)
-    const [listPage, setListPage] = useState(1)
-    const [savedFolders, setSavedFolders] = useState<SavedFolderResponse[]>([])
-    const [likeModalTarget, setLikeModalTarget] = useState<LikeModalTarget | null>(null)
-    const [selectedFavoriteFolderId, setSelectedFavoriteFolderId] = useState<number | null>(null)
-    const mainPanelRef = useRef<HTMLElement | null>(null)
-    const folderSortMenuRef = useRef<HTMLDivElement | null>(null)
+  // ── 활동 타임라인 ──────
+  const [selectedTimelineDate, setSelectedTimelineDate] = useState(todayKey)
+  const [calendarOpen, setCalendarOpen] = useState(false)
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const now = new Date()
+    return { year: now.getFullYear(), month: now.getMonth() }
+  })
+  const calendarRef = useRef<HTMLDivElement | null>(null)
+  const dayBodyRef = useRef<HTMLDivElement | null>(null)
+  const sortMenuRef = useRef<HTMLDivElement | null>(null)
+  const timelineDateInitialized = useRef(false)
+  const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null)
+  const [pinnedActivityId, setPinnedActivityId] = useState<string | null>(null)
+  const [listSortOrder, setListSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [folderSortOrder, setFolderSortOrder] = useState<'name' | 'lastSaved'>('lastSaved')
+  const [folderSortMenuOpen, setFolderSortMenuOpen] = useState(false)
+  const [sortMenuOpen, setSortMenuOpen] = useState(false)
+  const [listPage, setListPage] = useState(1)
+  const [savedFolders, setSavedFolders] = useState<SavedFolderResponse[]>([])
+  const [likeModalTarget, setLikeModalTarget] = useState<LikeModalTarget | null>(null)
+  const [selectedFavoriteFolderId, setSelectedFavoriteFolderId] = useState<number | null>(null)
+  const mainPanelRef = useRef<HTMLElement | null>(null)
+  const folderSortMenuRef = useRef<HTMLDivElement | null>(null)
 
   // ── 이미지 확대/축소/이동 ──────
   const [zoom, setZoom] = useState(1)
@@ -616,15 +623,15 @@ export function MyPage() {
   const ZOOM_MIN = 1
   const ZOOM_MAX = 4
 
-    const openDetailImage = (img: DetailImage) => {
-        setZoom(1)
-        setPan({ x: 0, y: 0 })
-        setShowChatHistory(false)
-        setChatHistory([])
-        setConfirmedDesignId(img.designId ?? null)
-        setShowDesignDetails(false)
-        setDetailImage(img)
-        if (img.designId == null) return
+  const openDetailImage = (img: DetailImage) => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+    setShowChatHistory(false)
+    setChatHistory([])
+    setConfirmedDesignId(img.designId ?? null)
+    setShowDesignDetails(false)
+    setDetailImage(img)
+    if (img.designId == null) return
     setDetailLoading(true)
     void getDesignDetail(img.designId)
         .then((detail) => {
@@ -2601,113 +2608,113 @@ export function MyPage() {
                 </button>
 
 
-    {showChatHistory ? (
-        <div className="mypage-x__modal-image-viewport" style={{ overflowY: 'auto', height: 'min(70vh, 620px)' }}>
-            <div className="design-chat__messages" style={{ padding: '0.5rem' }}>
-                {isChatHistoryLoading && <p style={{ textAlign: 'center', color: '#999' }}>불러오는 중…</p>}
-                {chatHistoryError && <p style={{ textAlign: 'center', color: '#c0392b' }}>{chatHistoryError}</p>}
-                {!isChatHistoryLoading && !chatHistoryError && chatHistory.length === 0 && (
-                    <p style={{ textAlign: 'center', color: '#999' }}>
-                        이 디자인은 채팅 없이 만들어졌거나, 저장된 대화 이력이 없어요.
-                    </p>
-                )}
-                {chatHistory.map((msg, i) => (
-                    <div key={i} className={`design-chat__row design-chat__row--${msg.role}`}>
-                        {msg.role === 'assistant' && (
-                            <img src="/images/logo.png" alt="" className="design-chat__avatar" />
+                {showChatHistory ? (
+                    <div className="mypage-x__modal-image-viewport" style={{ overflowY: 'auto', height: 'min(70vh, 620px)' }}>
+                      <div className="design-chat__messages" style={{ padding: '0.5rem' }}>
+                        {isChatHistoryLoading && <p style={{ textAlign: 'center', color: '#999' }}>불러오는 중…</p>}
+                        {chatHistoryError && <p style={{ textAlign: 'center', color: '#c0392b' }}>{chatHistoryError}</p>}
+                        {!isChatHistoryLoading && !chatHistoryError && chatHistory.length === 0 && (
+                            <p style={{ textAlign: 'center', color: '#999' }}>
+                              이 디자인은 채팅 없이 만들어졌거나, 저장된 대화 이력이 없어요.
+                            </p>
                         )}
-                        <div className={`design-chat__bubble design-chat__bubble--${msg.role}`}>
-                            {msg.content.split('\n').map((line, j) => (
-                                <p key={j}>{line}</p>
-                            ))}
-                            {msg.imageUrls && msg.imageUrls.length > 0 && (
-                                <div className="design-chat__bubble-images">
-                                    {msg.imageUrls.map((url, k) => (
-                                        <div key={k} className="design-chat__bubble-image-wrap">
+                        {chatHistory.map((msg, i) => (
+                            <div key={i} className={`design-chat__row design-chat__row--${msg.role}`}>
+                              {msg.role === 'assistant' && (
+                                  <img src="/images/logo.png" alt="" className="design-chat__avatar" />
+                              )}
+                              <div className={`design-chat__bubble design-chat__bubble--${msg.role}`}>
+                                {msg.content.split('\n').map((line, j) => (
+                                    <p key={j}>{line}</p>
+                                ))}
+                                {msg.imageUrls && msg.imageUrls.length > 0 && (
+                                    <div className="design-chat__bubble-images">
+                                      {msg.imageUrls.map((url, k) => (
+                                          <div key={k} className="design-chat__bubble-image-wrap">
                                             <img
                                                 src={url}
                                                 alt={`생성된 네일 디자인 ${k + 1}`}
                                                 style={{ cursor: 'zoom-in' }}
                                                 onClick={() => {
-                                                    setZoom(1)
-                                                    setPan({ x: 0, y: 0 })
-                                                    const newDesignId = msg.designId ?? detailImage?.designId ?? null
-                                                    const liked = likedKeySet.has(`${newDesignId}-${url}`)
-                                                    setDetailImage((prev) =>
-                                                        prev ? { ...prev, imageUrl: url, designId: newDesignId, liked } : prev,
-                                                    )
-                                                    setShowChatHistory(false)
+                                                  setZoom(1)
+                                                  setPan({ x: 0, y: 0 })
+                                                  const newDesignId = msg.designId ?? detailImage?.designId ?? null
+                                                  const liked = likedKeySet.has(`${newDesignId}-${url}`)
+                                                  setDetailImage((prev) =>
+                                                      prev ? { ...prev, imageUrl: url, designId: newDesignId, liked } : prev,
+                                                  )
+                                                  setShowChatHistory(false)
                                                 }}
                                             />
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                                          </div>
+                                      ))}
+                                    </div>
+                                )}
+                              </div>
+                            </div>
+                        ))}
+                      </div>
                     </div>
-                ))}
-            </div>
-        </div>
-    ) : (
-        <div
-            ref={imageViewportRef}
-            className={`mypage-x__modal-image-viewport mypage-x__modal-image-viewport--fit${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
-            onMouseUp={stopDragging}
-            onMouseLeave={stopDragging}
-        >
-            <img
-                src={detailImage.imageUrl}
-                alt="네일 디자인 확대"
-                className="mypage-x__modal-image"
-                draggable={false}
-                style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-                onMouseDown={handleImagePointerDown}
-                onMouseMove={handleImagePointerMove}
-            />
-
-            <div className="mypage-x__modal-image-tools">
-                <button
-                    type="button"
-                    className={`mypage-x__modal-heart${detailImage.liked ? ' is-liked' : ''}`}
-                    onClick={() => void handleModalToggleLike()}
-                    disabled={isBusy || detailImage.designId == null}
-                    aria-label={detailImage.liked ? '찜 해제' : '찜하기'}
-                >
-                    {Icon.heart}
-                </button>
-                {detailImage.liked && detailImage.designId != null && (
-                    <button
-                        type="button"
-                        className="mypage-x__modal-folder-pill"
-                        onClick={() => openMoveFolderModal(detailImage.designId!, detailImage.imageUrl)}
-                        title="저장 위치 변경"
-                        aria-label={`저장 위치 변경 (현재: ${detailImage.folder?.name
-                        ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
-                        ?? '기본'})`}
+                ) : (
+                    <div
+                        ref={imageViewportRef}
+                        className={`mypage-x__modal-image-viewport mypage-x__modal-image-viewport--fit${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
+                        onMouseUp={stopDragging}
+                        onMouseLeave={stopDragging}
                     >
+                      <img
+                          src={detailImage.imageUrl}
+                          alt="네일 디자인 확대"
+                          className="mypage-x__modal-image"
+                          draggable={false}
+                          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+                          onMouseDown={handleImagePointerDown}
+                          onMouseMove={handleImagePointerMove}
+                      />
+
+                      <div className="mypage-x__modal-image-tools">
+                        <button
+                            type="button"
+                            className={`mypage-x__modal-heart${detailImage.liked ? ' is-liked' : ''}`}
+                            onClick={() => void handleModalToggleLike()}
+                            disabled={isBusy || detailImage.designId == null}
+                            aria-label={detailImage.liked ? '찜 해제' : '찜하기'}
+                        >
+                          {Icon.heart}
+                        </button>
+                        {detailImage.liked && detailImage.designId != null && (
+                            <button
+                                type="button"
+                                className="mypage-x__modal-folder-pill"
+                                onClick={() => openMoveFolderModal(detailImage.designId!, detailImage.imageUrl)}
+                                title="저장 위치 변경"
+                                aria-label={`저장 위치 변경 (현재: ${detailImage.folder?.name
+                                ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
+                                ?? '기본'})`}
+                            >
                               <span className="mypage-x__modal-folder-pill-text">
                                 {detailImage.folder?.name
                                     ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
                                     ?? '기본'}
                               </span>
-                        <span className="mypage-x__modal-folder-pill-icon" aria-hidden="true">
+                              <span className="mypage-x__modal-folder-pill-icon" aria-hidden="true">
                                 {Icon.chevronDown}
                               </span>
-                    </button>
-                )}
-            </div>
+                            </button>
+                        )}
+                      </div>
 
-            {(detailImage.owner ?? detailImage.canDelete) && (
-                <span className={`mypage-x__modal-share-corner mypage-x__share-badge${detailImage.shared ? ' is-on' : ''}`}>
+                      {(detailImage.owner ?? detailImage.canDelete) && (
+                          <span className={`mypage-x__modal-share-corner mypage-x__share-badge${detailImage.shared ? ' is-on' : ''}`}>
                             {detailImage.shared ? '둘러보기에 공유 중' : '비공개'}
                           </span>
-            )}
+                      )}
 
-            <div className="mypage-x__modal-zoom-controls">
-                <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
-            </div>
-        </div>
-    )}
+                      <div className="mypage-x__modal-zoom-controls">
+                        <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
+                      </div>
+                    </div>
+                )}
 
                 {showDesignDetails && (
                     <div id="mypage-design-details" className="mypage-x__modal-design-details">
@@ -2728,160 +2735,160 @@ export function MyPage() {
                     <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
                   </button>
                 </div>
-                  <div className="mypage-x__modal-actions">
-                      {detailImage.designId != null && (
-                          <button
-                              type="button"
-                              className="mypage-x__modal-action--accent"
-                              onClick={() => setShowChatHistory((prev) => !prev)}
-                          >
-                              {showChatHistory ? '🖼 디자인으로 돌아가기' : '💬 채팅 이력 보기'}
-                          </button>
-                      )}
-                      {!showChatHistory && (
-                          <>
-                              {detailImage.designId != null && (
-                                  <button
-                                      type="button"
-                                      className="mypage-x__modal-action--danger"
-                                      onClick={() => void handleModalDelete()}
-                                      disabled={isBusy || !(detailImage.owner ?? detailImage.canDelete)}
-                                      title={
-                                          !(detailImage.owner ?? detailImage.canDelete)
-                                              ? '내 디자인만 삭제할 수 있어요'
-                                              : undefined
-                                      }
-                                  >
-                                      {ModalActionIcons.trash}
-                                      <span>이미지 삭제</span>
-                                  </button>
-                              )}
-                              <button
-                                  type="button"
-                                  className="mypage-x__modal-action--ghost"
-                                  onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
-                              >
-                                  {ModalActionIcons.download}
-                                  <span>이미지 다운로드</span>
-                              </button>
-                              {detailImage.designId != null && (
-                                  <button
-                                      type="button"
-                                      className={`mypage-x__modal-action--ghost${detailImage.shared ? ' is-active' : ''}`}
-                                      onClick={() => void handleToggleShare()}
-                                      disabled={shareBusy || !(detailImage.owner ?? detailImage.canDelete)}
-                                      title={
-                                          !(detailImage.owner ?? detailImage.canDelete)
-                                              ? '내 디자인만 공유할 수 있어요'
-                                              : undefined
-                                      }
-                                  >
-                                      {ModalActionIcons.share}
-                                      <span>
+                <div className="mypage-x__modal-actions">
+                  {detailImage.designId != null && (
+                      <button
+                          type="button"
+                          className="mypage-x__modal-action--accent"
+                          onClick={() => setShowChatHistory((prev) => !prev)}
+                      >
+                        {showChatHistory ? '🖼 디자인으로 돌아가기' : '💬 채팅 이력 보기'}
+                      </button>
+                  )}
+                  {!showChatHistory && (
+                      <>
+                        {detailImage.designId != null && (
+                            <button
+                                type="button"
+                                className="mypage-x__modal-action--danger"
+                                onClick={() => void handleModalDelete()}
+                                disabled={isBusy || !(detailImage.owner ?? detailImage.canDelete)}
+                                title={
+                                  !(detailImage.owner ?? detailImage.canDelete)
+                                      ? '내 디자인만 삭제할 수 있어요'
+                                      : undefined
+                                }
+                            >
+                              {ModalActionIcons.trash}
+                              <span>이미지 삭제</span>
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className="mypage-x__modal-action--ghost"
+                            onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
+                        >
+                          {ModalActionIcons.download}
+                          <span>이미지 다운로드</span>
+                        </button>
+                        {detailImage.designId != null && (
+                            <button
+                                type="button"
+                                className={`mypage-x__modal-action--ghost${detailImage.shared ? ' is-active' : ''}`}
+                                onClick={() => void handleToggleShare()}
+                                disabled={shareBusy || !(detailImage.owner ?? detailImage.canDelete)}
+                                title={
+                                  !(detailImage.owner ?? detailImage.canDelete)
+                                      ? '내 디자인만 공유할 수 있어요'
+                                      : undefined
+                                }
+                            >
+                              {ModalActionIcons.share}
+                              <span>
                                 {shareBusy ? '처리 중...' : detailImage.shared ? '공유 해제' : '공유하기'}
                               </span>
-                                  </button>
-                              )}
-                              <button
-                                  type="button"
-                                  className="mypage-x__modal-action--accent"
-                                  onClick={() => setArTryOnImageUrl(detailImage.imageUrl)}
-                              >
-                                  {ModalActionIcons.ar}
-                                  <span>AR로 미리보기</span>
-                              </button>
-                          </>
-                      )}
-                  </div>
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className="mypage-x__modal-action--accent"
+                            onClick={() => setArTryOnImageUrl(detailImage.imageUrl)}
+                        >
+                          {ModalActionIcons.ar}
+                          <span>AR로 미리보기</span>
+                        </button>
+                      </>
+                  )}
+                </div>
               </div>
             </div>
         )}
 
-          <FavoriteFolderModal
-              open={!!likeModalTarget}
-              onClose={() => setLikeModalTarget(null)}
-              onConfirm={confirmLikeWithFolder}
-              mode={likeModalTarget?.mode ?? 'like'}
-              initialFolderId={likeModalTarget?.currentFolderId ?? null}
-          />
+        <FavoriteFolderModal
+            open={!!likeModalTarget}
+            onClose={() => setLikeModalTarget(null)}
+            onConfirm={confirmLikeWithFolder}
+            mode={likeModalTarget?.mode ?? 'like'}
+            initialFolderId={likeModalTarget?.currentFolderId ?? null}
+        />
 
-          {/* ── 찜 폴더 삭제 확인 모달 ───────────────────────────────────── */}
-          {folderToDelete && (
-              <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="폴더 삭제 확인">
+        {/* ── 찜 폴더 삭제 확인 모달 ───────────────────────────────────── */}
+        {folderToDelete && (
+            <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="폴더 삭제 확인">
+              <button
+                  type="button"
+                  className="mypage-x__modal-backdrop"
+                  aria-label="닫기"
+                  onClick={closeDeleteFolderModal}
+              />
+              <div className="mypage-x__modal-panel mypage-x__confirm-panel">
+                <button
+                    type="button"
+                    className="mypage-x__modal-close mypage-x__modal-close--plain"
+                    onClick={closeDeleteFolderModal}
+                    aria-label="닫기"
+                    disabled={isBusy}
+                >
+                  ✕
+                </button>
+
+                <div className="mypage-x__confirm-icon mypage-x__confirm-icon--danger" aria-hidden="true">
+                  {Icon.trash}
+                </div>
+
+                <h2 className="mypage-x__confirm-title">
+                  <strong>{folderToDelete.name}</strong> 폴더를 삭제할까요?
+                </h2>
+
+                <p className="mypage-x__confirm-desc">
+                  폴더만 사라지고, 안에 있던 찜 이미지{' '}
+                  {folderToDelete.itemCount > 0 && <strong>{folderToDelete.itemCount}개</strong>}는{' '}
+                  <strong>기본</strong> 폴더로 자동 이동돼요.
+                </p>
+
+                {folderToDelete.itemCount > 0 && (
+                    <div className="mypage-x__confirm-flow" aria-hidden="true">
+                      <div className="mypage-x__confirm-flow-folder">
+                        <div className="mypage-x__confirm-flow-thumbs">
+                          {(folderToDelete.recentImageUrls ?? []).slice(0, 3).map((url, i) => (
+                              <img key={i} src={url} alt="" />
+                          ))}
+                          {(folderToDelete.recentImageUrls ?? []).length === 0 && (
+                              <span className="mypage-x__confirm-flow-empty">{Icon.folder}</span>
+                          )}
+                        </div>
+                        <span className="mypage-x__confirm-flow-label">{folderToDelete.name}</span>
+                      </div>
+
+                      <span className="mypage-x__confirm-flow-arrow">{Icon.chevronRight}</span>
+
+                      <div className="mypage-x__confirm-flow-folder mypage-x__confirm-flow-folder--default">
+                        <div className="mypage-x__confirm-flow-thumbs mypage-x__confirm-flow-thumbs--default">
+                          <span className="mypage-x__confirm-flow-heart">{Icon.heart}</span>
+                        </div>
+                        <span className="mypage-x__confirm-flow-label">기본</span>
+                      </div>
+                    </div>
+                )}
+
+                {folderDeleteError && <p className="mypage-x__message">{folderDeleteError}</p>}
+
+                <div className="mypage-x__modal-actions">
+                  <button type="button" onClick={closeDeleteFolderModal} disabled={isBusy}>
+                    취소
+                  </button>
                   <button
                       type="button"
-                      className="mypage-x__modal-backdrop"
-                      aria-label="닫기"
-                      onClick={closeDeleteFolderModal}
-                  />
-                  <div className="mypage-x__modal-panel mypage-x__confirm-panel">
-                      <button
-                          type="button"
-                          className="mypage-x__modal-close mypage-x__modal-close--plain"
-                          onClick={closeDeleteFolderModal}
-                          aria-label="닫기"
-                          disabled={isBusy}
-                      >
-                          ✕
-                      </button>
-
-                      <div className="mypage-x__confirm-icon mypage-x__confirm-icon--danger" aria-hidden="true">
-                          {Icon.trash}
-                      </div>
-
-                      <h2 className="mypage-x__confirm-title">
-                          <strong>{folderToDelete.name}</strong> 폴더를 삭제할까요?
-                      </h2>
-
-                      <p className="mypage-x__confirm-desc">
-                          폴더만 사라지고, 안에 있던 찜 이미지{' '}
-                          {folderToDelete.itemCount > 0 && <strong>{folderToDelete.itemCount}개</strong>}는{' '}
-                          <strong>기본</strong> 폴더로 자동 이동돼요.
-                      </p>
-
-                      {folderToDelete.itemCount > 0 && (
-                          <div className="mypage-x__confirm-flow" aria-hidden="true">
-                              <div className="mypage-x__confirm-flow-folder">
-                                  <div className="mypage-x__confirm-flow-thumbs">
-                                      {(folderToDelete.recentImageUrls ?? []).slice(0, 3).map((url, i) => (
-                                          <img key={i} src={url} alt="" />
-                                      ))}
-                                      {(folderToDelete.recentImageUrls ?? []).length === 0 && (
-                                          <span className="mypage-x__confirm-flow-empty">{Icon.folder}</span>
-                                      )}
-                                  </div>
-                                  <span className="mypage-x__confirm-flow-label">{folderToDelete.name}</span>
-                              </div>
-
-                              <span className="mypage-x__confirm-flow-arrow">{Icon.chevronRight}</span>
-
-                              <div className="mypage-x__confirm-flow-folder mypage-x__confirm-flow-folder--default">
-                                  <div className="mypage-x__confirm-flow-thumbs mypage-x__confirm-flow-thumbs--default">
-                                      <span className="mypage-x__confirm-flow-heart">{Icon.heart}</span>
-                                  </div>
-                                  <span className="mypage-x__confirm-flow-label">기본</span>
-                              </div>
-                          </div>
-                      )}
-
-                      {folderDeleteError && <p className="mypage-x__message">{folderDeleteError}</p>}
-
-                      <div className="mypage-x__modal-actions">
-                          <button type="button" onClick={closeDeleteFolderModal} disabled={isBusy}>
-                              취소
-                          </button>
-                          <button
-                              type="button"
-                              className="danger"
-                              onClick={() => void confirmDeleteFolder()}
-                              disabled={isBusy}
-                          >
-                              {isBusy ? '삭제 중...' : '폴더 삭제'}
-                          </button>
-                      </div>
-                  </div>
+                      className="danger"
+                      onClick={() => void confirmDeleteFolder()}
+                      disabled={isBusy}
+                  >
+                    {isBusy ? '삭제 중...' : '폴더 삭제'}
+                  </button>
+                </div>
               </div>
-          )}
+            </div>
+        )}
 
         {arTryOnImageUrl && (
             <NailArTryOnModal
@@ -3170,7 +3177,7 @@ export function MyPage() {
                     <h2 className="mypage-x__scanx-title">네일팁 출력</h2>
                     <p className="mypage-x__scanx-date">
                       {formatDateTimeFull(printDetailOrder.orderedAt)
-                        || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))}
+                          || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))}
                     </p>
                   </header>
 
@@ -3184,6 +3191,12 @@ export function MyPage() {
                       {PRINT_STATUS_LABEL[printDetailOrder.status]}
                     </span>
                   </section>
+
+                  {printDetailOrder.status === 'PRINTING' && <PrinterProgressWidget />}
+
+                  {printDetailOrder.status === 'FAILED' && printDetailOrder.failReason && (
+                      <p className="mypage-x__printx-empty-note">{printDetailOrder.failReason}</p>
+                  )}
 
                   <section className="mypage-x__scanx-shape">
                     <div className="mypage-x__scanx-shape-copy">

@@ -2,6 +2,7 @@ package com.example.nailyproject.service;
 
 import com.example.nailyproject.dto.request.PrintOrderRequestDto;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
+import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.entity.PrintOrder;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.PrintOrderRepository;
@@ -76,6 +77,9 @@ public class PrintOrderService {
         Map<String, String> shapes = FINGER_ORDER.stream()
                 .collect(Collectors.toMap(f -> f, f -> order.getShapeId()));
         String callbackUrl = backendServerUrl + "/prints/" + order.getId() + "/merge-result";
+        // 병합 성공 즉시(확인 단계 없이) 슬라이싱+출력까지 자동으로 이어지도록,
+        // printer 서버에 "출력 결과 콜백 주소"도 같이 넘긴다.
+        String printCallbackUrl = backendServerUrl + "/prints/" + order.getId() + "/print-result";
 
         Map<String, Object> requestBody;
         String endpoint;
@@ -92,7 +96,8 @@ public class PrintOrderService {
                         "rightSession", String.valueOf(order.getRightScanId()),
                         "leftShapes", shapes,
                         "rightShapes", shapes,
-                        "callbackUrl", callbackUrl
+                        "callbackUrl", callbackUrl,
+                        "printCallbackUrl", printCallbackUrl
                 );
             } else if (hasLeft || hasRight) {
                 endpoint = "/print/merge";
@@ -101,7 +106,8 @@ public class PrintOrderService {
                         "session", String.valueOf(hasLeft ? order.getLeftScanId() : order.getRightScanId()),
                         "hand", hasLeft ? "left" : "right",
                         "shapes", shapes,
-                        "callbackUrl", callbackUrl
+                        "callbackUrl", callbackUrl,
+                        "printCallbackUrl", printCallbackUrl
                 );
             } else {
                 order.updateStatus(PrintOrder.PrintStatus.FAILED);
@@ -220,6 +226,40 @@ public class PrintOrderService {
         return printOrderRepository.findAllByUserOrderByOrderedAtDesc(user).stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 프린터의 실시간 진행 상황 조회 GET /users/me/prints/progress
+     * printer/server.py의 GET /print/status를 그대로 대신 호출해서 전달한다.
+     * (프론트가 로컬 printer 서버의 ngrok 주소를 직접 알 필요 없이, 항상 백엔드를 통해서만 조회)
+     */
+    @Transactional(readOnly = true)
+    public PrinterProgressResponseDto getPrinterProgress() {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("ngrok-skip-browser-warning", "true");
+            HttpEntity<Void> httpEntity = new HttpEntity<>(headers);
+
+            var response = restTemplate.exchange(
+                    printerServerUrl + "/print/status", HttpMethod.GET, httpEntity, String.class);
+
+            JsonNode body = objectMapper.readTree(response.getBody());
+
+            return PrinterProgressResponseDto.builder()
+                    .success(body.path("success").asBoolean(false))
+                    .state(body.path("state").asText(null))
+                    .percentage(body.hasNonNull("percentage") ? body.get("percentage").asInt() : null)
+                    .remainingTimeMin(body.hasNonNull("remainingTimeMin") ? body.get("remainingTimeMin").asInt() : null)
+                    .nozzleTemp(body.hasNonNull("nozzleTemp") ? body.get("nozzleTemp").asDouble() : null)
+                    .bedTemp(body.hasNonNull("bedTemp") ? body.get("bedTemp").asDouble() : null)
+                    .message(body.path("message").asText(null))
+                    .build();
+        } catch (Exception e) {
+            return PrinterProgressResponseDto.builder()
+                    .success(false)
+                    .message("프린터 서버에 연결할 수 없습니다: " + e.getMessage())
+                    .build();
+        }
     }
 
     private PrintOrderResponseDto toDto(PrintOrder order) {
