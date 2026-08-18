@@ -47,6 +47,7 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 
 # Console prints in this file use non-ASCII characters (arrows, em-dashes).
 # On Windows the console's native codepage (cp949/cp1252/...) can't encode
@@ -1740,12 +1741,17 @@ def save_annotated(image, data, aruco_corners, finger, save_path):
 
 def measure_finger(top_path: str, finger: str,
                    aruco_size_mm: float, output_dir: str,
-                   ccurve_path: str = None) -> dict:
+                   ccurve_path: str = None,
+                   ccurve_table_edge: bool = True) -> dict:
     """
     ccurve_path : optional path to an end-on (tip-facing) photo.
         When provided, C-curve is measured directly from that image
         using the nail width as scale reference (no ArUco needed).
         When omitted, the brightness-drop fallback is used instead.
+    ccurve_table_edge : the end-on photo is a finger draped over a table/mat
+        edge (arm resting on the desk behind it) rather than isolated
+        against a plain background — the current capture standard. Set
+        False for the older isolated-background (box) style photos.
     """
     print(f"\n{'='*55}")
     print(f"  Measuring: {finger.upper()}")
@@ -1774,7 +1780,8 @@ def measure_finger(top_path: str, finger: str,
         try:
             cc = _endOn_ccurve(ccurve_path,
                                width_mm=data["width_mm"],
-                               debug_out=debug_path)
+                               debug_out=debug_path,
+                               table_edge=ccurve_table_edge)
             data["c_curve_mm"]    = cc["c_curve_mm"]
             data["arc_radius_mm"] = cc["arc_radius_mm"]
             data["_ccurve_method"] = "end-on photo"
@@ -1882,35 +1889,109 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
 # 10. Profile builder (size classification + skin tone)
 # ─────────────────────────────────────────────────────────────
 
-def build_profile(results: list) -> list:
+_LENGTH_DESC = {
+    "much_smaller": "평균보다 많이 짧은 편", "smaller": "평균보다 짧은 편",
+    "average": "평균과 비슷한 편",
+    "larger": "평균보다 긴 편", "much_larger": "평균보다 많이 긴 편",
+}
+_WIDTH_DESC = {
+    "much_smaller": "평균보다 많이 좁은 편", "smaller": "평균보다 좁은 편",
+    "average": "평균과 비슷한 편",
+    "larger": "평균보다 넓은 편", "much_larger": "평균보다 많이 넓은 편",
+}
+def _majority(labels: list):
+    """Plurality vote; ties broken toward whichever option is closest to
+    'average' on the size scale (the conservative choice)."""
+    labels = [l for l in labels if l]
+    if not labels:
+        return None
+    counts = Counter(labels)
+    top = max(counts.values())
+    winners = [l for l, c in counts.items() if c == top]
+    if len(winners) == 1:
+        return winners[0]
+    order = ["much_smaller", "smaller", "average", "larger", "much_larger"]
+    center = order.index("average")
+    winners.sort(key=lambda l: abs(order.index(l) - center) if l in order else 99)
+    return winners[0]
+
+
+def build_profile(results: list) -> dict:
     """
-    For each measured finger return a small profile dict with:
-      - finger name
+    Per-finger measured values (width/length/C-curve, straight from the
+    top+end-on photo pipeline — not just deltas) plus a hand-level summary
+    for the web display: averages, a majority-vote size verdict across the
+    5 fingers, and a one-line description.
+
+    Per finger:
+      - width_mm / length_mm / c_curve_mm / arc_radius_mm: measured values
+      - c_curve_ratio: c_curve_mm / arc_radius_mm, unitless 0 (flat) -> 1
+                   (half-circle)
       - width_vs_avg_mm / length_vs_avg_mm: measured minus the Korean-women
                    reference mean for that finger (STANDARD_NAILS)
-      - nail_size: overall size classification relative to that standard,
-                   based on the mean of the width/length z-scores
-                   (much_smaller / smaller / average / larger / much_larger)
+      - width_size / length_size / nail_size: size classification relative
+                   to that standard (much_smaller/smaller/average/larger/
+                   much_larger) — nail_size is the combined width+length
+                   verdict used for the STL comfort-fit shrink; width_size/
+                   length_size are each on their own axis, for the "손톱이
+                   짧은 편이고 좁은 편이에요" style summary text.
       - skin_tone: hex colour sampled from the skin ring around the nail
     """
-    profiles = []
+    fingers = []
     for r in results:
         finger = r["finger"]
         std    = STANDARD_NAILS.get(finger)
         if std is None:
             continue
-        w    = r["width_mm"]
-        l    = r.get("corrected_length_mm") or r["length_mm"]
-        w_z  = (w - std["width_mm"]) / std["width_sd"]
-        l_z  = (l - std["length_mm"]) / std["length_sd"]
-        profiles.append({
+        w   = r["width_mm"]
+        l   = r["length_mm"]
+        l_c = r.get("corrected_length_mm") or l
+        w_z = (w - std["width_mm"]) / std["width_sd"]
+        l_z = (l_c - std["length_mm"]) / std["length_sd"]
+        fingers.append({
             "finger":           finger,
+            "width_mm":         w,
+            "length_mm":        l,
+            "c_curve_mm":       r["c_curve_mm"],
+            "arc_radius_mm":    r.get("arc_radius_mm"),
+            "c_curve_method":   r.get("_ccurve_method", "?"),
             "width_vs_avg_mm":  round(w - std["width_mm"], 2),
-            "length_vs_avg_mm": round(l - std["length_mm"], 2),
+            "length_vs_avg_mm": round(l_c - std["length_mm"], 2),
+            "width_size":       _size_category(w_z),
+            "length_size":      _size_category(l_z),
             "nail_size":        _size_category((w_z + l_z) / 2.0),
             "skin_tone":        r.get("skin_tone_hex", "#FFFFFF"),
         })
-    return profiles
+
+    if not fingers:
+        return {"summary": None, "fingers": []}
+
+    n = len(fingers)
+    avg_width_mm   = round(sum(f["width_mm"] for f in fingers) / n, 2)
+    avg_length_mm  = round(sum(f["length_mm"] for f in fingers) / n, 2)
+    avg_c_curve_mm = round(sum(f["c_curve_mm"] for f in fingers) / n, 2)
+
+    width_size  = _majority([f["width_size"]  for f in fingers])
+    length_size = _majority([f["length_size"] for f in fingers])
+    nail_size   = _majority([f["nail_size"]   for f in fingers])
+
+    length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
+    width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
+    summary_text = (
+        f"손톱 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요. "
+        f"평균 C-curve는 {avg_c_curve_mm}mm입니다."
+    )
+
+    summary = {
+        "avg_width_mm":   avg_width_mm,
+        "avg_length_mm":  avg_length_mm,
+        "avg_c_curve_mm": avg_c_curve_mm,
+        "width_size":     width_size,
+        "length_size":    length_size,
+        "nail_size":      nail_size,
+        "summary_text":   summary_text,
+    }
+    return {"summary": summary, "fingers": fingers}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1930,6 +2011,10 @@ def main():
     p.add_argument("--ccurve-tops",  nargs="+", default=None,
                    help="End-on C-curve photos (batch, same count as --tops; "
                         'use "" or "none" to skip per finger)')
+    p.add_argument("--ccurve-box-style", action="store_true",
+                   help="End-on C-curve photo(s) are the older isolated-"
+                        "background (box) style, not the current table-"
+                        "edge style (default: table-edge)")
     p.add_argument("--aruco-size",   type=float, default=20.0)
     p.add_argument("--debug", action="store_true", help="verbose detector diagnostics")
     p.add_argument("--no-lateral", action="store_true",
@@ -1957,14 +2042,16 @@ def main():
 
         for finger, top in zip(args.fingers, args.tops):
             r = measure_finger(top, finger, args.aruco_size, args.output,
-                               ccurve_path=ccurve_map.get(finger))
+                               ccurve_path=ccurve_map.get(finger),
+                               ccurve_table_edge=not args.ccurve_box_style)
             results.append(r)
     else:
         if not args.top:
             sys.exit("ERROR: Provide --top photo path, or use --batch")
         r = measure_finger(args.top, args.finger,
                            args.aruco_size, args.output,
-                           ccurve_path=args.ccurve_top)
+                           ccurve_path=args.ccurve_top,
+                           ccurve_table_edge=not args.ccurve_box_style)
         results.append(r)
 
     payload   = build_payload(results, args.aruco_size)
@@ -1972,12 +2059,10 @@ def main():
     with open(json_path, "w") as f:
         json.dump(payload, f, indent=2)
 
-    profiles      = build_profile(results)
+    profile_data  = build_profile(results)
     profile_path  = os.path.join(args.output, "profile.json")
-    # Single finger → save the dict directly; batch → save as a list.
-    profile_data  = profiles[0] if len(profiles) == 1 else profiles
-    with open(profile_path, "w") as f:
-        json.dump(profile_data, f, indent=2)
+    with open(profile_path, "w", encoding="utf-8") as f:
+        json.dump(profile_data, f, indent=2, ensure_ascii=False)
 
     print(f"\n{'='*55}")
     print(f"[OK] Saved -> {json_path}")

@@ -106,3 +106,8 @@ scan/.env
 scan/photos
 scan/results
 
+scan/SCAN_PIPELINE.md
+scan/ccurve_images_wj/
+
+scan/out_live
+
