@@ -66,6 +66,35 @@ def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     return float(B.min() + t / 255.0 * np.ptp(B)), bg_b
 
 
+def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
+    """Locate the row where a uniform dark mat/desk-edge begins at the
+    bottom of the frame (end-on photo taken with the finger draped over a
+    table edge, arm resting on the desk behind it).
+
+    Scans upward from the bottom using the row-median L* (over the central
+    columns, avoiding stray objects near the left/right edges) and finds
+    where it first departs from the flat mat reference — that's the edge.
+    Returns None if no such flat-bottom region is found (e.g. the older
+    isolated-background photo style, where this step should be skipped).
+    """
+    H, W = img.shape[:2]
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
+    L = lab[:, :, 0].astype(np.float32)
+    x0, x1 = int(W * margin_frac), int(W * (1 - margin_frac))
+    row_med = np.median(L[:, x0:x1], axis=1)
+    ref = row_med[-max(20, int(0.03 * H)):]
+    mat_ref, mat_std = float(np.median(ref)), float(np.std(ref))
+    if mat_std > 15:
+        return None          # bottom strip isn't a flat mat — nothing to find
+    thr = max(3.0 * mat_std, 10.0)
+    edge_row = 0
+    for y in range(H - 1, -1, -1):
+        if abs(row_med[y] - mat_ref) > thr:
+            edge_row = y + 1
+            break
+    return edge_row
+
+
 def _fit_circle_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
     """Kåsa circle fit with iterative outlier rejection.
 
@@ -91,11 +120,53 @@ def _fit_circle_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
 
 def measure_ccurve(image_path: str, width_mm: float,
                    debug_out: str = None,
-                   thickness_mm: float = 0.85) -> dict:
+                   thickness_mm: float = 0.85,
+                   table_edge: bool = False,
+                   edge_margin_px: int = 220) -> dict:
 
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot open: {image_path}")
+
+    if table_edge:
+        edge_row = _find_table_edge(img)
+        if edge_row is None:
+            print("  [Edge] no flat table-edge mat found at the bottom — "
+                  "skipping crop.")
+        else:
+            crop_top = max(0, edge_row - edge_margin_px)
+            print(f"  [Edge] table edge at row {edge_row}  →  cropping to "
+                  f"[{crop_top}:] ({edge_margin_px}px margin above it)")
+            img = img[crop_top:, :]
+
+            # Other fingers/knuckles caught in the margin above are still
+            # fused to the target nail in one connected skin blob. The
+            # target is whichever part dips lowest below the table edge —
+            # anchor there and trim to just that finger's local width
+            # before the main pipeline (which can't tell fingers apart)
+            # ever sees the rest of the hand.
+            lab0 = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
+            warm0 = (lab0[:, :, 1].astype(np.float32) - 128) > 5
+            ys, xs = np.nonzero(warm0)
+            if len(ys):
+                ay = int(ys.max())
+                ax = int(np.median(xs[ys > ay - 5]))
+                # A single-row scan for the blob's local width is too
+                # fragile (shadows/antialiasing can pinch it to ~0px).
+                # Instead size the window from the known nail width and a
+                # nominal scale for this rig — generous enough to hold the
+                # whole nail, tight enough to exclude the next finger over.
+                # The real scale is computed precisely afterwards from the
+                # fitted chord.
+                nominal_mm_per_px = 0.048
+                half_w = int(0.9 * width_mm / nominal_mm_per_px)
+                x0 = max(0, ax - half_w)
+                x1 = min(img.shape[1], ax + half_w)
+                y0 = max(0, ay - int(1.8 * width_mm / nominal_mm_per_px))
+                y1 = min(img.shape[0], ay + 15)
+                print(f"  [Edge] anchor=({ax},{ay})  →  tight crop "
+                      f"x[{x0}:{x1}] y[{y0}:{y1}]")
+                img = img[y0:y1, x0:x1]
 
     H, W_img = img.shape[:2]
     scale_factor = max(H, W_img) / 2000.0          # for adaptive kernel sizes
@@ -127,11 +198,16 @@ def measure_ccurve(image_path: str, width_mm: float,
         raise RuntimeError("No finger-sized warm region found — "
                            "check that the fingertip is in frame.")
 
-    def centrality(c):
-        x, y, w, h = cv2.boundingRect(c)
-        return np.hypot(x + w / 2 - W_img / 2, y + h / 2 - H / 2)
-
-    finger_cnt = min(big, key=centrality)
+    if table_edge:
+        # The target nail is whichever warm blob hangs deepest into the mat
+        # below the table edge — other fingers/knuckles caught in the crop
+        # stay above it, even if they're more "central" in the frame.
+        finger_cnt = max(big, key=lambda c: cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3])
+    else:
+        def centrality(c):
+            x, y, w, h = cv2.boundingRect(c)
+            return np.hypot(x + w / 2 - W_img / 2, y + h / 2 - H / 2)
+        finger_cnt = min(big, key=centrality)
     fmask = np.zeros((H, W_img), np.uint8)
     cv2.drawContours(fmask, [finger_cnt], -1, 255, -1)
     fx, fy, fw, fh = cv2.boundingRect(finger_cnt)
@@ -171,6 +247,20 @@ def measure_ccurve(image_path: str, width_mm: float,
     rad = max(5, int(1.6 * thick_px)) | 1
     kd = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rad, rad))
     band = cv2.bitwise_and(cv2.dilate(pulp_mask, kd), nail_bin)
+
+    # The isotropic dilation above is meant to reach a little way UP from
+    # the pulp into the nail's dome, but it just as happily reaches
+    # SIDEWAYS from the pulp's leftmost/rightmost corners — straight into
+    # the lateral nail-fold skin, which often shares the nail's a* tone.
+    # That flattens the fitted arc (wider chord than the real nail, biased
+    # toward the flatter skin at the edges). Cap the lateral reach to the
+    # pulp's own width plus one nail-thickness of slack, since the nail
+    # can't be meaningfully wider than the finger flesh directly under it.
+    pbx, pby, pbw, pbh = cv2.boundingRect(pulp_cnt)
+    lat_pad = max(3, int(thick_px))
+    band[:, :max(0, pbx - lat_pad)] = 0
+    band[:, min(W_img, pbx + pbw + lat_pad):] = 0
+
     bcnts, _ = cv2.findContours(band, cv2.RETR_EXTERNAL,
                                 cv2.CHAIN_APPROX_NONE)
     if not bcnts:
@@ -182,8 +272,41 @@ def measure_ccurve(image_path: str, width_mm: float,
           f"bbox={cv2.boundingRect(band_cnt)}")
 
     # ── 5. Circle fit to band top boundary, hook-tip chord ───
+    # The dilated pulp mask rounds off at its own corners, and nail_bin can
+    # pick up the shadowed lateral side of the finger there — together they
+    # let the "topmost band pixel" trace climb up the SIDE of the finger
+    # near the hook tips instead of stopping at the nail's true corner
+    # (verified visually: the raw trace follows the finger's silhouette
+    # edge, not the nail, right where the hook tips are picked). Bound how
+    # far above the pulp's own local top boundary the trace may go, using
+    # the band's typical (median) thickness — where pulp doesn't reach
+    # (a few columns at the very edge), reuse the nearest pulp column.
     cols = np.where(band_mask.any(axis=0))[0]
-    top_y = np.array([np.argmax(band_mask[:, c] > 0) for c in cols], float)
+    raw_top = np.array([np.argmax(band_mask[:, c] > 0) for c in cols], float)
+
+    pcols = np.where(pulp_mask.any(axis=0))[0]
+    ptop = np.array([np.argmax(pulp_mask[:, c] > 0) for c in pcols], float)
+    nn = np.searchsorted(pcols, cols).clip(0, len(pcols) - 1)
+    nn_lo = (nn - 1).clip(0, len(pcols) - 1)
+    use_lo = np.abs(pcols[nn_lo] - cols) < np.abs(pcols[nn] - cols)
+    pulp_top_for_col = np.where(use_lo, ptop[nn_lo], ptop[nn])
+
+    thickness = pulp_top_for_col - raw_top
+    ref_thick = float(np.median(thickness[thickness > 0])) \
+        if (thickness > 0).any() else thick_px
+    cap_top = pulp_top_for_col - 2.2 * ref_thick
+    top_y = np.maximum(raw_top, cap_top)
+
+    # Apply the same cap to the mask itself, so the hook-tip search below
+    # (which scans band_mask directly, not just the per-column trace) can't
+    # pick a point from the trimmed-off vertical tail either.
+    cap_full = np.full(W_img, -1e9)
+    cap_full[cols] = cap_top
+    byy, bxx = np.nonzero(band_mask)
+    keep_px = byy >= cap_full[bxx]
+    band_mask = np.zeros_like(band_mask)
+    band_mask[byy[keep_px], bxx[keep_px]] = 255
+
     xs, ys = cols.astype(float), top_y
     cx, cy, r_px, keep = _fit_circle_robust(xs, ys)
     res_med = float(np.median(np.abs(
@@ -210,8 +333,30 @@ def measure_ccurve(image_path: str, width_mm: float,
             "check that the nail is clearly visible in the photo.")
 
     # ── 6. Scale & final values ───────────────────────────────
-    scale_mm_per_px = width_mm / chord_px
-    half_c = chord_px / 2.0
+    # The hook tips (x_L/x_R, 100% out to the visible edge) are the least
+    # reliable points on the trace — exactly where corner/shadow ambiguity
+    # concentrates (see measure_ccurve dev notes). Anchor the mm/px scale
+    # on a point INSET_FRAC of the way out from centre instead, well clear
+    # of that noise, and extrapolate to the known full width_mm linearly —
+    # width_mm itself is trusted ground truth (top-view measurement), not
+    # something this photo needs to re-detect at 100%.
+    INSET_FRAC = 0.8
+    x_c = (x_L + x_R) / 2.0
+    x_L80 = x_c - INSET_FRAC * (x_c - x_L)
+    x_R80 = x_c + INSET_FRAC * (x_R - x_c)
+    iL80 = int(np.argmin(np.abs(cols - x_L80)))
+    iR80 = int(np.argmin(np.abs(cols - x_R80)))
+    xL80, yL80 = float(cols[iL80]), float(top_y[iL80])
+    xR80, yR80 = float(cols[iR80]), float(top_y[iR80])
+    chord80_px = float(np.hypot(xR80 - xL80, yR80 - yL80))
+    if chord80_px < 8:
+        raise RuntimeError(
+            f"Degenerate inset chord={chord80_px:.0f}px — "
+            "check that the nail is clearly visible in the photo.")
+
+    scale_mm_per_px = (INSET_FRAC * width_mm) / chord80_px
+    chord_px_full = chord80_px / INSET_FRAC   # extrapolated to full width
+    half_c = chord_px_full / 2.0
     if r_px <= half_c:
         sagitta_px = r_px          # ≥ half circle; clamp
     else:
@@ -220,13 +365,14 @@ def measure_ccurve(image_path: str, width_mm: float,
     arc_R = round(width_mm ** 2 / (8 * h_mm) + h_mm / 2, 2)
     fit_R_mm = round(r_px * scale_mm_per_px, 2)
     # arc length over the curve (what a flexible ruler measures)
-    half = min(1.0, chord_px / (2 * r_px))
+    half = min(1.0, chord_px_full / (2 * r_px))
     arc_len_mm = round(2 * r_px * np.arcsin(half) * scale_mm_per_px, 2)
 
     print(f"  [Nail arc]  L=({x_L:.0f},{y_L:.0f})  R=({x_R:.0f},{y_R:.0f})  "
           f"peak=({x_P:.0f},{y_P:.0f})")
-    print(f"  [Scale]  chord={chord_px:.1f}px  W_mm={width_mm}mm  "
-          f"→  {scale_mm_per_px:.5f} mm/px")
+    print(f"  [Scale]  {int(INSET_FRAC*100)}%-inset chord={chord80_px:.1f}px "
+          f"(full~{chord_px_full:.1f}px vs raw hook-tip {chord_px:.1f}px)  "
+          f"W_mm={width_mm}mm  →  {scale_mm_per_px:.5f} mm/px")
     print(f"  [C-curve]  sagitta={sagitta_px:.1f}px  →  h={h_mm}mm")
     print(f"  [Arc R]  chord formula R={arc_R}mm   circle-fit R={fit_R_mm}mm")
     print(f"  [Arc length] over-the-curve width ~ {arc_len_mm}mm")
@@ -281,7 +427,7 @@ def measure_ccurve(image_path: str, width_mm: float,
         "arc_radius_mm": arc_R,
         "arc_radius_fit_mm": fit_R_mm,
         "arc_length_mm": arc_len_mm,
-        "arc_width_px":  round(chord_px, 1),
+        "arc_width_px":  round(chord_px_full, 1),
         "sagitta_px":    round(sagitta_px, 1),
         "scale_mm_per_px": round(scale_mm_per_px, 5),
         "nail_endpoints": {
@@ -302,12 +448,21 @@ def main():
                    help="Path to save annotated debug image")
     p.add_argument("--json-out",  default=None,
                    help="Path to save result JSON")
+    p.add_argument("--table-edge", action="store_true",
+                   help="Photo is finger draped over a table/mat edge "
+                        "(arm resting on the desk behind it) — crop out "
+                        "everything above the mat edge before measuring")
+    p.add_argument("--edge-margin-px", type=int, default=220,
+                   help="Pixels to keep above the detected table edge "
+                        "(default 220)")
     args = p.parse_args()
 
     print(f"\nC-curve measurement: {args.image}")
     print(f"  Known nail width: {args.width_mm}mm\n")
 
-    result = measure_ccurve(args.image, args.width_mm, args.debug_out)
+    result = measure_ccurve(args.image, args.width_mm, args.debug_out,
+                             table_edge=args.table_edge,
+                             edge_margin_px=args.edge_margin_px)
 
     print(f"\n  ┌─ C-CURVE RESULT ─────────────────────────────")
     print(f"  │  Sagitta (C-curve)  : {result['c_curve_mm']} mm")
