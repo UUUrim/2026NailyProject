@@ -1,0 +1,29 @@
+# RTX 50-series (Blackwell, sm_120) GPUs require a CUDA 12.8+ build.
+# If you only install the detection server (main_detect.py) on a separate machine,
+# a CPU-only torch build is fine.
+# For the generation server on GPU, install torch first:
+#   pip install torch torchvision --extra-index-url https://download.pytorch.org/whl/cu128
+#   pip install -r requirements.txt
+
+# Z-Image requires the latest diffusers (install from source until an official release includes it)
+git+https://github.com/huggingface/diffusers
+
+transformers>=4.55
+accelerate
+sentencepiece
+huggingface_hub
+safetensors
+peft
+
+fastapi
+uvicorn[standard]
+pydantic
+
+scikit-learn
+numpy
+pillow
+opencv-python-headless
+
+# GroundingDINO / SAM (used to reproduce the SegmentV2 ComfyUI node) - also needed by main_detect.py
+einops
+timm
