@@ -64,4 +64,8 @@ public class ScanImg {
     public void updateStlUrl(String stlUrl) {
         this.stlUrl = stlUrl;
     }
+
+    public void updateImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
+    }
 }

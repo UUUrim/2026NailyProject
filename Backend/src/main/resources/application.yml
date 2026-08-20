@@ -88,10 +88,10 @@ cloud:
     stack:
       auto: false
 
-python:
+analysis:
   server:
-    url: http://localhost:8000
+    url: https://sermon-friction-unequal.ngrok-free.dev  # 통합 서버 ngrok
 
 printer:
   server:
-    url: https://sermon-friction-unequal.ngrok-free.dev
+    url: ${analysis.server.url}  # 같은 주소 재사용

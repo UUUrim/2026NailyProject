@@ -78,13 +78,14 @@ function parseFingerMeasurements(measurements: string | null | undefined) {
       length?: number
       widthMm?: number
       width?: number
+      cCurveMm?: number
       cCurve?: number
       curve?: number
     }
     return {
       lengthMm: Number(m.lengthMm ?? m.length ?? 12),
       widthMm: Number(m.widthMm ?? m.width ?? 9),
-      cCurve: Number(m.cCurve ?? m.curve ?? 0.55),
+      cCurve: Number(m.cCurveMm ?? m.cCurve ?? m.curve ?? 0.55),
     }
   } catch {
     return { lengthMm: 12, widthMm: 9, cCurve: 0.55 }
