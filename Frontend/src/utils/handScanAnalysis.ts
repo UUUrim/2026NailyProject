@@ -15,6 +15,12 @@ export type FingerDetail = {
   widthMm: number
   cCurve: number
   overlay: { x: number; y: number }
+  // profile.json 논문 기준 비교값 (선택적 — 데이터 없을 때 기본값 사용)
+  widthVsAvgMm?:  number
+  lengthVsAvgMm?: number
+  widthSize?:     string
+  lengthSize?:    string
+  nailSize?:      string
 }
 
 export type HandScanAnalysis = {

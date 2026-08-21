@@ -100,13 +100,8 @@ public class ScanService {
         HandScan handScan = handScanRepository.findByIdAndUserId(scanId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 5장 다 올라왔는지 체크
-        List<ScanImg> images = scanImgRepository.findByHandScan(handScan);
-        if (images.size() < 5) {
-            throw new IllegalStateException("모든 손가락 이미지를 업로드해주세요. (" + images.size() + "/5)");
-        }
-
-        handScan.updateStatus(HandScan.ScanStatus.ANALYZING); // 상태: 분석 중
+        // A안: 사진 촬영은 스캔 서버가 직접 담당 → 프론트 업로드 체크 없음
+        handScan.updateStatus(HandScan.ScanStatus.ANALYZING);
 
         // 파이썬 FastAPI로 보낼 데이터 조합
         Map<String, Object> requestBody = Map.of(
@@ -153,16 +148,28 @@ public class ScanService {
                 resultDto.getOverallSize()
         );
 
-        // 2. ScanImg (자식들) 업데이트: 각 손가락별 측정 수치와 팁 호수 저장
+        // 2. ScanImg 업데이트 (A안: 스캔 서버가 사진 직접 촬영 → DB에 레코드 없을 수 있음 → 없으면 생성)
         for (ScanResultRequestDto.FingerResult fingerResult : resultDto.getFingers()) {
             ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
+            String annotatedUrl = fingerResult.getAnnotatedImageUrl() != null
+                    ? fingerResult.getAnnotatedImageUrl() : "";
+
             ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
-                    .orElseThrow(() -> new IllegalArgumentException("해당 손가락을 찾을 수 없습니다."));
+                    .orElseGet(() -> scanImgRepository.save(
+                            ScanImg.builder()
+                                    .handScan(handScan)
+                                    .finger(fingerEnum)
+                                    .imageUrl(annotatedUrl)   // annotated 이미지를 대표 이미지로 저장
+                                    .build()
+                    ));
 
             try {
-                // 손가락별 수치는 JSON 형태로 변환해서 저장
                 String measurementsJson = objectMapper.writeValueAsString(fingerResult.getMeasurements());
                 scanImg.updateAnalysisResult(measurementsJson, fingerResult.getSize());
+                // 스캔 서버가 annotated URL을 보내줬으면 imageUrl 업데이트
+                if (!annotatedUrl.isEmpty()) {
+                    scanImg.updateImageUrl(annotatedUrl);
+                }
             } catch (Exception e) {
                 throw new RuntimeException("수치 데이터 JSON 변환 중 오류가 발생했습니다.", e);
             }

@@ -288,6 +288,7 @@
     display: grid;
     grid-template-columns: 1fr 2px 1fr;
     min-height: 0;
+    max-height: calc(100svh - 120px); /* 캡처 버튼/뱃지 공간 확보 */
 }
 
 .hand-scan-fs__feed {
@@ -475,7 +476,8 @@
     font-weight: 600;
     line-height: 1.4;
     color: #fff;
-    white-space: nowrap;
+    white-space: normal;
+    text-align: center;
     pointer-events: none;
     border-radius: 999px;
     background: rgba(0, 0, 0, 0.45);

@@ -18,10 +18,14 @@ import {
   moveLikedDesign,
   unlikeDesign,
   createSavedFolder,
+  deleteDesign,
+  getDesignChatHistory,
   deleteSavedFolder,
   type DesignImageResponse,
   type SavedDesignResponse,
   type SavedFolderResponse,
+  type DesignExtractedDetails,
+  type DesignChatMessage,
 } from '@/apis/design'
 import { FavoriteFolderModal } from '@/components/mypage/FavoriteFolderModal'
 import { NextStepButton } from '@/components/common/NextStepButton'
@@ -480,6 +484,33 @@ export function MyPage() {
 
   const [detailImage, setDetailImage] = useState<DesignImageDetailInput | null>(null)
   const [isBusy, setIsBusy] = useState(false)
+
+// ── 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글) ──────
+  const [showChatHistory, setShowChatHistory] = useState(false)
+  const [chatHistory, setChatHistory] = useState<DesignChatMessage[]>([])
+  const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
+  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
+  const [confirmedDesignId, setConfirmedDesignId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!showChatHistory || confirmedDesignId == null) return
+    let cancelled = false
+    setIsChatHistoryLoading(true)
+    setChatHistoryError(null)
+    getDesignChatHistory(confirmedDesignId)
+        .then((data) => {
+          if (!cancelled) setChatHistory(data)
+        })
+        .catch(() => {
+          if (!cancelled) setChatHistoryError('채팅 이력을 불러오지 못했어요.')
+        })
+        .finally(() => {
+          if (!cancelled) setIsChatHistoryLoading(false)
+        })
+    return () => {
+      cancelled = true
+    }
+  }, [showChatHistory, confirmedDesignId])
 
   // ── 활동 타임라인 ──────
   const [selectedTimelineDate, setSelectedTimelineDate] = useState(todayKey)
