@@ -280,7 +280,9 @@
     background: #0d0d0d;
     display: flex;
     flex-direction: column;
+    justify-content: center;
     overflow: hidden;
+    --hand-scan-fs-reserved: 120px; /* 캡처 버튼 공간 확보 (위아래로 절반씩 분배됨) */
 }
 
 .hand-scan-fs__feeds {
@@ -288,7 +290,7 @@
     display: grid;
     grid-template-columns: 1fr 2px 1fr;
     min-height: 0;
-    max-height: calc(100svh - 120px); /* 캡처 버튼/뱃지 공간 확보 */
+    max-height: calc(100svh - var(--hand-scan-fs-reserved));
 }
 
 .hand-scan-fs__feed {
@@ -494,7 +496,7 @@
 
 .hand-scan-fs__finger-badge {
     position: absolute;
-    top: 64px;
+    top: 130px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 2;
