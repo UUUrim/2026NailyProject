@@ -1,23 +1,25 @@
 import { useEffect, useState } from 'react'
 import { getScanResult } from '@/apis/scan'
 import { getNailShape } from '@/constants/nailShapes'
-import { SEASON_ROWS, SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
+import { SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
+import { analyzeSkinTone, classifySkinLevel, generateSkinTonePalette } from '@/utils/skinTone'
 import {
   buildScanDetail,
   dateKeyOf,
   formatDateTimeFull,
   formatNavDate,
-  pickPalettePreview,
-  representativePersonalColor,
   type ScanDetail,
   type ScanSession,
 } from '@/utils/scanDetail'
+import { ScanXModalShell } from '@/components/mypage/ScanXModalShell'
 import '@/styles/mypage.css'
 
 type Props = {
   session: ScanSession | null
   onClose: () => void
 }
+
+const FALLBACK_SKIN_COLOR = '#de869f'
 
 const Icon = {
   design: (
@@ -100,6 +102,25 @@ export function ScanDetailModal({ session, onClose }: Props) {
   const [fingerDetailOpen, setFingerDetailOpen] = useState(false)
   const [fingerHand, setFingerHand] = useState<'L' | 'R'>('L')
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // 클릭으로 고정(핀)된 상태인지 — 핀 되어 있으면 마우스가 벗어나도 안 닫히고,
+  // 핀 된 채로 버튼을 다시 클릭하면 마우스가 버튼 위에 있어도 확실히 닫혀야 한다.
+  const [palettePinned, setPalettePinned] = useState(false)
+
+  const openPaletteOnHover = () => {
+    if (!palettePinned) setPaletteOpen(true)
+  }
+  const closePaletteOnHover = () => {
+    if (!palettePinned) setPaletteOpen(false)
+  }
+  const togglePaletteClick = () => {
+    if (palettePinned) {
+      setPalettePinned(false)
+      setPaletteOpen(false)
+    } else {
+      setPalettePinned(true)
+      setPaletteOpen(true)
+    }
+  }
 
   useEffect(() => {
     if (!session) {
@@ -107,6 +128,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
       setIsLoading(false)
       setFingerDetailOpen(false)
       setPaletteOpen(false)
+      setPalettePinned(false)
       return
     }
 
@@ -115,6 +137,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
     setFingerDetailOpen(false)
     setFingerHand('L')
     setPaletteOpen(false)
+    setPalettePinned(false)
     setIsLoading(true)
 
     void (async () => {
@@ -139,259 +162,284 @@ export function ScanDetailModal({ session, onClose }: Props) {
 
   if (!session) return null
 
+  const subtitle = detail
+    ? formatDateTimeFull(detail.scannedAt) || formatNavDate(dateKeyOf(detail.scannedAt))
+    : null
+
   return (
-    <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="손 분석 상세 결과">
-      <button
-        type="button"
-        className="mypage-x__modal-backdrop"
-        aria-label="닫기"
-        onClick={onClose}
-      />
-      <div className="mypage-x__modal-panel mypage-x__scanx-panel">
-        <button
-          type="button"
-          className="mypage-x__modal-close mypage-x__modal-close--plain"
-          onClick={onClose}
-          aria-label="닫기"
-        >
-          ✕
-        </button>
+    <ScanXModalShell
+      ariaLabel="손 분석 상세 결과"
+      eyebrow="Hand Analysis"
+      title="손 분석 결과"
+      subtitle={subtitle}
+      onClose={onClose}
+    >
+      {isLoading || !detail ? (
+        <p className="mypage-x__empty">분석 결과를 불러오는 중...</p>
+      ) : (() => {
+        const skinHex = detail.skinToneHex ?? FALLBACK_SKIN_COLOR
+        const analysis = detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null
+        const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
+        const palette = detail.skinToneHex ? generateSkinTonePalette(detail.skinToneHex, 24) : []
+        const shapeLabel = detail.shapeId
+          ? getNailShape(detail.shapeId)?.labelKo ?? detail.shapeId
+          : null
+        const shapeEn = detail.shapeId
+          ? getNailShape(detail.shapeId)?.labelEn ?? detail.shapeId
+          : null
+        const lengthPct = Math.min(100, Math.max(8, (detail.avgLength / 18) * 100))
+        const widthPct = Math.min(100, Math.max(8, (detail.avgWidth / 14) * 100))
+        const curvePct = Math.min(100, Math.max(8, detail.avgCurve * 100))
+        const fingerList = detail.fingers.filter((f) => f.hand === fingerHand)
+        const hasLeft = detail.fingers.some((f) => f.hand === 'L')
+        const hasRight = detail.fingers.some((f) => f.hand === 'R')
 
-        {isLoading || !detail ? (
-          <p className="mypage-x__empty">분석 결과를 불러오는 중...</p>
-        ) : (() => {
-          const seasonRow = SEASON_ROWS.find((r) => r.code === detail.seasonCode)
-          const repColor = representativePersonalColor(detail.seasonCode)
-          const palette = pickPalettePreview(detail.seasonCode, 24)
-          const shapeLabel = detail.shapeId
-            ? getNailShape(detail.shapeId)?.labelKo ?? detail.shapeId
-            : null
-          const shapeEn = detail.shapeId
-            ? getNailShape(detail.shapeId)?.labelEn ?? detail.shapeId
-            : null
-          const lengthPct = Math.min(100, Math.max(8, (detail.avgLength / 18) * 100))
-          const widthPct = Math.min(100, Math.max(8, (detail.avgWidth / 14) * 100))
-          const curvePct = Math.min(100, Math.max(8, detail.avgCurve * 100))
-          const fingerList = detail.fingers.filter((f) => f.hand === fingerHand)
-          const hasLeft = detail.fingers.some((f) => f.hand === 'L')
-          const hasRight = detail.fingers.some((f) => f.hand === 'R')
+        return (
+          <>
+            <section
+              className="mypage-x__scanx-hero"
+              style={{
+                background: `linear-gradient(145deg, ${skinHex}22 0%, #fff 48%, ${skinHex}14 100%)`,
+              }}
+            >
+              {palette.length > 0 && (
+                <div
+                  className={`mypage-x__scanx-palette-wrap${paletteOpen ? ' is-open' : ''}`}
+                  onMouseEnter={openPaletteOnHover}
+                  onMouseLeave={closePaletteOnHover}
+                  onFocus={openPaletteOnHover}
+                  onBlur={closePaletteOnHover}
+                >
+                  <button
+                    type="button"
+                    className="mypage-x__scanx-palette-btn"
+                    aria-label="추천 컬러 팔레트 보기"
+                    aria-expanded={paletteOpen}
+                    aria-haspopup="true"
+                    onClick={togglePaletteClick}
+                  >
+                    {Icon.palette}
+                  </button>
+                  <div className="mypage-x__scanx-palette-pop" role="tooltip">
+                    <p className="mypage-x__scanx-palette-pop-title">추천 컬러</p>
+                    <div className="mypage-x__scanx-palette" aria-label="대표 피부색 추천 컬러 24색">
+                      {palette.map((hex, idx) => (
+                        <i key={`${hex}-${idx}`} style={{ background: hex }} title={hex} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="mypage-x__scanx-hero-top">
+                <span
+                  className="mypage-x__scanx-color-orb"
+                  style={{ background: skinHex }}
+                  aria-hidden="true"
+                />
+                <div className="mypage-x__scanx-hero-copy">
+                  <p className="mypage-x__scanx-kicker">대표 피부색</p>
+                  <h3 className="mypage-x__scanx-season">{toneLabel}</h3>
+                  {analysis && (
+                    <div className="mypage-x__scanx-chips">
+                      <span>{toneLabel}</span>
+                      <span>{classifySkinLevel(analysis.brightness.percent)}명도</span>
+                      <span>{classifySkinLevel(analysis.saturation.percent)}채도</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
 
-          return (
-            <>
-              <header className="mypage-x__scanx-head">
-                <p className="mypage-x__scanx-eyebrow">Hand Analysis</p>
-                <h2 className="mypage-x__scanx-title">손 분석 결과</h2>
-                <p className="mypage-x__scanx-date">
-                  {formatDateTimeFull(detail.scannedAt) || formatNavDate(dateKeyOf(detail.scannedAt))}
-                </p>
-              </header>
+            {analysis && (
+              <section className="mypage-x__scanx-tone-card" aria-label="피부톤 분석">
+                <p className="mypage-x__scanx-section-label">피부톤 분석</p>
+                <div className="mypage-x__scanx-tone-bars">
+                  <div className="mypage-x__scanx-tone-bar">
+                    <div className="mypage-x__scanx-tone-bar-head">
+                      <span>톤</span>
+                      <span>{analysis.tone.label}</span>
+                    </div>
+                    <div className="mypage-x__scanx-tone-bar-track mypage-x__scanx-tone-bar-track--tone">
+                      <span style={{ left: `${analysis.tone.percent}%` }} />
+                    </div>
+                  </div>
+                  <div className="mypage-x__scanx-tone-bar">
+                    <div className="mypage-x__scanx-tone-bar-head">
+                      <span>명도</span>
+                      <span>{analysis.brightness.label}</span>
+                    </div>
+                    <div className="mypage-x__scanx-tone-bar-track mypage-x__scanx-tone-bar-track--brightness">
+                      <span style={{ left: `${analysis.brightness.percent}%` }} />
+                    </div>
+                  </div>
+                  <div className="mypage-x__scanx-tone-bar">
+                    <div className="mypage-x__scanx-tone-bar-head">
+                      <span>채도 (혈색)</span>
+                      <span>{analysis.saturation.label}</span>
+                    </div>
+                    <div className="mypage-x__scanx-tone-bar-track mypage-x__scanx-tone-bar-track--saturation">
+                      <span style={{ left: `${analysis.saturation.percent}%` }} />
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
 
-              <section
-                className="mypage-x__scanx-hero"
-                style={{
-                  background: `linear-gradient(145deg, ${repColor}22 0%, #fff 48%, ${repColor}14 100%)`,
-                }}
-              >
-                {palette.length > 0 && (
-                  <div className={`mypage-x__scanx-palette-wrap${paletteOpen ? ' is-open' : ''}`}>
-                    <button
-                      type="button"
-                      className="mypage-x__scanx-palette-btn"
-                      aria-label="퍼스널컬러 팔레트 보기"
-                      aria-expanded={paletteOpen}
-                      aria-haspopup="true"
-                      onClick={() => setPaletteOpen((prev) => !prev)}
+            <section className="mypage-x__scanx-shape">
+              <div className="mypage-x__scanx-shape-copy">
+                <p className="mypage-x__scanx-kicker">추천 네일팁 쉐입</p>
+                <strong>{shapeLabel ?? '미정'}</strong>
+                {shapeEn && <span>{shapeEn}</span>}
+              </div>
+              <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
+                {detail.shapeId && SHAPE_PREVIEW_IMAGES[detail.shapeId] ? (
+                  <img src={SHAPE_PREVIEW_IMAGES[detail.shapeId]} alt="" />
+                ) : (
+                  Icon.design
+                )}
+              </div>
+            </section>
+
+            <section className="mypage-x__scanx-metrics" aria-label="양손 평균 손톱 지표">
+              <p className="mypage-x__scanx-section-label">손톱 평균 수치</p>
+              <div className="mypage-x__scanx-metric-grid">
+                <article className="mypage-x__scanx-metric">
+                  <div className="mypage-x__scanx-metric-top">
+                    <div className="mypage-x__scanx-metric-copy">
+                      <p>길이</p>
+                      <strong>
+                        {detail.avgLength.toFixed(1)}
+                        <em>mm</em>
+                      </strong>
+                    </div>
+                    <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
+                      {Icon.lengthIcon}
+                    </span>
+                  </div>
+                  <div className="mypage-x__scanx-meter" aria-hidden="true">
+                    <i style={{ width: `${lengthPct}%` }} />
+                  </div>
+                  <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
+                </article>
+                <article className="mypage-x__scanx-metric">
+                  <div className="mypage-x__scanx-metric-top">
+                    <div className="mypage-x__scanx-metric-copy">
+                      <p>너비</p>
+                      <strong>
+                        {detail.avgWidth.toFixed(1)}
+                        <em>mm</em>
+                      </strong>
+                    </div>
+                    <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
+                      {Icon.widthIcon}
+                    </span>
+                  </div>
+                  <div className="mypage-x__scanx-meter" aria-hidden="true">
+                    <i style={{ width: `${widthPct}%` }} />
+                  </div>
+                  <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
+                </article>
+                <article className="mypage-x__scanx-metric">
+                  <div className="mypage-x__scanx-metric-top">
+                    <div className="mypage-x__scanx-metric-copy">
+                      <p>곡률</p>
+                      <strong>{detail.avgCurve.toFixed(2)}</strong>
+                    </div>
+                    <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
+                      {Icon.curveIcon}
+                    </span>
+                  </div>
+                  <div className="mypage-x__scanx-meter" aria-hidden="true">
+                    <i style={{ width: `${curvePct}%` }} />
+                  </div>
+                  <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
+                </article>
+              </div>
+            </section>
+
+            <p className="mypage-x__scanx-comment">
+              <span className="mypage-x__scanx-comment-label">
+                한줄 요약
+                <i aria-hidden="true">{Icon.summaryIcon}</i>
+              </span>
+              {detail.comment}
+            </p>
+
+            {detail.fingers.length > 0 && (
+              <div className="mypage-x__scanx-detail-toggle-wrap">
+                <button
+                  type="button"
+                  className={`mypage-x__scanx-detail-toggle${fingerDetailOpen ? ' is-open' : ''}`}
+                  onClick={() => setFingerDetailOpen((prev) => !prev)}
+                  aria-expanded={fingerDetailOpen}
+                >
+                  손가락별 상세 측정값 {fingerDetailOpen ? '접기' : '보기'}
+                  <span className="mypage-x__scanx-detail-toggle-icon" aria-hidden="true">
+                    {Icon.chevronDown}
+                  </span>
+                </button>
+
+                {fingerDetailOpen && (
+                  <div className="mypage-x__scanx-finger-panel">
+                    <div
+                      className={`mypage-x__scanx-hand-tabs${hasLeft && hasRight ? '' : ' is-single'}`}
+                      role="tablist"
+                      aria-label="손 선택"
                     >
-                      {Icon.palette}
-                    </button>
-                    <div className="mypage-x__scanx-palette-pop" role="tooltip">
-                      <p className="mypage-x__scanx-palette-pop-title">컬러 팔레트</p>
-                      <div className="mypage-x__scanx-palette" aria-label="퍼스널컬러 팔레트 24색">
-                        {palette.map((hex, idx) => (
-                          <i key={`${hex}-${idx}`} style={{ background: hex }} title={hex} />
-                        ))}
+                      {hasLeft && (
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={fingerHand === 'L'}
+                          className={fingerHand === 'L' ? 'is-active' : ''}
+                          onClick={() => setFingerHand('L')}
+                        >
+                          <em>L</em>
+                          <span>왼손</span>
+                        </button>
+                      )}
+                      {hasRight && (
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={fingerHand === 'R'}
+                          className={fingerHand === 'R' ? 'is-active' : ''}
+                          onClick={() => setFingerHand('R')}
+                        >
+                          <em>R</em>
+                          <span>오른손</span>
+                        </button>
+                      )}
+                    </div>
+                    <div className="mypage-x__scanx-hand-rows">
+                      <div className="mypage-x__scanx-hand-row mypage-x__scanx-hand-row--head">
+                        <span>손가락</span>
+                        <span>길이</span>
+                        <span>너비</span>
+                        <span>곡률</span>
                       </div>
+                      {fingerList.map((f) => (
+                        <div key={f.label} className="mypage-x__scanx-hand-row">
+                          <span className="mypage-x__scanx-hand-name">{f.partLabel}</span>
+                          <span>
+                            {f.lengthMm.toFixed(1)}
+                            <small>mm</small>
+                          </span>
+                          <span>
+                            {f.widthMm.toFixed(1)}
+                            <small>mm</small>
+                          </span>
+                          <span>{f.cCurve.toFixed(2)}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
-                <div className="mypage-x__scanx-hero-top">
-                  <span
-                    className="mypage-x__scanx-color-orb"
-                    style={{ background: repColor }}
-                    aria-hidden="true"
-                  />
-                  <div className="mypage-x__scanx-hero-copy">
-                    <p className="mypage-x__scanx-kicker">퍼스널 컬러</p>
-                    <h3 className="mypage-x__scanx-season" style={{ color: repColor }}>
-                      {detail.seasonNameKo ?? '분석 결과 없음'}
-                    </h3>
-                    {seasonRow && (
-                      <div className="mypage-x__scanx-chips">
-                        <span>{seasonRow.tone} 톤</span>
-                        <span>{seasonRow.brightness}</span>
-                        <span>{seasonRow.saturation}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-
-              <section className="mypage-x__scanx-shape">
-                <div className="mypage-x__scanx-shape-copy">
-                  <p className="mypage-x__scanx-kicker">추천 네일팁 쉐입</p>
-                  <strong>{shapeLabel ?? '미정'}</strong>
-                  {shapeEn && <span>{shapeEn}</span>}
-                </div>
-                <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
-                  {detail.shapeId && SHAPE_PREVIEW_IMAGES[detail.shapeId] ? (
-                    <img src={SHAPE_PREVIEW_IMAGES[detail.shapeId]} alt="" />
-                  ) : (
-                    Icon.design
-                  )}
-                </div>
-              </section>
-
-              <section className="mypage-x__scanx-metrics" aria-label="양손 평균 손톱 지표">
-                <p className="mypage-x__scanx-section-label">손톱 평균 수치</p>
-                <div className="mypage-x__scanx-metric-grid">
-                  <article className="mypage-x__scanx-metric">
-                    <div className="mypage-x__scanx-metric-top">
-                      <div className="mypage-x__scanx-metric-copy">
-                        <p>길이</p>
-                        <strong>
-                          {detail.avgLength.toFixed(1)}
-                          <em>mm</em>
-                        </strong>
-                      </div>
-                      <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
-                        {Icon.lengthIcon}
-                      </span>
-                    </div>
-                    <div className="mypage-x__scanx-meter" aria-hidden="true">
-                      <i style={{ width: `${lengthPct}%` }} />
-                    </div>
-                    <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
-                  </article>
-                  <article className="mypage-x__scanx-metric">
-                    <div className="mypage-x__scanx-metric-top">
-                      <div className="mypage-x__scanx-metric-copy">
-                        <p>너비</p>
-                        <strong>
-                          {detail.avgWidth.toFixed(1)}
-                          <em>mm</em>
-                        </strong>
-                      </div>
-                      <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
-                        {Icon.widthIcon}
-                      </span>
-                    </div>
-                    <div className="mypage-x__scanx-meter" aria-hidden="true">
-                      <i style={{ width: `${widthPct}%` }} />
-                    </div>
-                    <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
-                  </article>
-                  <article className="mypage-x__scanx-metric">
-                    <div className="mypage-x__scanx-metric-top">
-                      <div className="mypage-x__scanx-metric-copy">
-                        <p>곡률</p>
-                        <strong>{detail.avgCurve.toFixed(2)}</strong>
-                      </div>
-                      <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
-                        {Icon.curveIcon}
-                      </span>
-                    </div>
-                    <div className="mypage-x__scanx-meter" aria-hidden="true">
-                      <i style={{ width: `${curvePct}%` }} />
-                    </div>
-                    <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
-                  </article>
-                </div>
-              </section>
-
-              <p className="mypage-x__scanx-comment">
-                <span className="mypage-x__scanx-comment-label">
-                  한줄 요약
-                  <i aria-hidden="true">{Icon.summaryIcon}</i>
-                </span>
-                {detail.comment}
-              </p>
-
-              {detail.fingers.length > 0 && (
-                <div className="mypage-x__scanx-detail-toggle-wrap">
-                  <button
-                    type="button"
-                    className={`mypage-x__scanx-detail-toggle${fingerDetailOpen ? ' is-open' : ''}`}
-                    onClick={() => setFingerDetailOpen((prev) => !prev)}
-                    aria-expanded={fingerDetailOpen}
-                  >
-                    손가락별 상세 측정값 {fingerDetailOpen ? '접기' : '보기'}
-                    <span className="mypage-x__scanx-detail-toggle-icon" aria-hidden="true">
-                      {Icon.chevronDown}
-                    </span>
-                  </button>
-
-                  {fingerDetailOpen && (
-                    <div className="mypage-x__scanx-finger-panel">
-                      <div
-                        className={`mypage-x__scanx-hand-tabs${hasLeft && hasRight ? '' : ' is-single'}`}
-                        role="tablist"
-                        aria-label="손 선택"
-                      >
-                        {hasLeft && (
-                          <button
-                            type="button"
-                            role="tab"
-                            aria-selected={fingerHand === 'L'}
-                            className={fingerHand === 'L' ? 'is-active' : ''}
-                            onClick={() => setFingerHand('L')}
-                          >
-                            <em>L</em>
-                            <span>왼손</span>
-                          </button>
-                        )}
-                        {hasRight && (
-                          <button
-                            type="button"
-                            role="tab"
-                            aria-selected={fingerHand === 'R'}
-                            className={fingerHand === 'R' ? 'is-active' : ''}
-                            onClick={() => setFingerHand('R')}
-                          >
-                            <em>R</em>
-                            <span>오른손</span>
-                          </button>
-                        )}
-                      </div>
-                      <div className="mypage-x__scanx-hand-rows">
-                        <div className="mypage-x__scanx-hand-row mypage-x__scanx-hand-row--head">
-                          <span>손가락</span>
-                          <span>길이</span>
-                          <span>너비</span>
-                          <span>곡률</span>
-                        </div>
-                        {fingerList.map((f) => (
-                          <div key={f.label} className="mypage-x__scanx-hand-row">
-                            <span className="mypage-x__scanx-hand-name">{f.partLabel}</span>
-                            <span>
-                              {f.lengthMm.toFixed(1)}
-                              <small>mm</small>
-                            </span>
-                            <span>
-                              {f.widthMm.toFixed(1)}
-                              <small>mm</small>
-                            </span>
-                            <span>{f.cCurve.toFixed(2)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )
-        })()}
-      </div>
-    </div>
+              </div>
+            )}
+          </>
+        )
+      })()}
+    </ScanXModalShell>
   )
 }

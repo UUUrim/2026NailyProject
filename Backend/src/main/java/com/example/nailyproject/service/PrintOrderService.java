@@ -16,6 +16,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.format.DateTimeFormatter;
@@ -124,9 +126,33 @@ public class PrintOrderService {
             restTemplate.exchange(printerServerUrl + endpoint, HttpMethod.POST, httpEntity, String.class);
         } catch (Exception e) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
-            order.updateFailReason("병합 서버 요청 실패: " + e.getMessage());
+            order.updateFailReason(describePrinterCallFailure(e, PrinterCallStep.MERGE));
             printOrderRepository.save(order);
         }
+    }
+
+    private enum PrinterCallStep {
+        MERGE,
+        PRINT_START,
+    }
+
+    /**
+     * printer/server.py 호출 실패의 원인을 사용자가 이해할 수 있는 문구로 변환한다.
+     * 원인별로(서버 연결 불가/서버 오류 응답/그 외) 메시지를 나눠서, 원인 불명의 긴 예외
+     * 메시지가 그대로 화면에 노출되거나 DB 컬럼 길이를 초과하는 일이 없도록 한다.
+     */
+    private String describePrinterCallFailure(Exception e, PrinterCallStep step) {
+        if (e instanceof ResourceAccessException) {
+            return "프린터 서버에 연결할 수 없습니다. 프린터 서버가 켜져 있는지 확인해 주세요.";
+        }
+        if (e instanceof HttpStatusCodeException) {
+            return "프린터 서버가 요청을 처리하지 못했습니다. 다시 시도해 주세요.";
+        }
+        return switch (step) {
+            case MERGE -> "병합 서버 요청에 실패했습니다. 다시 시도해 주세요.";
+            case PRINT_START -> "출력 시작 요청에 실패했습니다. 다시 시도해 주세요.";
+            default -> "알 수 없는 오류가 발생했습니다.";
+        };
     }
 
     /**
@@ -187,7 +213,7 @@ public class PrintOrderService {
             restTemplate.exchange(printerServerUrl + "/print/start", HttpMethod.POST, httpEntity, String.class);
         } catch (Exception e) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
-            order.updateFailReason("출력 시작 요청 실패: " + e.getMessage());
+            order.updateFailReason(describePrinterCallFailure(e, PrinterCallStep.PRINT_START));
             printOrderRepository.save(order);
             return toDto(order);
         }

@@ -46,6 +46,22 @@
   border: none;
 }
 
+/* 메인 페이지 히어로 위의 오버레이 헤더: 처음엔 투명 배경으로 히어로 이미지 위에 떠 있다가,
+   스크롤을 시작하면 화면 상단에 고정되면서 흰 배경으로 전환된다. */
+.landing-header--overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  transition: background-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.landing-header--overlay.landing-header--scrolled {
+  background: #ffffff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
 .landing-header__inner {
   max-width: var(--naily-max-width);
   margin: 0 auto;
@@ -128,6 +144,7 @@
 .landing-header__login {
   font-size: 0.9375rem;
   color: var(--naily-text);
+  font-weight: 600;
   text-decoration: none;
   transition: opacity 0.2s;
 }
@@ -145,7 +162,7 @@
   background: var(--naily-pink);
   color: #ffffff;
   font-size: 0.9375rem;
-  font-weight: 500;
+  font-weight: 600;
   text-decoration: none;
   transition: background 0.2s;
 }
@@ -253,6 +270,7 @@
 }
 
 .hero-panel--top .hero-panel__content {
+  padding-top: var(--landing-header-height);
   transform: translateY(-1.25rem);
 }
 
@@ -297,6 +315,13 @@
   cursor: pointer;
   box-shadow: 0 12px 32px rgba(222, 134, 159, 0.35);
   transition: transform 0.2s, box-shadow 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cta-button svg {
+  flex-shrink: 0;
 }
 
 .cta-button:hover {

@@ -24,6 +24,7 @@ public class ScanResultResponseDto {
 
     // 분석 결과
     private String shape;
+    private String recommendedShape;
     private String skinToneHex;
     private List<String> recommendedColors;
     private String seasonCode;
@@ -67,6 +68,7 @@ public class ScanResultResponseDto {
                 .handSide(handScan.getHandSide().name())
                 .status(handScan.getStatus().name())
                 .shape(handScan.getShape())
+                .recommendedShape(handScan.getRecommendedShape())
                 .skinToneHex(handScan.getSkinToneHex())
                 .recommendedColors(parseRecommendedColors(handScan.getRecommendedColors(), objectMapper))
                 .seasonCode(handScan.getSeasonCode())

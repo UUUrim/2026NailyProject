@@ -66,16 +66,12 @@ function ServiceBrowserMockup() {
                     <stop offset="0%" stopColor="#fdeff4" />
                     <stop offset="100%" stopColor="#f8d4e0" />
                   </linearGradient>
-                  <clipPath id="nailClip2">
-                    <rect x="34" y="14" width="18" height="20" rx="6" />
-                  </clipPath>
                   <clipPath id="nailClip3">
                     <rect x="60" y="16" width="18" height="12" rx="6" />
                   </clipPath>
                 </defs>
                 <rect x="8" y="18" width="18" height="28" rx="6" fill="url(#nailFill1)" stroke="#de869f" strokeWidth="1.5" />
-                <rect x="34" y="14" width="18" height="32" rx="6" fill="rgba(222,134,159,0.12)" stroke="#de869f" strokeWidth="1.5" />
-                <rect x="34" y="14" width="18" height="32" rx="6" fill="url(#nailFill2)" clipPath="url(#nailClip2)" />
+                <rect x="34" y="14" width="18" height="32" rx="6" fill="url(#nailFill2)" stroke="#de869f" strokeWidth="1.5" />
                 <rect x="60" y="16" width="18" height="30" rx="6" fill="rgba(222,134,159,0.12)" stroke="#de869f" strokeWidth="1.5" />
                 <rect x="60" y="16" width="18" height="30" rx="6" fill="url(#nailFill3)" clipPath="url(#nailClip3)" />
                 <rect x="86" y="20" width="18" height="26" rx="6" fill="rgba(222,134,159,0.08)" stroke="#de869f" strokeWidth="1.5" strokeDasharray="3 2" opacity="0.6" />

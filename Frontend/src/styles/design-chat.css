@@ -16,7 +16,7 @@
 
 .design-chat-sidebar {
     flex-shrink: 0;
-    width: 264px;
+    width: 304px;
     display: flex;
     flex-direction: column;
     background: #fff;
@@ -39,6 +39,10 @@
     border-bottom: 1px solid #f5e2ea;
 }
 
+.design-chat-sidebar__header-main {
+    min-width: 0;
+}
+
 .design-chat-sidebar__eyebrow {
     margin: 0 0 0.3rem;
     font-size: 0.65rem;
@@ -46,6 +50,21 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--naily-pink-hover, #d0768f);
+}
+
+.design-chat-sidebar__title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+/* 특정 스캔에 고정된 진입(메인 "시작하기" 흐름)에서 보여주는, 클릭 불가능한 날짜 표시 */
+.design-chat-sidebar__session-static {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #b98599;
+    white-space: nowrap;
 }
 
 .design-chat-sidebar__header h2 {
@@ -56,16 +75,152 @@
     line-height: 1.4;
 }
 
+/* 분석 결과 선택 드롭다운 트리거 — 기존 SeasonDropdown과 같은 네일리 핑크 필(pill) 스타일 */
+.design-chat-sidebar__session-dropdown {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.design-chat-sidebar__session-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.55rem;
+    border: 1.5px solid #f3d9e2;
+    border-radius: 999px;
+    background-color: var(--naily-pink-light, #fdf5f8);
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--naily-pink-hover, #d0768f);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s, background-color 0.15s;
+}
+
+.design-chat-sidebar__session-trigger svg {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+}
+
+.design-chat-sidebar__session-trigger:hover {
+    border-color: var(--naily-pink, #de869f);
+}
+
+.design-chat-sidebar__session-trigger.is-open svg {
+    transform: rotate(180deg);
+}
+
+.design-chat-sidebar__session-menu {
+    z-index: 60;
+    width: 190px;
+    background: #fff;
+    border: 1px solid #f5e2ea;
+    border-radius: 16px;
+    /* 네 모서리를 다 둥글게 두고, 안쪽 스크롤 래퍼를 따로 둬서 모서리에 스크롤 막대가 잘리지 않게 한다 */
+    overflow: hidden;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14);
+}
+
+.design-chat-sidebar__session-menu-scroll {
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 0.4rem;
+    /* 채팅 화면과 동일한 네일리 핑크 커스텀 스크롤바 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+}
+
+/* 목록이 넘쳐서 실제로 스크롤될 때만 오른쪽에 여백을 두고 스크롤바를 모서리 밖으로 살짝
+   안쪽(왼쪽)으로 뺀다 — ? 패널 본문 스크롤(design-chat-sidebar__scroll)과 동일한 방식.
+   안 넘칠 땐(스크롤바 자체가 없을 땐) 이 여백도 필요 없으므로 붙이지 않는다 */
+.design-chat-sidebar__session-menu-scroll.is-scrollable {
+    padding-right: 0.65rem;
+    margin-right: 0.35rem;
+}
+
+.design-chat-sidebar__session-menu-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.design-chat-sidebar__session-menu-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.design-chat-sidebar__session-menu-scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(222, 134, 159, 0.5);
+    border-radius: 999px;
+}
+
+.design-chat-sidebar__session-menu-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(222, 134, 159, 0.8);
+}
+
+.design-chat-sidebar__session-option {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.5rem 0.55rem;
+    border: none;
+    border-radius: 11px;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s;
+}
+
+.design-chat-sidebar__session-option + .design-chat-sidebar__session-option {
+    margin-top: 2px;
+}
+
+.design-chat-sidebar__session-option:hover {
+    background: var(--naily-pink-light, #fdf5f8);
+}
+
+.design-chat-sidebar__session-option.is-active {
+    background: linear-gradient(135deg, #fdf0f4, #fbe4ec);
+}
+
+.design-chat-sidebar__session-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.design-chat-sidebar__session-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.design-chat-sidebar__session-date {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #1a1a1a;
+    white-space: nowrap;
+}
+
+.design-chat-sidebar__session-hex {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #999;
+    white-space: nowrap;
+}
+
 .design-chat-sidebar__close {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 34px;
+    height: 34px;
     border-radius: 999px;
     border: none;
-    background: rgba(255, 255, 255, 0.65);
-    font-size: 1rem;
+    background: transparent;
+    font-size: 1.2rem;
     line-height: 1;
     color: #8a5c6a;
     cursor: pointer;
@@ -74,23 +229,41 @@
 }
 
 .design-chat-sidebar__close:hover {
-    background: #fff;
+    background: rgba(255, 255, 255, 0.75);
 }
 
 .design-chat-sidebar__scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 1.1rem 1.1rem 1.4rem;
+    /* 카드와 스크롤바 사이 간격을 줄이기 위해 오른쪽 패딩만 좁힘 */
+    padding: 1.1rem 0.8rem 1.4rem 1.1rem;
+    /* 스크롤바가 패널의 둥근 모서리(border-radius)와 겹쳐 위아래 끝이 잘려 보이던 것을
+       방지하기 위해, 스크롤바가 그려지는 오른쪽 경계를 모서리 밖으로 살짝 안쪽(왼쪽)으로 뺀다 */
+    margin-right: 0.4rem;
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE/Edge */
+    /* 네일리 커스텀 스크롤바 — 트랙은 배경 없이 투명, 막대만 핑크로 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
 .design-chat-sidebar__scroll::-webkit-scrollbar {
-    display: none; /* Chrome/Safari/Edge */
+    width: 6px;
+}
+
+.design-chat-sidebar__scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.design-chat-sidebar__scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(222, 134, 159, 0.5);
+    border-radius: 999px;
+}
+
+.design-chat-sidebar__scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(222, 134, 159, 0.8);
 }
 
 .design-chat-sidebar__card {
@@ -133,10 +306,60 @@
     color: #1a1a1a;
 }
 
-.design-chat-sidebar__tone-desc {
-    margin: 0.15rem 0 0;
-    font-size: 0.75rem;
-    color: #999;
+.design-chat-sidebar__tone-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    margin-top: 0.9rem;
+}
+
+.design-chat-sidebar__tone-bar-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.72rem;
+}
+
+.design-chat-sidebar__tone-bar-head span:first-child {
+    font-weight: 700;
+    color: #555;
+}
+
+.design-chat-sidebar__tone-bar-head span:last-child {
+    font-weight: 700;
+    color: var(--naily-pink-hover, #d0768f);
+}
+
+.design-chat-sidebar__tone-bar-track {
+    position: relative;
+    height: 5px;
+    border-radius: 999px;
+}
+
+.design-chat-sidebar__tone-bar-track--tone {
+    background: linear-gradient(90deg, #8fb4e6 0%, #f0c069 100%);
+}
+
+.design-chat-sidebar__tone-bar-track--brightness {
+    background: linear-gradient(90deg, #4a4a4a 0%, #f5efe4 100%);
+}
+
+.design-chat-sidebar__tone-bar-track--saturation {
+    background: linear-gradient(90deg, #f4d7de 0%, #d63a72 100%);
+}
+
+.design-chat-sidebar__tone-bar-track span {
+    position: absolute;
+    top: 50%;
+    width: 13px;
+    height: 13px;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    background: #fff;
+    border: 2px solid #a3235f;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
 .design-chat-sidebar__palette {
@@ -157,16 +380,19 @@
 .design-chat-sidebar__shape-row {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 0.7rem;
 }
 
 .design-chat-sidebar__shape-img {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     object-fit: contain;
-    padding: 6px;
-    background: var(--naily-pink-light, #fdf5f8);
+    padding: 7px;
+    background: #fff;
+    border: 1px solid #f0f0f0;
     border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     flex-shrink: 0;
 }
 
@@ -202,7 +428,8 @@
 .design-chat-sidebar__metric-name {
     font-size: 0.8rem;
     font-weight: 600;
-    color: #666;
+    /* 대표 피부색 카드의 "톤"/"명도"/"채도 (혈색)" 라벨(tone-bar-head 첫 span)과 동일한 색 */
+    color: #555;
 }
 
 .design-chat-sidebar__metric-value {
@@ -227,31 +454,75 @@
     background: linear-gradient(90deg, #de869f, #c9a8ff);
 }
 
-.design-chat-sidebar__comment-card {
-    background: linear-gradient(135deg, #fdf0f4, #faf6ff);
-    border: 1px solid #f4e9ee;
-    border-radius: 14px;
-    padding: 0.95rem 1rem;
-}
-
-.design-chat-sidebar__comment {
+.design-chat-sidebar__metric-compare {
     margin: 0;
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: #1a1a1a;
-    line-height: 1.55;
+    font-size: 0.7rem;
+    font-weight: 600;
+    /* 대표 피부색 카드의 "웜톤"/"밝은 편"/"보통" 라벨(tone-bar-head 마지막 span)과 동일한 색 */
+    color: var(--naily-pink-hover, #d0768f);
 }
 
-.design-chat-sidebar__percentile {
+/* 손 스캔 정보가 없을 때 보여주는 빈 상태 */
+.design-chat-sidebar__empty {
+    flex: 1;
     display: flex;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 0.9rem;
+    padding: 1rem 1.4rem;
+}
+
+.design-chat-sidebar__empty-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 999px;
+    /* 마이페이지 확인모달(mypage-x__confirm-icon)과 동일한 은은한 그라데이션 + 그림자 */
+    background: linear-gradient(145deg, #de869f, #c96d88);
+    color: #fff;
+    box-shadow: 0 8px 20px rgba(222, 134, 159, 0.32);
+    flex-shrink: 0;
+}
+
+.design-chat-sidebar__empty-text {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #786a6a;
+    line-height: 1.6;
+}
+
+/* 다른 페이지의 "출력하러 가기" 류 CTA와 동일한 레시피(텍스트+화살표, 투명 배경, 호버 시 슬라이드) */
+.design-chat-sidebar__scan-cta {
+    display: inline-flex;
+    align-items: center;
     gap: 0.35rem;
-    margin: 0.65rem 0 0;
-    padding-top: 0.6rem;
-    border-top: 1px dashed #f0d3de;
-    font-size: 0.75rem;
-    color: #a9758a;
-    line-height: 1.5;
+    border: none;
+    background: transparent;
+    color: #de869f;
+    padding: 0.4rem 0.2rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: gap 0.25s ease, color 0.2s ease;
+}
+
+.design-chat-sidebar__scan-cta svg {
+    flex-shrink: 0;
+    transition: transform 0.25s ease;
+}
+
+.design-chat-sidebar__scan-cta:hover {
+    gap: 0.6rem;
+    color: #c96a86;
+}
+
+.design-chat-sidebar__scan-cta:hover svg {
+    transform: translateX(5px);
 }
 
 .design-chat {
@@ -274,6 +545,26 @@
     flex-direction: column;
     gap: 1.1rem;
     padding: 0.25rem 0.5rem 1.5rem 0;
+    /* ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+}
+
+.design-chat__messages::-webkit-scrollbar {
+    width: 6px;
+}
+
+.design-chat__messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.design-chat__messages::-webkit-scrollbar-thumb {
+    background-color: rgba(222, 134, 159, 0.5);
+    border-radius: 999px;
+}
+
+.design-chat__messages::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(222, 134, 159, 0.8);
 }
 
 .design-chat__row {
@@ -416,6 +707,26 @@
     margin-bottom: 1rem;
     max-height: 42vh;
     overflow-y: auto;
+    /* ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+}
+
+.design-chat__quickreply::-webkit-scrollbar {
+    width: 6px;
+}
+
+.design-chat__quickreply::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.design-chat__quickreply::-webkit-scrollbar-thumb {
+    background-color: rgba(222, 134, 159, 0.5);
+    border-radius: 999px;
+}
+
+.design-chat__quickreply::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(222, 134, 159, 0.8);
 }
 
 .design-chat__quickreply-back-btn {
@@ -758,6 +1069,28 @@
     opacity: 0.6;
 }
 
+/* 쉐입 선택 단계 — 선택된 분석 결과의 AI 추천 쉐입 카드에 붙는 배지 (scan-shape-card__badge--recommend와 동일 톤) */
+.design-chat__quickreply-recommend-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.22rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #f7dcd0 0%, #e3ab98 50%, #b76e79 100%);
+    color: #5c2f30;
+    box-shadow: 0 3px 10px rgba(183, 110, 121, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.design-chat__quickreply-recommend-badge svg {
+    flex-shrink: 0;
+}
+
 .design-chat__quickreply-index {
     display: inline-flex;
     align-items: center;
@@ -765,10 +1098,10 @@
     width: 20px;
     height: 20px;
     border-radius: 6px;
-    background: #f2f2f2;
-    color: #888;
+    background: var(--naily-pink-light, #fdf5f8);
+    color: var(--naily-pink-hover, #d0768f);
     font-size: 0.75rem;
-    font-weight: 600;
+    font-weight: 700;
     flex-shrink: 0;
 }
 
@@ -797,6 +1130,19 @@
 .design-chat__quickreply-confirm:disabled {
     opacity: 0.6;
     cursor: default;
+}
+
+.design-chat__quickreply-confirm-swatches {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.design-chat__quickreply-confirm-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    flex-shrink: 0;
 }
 
 /* ── 입력창 ── */
@@ -939,13 +1285,13 @@
 .design-chat__season-dropdown-trigger {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.7rem;
+    gap: 0.3rem;
+    padding: 0.3rem 0.55rem;
     border: 1.5px solid #f3d9e2;
     border-radius: 999px;
     background-color: var(--naily-pink-light, #fdf5f8);
-    font-size: 0.75rem;
-    font-weight: 600;
+    font-size: 0.72rem;
+    font-weight: 700;
     color: var(--naily-pink-hover, #d0768f);
     cursor: pointer;
     white-space: nowrap;
@@ -959,38 +1305,69 @@
 .design-chat__season-dropdown-chevron {
     flex-shrink: 0;
     color: var(--naily-pink, #de869f);
-    transition: transform 0.15s;
+    transition: transform 0.2s ease;
 }
 
 .design-chat__season-dropdown-chevron.is-open {
     transform: rotate(180deg);
 }
 
+/* ? 패널의 "분석 결과 선택" 드롭다운(design-chat-sidebar__session-*)과 동일한 스타일 —
+   바깥은 모서리를 둥글게 두고 overflow:hidden으로 자르고, 안쪽에 스크롤 전용 래퍼를 따로 둬서
+   스크롤바가 모서리를 잘라먹지 않게 한다 */
 .design-chat__season-dropdown-menu {
     z-index: 1000;
-    width: max-content;
-    max-height: 220px;
-    overflow-y: auto;
+    width: 190px;
     background: #fff;
-    border: 1px solid #f3d9e2;
-    border-radius: 14px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+    border: 1px solid #f5e2ea;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14);
+}
+
+.design-chat__season-dropdown-menu-scroll {
+    max-height: 320px;
+    overflow-y: auto;
     padding: 0.4rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+}
+
+.design-chat__season-dropdown-menu-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.design-chat__season-dropdown-menu-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.design-chat__season-dropdown-menu-scroll::-webkit-scrollbar-thumb {
+    background-color: rgba(222, 134, 159, 0.5);
+    border-radius: 999px;
+}
+
+.design-chat__season-dropdown-menu-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(222, 134, 159, 0.8);
 }
 
 .design-chat__season-dropdown-option {
+    display: flex;
+    align-items: center;
+    width: 100%;
     border: none;
-    background: none;
-    border-radius: 8px;
-    padding: 0.45rem 0.7rem;
+    background: transparent;
+    border-radius: 11px;
+    padding: 0.5rem 0.55rem;
     font-size: 0.8125rem;
     color: #444;
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
+    transition: background 0.15s;
+}
+
+.design-chat__season-dropdown-option + .design-chat__season-dropdown-option {
+    margin-top: 2px;
 }
 
 .design-chat__season-dropdown-option:hover {
@@ -998,8 +1375,7 @@
 }
 
 .design-chat__season-dropdown-option.is-active {
-    background: var(--naily-pink, #de869f);
-    color: #fff;
+    background: linear-gradient(135deg, #fdf0f4, #fbe4ec);
     font-weight: 600;
 }
 
@@ -1033,8 +1409,9 @@
 }
 
 .design-chat__color-swatch {
+    /* max-width를 두지 않고 그리드 칸을 꽉 채워야, 칸 안에 남는 여백 없이
+       위/아래/좌/우 간격이 전부 gap 값 하나로만 균일하게 결정된다 */
     width: 100%;
-    max-width: 75px; /*흠..좀 더 줄여도 되지 않을까*/
     aspect-ratio: 1;
     border-radius: 8px;
     border: 2px solid transparent;

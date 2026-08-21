@@ -57,6 +57,8 @@ public class UserHistoryController {
                             .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
                             .status(scan.getStatus() != null ? scan.getStatus().name() : null)
                             .shape(scan.getShape())
+                            .recommendedShape(scan.getRecommendedShape())
+                            .skinToneHex(scan.getSkinToneHex())
                             .seasonCode(scan.getSeasonCode())
                             .seasonNameKo(scan.getSeasonNameKo())
                             .avgLengthMm(averages.lengthMm())
@@ -168,19 +170,20 @@ public class UserHistoryController {
             JsonNode node = objectMapper.readTree(raw);
             double length = firstNumber(node, "lengthMm", "length");
             double width = firstNumber(node, "widthMm", "width");
-            double curve = firstNumber(node, "cCurve", "curve");
+            // 실제 스캔 파이프라인(scan/server.py)이 내려주는 곡률 필드명은 cCurveMm이다.
+            // cCurve/curve는 과거 목업 데이터 호환용 fallback으로만 남겨둔다.
+            double curve = firstNumber(node, "cCurveMm", "cCurve", "curve");
             return new double[]{length, width, curve};
         } catch (Exception ignored) {
             return null;
         }
     }
 
-    private double firstNumber(JsonNode node, String primary, String fallback) {
-        if (node.has(primary) && node.get(primary).isNumber()) {
-            return node.get(primary).asDouble();
-        }
-        if (node.has(fallback) && node.get(fallback).isNumber()) {
-            return node.get(fallback).asDouble();
+    private double firstNumber(JsonNode node, String... keys) {
+        for (String key : keys) {
+            if (node.has(key) && node.get(key).isNumber()) {
+                return node.get(key).asDouble();
+            }
         }
         return 0;
     }

@@ -15,6 +15,8 @@ import java.time.LocalDateTime;
 @Builder
 public class PrintOrder {
 
+    private static final int FAIL_REASON_MAX_LENGTH = 1000;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
@@ -47,7 +49,7 @@ public class PrintOrder {
     private String mergedModelUrl;
 
     // 실패 시 원인 메시지 (프론트에 보여주기 위함)
-    @Column(name = "fail_reason")
+    @Column(name = "fail_reason", length = FAIL_REASON_MAX_LENGTH)
     private String failReason;
 
     @CreationTimestamp
@@ -72,6 +74,8 @@ public class PrintOrder {
     }
 
     public void updateFailReason(String failReason) {
-        this.failReason = failReason;
+        this.failReason = failReason != null && failReason.length() > FAIL_REASON_MAX_LENGTH
+                ? failReason.substring(0, FAIL_REASON_MAX_LENGTH)
+                : failReason;
     }
 }
