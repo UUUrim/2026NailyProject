@@ -1,12 +1,12 @@
 .app-footer {
-  --footer-fade-height: 7rem;
-  --footer-pad-top: 1.25rem;
-  --footer-content-offset: 1.25rem;
-  --footer-pad-bottom: 2.75rem;
+  --footer-fade-height: 4.5rem;
+  --footer-pad-top: 0.75rem;
+  --footer-content-offset: 0.75rem;
+  --footer-pad-bottom: 1.75rem;
   --naily-pink-light: #fdf5f8;
 
   position: relative;
-  margin-top: 2.5rem;
+  margin-top: 1rem;
   background: var(--naily-pink-light);
   overflow: hidden;
   flex-shrink: 0;
@@ -62,11 +62,12 @@
 
 @media (max-width: 640px) {
   .app-footer {
-    --footer-fade-height: 5.5rem;
-    --footer-pad-top: 1rem;
-    --footer-content-offset: 1rem;
-    --footer-pad-bottom: 2.25rem;
-    margin-top: 1.75rem;
+    --footer-fade-height: 3.75rem;
+    --footer-pad-top: 0.6rem;
+    --footer-content-offset: 0.6rem;
+    --footer-pad-bottom: 1.5rem;
+    /* 데스크톱(1rem) 대비 원래 margin-top 비율(2.5rem→1.75rem, 0.7배)을 그대로 적용 */
+    margin-top: 0.7rem;
   }
 
   .app-footer__inner {

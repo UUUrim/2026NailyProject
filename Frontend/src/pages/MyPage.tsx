@@ -3,10 +3,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { NailArTryOnModal } from '@/components/ar/NailArTryOnModal'
 import { AppShell } from '@/components/layout/AppShell'
 import { useAuth } from '@/hooks/useAuth'
 import { getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/apis/prints'
@@ -19,42 +17,30 @@ import {
   likeDesign,
   moveLikedDesign,
   unlikeDesign,
-  deleteDesign,
+  createSavedFolder,
   deleteSavedFolder,
-  getDesignDetail,
-  shareDesign,
-  unshareDesign,
   type DesignImageResponse,
   type SavedDesignResponse,
   type SavedFolderResponse,
-  type DesignExtractedDetails,
 } from '@/apis/design'
 import { FavoriteFolderModal } from '@/components/mypage/FavoriteFolderModal'
-import { DesignDetailsPanel } from '@/components/design/DesignDetailsPanel'
+import { NextStepButton } from '@/components/common/NextStepButton'
+import { DesignImageDetailModal, type DesignImageDetailInput } from '@/components/design/DesignImageDetailModal'
 import { ModalActionIcons } from '@/components/design/ModalActionIcons'
 import { getMyScans, getScanResult, type ScanHistoryItem, type ScanResultResponse } from '@/apis/scan'
 import { getNailShape } from '@/constants/nailShapes'
-import { PERSONAL_COLOR_SWATCHES, SEASON_ROWS, SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
+import { SHAPE_PREVIEW_IMAGES } from '@/constants/designPreferences'
 import { ApiError } from '@/utils/apiClient'
-import { downloadImage } from '@/utils/downloadImage'
+import { getPasswordRuleChecks, isPasswordValid } from '@/utils/passwordRules'
+import { PrinterProgressWidget } from '@/components/mypage/PrinterProgressWidget'
+import { ScanDetailModal } from '@/components/mypage/ScanDetailModal'
+import { ScanXModalShell } from '@/components/mypage/ScanXModalShell'
+import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/utils/scanDetail'
+import { analyzeSkinTone, generateSkinTonePalette } from '@/utils/skinTone'
 import '@/styles/mypage.css'
+import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
-
 type SectionId = 'dashboard' | 'profile' | 'timeline' | 'scans' | 'prints' | 'designs' | 'favorites'
-
-type DetailImage = {
-  designId: number | null
-  imageUrl: string
-  createdAt?: string
-  promptSummary?: string
-  liked: boolean
-  canDelete: boolean
-  isFavoriteView: boolean
-  owner?: boolean
-  folder?: { folderId: number; name: string } | null
-  shared?: boolean
-  details?: DesignExtractedDetails | null
-}
 
 type LikeModalTarget = {
   designId: number
@@ -65,14 +51,20 @@ type LikeModalTarget = {
 
 const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   QUEUED: '출력 대기',
+  MERGING: '모델 병합 중',
+  MERGED: '병합 완료',
   PRINTING: '출력 중',
   COMPLETED: '완료',
+  FAILED: '실패',
 }
 
 const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   QUEUED: '프린터 대기열에 등록되어 있어요.',
+  MERGING: '손톱 모델을 하나로 합치고 있어요.',
+  MERGED: '모델 병합이 끝났어요. 곧 출력이 시작돼요.',
   PRINTING: '네일팁을 출력하고 있어요.',
   COMPLETED: '네일팁 출력이 완료되었어요.',
+  FAILED: '출력 중 문제가 발생했어요.',
 }
 
 // 손 스캔 분석 상태 (네일팁 출력 관련 상태는 출력 이력에서만 표시)
@@ -89,41 +81,6 @@ function scanStatusBadgeClass(status: string | null | undefined): string {
   const raw = (status ?? '').toLowerCase()
   if (raw === 'generating_stl') return 'measured'
   return raw || 'ready'
-}
-
-// 한 번의 촬영에서 나온 왼손/오른손 스캔 기록을 하나로 묶은 단위
-type ScanSession = {
-  key: string
-  scannedAt: string
-  leftScanId: number | null
-  rightScanId: number | null
-  seasonCode: string | null
-  seasonNameKo: string | null
-  shape: string | null
-  status: string | null
-  avgLengthMm: number | null
-  avgWidthMm: number | null
-  avgCurve: number | null
-}
-
-function avgNullable(a: number | null | undefined, b: number | null | undefined): number | null {
-  if (a == null && b == null) return null
-  if (a == null) return b ?? null
-  if (b == null) return a
-  return Number(((a + b) / 2).toFixed(2))
-}
-
-/** 퍼스널컬러 팔레트의 대표색(두 번째 스와치, 없으면 첫 색) */
-function representativePersonalColor(seasonCode: string | null | undefined): string {
-  const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : undefined
-  if (!palette?.length) return '#de869f'
-  return palette[1] ?? palette[0]
-}
-
-function pickPalettePreview(seasonCode: string | null | undefined, count = 5): string[] {
-  const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : undefined
-  if (!palette?.length) return []
-  return palette.slice(0, count)
 }
 
 function formatMetricCurve(value: number | null | undefined): string {
@@ -161,13 +118,15 @@ function parseFingerMeasurements(measurements: string | null | undefined) {
       length?: number
       widthMm?: number
       width?: number
+      cCurveMm?: number
       cCurve?: number
       curve?: number
     }
+    // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
     return {
       lengthMm: Number(m.lengthMm ?? m.length ?? 12),
       widthMm: Number(m.widthMm ?? m.width ?? 9),
-      cCurve: Number(m.cCurve ?? m.curve ?? 0.55),
+      cCurve: Number(m.cCurveMm ?? m.cCurve ?? m.curve ?? 0.55),
     }
   } catch {
     return { lengthMm: 12, widthMm: 9, cCurve: 0.55 }
@@ -214,6 +173,12 @@ function buildScanDetail(left: ScanResultResponse | null, right: ScanResultRespo
 
 // ── 아이콘 (선 스타일로 통일) ────────────────────────────────────────────
 const Icon = {
+  plus: (
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+  ),
+  close: (
+      <svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+  ),
   home: (
       <svg viewBox="0 0 24 24" fill="none"><path d="M4 11.5 12 4l8 7.5M6 10v9h12v-9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
@@ -327,17 +292,17 @@ const SECTION_META: Record<SectionId, { subtitle: string; title: string; descrip
   designs: {
     subtitle: 'Design',
     title: '디자인 이력',
-    description: '생성한 모든 네일 디자인이에요. 이미지를 눌러 확대·저장·AR 미리보기가 가능해요.',
+    description: '생성한 최종 네일 디자인만 모아놨어요. 이미지를 눌러 자세히 확인해 보세요.',
   },
   prints: {
-    subtitle: 'Nail Tip Print',
+    subtitle: 'Nail Tips Print',
     title: '네일팁 출력 내역',
     description: '3D 네일팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
   },
   favorites: {
     subtitle: 'Liked',
     title: '찜 목록',
-    description: 'ㅇㅇ 님이 찜해두신 디자인만 모아놨어요.',
+    description: 'ㅇㅇ 님이 찜해둔 디자인만 모아놨어요.',
   },
 }
 
@@ -418,22 +383,6 @@ function compareByTime(aRaw: string, bRaw: string, order: 'newest' | 'oldest') {
   return order === 'newest' ? tb - ta : ta - tb
 }
 
-function laterScannedAt(a: string, b: string): string {
-  const ta = parseDateFlexible(a)?.getTime() ?? 0
-  const tb = parseDateFlexible(b)?.getTime() ?? 0
-  return tb >= ta ? b : a
-}
-
-function pickAnalysisStatus(leftStatus: string | null | undefined, rightStatus: string | null | undefined): string | null {
-  const statuses = [leftStatus, rightStatus].filter(Boolean) as string[]
-  if (statuses.length === 0) return null
-  const order = ['FAILED', 'READY', 'ANALYZING', 'MEASURED', 'GENERATING_STL', 'COMPLETED']
-  for (const s of order) {
-    if (statuses.includes(s)) return s
-  }
-  return statuses[0]
-}
-
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -486,23 +435,6 @@ type TimelineDayEvent = {
   timeMs: number
 }
 
-// ── 새 비밀번호 규칙 체크리스트 ──────
-type PasswordRuleCheck = { key: string; label: string; passed: boolean }
-
-function getPasswordRuleChecks(pw: string): PasswordRuleCheck[] {
-  return [
-    { key: 'length', label: '8자 이상', passed: pw.length >= 8 },
-    { key: 'upper', label: '영문 대문자 포함', passed: /[A-Z]/.test(pw) },
-    { key: 'lower', label: '영문 소문자 포함', passed: /[a-z]/.test(pw) },
-    { key: 'digit', label: '숫자 포함', passed: /[0-9]/.test(pw) },
-    { key: 'special', label: '특수문자 포함', passed: /[^A-Za-z0-9]/.test(pw) },
-  ]
-}
-
-function isPasswordValid(pw: string): boolean {
-  return getPasswordRuleChecks(pw).every((rule) => rule.passed)
-}
-
 export function MyPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -546,16 +478,13 @@ export function MyPage() {
   const [prints, setPrints] = useState<NailTipPrintOrder[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
-  const [detailImage, setDetailImage] = useState<DetailImage | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [shareBusy, setShareBusy] = useState(false)
-  const [showDesignDetails, setShowDesignDetails] = useState(false)
-  const [arTryOnImageUrl, setArTryOnImageUrl] = useState<string | null>(null)
+  const [detailImage, setDetailImage] = useState<DesignImageDetailInput | null>(null)
   const [isBusy, setIsBusy] = useState(false)
 
   // ── 활동 타임라인 ──────
   const [selectedTimelineDate, setSelectedTimelineDate] = useState(todayKey)
   const [calendarOpen, setCalendarOpen] = useState(false)
+  const [calendarViewMode, setCalendarViewMode] = useState<'days' | 'months'>('days')
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
@@ -577,116 +506,44 @@ export function MyPage() {
   const mainPanelRef = useRef<HTMLElement | null>(null)
   const folderSortMenuRef = useRef<HTMLDivElement | null>(null)
 
-  // ── 이미지 확대/축소/이동 ──────
-  const [zoom, setZoom] = useState(1)
-  const [pan, setPan] = useState({ x: 0, y: 0 })
-  const [isDragging, setIsDragging] = useState(false)
-  const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
-  const imageViewportRef = useRef<HTMLDivElement | null>(null)
+  // ── 찜 탭 폴더 목록에서 바로 새 폴더 만들기 ──────
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const [newFolderNameInStrip, setNewFolderNameInStrip] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+  const [createFolderError, setCreateFolderError] = useState<string | null>(null)
 
-  const ZOOM_MIN = 1
-  const ZOOM_MAX = 4
-
-  const openDetailImage = (img: DetailImage) => {
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
-    setShowDesignDetails(false)
-    setDetailImage(img)
-    if (img.designId == null) return
-    setDetailLoading(true)
-    void getDesignDetail(img.designId)
-        .then((detail) => {
-          setDetailImage((prev) =>
-              prev && prev.designId === img.designId
-                  ? {
-                    ...prev,
-                    shared: detail.shared,
-                    owner: detail.owner,
-                    canDelete: detail.owner,
-                    details: detail.details ?? null,
-                    createdAt: detail.createdAt || prev.createdAt,
-                  }
-                  : prev,
-          )
-        })
-        .catch(() => {
-          /* 상세 실패해도 이미지는 볼 수 있게 유지 */
-        })
-        .finally(() => setDetailLoading(false))
+  const startCreatingFolderInStrip = () => {
+    setCreateFolderError(null)
+    setCreatingFolder(true)
   }
 
-  const closeDetailImage = () => {
-    setDetailImage(null)
-    setDetailLoading(false)
-    setShareBusy(false)
-    setShowDesignDetails(false)
-    setZoom(1)
-    setPan({ x: 0, y: 0 })
+  const cancelCreatingFolderInStrip = () => {
+    setCreatingFolder(false)
+    setNewFolderNameInStrip('')
+    setCreateFolderError(null)
   }
 
-  const handleToggleShare = async () => {
-    if (!detailImage?.designId || !detailImage.owner || shareBusy) return
-    setShareBusy(true)
+  const handleCreateFolderInStrip = async () => {
+    const name = newFolderNameInStrip.trim()
+    if (!name) {
+      setCreateFolderError('폴더 이름을 입력해 주세요.')
+      return
+    }
+    setIsCreatingFolder(true)
+    setCreateFolderError(null)
     try {
-      const next = detailImage.shared
-          ? await unshareDesign(detailImage.designId)
-          : await shareDesign(detailImage.designId)
-      setDetailImage((prev) =>
-          prev ? { ...prev, shared: next.shared, details: next.details ?? prev.details } : prev,
-      )
-      setDesigns((prev) =>
-          prev.map((d) =>
-              d.designId === detailImage.designId ? { ...d, shared: next.shared } : d,
-          ),
-      )
+      const created = await createSavedFolder(name)
+      setSavedFolders((prev) => [...prev, created])
+      cancelCreatingFolderInStrip()
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : '공유 처리에 실패했습니다.')
+      setCreateFolderError(e instanceof ApiError ? e.message : '폴더를 만들지 못했습니다.')
     } finally {
-      setShareBusy(false)
+      setIsCreatingFolder(false)
     }
   }
 
-  const WHEEL_ZOOM_SENSITIVITY = 0.0015
-
-  // 마우스 휠로 확대/축소 (passive 리스너에서는 preventDefault가 무시되므로
-  // 네이티브 이벤트 리스너를 { passive: false }로 직접 등록한다)
-  useEffect(() => {
-    const viewport = imageViewportRef.current
-    if (!viewport || !detailImage) return
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      setZoom((z) => {
-        const next = Math.min(
-            ZOOM_MAX,
-            Math.max(ZOOM_MIN, Number((z - e.deltaY * WHEEL_ZOOM_SENSITIVITY).toFixed(2))),
-        )
-        if (next === ZOOM_MIN) setPan({ x: 0, y: 0 })
-        return next
-      })
-    }
-
-    viewport.addEventListener('wheel', onWheel, { passive: false })
-    return () => viewport.removeEventListener('wheel', onWheel)
-  }, [detailImage])
-
-  const handleImagePointerDown = (e: ReactMouseEvent<HTMLImageElement>) => {
-    if (zoom <= ZOOM_MIN) return
-    setIsDragging(true)
-    dragStartRef.current.x = e.clientX
-    dragStartRef.current.y = e.clientY
-    dragStartRef.current.panX = pan.x
-    dragStartRef.current.panY = pan.y
-  }
-
-  const handleImagePointerMove = (e: ReactMouseEvent<HTMLImageElement>) => {
-    if (!isDragging) return
-    const dx = e.clientX - dragStartRef.current.x
-    const dy = e.clientY - dragStartRef.current.y
-    setPan({ x: dragStartRef.current.panX + dx, y: dragStartRef.current.panY + dy })
-  }
-
-  const stopDragging = () => setIsDragging(false)
+  const openDetailImage = (img: DesignImageDetailInput) => setDetailImage(img)
+  const closeDetailImage = () => setDetailImage(null)
 
   useEffect(() => {
     getMyProfile()
@@ -722,99 +579,17 @@ export function MyPage() {
       [favorites],
   )
 
-  // 한 번의 촬영에서 나온 왼손/오른손 기록을 하나의 세션으로 묶음
-  // (같은 세션이면 촬영 시각이 서로 가까움 — 90분 이내면 같은 세션으로 판단)
-  const scanSessions = useMemo<ScanSession[]>(() => {
-    const sorted = [...scans].sort(
-        (a, b) => (parseDateFlexible(b.scannedAt)?.getTime() ?? 0) - (parseDateFlexible(a.scannedAt)?.getTime() ?? 0),
-    )
-    const used = new Set<number>()
-    const sessions: ScanSession[] = []
-
-    sorted.forEach((scan, i) => {
-      if (used.has(scan.scanId)) return
-      used.add(scan.scanId)
-
-      const scanTime = parseDateFlexible(scan.scannedAt)?.getTime() ?? 0
-      const partner = sorted.find((other, j) => {
-        if (j === i || used.has(other.scanId) || other.handSide === scan.handSide) return false
-        const otherTime = parseDateFlexible(other.scannedAt)?.getTime() ?? 0
-        return Math.abs(otherTime - scanTime) < 90 * 60 * 1000
-      })
-      // 양손 촬영을 모두 마친 경우만 이력으로 저장·표시
-      if (!partner) return
-      used.add(partner.scanId)
-
-      const left = scan.handSide === 'LEFT' ? scan : partner.handSide === 'LEFT' ? partner : null
-      const right = scan.handSide === 'RIGHT' ? scan : partner.handSide === 'RIGHT' ? partner : null
-      if (!left || !right) return
-
-      const status = pickAnalysisStatus(left.status, right.status)
-      const seasonCode = left.seasonCode ?? right.seasonCode ?? null
-      const seasonNameKo = left.seasonNameKo ?? right.seasonNameKo ?? null
-      const shape = left.shape ?? right.shape ?? null
-      const avgLengthMm = avgNullable(left.avgLengthMm, right.avgLengthMm)
-      const avgWidthMm = avgNullable(left.avgWidthMm, right.avgWidthMm)
-      const avgCurve = avgNullable(left.avgCurve, right.avgCurve)
-
-      // '분석 완료'는 상태 문자열이 아니라, 손 분석 결과 페이지에 실제로 표시되는 값들이
-      // 전부 채워졌는지로 판단한다 — 퍼스널 컬러 + 추천 쉐입 + 길이/너비/곡률까지 모두 나와야
-      // 마이페이지 손 분석 이력에 노출한다. (상태값만 "완료"고 실제 값은 비어 있는 경우를 걸러낸다)
-      const isFullyAnalyzed =
-          seasonCode != null && shape != null && avgLengthMm != null && avgWidthMm != null && avgCurve != null
-      if (!isFullyAnalyzed) return
-
-      sessions.push({
-        key: `${left.scanId}-${right.scanId}`,
-        scannedAt: laterScannedAt(left.scannedAt, right.scannedAt),
-        leftScanId: left.scanId,
-        rightScanId: right.scanId,
-        seasonCode,
-        seasonNameKo,
-        shape,
-        status,
-        avgLengthMm,
-        avgWidthMm,
-        avgCurve,
-      })
-    })
-
-    return sessions
-  }, [scans])
+  // 한 번의 촬영에서 나온 왼손/오른손 기록을 하나의 세션으로 묶고, 실제 분석 결과값이
+  // 전부 채워진 것만 이력으로 노출한다 (utils/scanDetail — 출력/스캔 페이지와 동일한 기준 사용)
+  const scanSessions = useMemo<ScanSession[]>(
+      () => buildScanSessions(scans).filter(isFullyAnalyzedSession),
+      [scans],
+  )
 
   // ── 손 분석 세션 상세 모달 ──────
   const [scanDetailSession, setScanDetailSession] = useState<ScanSession | null>(null)
-  const [scanDetail, setScanDetail] = useState<ScanDetail | null>(null)
-  const [isLoadingScanDetail, setIsLoadingScanDetail] = useState(false)
-  const [scanFingerDetailOpen, setScanFingerDetailOpen] = useState(false)
-  const [scanFingerHand, setScanFingerHand] = useState<'L' | 'R'>('L')
-  const [scanPaletteOpen, setScanPaletteOpen] = useState(false)
-
-  const openScanDetail = async (session: ScanSession) => {
-    setScanDetailSession(session)
-    setScanDetail(null)
-    setScanFingerDetailOpen(false)
-    setScanFingerHand('L')
-    setScanPaletteOpen(false)
-    setIsLoadingScanDetail(true)
-    try {
-      const [left, right] = await Promise.all([
-        session.leftScanId ? getScanResult(session.leftScanId).catch(() => null) : Promise.resolve(null),
-        session.rightScanId ? getScanResult(session.rightScanId).catch(() => null) : Promise.resolve(null),
-      ])
-      const detail = buildScanDetail(left, right)
-      setScanDetail(detail)
-      setScanFingerHand(detail.fingers.some((f) => f.hand === 'L') ? 'L' : 'R')
-    } finally {
-      setIsLoadingScanDetail(false)
-    }
-  }
-
-  const closeScanDetail = () => {
-    setScanDetailSession(null)
-    setScanFingerDetailOpen(false)
-    setScanPaletteOpen(false)
-  }
+  const openScanDetail = (session: ScanSession) => setScanDetailSession(session)
+  const closeScanDetail = () => setScanDetailSession(null)
 
   // ── 네일팁 출력 상세 모달 ──────
   const [printDetailOrder, setPrintDetailOrder] = useState<NailTipPrintOrder | null>(null)
@@ -1037,53 +812,6 @@ export function MyPage() {
     }
   }
 
-  const handleModalToggleLike = async () => {
-    if (!detailImage || detailImage.designId == null || isBusy) return
-    setIsBusy(true)
-    try {
-      if (detailImage.liked) {
-        await toggleLikeFromGrid(detailImage.designId, detailImage.imageUrl)
-      } else {
-        await toggleLikeFromGrid(detailImage.designId, detailImage.imageUrl)
-      }
-    } finally {
-      setIsBusy(false)
-    }
-  }
-
-  const handleModalDelete = async () => {
-    if (!detailImage || detailImage.designId == null || isBusy) return
-    if (!window.confirm('이 디자인을 삭제할까요? 삭제하면 되돌릴 수 없어요.')) return
-    setIsBusy(true)
-    try {
-      await deleteDesign(detailImage.designId)
-      setDesigns((prev) => prev.filter((d) => d.designId !== detailImage.designId))
-      setFavorites((prev) => prev.filter((f) => f.designId !== detailImage.designId))
-      setDetailImage(null)
-    } catch (e) {
-      alert(e instanceof ApiError ? e.message : '삭제에 실패했습니다.')
-    } finally {
-      setIsBusy(false)
-    }
-  }
-
-  const handleModalUnfavorite = async () => {
-    if (!detailImage || detailImage.designId == null || isBusy) return
-    setIsBusy(true)
-    try {
-      await unlikeDesign(detailImage.designId, detailImage.imageUrl)
-      setFavorites((prev) =>
-          prev.filter((f) => !(f.designId === detailImage.designId && f.imageUrl === detailImage.imageUrl)),
-      )
-      void getSavedFolders().then(setSavedFolders).catch(() => {})
-      setDetailImage(null)
-    } catch (e) {
-      alert(e instanceof ApiError ? e.message : '요청에 실패했습니다.')
-    } finally {
-      setIsBusy(false)
-    }
-  }
-
   // ── 전체 활동 타임라인: 손 스캔 + 디자인 생성 + 네일팁 출력을 날짜별로 통합 ──────
   const timelineByDate = useMemo(() => {
     const map = new Map<string, TimelineDayGroup>()
@@ -1255,6 +983,7 @@ export function MyPage() {
 
   const moveTimelineDate = (delta: number) => {
     const next = shiftDateKey(selectedTimelineDate, delta)
+    if (next > todayKey()) return
     setSelectedTimelineDate(next)
     const [y, m] = next.split('-').map(Number)
     setCalendarMonth({ year: y, month: m - 1 })
@@ -1263,19 +992,41 @@ export function MyPage() {
   const openTimelineCalendar = () => {
     const [y, m] = selectedTimelineDate.split('-').map(Number)
     setCalendarMonth({ year: y, month: m - 1 })
+    setCalendarViewMode('days')
     setCalendarOpen((prev) => !prev)
   }
 
   const selectTimelineDate = (key: string) => {
+    if (key > todayKey()) return
     setSelectedTimelineDate(key)
     setCalendarOpen(false)
   }
 
+  // 오늘이 속한 달을 넘어서는(=미래) 달로는 이동할 수 없다 — 어차피 그 달의 날짜는
+  // 전부 is-future로 막혀 있어서 고를 게 없기 때문.
+  const isCurrentOrFutureMonth = (year: number, month: number) => {
+    const now = new Date()
+    return year > now.getFullYear() || (year === now.getFullYear() && month >= now.getMonth())
+  }
+
   const shiftCalendarMonth = (delta: number) => {
     setCalendarMonth((prev) => {
+      if (delta > 0 && isCurrentOrFutureMonth(prev.year, prev.month)) return prev
       const date = new Date(prev.year, prev.month + delta, 1)
       return { year: date.getFullYear(), month: date.getMonth() }
     })
+  }
+
+  const shiftCalendarYear = (delta: number) => {
+    setCalendarMonth((prev) => {
+      if (delta > 0 && prev.year >= new Date().getFullYear()) return prev
+      return { ...prev, year: prev.year + delta }
+    })
+  }
+
+  const selectCalendarMonth = (month: number) => {
+    setCalendarMonth((prev) => ({ ...prev, month }))
+    setCalendarViewMode('days')
   }
 
   const renderScanSessionRow = (
@@ -1285,11 +1036,12 @@ export function MyPage() {
     const activityId = options?.activityId ?? `scan-${session.key}`
     const timeLabel = formatDateTimeFull(session.scannedAt)
     const highlighted = options?.interactive ? activeActivityId === activityId : false
-    const shapeLabel = session.shape
-        ? getNailShape(session.shape)?.labelKo ?? session.shape
+    const shapeLabel = session.recommendedShape
+        ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
-    const repColor = representativePersonalColor(session.seasonCode)
-    const palettePreview = pickPalettePreview(session.seasonCode, 5)
+    const skinHex = session.skinToneHex
+    const toneLabel = skinHex ? analyzeSkinTone(skinHex).tone.label.replace(/\s+/g, '') : '미분석'
+    const palettePreview = skinHex ? generateSkinTonePalette(skinHex, 5) : []
     const metricsLine = [
       `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
       `너비 ${session.avgWidthMm != null ? `${Number(session.avgWidthMm).toFixed(1).replace(/\.0$/, '')}mm` : '-'}`,
@@ -1305,24 +1057,22 @@ export function MyPage() {
             className={`mypage-x__scan-row mypage-x__scan-row--rich${highlighted ? ' is-highlighted' : ''}`}
             onClick={() => {
               if (options?.interactive) handleActivitySelect(activityId)
-              void openScanDetail(session)
+              openScanDetail(session)
             }}
             onMouseEnter={() => options?.interactive && handleActivityHover(activityId)}
             onMouseLeave={() => options?.interactive && handleActivityHover(null)}
         >
           <span
               className="mypage-x__scan-swatch mypage-x__scan-swatch--lg"
-              style={{ background: repColor }}
+              style={{ background: skinHex ?? '#de869f' }}
               aria-hidden="true"
           />
           <div className="mypage-x__scan-info">
-            <p className="mypage-x__scan-season" style={{ color: repColor }}>
-              {session.seasonNameKo ?? '미분석'}
-            </p>
+            <p className="mypage-x__scan-season">{toneLabel}</p>
             <p className="mypage-x__scan-metrics">{metricsLine}</p>
             <p className="mypage-x__scan-shape-line">추천 쉐입: {shapeLabel ?? '미정'}</p>
             {palettePreview.length > 0 && (
-                <div className="mypage-x__scan-palette" aria-label="퍼스널컬러 팔레트">
+                <div className="mypage-x__scan-palette" aria-label="대표 피부색 추천 컬러">
                   {palettePreview.map((hex, idx) => (
                       <i key={`${hex}-${idx}`} style={{ background: hex }} />
                   ))}
@@ -1681,11 +1431,7 @@ export function MyPage() {
         <span className="mypage-x__empty-icon" aria-hidden="true">{Icon[icon]}</span>
         <p className="mypage-x__empty-title">{title}</p>
         <p className="mypage-x__empty-desc">{description}</p>
-        {actionLabel && onAction && (
-            <button type="button" className="mypage-x__cta" onClick={onAction}>
-              {actionLabel}
-            </button>
-        )}
+        {actionLabel && onAction && <NextStepButton label={actionLabel} onClick={onAction} />}
       </div>
   )
 
@@ -1710,7 +1456,7 @@ export function MyPage() {
         icon: 'design',
         title: '아직 디자인이 없어요',
         description: 'AI와 함께 첫 네일 디자인을 만들어보세요.',
-        actionLabel: '디자인 만들기',
+        actionLabel: '디자인 만들러 가기',
         onAction: () => navigate('/design/chat'),
       })
     }
@@ -1758,13 +1504,8 @@ export function MyPage() {
                           designId: item.designId,
                           imageUrl: item.imageUrl,
                           createdAt: modalDate,
-                          promptSummary: 'promptSummary' in item ? item.promptSummary : undefined,
                           liked,
-                          canDelete: !isFavoriteView,
-                          isFavoriteView,
-                          owner: !isFavoriteView,
                           folder,
-                          shared: isShared,
                         })
                       }}
                   >
@@ -1880,18 +1621,6 @@ export function MyPage() {
                         손 분석부터 네일팁 출력, 디자인까지 — 나의 네일 여정을 한곳에서 관리하세요.
                       </p>
                     </div>
-                    {/*<div className="mypage-x__hero-actions">*/}
-                    {/*  <button type="button" className="mypage-x__cta" onClick={() => navigate('/scan/hand')}>*/}
-                    {/*    손 스캔하기*/}
-                    {/*  </button>*/}
-                    {/*  <button*/}
-                    {/*      type="button"*/}
-                    {/*      className="mypage-x__cta mypage-x__cta--outline"*/}
-                    {/*      onClick={() => navigate('/design/chat')}*/}
-                    {/*  >*/}
-                    {/*    디자인 만들기*/}
-                    {/*  </button>*/}
-                    {/*</div>*/}
                   </div>
 
                   <div className="mypage-x__stat-grid">
@@ -1929,7 +1658,7 @@ export function MyPage() {
                       renderImageGrid(designs.slice(0, 4), false, {
                         title: '아직 생성한 디자인이 없어요',
                         description: 'AI와 대화하며 첫 네일 디자인을 만들어보세요.',
-                        actionLabel: '디자인 만들기',
+                        actionLabel: '디자인 만들러 가기',
                         onAction: () => navigate('/design/chat'),
                       })
                   )}
@@ -2146,7 +1875,7 @@ export function MyPage() {
                         icon: 'hand',
                         title: '손 분석 이력이 없어요',
                         description: '손을 스캔하면 퍼스널컬러와 맞춤 네일팁 쉐입을 추천해드려요.',
-                        actionLabel: '손 스캔하기',
+                        actionLabel: '손 촬영하러 가기',
                         onAction: () => navigate('/scan/hand'),
                       })
                   ) : (
@@ -2226,6 +1955,7 @@ export function MyPage() {
                                 type="button"
                                 className="mypage-x__day-nav-arrow"
                                 onClick={() => moveTimelineDate(1)}
+                                disabled={selectedTimelineDate >= todayKey()}
                                 aria-label="다음 날"
                             >
                               {Icon.chevronRight}
@@ -2239,57 +1969,104 @@ export function MyPage() {
                                     <button
                                         type="button"
                                         className="mypage-x__naily-cal-month-btn"
-                                        onClick={() => shiftCalendarMonth(-1)}
-                                        aria-label="이전 달"
+                                        onClick={() =>
+                                            calendarViewMode === 'days' ? shiftCalendarMonth(-1) : shiftCalendarYear(-1)
+                                        }
+                                        aria-label={calendarViewMode === 'days' ? '이전 달' : '이전 연도'}
                                     >
                                       {Icon.chevronLeft}
                                     </button>
-                                    <p className="mypage-x__naily-cal-month">
-                                      {calendarMonth.year}년 {calendarMonth.month + 1}월
-                                    </p>
+                                    <button
+                                        type="button"
+                                        className="mypage-x__naily-cal-month mypage-x__naily-cal-month--btn"
+                                        onClick={() => setCalendarViewMode((prev) => (prev === 'days' ? 'months' : 'days'))}
+                                        aria-label="월 선택"
+                                    >
+                                      {calendarViewMode === 'days'
+                                          ? `${calendarMonth.year}년 ${calendarMonth.month + 1}월`
+                                          : `${calendarMonth.year}년`}
+                                    </button>
                                     <button
                                         type="button"
                                         className="mypage-x__naily-cal-month-btn"
-                                        onClick={() => shiftCalendarMonth(1)}
-                                        aria-label="다음 달"
+                                        onClick={() =>
+                                            calendarViewMode === 'days' ? shiftCalendarMonth(1) : shiftCalendarYear(1)
+                                        }
+                                        aria-label={calendarViewMode === 'days' ? '다음 달' : '다음 연도'}
+                                        disabled={
+                                            calendarViewMode === 'days'
+                                                ? isCurrentOrFutureMonth(calendarMonth.year, calendarMonth.month)
+                                                : calendarMonth.year >= new Date().getFullYear()
+                                        }
                                     >
                                       {Icon.chevronRight}
                                     </button>
                                   </div>
                                 </div>
 
-                                <div className="mypage-x__naily-cal-weekdays">
-                                  {['일', '월', '화', '수', '목', '금', '토'].map((w) => (
-                                      <span key={w}>{w}</span>
-                                  ))}
-                                </div>
+                                {calendarViewMode === 'months' ? (
+                                    <div className="mypage-x__naily-cal-month-grid">
+                                      {Array.from({ length: 12 }, (_, month) => month).map((month) => {
+                                        const now = new Date()
+                                        const isFutureMonth =
+                                            calendarMonth.year > now.getFullYear() ||
+                                            (calendarMonth.year === now.getFullYear() && month > now.getMonth())
+                                        const isSelected = month === calendarMonth.month
+                                        return (
+                                            <button
+                                                key={month}
+                                                type="button"
+                                                className={[
+                                                  'mypage-x__naily-cal-month-cell',
+                                                  isSelected ? 'is-selected' : '',
+                                                ].filter(Boolean).join(' ')}
+                                                onClick={() => selectCalendarMonth(month)}
+                                                disabled={isFutureMonth}
+                                            >
+                                              {month + 1}월
+                                            </button>
+                                        )
+                                      })}
+                                    </div>
+                                ) : (
+                                    <>
+                                      <div className="mypage-x__naily-cal-weekdays">
+                                        {['일', '월', '화', '수', '목', '금', '토'].map((w) => (
+                                            <span key={w}>{w}</span>
+                                        ))}
+                                      </div>
 
-                                <div className="mypage-x__naily-cal-grid">
-                                  {buildCalendarCells(calendarMonth.year, calendarMonth.month).map((cell, idx) => {
-                                    if (!cell) {
-                                      return <span key={`empty-${idx}`} className="mypage-x__naily-cal-empty" />
-                                    }
-                                    const isSelected = cell.key === selectedTimelineDate
-                                    const isToday = cell.key === todayKey()
-                                    const hasActivity = timelineActivityDates.has(cell.key)
-                                    return (
-                                        <button
-                                            key={cell.key}
-                                            type="button"
-                                            className={[
-                                              'mypage-x__naily-cal-day',
-                                              isSelected ? 'is-selected' : '',
-                                              isToday ? 'is-today' : '',
-                                              hasActivity ? 'has-activity' : '',
-                                            ].filter(Boolean).join(' ')}
-                                            onClick={() => selectTimelineDate(cell.key)}
-                                        >
-                                          {cell.day}
-                                          {hasActivity && <i aria-hidden="true" />}
-                                        </button>
-                                    )
-                                  })}
-                                </div>
+                                      <div className="mypage-x__naily-cal-grid">
+                                        {buildCalendarCells(calendarMonth.year, calendarMonth.month).map((cell, idx) => {
+                                          if (!cell) {
+                                            return <span key={`empty-${idx}`} className="mypage-x__naily-cal-empty" />
+                                          }
+                                          const isSelected = cell.key === selectedTimelineDate
+                                          const isToday = cell.key === todayKey()
+                                          const hasActivity = timelineActivityDates.has(cell.key)
+                                          const isFuture = cell.key > todayKey()
+                                          return (
+                                              <button
+                                                  key={cell.key}
+                                                  type="button"
+                                                  className={[
+                                                    'mypage-x__naily-cal-day',
+                                                    isSelected ? 'is-selected' : '',
+                                                    isToday ? 'is-today' : '',
+                                                    hasActivity ? 'has-activity' : '',
+                                                    isFuture ? 'is-future' : '',
+                                                  ].filter(Boolean).join(' ')}
+                                                  onClick={() => selectTimelineDate(cell.key)}
+                                                  disabled={isFuture}
+                                              >
+                                                {cell.day}
+                                                {hasActivity && <i aria-hidden="true" />}
+                                              </button>
+                                          )
+                                        })}
+                                      </div>
+                                    </>
+                                )}
 
                                 <div className="mypage-x__naily-cal-footer">
                                   <button
@@ -2441,55 +2218,100 @@ export function MyPage() {
                         <>
                           <div className="mypage-x__fav-block">
                             {renderFavBlockToolbar('폴더', sortedFolders.length, 'folder')}
-                            {sortedFolders.length === 0 ? (
-                                <p className="mypage-x__day-section-empty">폴더를 불러오는 중이거나 아직 없어요.</p>
-                            ) : (
-                                <div className="mypage-x__folder-strip">
-                                  {sortedFolders.map((folder) => {
-                                    const thumbs = folder.recentImageUrls ?? []
-                                    return (
-                                        <div key={folder.folderId} className="mypage-x__folder-card">
+                            <div className="mypage-x__folder-strip">
+                              {sortedFolders.map((folder) => {
+                                const thumbs = folder.recentImageUrls ?? []
+                                return (
+                                    <div key={folder.folderId} className="mypage-x__folder-card">
+                                      <button
+                                          type="button"
+                                          className="mypage-x__folder-card-open"
+                                          onClick={() => setSelectedFavoriteFolderId(folder.folderId)}
+                                      >
+                                        <div className="mypage-x__folder-thumbs" aria-hidden="true">
+                                          <div className="mypage-x__folder-thumb-main">
+                                            {thumbs[0] ? <img src={thumbs[0]} alt="" /> : <span />}
+                                          </div>
+                                          <div className="mypage-x__folder-thumb-side">
+                                            <div>{thumbs[1] ? <img src={thumbs[1]} alt="" /> : <span />}</div>
+                                            <div>{thumbs[2] ? <img src={thumbs[2]} alt="" /> : <span />}</div>
+                                          </div>
+                                        </div>
+                                        <div className="mypage-x__folder-meta">
+                                          <div className="mypage-x__folder-meta-row">
+                                            <p className="mypage-x__folder-name">{folder.name}</p>
+                                          </div>
+                                          <p className="mypage-x__folder-count">{folder.itemCount}개</p>
+                                        </div>
+                                      </button>
+                                      {!folder.isDefault && (
                                           <button
                                               type="button"
-                                              className="mypage-x__folder-card-open"
-                                              onClick={() => setSelectedFavoriteFolderId(folder.folderId)}
+                                              className="mypage-x__folder-delete-btn"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                openDeleteFolderModal(folder)
+                                              }}
+                                              disabled={isBusy}
+                                              title="폴더 삭제"
+                                              aria-label={`${folder.name} 폴더 삭제`}
                                           >
-                                            <div className="mypage-x__folder-thumbs" aria-hidden="true">
-                                              <div className="mypage-x__folder-thumb-main">
-                                                {thumbs[0] ? <img src={thumbs[0]} alt="" /> : <span />}
-                                              </div>
-                                              <div className="mypage-x__folder-thumb-side">
-                                                <div>{thumbs[1] ? <img src={thumbs[1]} alt="" /> : <span />}</div>
-                                                <div>{thumbs[2] ? <img src={thumbs[2]} alt="" /> : <span />}</div>
-                                              </div>
-                                            </div>
-                                            <div className="mypage-x__folder-meta">
-                                              <div className="mypage-x__folder-meta-row">
-                                                <p className="mypage-x__folder-name">{folder.name}</p>
-                                              </div>
-                                              <p className="mypage-x__folder-count">{folder.itemCount}개</p>
-                                            </div>
+                                            {Icon.trash}
                                           </button>
-                                          {!folder.isDefault && (
-                                              <button
-                                                  type="button"
-                                                  className="mypage-x__folder-delete-btn"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation()
-                                                    openDeleteFolderModal(folder)
-                                                  }}
-                                                  disabled={isBusy}
-                                                  title="폴더 삭제"
-                                                  aria-label={`${folder.name} 폴더 삭제`}
-                                              >
-                                                {Icon.trash}
-                                              </button>
-                                          )}
-                                        </div>
-                                    )
-                                  })}
-                                </div>
-                            )}
+                                      )}
+                                    </div>
+                                )
+                              })}
+
+                              {creatingFolder ? (
+                                  <div className="mypage-x__folder-card mypage-x__folder-card--new is-editing">
+                                    <div className="mypage-x__folder-new-thumb" aria-hidden="true">
+                                      {Icon.plus}
+                                    </div>
+                                    <div className="mypage-x__folder-meta">
+                                      <div className="mypage-x__folder-new-input-row">
+                                        <input
+                                            value={newFolderNameInStrip}
+                                            onChange={(e) => setNewFolderNameInStrip(e.target.value)}
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault()
+                                                void handleCreateFolderInStrip()
+                                              }
+                                            }}
+                                            placeholder="폴더 이름"
+                                            maxLength={50}
+                                            autoFocus
+                                            disabled={isCreatingFolder}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="mypage-x__folder-new-cancel"
+                                            onClick={cancelCreatingFolderInStrip}
+                                            aria-label="새 폴더 만들기 취소"
+                                            disabled={isCreatingFolder}
+                                        >
+                                          {Icon.close}
+                                        </button>
+                                      </div>
+                                      {createFolderError && <p className="mypage-x__folder-new-error">{createFolderError}</p>}
+                                    </div>
+                                  </div>
+                              ) : (
+                                  <button
+                                      type="button"
+                                      className="mypage-x__folder-card mypage-x__folder-card--new"
+                                      onClick={startCreatingFolderInStrip}
+                                  >
+                                    <div className="mypage-x__folder-new-thumb" aria-hidden="true">
+                                      {Icon.plus}
+                                    </div>
+                                    <div className="mypage-x__folder-meta">
+                                      <p className="mypage-x__folder-name">새 폴더 만들기</p>
+                                    </div>
+                                  </button>
+                              )}
+                            </div>
                           </div>
 
                           <div className="mypage-x__fav-block">
@@ -2523,8 +2345,8 @@ export function MyPage() {
                         icon: 'print',
                         title: '출력 신청 내역이 없어요',
                         description: '손 분석 후 맞춤 네일팁 3D 출력을 신청할 수 있어요.',
-                        actionLabel: '손 스캔하기',
-                        onAction: () => navigate('/scan/hand'),
+                        actionLabel: '출력하러 가기',
+                        onAction: () => navigate('/print'),
                       })
                   ) : (
                       <>
@@ -2547,161 +2369,26 @@ export function MyPage() {
         </div>
 
         {/* ── 이미지 상세 모달 ───────────────────────────────────────── */}
-        {detailImage && (
-            <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="디자인 상세">
-              <button
-                  type="button"
-                  className="mypage-x__modal-backdrop"
-                  aria-label="닫기"
-                  onClick={closeDetailImage}
-              />
-              <div className="mypage-x__modal-panel mypage-x__modal-panel--lg mypage-x__modal-panel--image">
-                <button
-                    type="button"
-                    className="mypage-x__modal-close mypage-x__modal-close--plain"
-                    onClick={closeDetailImage}
-                    aria-label="닫기"
-                >
-                  ✕
-                </button>
-
-                <div
-                    ref={imageViewportRef}
-                    className={`mypage-x__modal-image-viewport mypage-x__modal-image-viewport--fit${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
-                    onMouseUp={stopDragging}
-                    onMouseLeave={stopDragging}
-                >
-                  <img
-                      src={detailImage.imageUrl}
-                      alt="네일 디자인 확대"
-                      className="mypage-x__modal-image"
-                      draggable={false}
-                      style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
-                      onMouseDown={handleImagePointerDown}
-                      onMouseMove={handleImagePointerMove}
-                  />
-
-                  <div className="mypage-x__modal-image-tools">
-                    <button
-                        type="button"
-                        className={`mypage-x__modal-heart${detailImage.liked ? ' is-liked' : ''}`}
-                        onClick={() => void handleModalToggleLike()}
-                        disabled={isBusy || detailImage.designId == null}
-                        aria-label={detailImage.liked ? '찜 해제' : '찜하기'}
-                    >
-                      {Icon.heart}
-                    </button>
-                    {detailImage.liked && detailImage.designId != null && (
-                        <button
-                            type="button"
-                            className="mypage-x__modal-folder-pill"
-                            onClick={() => openMoveFolderModal(detailImage.designId!, detailImage.imageUrl)}
-                            title="저장 위치 변경"
-                            aria-label={`저장 위치 변경 (현재: ${detailImage.folder?.name
-                            ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
-                            ?? '기본'})`}
-                        >
-                          <span className="mypage-x__modal-folder-pill-text">
-                            {detailImage.folder?.name
-                                ?? findFavoriteFolder(detailImage.designId, detailImage.imageUrl)?.name
-                                ?? '기본'}
-                          </span>
-                          <span className="mypage-x__modal-folder-pill-icon" aria-hidden="true">
-                            {Icon.chevronDown}
-                          </span>
-                        </button>
-                    )}
-                  </div>
-
-                  {(detailImage.owner ?? detailImage.canDelete) && (
-                      <span className={`mypage-x__modal-share-corner mypage-x__share-badge${detailImage.shared ? ' is-on' : ''}`}>
-                        {detailImage.shared ? '둘러보기에 공유 중' : '비공개'}
-                      </span>
-                  )}
-
-                  <div className="mypage-x__modal-zoom-controls">
-                    <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
-                  </div>
-                </div>
-
-                {showDesignDetails && (
-                    <div id="mypage-design-details" className="mypage-x__modal-design-details">
-                      <DesignDetailsPanel details={detailImage.details} loading={detailLoading} />
-                    </div>
-                )}
-
-                <div className="mypage-x__modal-info">
-                  {detailImage.createdAt && <p className="mypage-x__modal-date">{detailImage.createdAt}</p>}
-                  <button
-                      type="button"
-                      className={`mypage-x__modal-details-btn mypage-x__modal-details-btn--inline${showDesignDetails ? ' is-open' : ''}`}
-                      onClick={() => setShowDesignDetails((prev) => !prev)}
-                      aria-expanded={showDesignDetails}
-                      aria-controls="mypage-design-details"
-                  >
-                    {ModalActionIcons.details}
-                    <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
-                  </button>
-                </div>
-                <div className="mypage-x__modal-actions">
-                  {detailImage.designId != null && (
-                      <button
-                          type="button"
-                          className="mypage-x__modal-action--danger"
-                          onClick={() => void handleModalDelete()}
-                          disabled={isBusy || !(detailImage.owner ?? detailImage.canDelete)}
-                          title={
-                            !(detailImage.owner ?? detailImage.canDelete)
-                                ? '내 디자인만 삭제할 수 있어요'
-                                : undefined
-                          }
-                      >
-                        {ModalActionIcons.trash}
-                        <span>이미지 삭제</span>
-                      </button>
-                  )}
-                  <button
-                      type="button"
-                      className="mypage-x__modal-action--ghost"
-                      onClick={() => void downloadImage(detailImage.imageUrl, `naily-design-${Date.now()}.png`)}
-                  >
-                    {ModalActionIcons.download}
-                    <span>이미지 다운로드</span>
-                  </button>
-                  {detailImage.designId != null && (
-                      <button
-                          type="button"
-                          className={`mypage-x__modal-action--ghost${detailImage.shared ? ' is-active' : ''}`}
-                          onClick={() => void handleToggleShare()}
-                          disabled={shareBusy || !(detailImage.owner ?? detailImage.canDelete)}
-                          title={
-                            !(detailImage.owner ?? detailImage.canDelete)
-                                ? '내 디자인만 공유할 수 있어요'
-                                : undefined
-                          }
-                      >
-                        {ModalActionIcons.share}
-                        <span>
-                          {shareBusy
-                              ? '처리 중...'
-                              : detailImage.shared
-                                  ? '공유 해제'
-                                  : '공유하기'}
-                        </span>
-                      </button>
-                  )}
-                  <button
-                      type="button"
-                      className="mypage-x__modal-action--accent"
-                      onClick={() => setArTryOnImageUrl(detailImage.imageUrl)}
-                  >
-                    {ModalActionIcons.ar}
-                    <span>AR로 미리보기</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-        )}
+        <DesignImageDetailModal
+            image={detailImage}
+            onClose={closeDetailImage}
+            checkLiked={(designId, imageUrl) => likedKeySet.has(`${designId}-${imageUrl}`)}
+            onLikeChange={(designId, imageUrl, saved) => {
+              if (saved) {
+                setFavorites((prev) => [saved, ...prev.filter((f) => !(f.designId === designId && f.imageUrl === imageUrl))])
+              } else {
+                setFavorites((prev) => prev.filter((f) => !(f.designId === designId && f.imageUrl === imageUrl)))
+              }
+              void getSavedFolders().then(setSavedFolders).catch(() => {})
+            }}
+            onShareChange={(designId, shared) => {
+              setDesigns((prev) => prev.map((d) => (d.designId === designId ? { ...d, shared } : d)))
+            }}
+            onDeleted={(designId) => {
+              setDesigns((prev) => prev.filter((d) => d.designId !== designId))
+              setFavorites((prev) => prev.filter((f) => f.designId !== designId))
+            }}
+        />
 
         <FavoriteFolderModal
             open={!!likeModalTarget}
@@ -2739,11 +2426,12 @@ export function MyPage() {
                   <strong>{folderToDelete.name}</strong> 폴더를 삭제할까요?
                 </h2>
 
-                <p className="mypage-x__confirm-desc">
-                  폴더만 사라지고, 안에 있던 찜 이미지{' '}
-                  {folderToDelete.itemCount > 0 && <strong>{folderToDelete.itemCount}개</strong>}는{' '}
-                  <strong>기본</strong> 폴더로 자동 이동돼요.
-                </p>
+                {folderToDelete.itemCount > 0 && (
+                    <p className="mypage-x__confirm-desc">
+                      폴더만 사라지고, 안에 있던 찜 이미지 <strong>{folderToDelete.itemCount}개</strong>는{' '}
+                      <strong>기본</strong> 폴더로 자동 이동돼요.
+                    </p>
+                )}
 
                 {folderToDelete.itemCount > 0 && (
                     <div className="mypage-x__confirm-flow" aria-hidden="true">
@@ -2778,262 +2466,19 @@ export function MyPage() {
                   </button>
                   <button
                       type="button"
-                      className="danger"
+                      className="mypage-x__modal-action--danger"
                       onClick={() => void confirmDeleteFolder()}
                       disabled={isBusy}
                   >
-                    {isBusy ? '삭제 중...' : '폴더 삭제'}
+                    <span>{isBusy ? '삭제 중...' : '폴더 삭제'}</span>
                   </button>
                 </div>
               </div>
             </div>
         )}
 
-        {arTryOnImageUrl && (
-            <NailArTryOnModal
-                imageUrl={arTryOnImageUrl}
-                onClose={() => setArTryOnImageUrl(null)}
-            />
-        )}
-
         {/* ── 손 분석 결과 상세 모달 ───────────────────────────────────── */}
-        {scanDetailSession && (
-            <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="손 분석 상세 결과">
-              <button
-                  type="button"
-                  className="mypage-x__modal-backdrop"
-                  aria-label="닫기"
-                  onClick={closeScanDetail}
-              />
-              <div className="mypage-x__modal-panel mypage-x__scanx-panel">
-                <button
-                    type="button"
-                    className="mypage-x__modal-close mypage-x__modal-close--plain"
-                    onClick={closeScanDetail}
-                    aria-label="닫기"
-                >
-                  ✕
-                </button>
-
-                {isLoadingScanDetail || !scanDetail ? (
-                    <p className="mypage-x__empty">분석 결과를 불러오는 중...</p>
-                ) : (() => {
-                  const seasonRow = SEASON_ROWS.find((r) => r.code === scanDetail.seasonCode)
-                  const repColor = representativePersonalColor(scanDetail.seasonCode)
-                  const palette = pickPalettePreview(scanDetail.seasonCode, 24)
-                  const shapeLabel = scanDetail.shapeId
-                      ? getNailShape(scanDetail.shapeId)?.labelKo ?? scanDetail.shapeId
-                      : null
-                  const shapeEn = scanDetail.shapeId
-                      ? getNailShape(scanDetail.shapeId)?.labelEn ?? scanDetail.shapeId
-                      : null
-                  const lengthPct = Math.min(100, Math.max(8, (scanDetail.avgLength / 18) * 100))
-                  const widthPct = Math.min(100, Math.max(8, (scanDetail.avgWidth / 14) * 100))
-                  const curvePct = Math.min(100, Math.max(8, scanDetail.avgCurve * 100))
-                  const fingerList = scanDetail.fingers.filter((f) => f.hand === scanFingerHand)
-                  const hasLeft = scanDetail.fingers.some((f) => f.hand === 'L')
-                  const hasRight = scanDetail.fingers.some((f) => f.hand === 'R')
-
-                  return (
-                      <>
-                        <header className="mypage-x__scanx-head">
-                          <p className="mypage-x__scanx-eyebrow">Hand Analysis</p>
-                          <h2 className="mypage-x__scanx-title">손 분석 결과</h2>
-                          <p className="mypage-x__scanx-date">
-                            {formatDateTimeFull(scanDetail.scannedAt) || formatNavDate(dateKeyOf(scanDetail.scannedAt))}
-                          </p>
-                        </header>
-
-                        <section
-                            className="mypage-x__scanx-hero"
-                            style={{
-                              background: `linear-gradient(145deg, ${repColor}22 0%, #fff 48%, ${repColor}14 100%)`,
-                            }}
-                        >
-                          {palette.length > 0 && (
-                              <div className={`mypage-x__scanx-palette-wrap${scanPaletteOpen ? ' is-open' : ''}`}>
-                                <button
-                                    type="button"
-                                    className="mypage-x__scanx-palette-btn"
-                                    aria-label="퍼스널컬러 팔레트 보기"
-                                    aria-expanded={scanPaletteOpen}
-                                    aria-haspopup="true"
-                                    onClick={() => setScanPaletteOpen((prev) => !prev)}
-                                >
-                                  {Icon.palette}
-                                </button>
-                                <div className="mypage-x__scanx-palette-pop" role="tooltip">
-                                  <p className="mypage-x__scanx-palette-pop-title">컬러 팔레트</p>
-                                  <div className="mypage-x__scanx-palette" aria-label="퍼스널컬러 팔레트 24색">
-                                    {palette.map((hex, idx) => (
-                                        <i key={`${hex}-${idx}`} style={{ background: hex }} title={hex} />
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                          )}
-                          <div className="mypage-x__scanx-hero-top">
-                            <span
-                                className="mypage-x__scanx-color-orb"
-                                style={{ background: repColor }}
-                                aria-hidden="true"
-                            />
-                            <div className="mypage-x__scanx-hero-copy">
-                              <p className="mypage-x__scanx-kicker">퍼스널 컬러</p>
-                              <h3 className="mypage-x__scanx-season" style={{ color: repColor }}>
-                                {scanDetail.seasonNameKo ?? '분석 결과 없음'}
-                              </h3>
-                              {seasonRow && (
-                                  <div className="mypage-x__scanx-chips">
-                                    <span>{seasonRow.tone} 톤</span>
-                                    <span>{seasonRow.brightness}</span>
-                                    <span>{seasonRow.saturation}</span>
-                                  </div>
-                              )}
-                            </div>
-                          </div>
-                        </section>
-
-                        <section className="mypage-x__scanx-shape">
-                          <div className="mypage-x__scanx-shape-copy">
-                            <p className="mypage-x__scanx-kicker">추천 네일팁 쉐입</p>
-                            <strong>{shapeLabel ?? '미정'}</strong>
-                            {shapeEn && <span>{shapeEn}</span>}
-                          </div>
-                          <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
-                            {scanDetail.shapeId && SHAPE_PREVIEW_IMAGES[scanDetail.shapeId] ? (
-                                <img src={SHAPE_PREVIEW_IMAGES[scanDetail.shapeId]} alt="" />
-                            ) : (
-                                Icon.design
-                            )}
-                          </div>
-                        </section>
-
-                        <section className="mypage-x__scanx-metrics" aria-label="양손 평균 손톱 지표">
-                          <p className="mypage-x__scanx-section-label">손톱 평균 수치</p>
-                          <div className="mypage-x__scanx-metric-grid">
-                            <article className="mypage-x__scanx-metric">
-                              <div className="mypage-x__scanx-metric-top">
-                                <div className="mypage-x__scanx-metric-copy">
-                                  <p>길이</p>
-                                  <strong>{scanDetail.avgLength.toFixed(1)}<em>mm</em></strong>
-                                </div>
-                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.lengthIcon}</span>
-                              </div>
-                              <div className="mypage-x__scanx-meter" aria-hidden="true">
-                                <i style={{ width: `${lengthPct}%` }} />
-                              </div>
-                              <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
-                            </article>
-                            <article className="mypage-x__scanx-metric">
-                              <div className="mypage-x__scanx-metric-top">
-                                <div className="mypage-x__scanx-metric-copy">
-                                  <p>너비</p>
-                                  <strong>{scanDetail.avgWidth.toFixed(1)}<em>mm</em></strong>
-                                </div>
-                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.widthIcon}</span>
-                              </div>
-                              <div className="mypage-x__scanx-meter" aria-hidden="true">
-                                <i style={{ width: `${widthPct}%` }} />
-                              </div>
-                              <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
-                            </article>
-                            <article className="mypage-x__scanx-metric">
-                              <div className="mypage-x__scanx-metric-top">
-                                <div className="mypage-x__scanx-metric-copy">
-                                  <p>곡률</p>
-                                  <strong>{scanDetail.avgCurve.toFixed(2)}</strong>
-                                </div>
-                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.curveIcon}</span>
-                              </div>
-                              <div className="mypage-x__scanx-meter" aria-hidden="true">
-                                <i style={{ width: `${curvePct}%` }} />
-                              </div>
-                              <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
-                            </article>
-                          </div>
-                        </section>
-
-                        <p className="mypage-x__scanx-comment">
-                          <span className="mypage-x__scanx-comment-label">
-                            한줄 요약
-                            <i aria-hidden="true">{Icon.summaryIcon}</i>
-                          </span>
-                          {scanDetail.comment}
-                        </p>
-
-                        {scanDetail.fingers.length > 0 && (
-                            <div className="mypage-x__scanx-detail-toggle-wrap">
-                              <button
-                                  type="button"
-                                  className={`mypage-x__scanx-detail-toggle${scanFingerDetailOpen ? ' is-open' : ''}`}
-                                  onClick={() => setScanFingerDetailOpen((prev) => !prev)}
-                                  aria-expanded={scanFingerDetailOpen}
-                              >
-                                손가락별 상세 측정값 {scanFingerDetailOpen ? '접기' : '보기'}
-                                <span className="mypage-x__scanx-detail-toggle-icon" aria-hidden="true">
-                                  {Icon.chevronDown}
-                                </span>
-                              </button>
-
-                              {scanFingerDetailOpen && (
-                                  <div className="mypage-x__scanx-finger-panel">
-                                    <div
-                                        className={`mypage-x__scanx-hand-tabs${hasLeft && hasRight ? '' : ' is-single'}`}
-                                        role="tablist"
-                                        aria-label="손 선택"
-                                    >
-                                      {hasLeft && (
-                                          <button
-                                              type="button"
-                                              role="tab"
-                                              aria-selected={scanFingerHand === 'L'}
-                                              className={scanFingerHand === 'L' ? 'is-active' : ''}
-                                              onClick={() => setScanFingerHand('L')}
-                                          >
-                                            <em>L</em>
-                                            <span>왼손</span>
-                                          </button>
-                                      )}
-                                      {hasRight && (
-                                          <button
-                                              type="button"
-                                              role="tab"
-                                              aria-selected={scanFingerHand === 'R'}
-                                              className={scanFingerHand === 'R' ? 'is-active' : ''}
-                                              onClick={() => setScanFingerHand('R')}
-                                          >
-                                            <em>R</em>
-                                            <span>오른손</span>
-                                          </button>
-                                      )}
-                                    </div>
-                                    <div className="mypage-x__scanx-hand-rows">
-                                      <div className="mypage-x__scanx-hand-row mypage-x__scanx-hand-row--head">
-                                        <span>손가락</span>
-                                        <span>길이</span>
-                                        <span>너비</span>
-                                        <span>곡률</span>
-                                      </div>
-                                      {fingerList.map((f) => (
-                                          <div key={f.label} className="mypage-x__scanx-hand-row">
-                                            <span className="mypage-x__scanx-hand-name">{f.partLabel}</span>
-                                            <span>{f.lengthMm.toFixed(1)}<small>mm</small></span>
-                                            <span>{f.widthMm.toFixed(1)}<small>mm</small></span>
-                                            <span>{f.cCurve.toFixed(2)}</span>
-                                          </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                              )}
-                            </div>
-                        )}
-                      </>
-                  )
-                })()}
-              </div>
-            </div>
-        )}
+        <ScanDetailModal session={scanDetailSession} onClose={closeScanDetail} />
 
         {/* ── 네일팁 출력 상세 모달 ───────────────────────────────────── */}
         {printDetailOrder && (() => {
@@ -3053,43 +2498,33 @@ export function MyPage() {
               ? Math.min(100, Math.max(8, printDetailScan.avgCurve * 100))
               : 0
 
+          const subtitle = formatDateTimeFull(printDetailOrder.orderedAt)
+              || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))
+
           return (
-              <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="네일팁 출력 상세">
-                <button
-                    type="button"
-                    className="mypage-x__modal-backdrop"
-                    aria-label="닫기"
-                    onClick={closePrintDetail}
-                />
-                <div className="mypage-x__modal-panel mypage-x__scanx-panel">
-                  <button
-                      type="button"
-                      className="mypage-x__modal-close mypage-x__modal-close--plain"
-                      onClick={closePrintDetail}
-                      aria-label="닫기"
-                  >
-                    ✕
-                  </button>
-
-                  <header className="mypage-x__scanx-head">
-                    <p className="mypage-x__scanx-eyebrow">Nail Tip Print</p>
-                    <h2 className="mypage-x__scanx-title">네일팁 출력</h2>
-                    <p className="mypage-x__scanx-date">
-                      {formatDateTimeFull(printDetailOrder.orderedAt)
-                        || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))}
-                    </p>
-                  </header>
-
+              <ScanXModalShell
+                  ariaLabel="네일팁 출력 상세"
+                  eyebrow="Nail Tips Print"
+                  title="네일팁 출력"
+                  subtitle={subtitle}
+                  onClose={closePrintDetail}
+              >
                   <section className={`mypage-x__printx-status mypage-x__printx-status--${statusKey}`}>
                     <div className="mypage-x__printx-status-copy">
                       <p className="mypage-x__scanx-kicker">진행 상태</p>
                       <strong>{PRINT_STATUS_LABEL[printDetailOrder.status]}</strong>
-                      <span>{PRINT_STATUS_HINT[printDetailOrder.status]}</span>
+                      <span className={printDetailOrder.status === 'FAILED' ? 'mypage-x__printx-status-fail' : undefined}>
+                        {printDetailOrder.status === 'FAILED' && printDetailOrder.failReason
+                            ? printDetailOrder.failReason
+                            : PRINT_STATUS_HINT[printDetailOrder.status]}
+                      </span>
                     </div>
                     <span className={`mypage-x__badge mypage-x__badge--${statusKey}`}>
                       {PRINT_STATUS_LABEL[printDetailOrder.status]}
                     </span>
                   </section>
+
+                  {printDetailOrder.status === 'PRINTING' && <PrinterProgressWidget />}
 
                   <section className="mypage-x__scanx-shape">
                     <div className="mypage-x__scanx-shape-copy">
@@ -3171,8 +2606,7 @@ export function MyPage() {
                         </>
                     )}
                   </section>
-                </div>
-              </div>
+              </ScanXModalShell>
           )
         })()}
       </AppShell>

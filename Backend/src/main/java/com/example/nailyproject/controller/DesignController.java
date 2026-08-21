@@ -42,6 +42,7 @@ public class DesignController {
     /**
      * '둘러보기' 커뮤니티 갤러리 GET /designs/community
      * 로그인 여부와 상관없이 누구나 조회 가능 (SecurityConfig에서 permitAll 처리)
+     * user가 있으면(로그인 상태) 각 디자인에 내가 좋아요 눌렀는지(likedByMe) 함께 내려준다.
      */
     @GetMapping("/community")
     public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.CommunityDesignResponseDto>>> getCommunityDesigns(
@@ -89,6 +90,37 @@ public class DesignController {
 
         var data = nailDesignService.unshareDesign(user, designId);
         return ResponseEntity.ok(ApiResponse.success(200, "둘러보기 공유가 해제되었습니다.", data));
+    }
+
+    /**
+     * 디자인 확정 PATCH /designs/{designId}/confirm
+     * 채팅에서 "네, 이 디자인으로 할게요"를 눌렀을 때 호출 — 이때부터 마이페이지 이력에 노출된다.
+     */
+    @PatchMapping("/{designId}/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmDesign(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        nailDesignService.confirmDesign(user, designId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "디자인이 확정되었습니다.", null)
+        );
+    }
+
+    /**
+     * 이 디자인이 만들어진 채팅 세션의 대화 내역 조회 GET /designs/{designId}/chat-history
+     */
+    @GetMapping("/{designId}/chat-history")
+    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.ChatMessageResponseDto>>> getDesignChatHistory(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId) {
+
+        var data = nailDesignService.getDesignChatHistory(user, designId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "채팅 이력 조회 성공.", data)
+        );
     }
 
     /**

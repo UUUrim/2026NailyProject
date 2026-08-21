@@ -80,7 +80,7 @@ TIP_HEIGHT_FACTOR = {
     "round":     0.50,  # semi-ellipse (tip_h = 0.5·W) → perfect semi-circle, short and wide
     "oval":      0.65,  # semi-ellipse (tip_h = 0.65·W) → taller ellipse, more elongated than round
     "almond":    0.85,  # elongated ellipse — tapered sides, fully rounded tip
-    "square":    0.00,  # no taper — flat perpendicular tip, full width
+    "square":    0.45,  # flat tip, but with a subtle width taper leading into it (see taper_mm)
     "stiletto":  1.50,  # linear taper to a sharp point (longer, more dramatic)
     "ballerina": 1.00,  # linear taper to flat tip ~40 % of nail width
 }
@@ -91,12 +91,18 @@ FLAT_TIP_SHAPES = {"square", "ballerina"}
 # Shapes worn long — default tip extension 7 mm instead of 3 mm.
 LONG_SHAPES = {"almond", "stiletto", "ballerina"}
 
+# 폭 보정(fit margin): 측정한 평평한 폭을 C-curve로 구부리면 실제 손가락을
+# 감싸는 현(chord) 폭이 측정값보다 작아져서, 프린트한 손톱이 실제보다 작게
+# 나옴.  이를 보정하기 위해 STL 생성 전에 측정 폭에 이 값을 더한다.
+# (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
+WIDTH_FIT_MARGIN_MM = 1.5
+
 
 # ─────────────────────────────────────────────────────────────
 # Nail shape: analytic cross-section width at each Y
 # ─────────────────────────────────────────────────────────────
 
-def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0):
+def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0, taper_mm=0.0):
     """
     Return (x_left, x_right) for the nail footprint at height y_val.
 
@@ -110,13 +116,20 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0):
     if y_val >= y_side_top:
         # ── Tip region ────────────────────────────────────────
         if shape == "square":
-            # Flat tip at full width, but with a circular-arc corner in XY
-            # for the last tip_r mm so the plan-view corners are rounded.
+            # Real square nails aren't perfectly parallel-sided: the plate
+            # narrows a little (a few tenths of a mm per side) from the body
+            # toward the free edge before the flat tip, THEN the last tip_r
+            # mm of that already-slightly-narrower edge gets the circular-arc
+            # corner rounding. t=0 at the start of this region (full W),
+            # t=1 at the tip (W - taper_mm).
+            t = min((y_val - y_side_top) / tip_h, 1.0) if tip_h > 0 else 1.0
+            half_reduction = (taper_mm / 2.0) * t
+            xl0, xr0 = half_reduction, float(W) - half_reduction
             if tip_r > 0 and y_val >= (L_total - tip_r):
                 d_y   = y_val - (L_total - tip_r)          # 0→tip_r
                 inset = tip_r - float(np.sqrt(max(tip_r ** 2 - d_y ** 2, 0.0)))
-                return inset, float(W) - inset
-            return 0.0, float(W)
+                return xl0 + inset, xr0 - inset
+            return xl0, xr0
 
         # Normalised position within tip: 0 at base, 1 at tip end.
         t = min((y_val - y_side_top) / tip_h, 1.0) if tip_h > 0 else 1.0
@@ -196,27 +209,55 @@ def arc_z(x_arr, x_cen, c_mm, arc_r):
 def generate_stl(params, output_path):
     C         = float(params["c_curve_mm"])
     arc_r     = float(params["arc_radius_mm"])
-    THICK     = float(params.get("thickness_mm", 1.2))
-    W         = float(params["width_mm"])
-    # Prefer corrected_length_mm when the measurer flagged the raw length as
-    # suspect (nail tip not fully visible in photo).
-    L         = float(params.get("corrected_length_mm") or params["length_mm"])
-    # Shape-specific default extensions: stiletto/coffin get 7 mm,
-    # all other shapes default to 3 mm.  An explicit --tip-extension
-    # value always wins (passed as a non-None entry in params).
-    _shape_tmp = params.get("shape", "round")
-    _ext_default = 7.0 if _shape_tmp in LONG_SHAPES else 3.0
-    L_ext     = float(params.get("tip_extension_mm") or _ext_default)
+    THICK     = float(params.get("thickness_mm", 0.6))
+    EXACT     = bool(params.get("exact"))
     CUT_DEPTH = float(params.get("cuticle_depth_mm", 1.5))
+    # Extra dome height (mm) at the cuticle end, blending to 0 at the free
+    # edge — makes the inner cavity rounder where the finger flesh is rounder.
+    # Forced to 0 in exact mode (validation replica must stay true).
+    # Reverted to the previous uniform C-curve dome: the cuticle-side extra
+    # roundness (cuticle_curve) is now OFF by default (0.0).  It made prints
+    # come out wrong, so the inner dome again uses the measured C-curve at
+    # every row.  Pass --cuticle-curve >0 to re-enable the blend if wanted.
+    CUT_CURVE = 0.0 if params.get("exact") else \
+        float(params.get("cuticle_curve_mm", 0.0))
+    _shape_tmp = params.get("shape", "round")
+    if EXACT:
+        # Exact-replica mode (validation prints): true measured dimensions,
+        # no comfort shrink, no tip extension, no W/L length "correction".
+        # Centreline length incl. the cuticle arch equals the measured length.
+        W     = float(params["width_mm"])
+        L     = max(float(params["length_mm"]) - CUT_DEPTH, 1.0)
+        L_ext = 0.0
+    else:
+        # 폭 보정: C-curve로 구부리면 현(chord) 폭이 줄어 실제보다 작게
+        # 프린트되므로, 측정 폭에 fit margin(+WIDTH_FIT_MARGIN_MM)을 더한다.
+        W     = float(params["width_mm"]) + WIDTH_FIT_MARGIN_MM
+        # Length: use the MEASURED length (Sobel tip→cuticle).  The old code
+        # preferred corrected_length_mm = width / 0.91 (Jung et al. W/L prior),
+        # but ruler ground truth showed 0.91 is wrong (true ~0.64–0.86), which
+        # made prints ~4 mm too short.  corrected_length_mm is now only a
+        # fallback when no measured length exists.
+        L     = float(params.get("length_mm")
+                      or params.get("corrected_length_mm") or 0.0)
+        # Shape-specific default extensions: stiletto/coffin get 7 mm,
+        # all other shapes default to 3 mm.  An explicit --tip-extension
+        # value always wins (passed as a non-None entry in params).
+        _ext_default = 7.0 if _shape_tmp in LONG_SHAPES else 3.0
+        L_ext = float(params.get("tip_extension_mm") or _ext_default)
     x_cen     = W / 2.0
 
     shape   = params.get("shape", "round")
     EDGE_R  = float(params.get("edge_round_mm", 0.0))
     L_total = L + L_ext
 
-    # Square uses no XY plan-view corner rounding — corners are 90° in footprint.
-    # The "bent paper" look comes from the C-curve carried to the tip face.
-    CORNER_R = 0.0
+    # Square's plan-view (XY) tip corners: rounded off by CORNER_R mm so the
+    # free-edge corners don't scratch skin (a quarter-circle inset, see the
+    # "square" branch of x_extent()). 0 = sharp 90° corners.
+    CORNER_R = float(params.get("corner_round_mm", 0.0) or 0.0)
+    # Square's subtle width taper leading into the tip (see x_extent()) —
+    # total mm the plate narrows by, split evenly across both sides.
+    TAPER_MM = float(params.get("taper_mm", 0.0) or 0.0)
 
     # Stiletto: taper covers the extension plus the top 30 % of the natural nail,
     # so the sides start narrowing before the free edge — matches the smooth
@@ -229,6 +270,13 @@ def generate_stl(params, output_path):
     elif shape == "ballerina":
         # Straight sides from cuticle to midpoint, taper from midpoint to tip.
         tip_h = L_total * 0.5
+    elif shape == "square":
+        # The taper+corner-round region must stay entirely within the
+        # extension (L_ext) — the real measured nail (length L) has to be
+        # fully covered at full width first, and only narrow after that.
+        # Capped at L_ext so y_side_top = L_total-tip_h never dips below L.
+        tip_h = min(L_ext, max(CORNER_R, W * TIP_HEIGHT_FACTOR.get(shape, 0.45)))
+        CORNER_R = min(CORNER_R, tip_h)
     else:
         tip_h = W * TIP_HEIGHT_FACTOR.get(shape, 0.50)
 
@@ -243,7 +291,7 @@ def generate_stl(params, output_path):
     grid_y = np.zeros((ny, nx))
     for i, y in enumerate(ys):
         xl, xr = x_extent(y, W, L_total, tip_h, CUT_DEPTH, shape,
-                          tip_r=CORNER_R)
+                          tip_r=CORNER_R, taper_mm=TAPER_MM)
         grid_x[i] = xl + np.linspace(0, 1, nx) * (xr - xl)
         grid_y[i] = y
 
@@ -252,9 +300,31 @@ def generate_stl(params, output_path):
     # Inverting it gives a dome: C at centre, 0 at edges — this matches the
     # convex top surface of the real nail so the inner surface seats flush.
     # Adding THICK gives the outer surface, also dome-shaped (natural look).
-    arc_off = arc_z(grid_x, x_cen, C, arc_r)     # (ny, nx)  0→C  bowl
-    z_bot   = C - arc_off                          # (ny, nx)  C→0  dome (inner)
-    z_top   = z_bot + THICK                        # (ny, nx)  uniform shell
+    #
+    # Per-row curvature blend (fit fix): the fingertip flesh under the nail
+    # bed is ROUNDER near the cuticle than the nail is at its free edge, so
+    # a uniform C-curve tube pinches at the base and is hard to put on.
+    # Blend the dome height from (C + CUT_CURVE) at the cuticle arch down to
+    # the measured C at the free edge (y = L); the tip extension keeps the
+    # measured C.  Each row's arc radius is recomputed holding the measured
+    # arc's CHORD constant  (chord^2 = 8*C*(R - C/2)),  so at t=0 the row
+    # reproduces the measured (C, arc_r) pair exactly.
+    if C < 0.05:
+        z_bot = np.zeros_like(grid_x)              # flat nail — unchanged
+    elif CUT_CURVE > 1e-6:
+        chord_sq = 8.0 * C * (arc_r - C / 2.0)     # measured-arc chord^2
+        yr    = np.clip((ys + CUT_DEPTH) / max(L + CUT_DEPTH, 1e-6), 0.0, 1.0)
+        t     = 1.0 - (yr * yr * (3.0 - 2.0 * yr))   # smoothstep: 1@cuticle→0@free edge
+        C_row = C + CUT_CURVE * t                    # (ny,)
+        R_row = chord_sq / (8.0 * C_row) + C_row / 2.0
+        dx    = grid_x - x_cen                       # (ny, nx)
+        sag   = R_row[:, None] - np.sqrt(
+            np.maximum(R_row[:, None] ** 2 - dx ** 2, 0.0))
+        z_bot = C_row[:, None] - sag                 # rounder dome at base
+    else:
+        arc_off = arc_z(grid_x, x_cen, C, arc_r)   # (ny, nx)  0→C  bowl
+        z_bot   = C - arc_off                        # (ny, nx)  C→0  dome (inner)
+    z_top = z_bot + THICK                          # (ny, nx)  uniform shell
 
     # ── Top perimeter edge rounding ───────────────────────────
     # Applies a quarter-circle fillet where the top surface meets the side
@@ -442,8 +512,17 @@ def main():
     p.add_argument("--cuticle-depth",  type=float, default=1.5,
                    help="Depth of cuticle arch below cuticle line in mm "
                         "(default 1.5 — increase for deeper arch)")
-    p.add_argument("--thickness",      type=float, default=1.2,
-                   help="Uniform shell thickness in mm (default 1.2)")
+    p.add_argument("--cuticle-curve",  type=float, default=0.0,
+                   help="Extra inner-dome height in mm at the cuticle end, "
+                        "blending to the measured C-curve at the free edge "
+                        "(default 0 — OFF, uses the plain measured C-curve; "
+                        "set >0 to re-enable the cuticle-side rounding). "
+                        "Ignored in --exact mode")
+    p.add_argument("--thickness",      type=float, default=0.6,
+                   help="Uniform shell thickness in mm (default 0.6)")
+    p.add_argument("--exact",          action="store_true",
+                   help="Exact replica of the measured nail: true width/length, "
+                        "no comfort shrink, no tip extension (validation prints)")
     p.add_argument("--shape",          default="round", choices=SHAPES,
                    help="Tip shape: round | oval | almond | square | "
                         "stiletto | ballerina  (default: round)")
@@ -452,6 +531,17 @@ def main():
                         "rounds the sharp junction between top surface and "
                         "side walls (default: 1.0 for almond/ballerina/"
                         "square/stiletto, 0 for round/oval)")
+    p.add_argument("--corner-round",   type=float, default=None,
+                   help="Plan-view (XY) fillet radius (mm) for the square "
+                        "shape's two tip corners — rounds off the sharp 90° "
+                        "corners so they don't scratch skin (default: 1.5 "
+                        "for square, ignored by other shapes; 0 = sharp)")
+    p.add_argument("--taper",          type=float, default=None,
+                   help="Total mm the square shape's plate narrows by "
+                        "(split evenly across both sides) leading into the "
+                        "tip corners — real square nails aren't perfectly "
+                        "parallel-sided (default: 1.0 for square, ignored "
+                        "by other shapes; 0 = parallel sides)")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -466,14 +556,24 @@ def main():
 
     ext_default = 7.0 if args.shape in LONG_SHAPES else 3.0
     display_ext = args.tip_extension if args.tip_extension is not None else ext_default
+    if args.exact:
+        display_ext = 0.0
 
     _edge_round_default = 1.0 if args.shape in {"almond", "ballerina", "square", "stiletto"} else 0.0
     edge_round = args.edge_round if args.edge_round is not None else _edge_round_default
 
+    _corner_round_default = 1.5 if args.shape == "square" else 0.0
+    corner_round = args.corner_round if args.corner_round is not None else _corner_round_default
+
+    _taper_default = 1.0 if args.shape == "square" else 0.0
+    taper = args.taper if args.taper is not None else _taper_default
+
     print(f"\n{'='*55}")
     print(f"  Exact-Fit Nail STL  v15  |  shape: {args.shape}")
+    _cc = 0.0 if args.exact else args.cuticle_curve
     print(f"  Tip +{display_ext}mm  CuticleArch {args.cuticle_depth}mm  "
-          f"Thick {args.thickness}mm  EdgeRound {edge_round}mm")
+          f"Thick {args.thickness}mm  EdgeRound {edge_round}mm  "
+          f"CornerRound {corner_round}mm  Taper {taper}mm  CuticleCurve +{_cc}mm")
     print(f"{'='*55}")
 
     for nail in nails:
@@ -490,9 +590,13 @@ def main():
             "corrected_length_mm": nail.get("corrected_length_mm"),
             "tip_extension_mm":    args.tip_extension,
             "cuticle_depth_mm":    args.cuticle_depth,
+            "cuticle_curve_mm":    args.cuticle_curve,
             "thickness_mm":        args.thickness,
             "shape":               args.shape,
             "edge_round_mm":       edge_round,
+            "corner_round_mm":     corner_round,
+            "taper_mm":            taper,
+            "exact":               args.exact,
         }
 
         out   = os.path.join(args.output, f"nail_{finger}_{args.shape}.stl")

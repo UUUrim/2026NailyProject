@@ -3,6 +3,7 @@ package com.example.nailyproject.controller;
 import com.example.nailyproject.dto.request.PrintOrderRequestDto;
 import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
+import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.ScanImg;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -55,11 +57,13 @@ public class UserHistoryController {
                             .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
                             .status(scan.getStatus() != null ? scan.getStatus().name() : null)
                             .shape(scan.getShape())
+                            .recommendedShape(scan.getRecommendedShape())
+                            .skinToneHex(scan.getSkinToneHex())
                             .seasonCode(scan.getSeasonCode())
                             .seasonNameKo(scan.getSeasonNameKo())
-                            .avgLengthMm(averages.lengthMm)
-                            .avgWidthMm(averages.widthMm)
-                            .avgCurve(averages.curve)
+                            .avgLengthMm(averages.lengthMm())
+                            .avgWidthMm(averages.widthMm())
+                            .avgCurve(averages.curve())
                             .scannedAt(scan.getScannedAt() != null ? scan.getScannedAt().format(FORMATTER) : "")
                             .build();
                 })
@@ -100,6 +104,40 @@ public class UserHistoryController {
         );
     }
 
+    /**
+     * 병합 결과(MERGED 상태) 확인 후 "진짜 출력하기" POST /users/me/prints/{orderId}/confirm
+     * 슬라이싱 + 프린터 업로드/출력 시작을 트리거한다.
+     */
+    @PostMapping("/prints/{orderId}/confirm")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> confirmPrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.confirmPrint(user, orderId);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "출력이 시작되었습니다.", data)
+        );
+    }
+
+    /**
+     * 프린터 실시간 진행 상황 조회 GET /users/me/prints/progress
+     * printer/server.py의 /print/status를 백엔드가 대신 호출해서 전달한다.
+     * 프론트는 출력 중일 때 몇 초 간격으로 이걸 폴링해서 진행률/온도를 보여준다.
+     */
+    @GetMapping("/prints/progress")
+    public ResponseEntity<ApiResponse<PrinterProgressResponseDto>> getPrinterProgress(
+            @AuthenticationPrincipal User user) {
+
+        PrinterProgressResponseDto data = printOrderService.getPrinterProgress();
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "프린터 진행 상황 조회 성공.", data)
+        );
+    }
+
+    // ── 손가락별 측정값 평균 계산 (마이페이지 손 분석 이력 카드에 표시) ──────────────
+
     private FingerAverages computeFingerAverages(HandScan scan) {
         List<ScanImg> images = scanImgRepository.findByHandScan(scan);
         double lengthSum = 0;
@@ -132,19 +170,20 @@ public class UserHistoryController {
             JsonNode node = objectMapper.readTree(raw);
             double length = firstNumber(node, "lengthMm", "length");
             double width = firstNumber(node, "widthMm", "width");
-            double curve = firstNumber(node, "cCurve", "curve");
+            // 실제 스캔 파이프라인(scan/server.py)이 내려주는 곡률 필드명은 cCurveMm이다.
+            // cCurve/curve는 과거 목업 데이터 호환용 fallback으로만 남겨둔다.
+            double curve = firstNumber(node, "cCurveMm", "cCurve", "curve");
             return new double[]{length, width, curve};
         } catch (Exception ignored) {
             return null;
         }
     }
 
-    private double firstNumber(JsonNode node, String primary, String fallback) {
-        if (node.has(primary) && node.get(primary).isNumber()) {
-            return node.get(primary).asDouble();
-        }
-        if (node.has(fallback) && node.get(fallback).isNumber()) {
-            return node.get(fallback).asDouble();
+    private double firstNumber(JsonNode node, String... keys) {
+        for (String key : keys) {
+            if (node.has(key) && node.get(key).isNumber()) {
+                return node.get(key).asDouble();
+            }
         }
         return 0;
     }

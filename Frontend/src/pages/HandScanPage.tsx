@@ -2,21 +2,26 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
-import { PageBackLink } from '@/components/layout/PageBackLink'
+import { PageHero } from '@/components/layout/PageHero'
 import { startScan, uploadFingerImage, requestAnalyze, getMyScans } from '@/apis/scan'
 import { CameraFeedSelect } from '@/components/handScan/CameraFeedSelect'
 import { CameraSetupPreview } from '@/components/handScan/CameraSetupPreview'
 import { ScanDetailModal } from '@/components/mypage/ScanDetailModal'
+import { PillButton } from '@/components/common/PillButton'
+import { WarningIcon } from '@/components/icons/WarningIcon'
 import { useFingerAlignment } from '@/hooks/useFingerAlignment'
 import { useAuth } from '@/hooks/useAuth'
+import { useLeaveWarning } from '@/hooks/useLeaveWarning'
+import { useSnapshotRestore } from '@/hooks/useSnapshotRestore'
 import { ApiError } from '@/utils/apiClient'
+import { AUTH_CHANGE_EVENT } from '@/utils/auth'
 import {
   buildScanSessions,
   formatMetricCurve,
   isFullyAnalyzedSession,
-  representativePersonalColor,
   type ScanSession,
 } from '@/utils/scanDetail'
+import { analyzeSkinTone } from '@/utils/skinTone'
 import { getNailShape } from '@/constants/nailShapes'
 import '@/styles/hand-scan.css'
 
@@ -77,6 +82,12 @@ type HandScanSnapshot = {
 
 let handScanSnapshot: HandScanSnapshot | null = null
 
+// 로그인/로그아웃(계정 전환)이 일어나면 이전 계정의 촬영 진행 상황이 다음 계정에게
+// 보이지 않도록 스냅샷을 비운다. 실제 서버에 저장된 이력은 계정별로 분리되어 있어 영향 없음.
+window.addEventListener(AUTH_CHANGE_EVENT, () => {
+  handScanSnapshot = null
+})
+
 export function HandScanPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -90,12 +101,18 @@ export function HandScanPage() {
   const [leftDeviceId, setLeftDeviceId] = useState<string>('default')
   const [rightDeviceId, setRightDeviceId] = useState<string>('default')
 
-  const [currentStepIndex, setCurrentStepIndex] = useState(handScanSnapshot?.currentStepIndex ?? 0)
+  // 브라우저 뒤로/앞으로가기(POP)로 돌아온 경우에만 이전 촬영 진행 상황을 복원한다.
+  // 앱 안의 링크/버튼으로 들어온 경우엔 항상 처음부터 새로 시작한다.
+  const restoredSnapshot = useSnapshotRestore(handScanSnapshot, () => {
+    handScanSnapshot = null
+  })
+
+  const [currentStepIndex, setCurrentStepIndex] = useState(restoredSnapshot?.currentStepIndex ?? 0)
   const [scanIds, setScanIds] = useState<Record<HandSide, number | null>>(
-      handScanSnapshot?.scanIds ?? { LEFT: null, RIGHT: null },
+      restoredSnapshot?.scanIds ?? { LEFT: null, RIGHT: null },
   )
-  const [uploadedSteps, setUploadedSteps] = useState<Set<string>>(handScanSnapshot?.uploadedSteps ?? new Set())
-  const [isDone, setIsDone] = useState(handScanSnapshot?.isDone ?? false)
+  const [uploadedSteps, setUploadedSteps] = useState<Set<string>>(restoredSnapshot?.uploadedSteps ?? new Set())
+  const [isDone, setIsDone] = useState(restoredSnapshot?.isDone ?? false)
 
   const [gateStatus, setGateStatus] = useState<'checking' | 'show' | 'pass'>(
       skipRescanGate || !isLoggedIn ? 'pass' : 'checking',
@@ -335,6 +352,17 @@ export function HandScanPage() {
     handScanSnapshot = { currentStepIndex, scanIds, uploadedSteps, isDone }
   }, [currentStepIndex, scanIds, uploadedSteps, isDone])
 
+  // 뒤로가기는 그대로 허용(스냅샷이 복원해줌). 새로고침/탭 닫기/헤더 내비게이션 등으로
+  // 벗어나려 할 때만 경고하고, 그래도 나가면 촬영 진행 상황을 초기화해서 처음부터 다시 찍게 한다.
+  useLeaveWarning(
+      currentStepIndex > 0 || uploadedSteps.size > 0,
+      '지금 나가면 촬영 진행 상황이 초기화돼, 처음부터 다시 찍어야 해요. 그래도 나가시겠어요?',
+      () => {
+        handScanSnapshot = null
+        stopStreams()
+      },
+  )
+
   useEffect(() => {
     if (!isFullscreen) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -468,9 +496,10 @@ export function HandScanPage() {
   if (gateStatus === 'show' && latestCompletedSession) {
     const session = latestCompletedSession
     const dateLabel = formatScanDateLabel(session.scannedAt)
-    const repColor = representativePersonalColor(session.seasonCode)
-    const shapeLabel = session.shape
-        ? getNailShape(session.shape)?.labelKo ?? session.shape
+    const skinHex = session.skinToneHex
+    const toneLabel = skinHex ? analyzeSkinTone(skinHex).tone.label.replace(/\s+/g, '') : '미분석'
+    const shapeLabel = session.recommendedShape
+        ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
     const metricsLine = [
       `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
@@ -483,16 +512,7 @@ export function HandScanPage() {
           <AppShell mainClassName="hand-scan-page hand-scan-page--gate">
             <section className="hand-scan-rescan-gate" aria-labelledby="rescan-gate-title">
               <div className="hand-scan-rescan-gate__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
-                  <path
-                      d="M12 3.8 21.2 19.5H2.8L12 3.8z"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinejoin="round"
-                  />
-                  <path d="M12 9.2v5.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  <circle cx="12" cy="16.9" r="1.1" fill="currentColor" />
-                </svg>
+                <WarningIcon width={28} height={28} />
               </div>
 
               <h2 id="rescan-gate-title" className="hand-scan-rescan-gate__title">
@@ -517,14 +537,12 @@ export function HandScanPage() {
                 >
                   <span
                       className="hand-scan-rescan-gate__record-swatch"
-                      style={{ background: repColor }}
+                      style={{ background: skinHex ?? '#de869f' }}
                       aria-hidden="true"
                   />
                   <span className="hand-scan-rescan-gate__record-body">
                     <strong className="hand-scan-rescan-gate__record-date">{dateLabel}</strong>
-                    <span className="hand-scan-rescan-gate__record-season" style={{ color: repColor }}>
-                      {session.seasonNameKo ?? '미분석'}
-                    </span>
+                    <span className="hand-scan-rescan-gate__record-season">{toneLabel}</span>
                     <span className="hand-scan-rescan-gate__record-metrics">{metricsLine}</span>
                     <span className="hand-scan-rescan-gate__record-shape">
                       추천 쉐입: {shapeLabel ?? '미정'}
@@ -540,16 +558,16 @@ export function HandScanPage() {
               </p>
 
               <div className="hand-scan-rescan-gate__actions">
-                <button
-                    type="button"
-                    className="hand-scan-rescan-gate__btn hand-scan-rescan-gate__btn--secondary"
+                <PillButton
+                    variant="ghost"
+                    className="hand-scan-rescan-gate__btn"
                     onClick={handleConfirmRescan}
                 >
                   다시 스캔하기
-                </button>
-                <button
-                    type="button"
-                    className="hand-scan-rescan-gate__btn hand-scan-rescan-gate__btn--primary"
+                </PillButton>
+                <PillButton
+                    variant="primary"
+                    className="hand-scan-rescan-gate__btn"
                     onClick={() =>
                         navigate('/print', {
                           state: {
@@ -560,7 +578,7 @@ export function HandScanPage() {
                     }
                 >
                   네일팁 출력하러 가기
-                </button>
+                </PillButton>
               </div>
             </section>
           </AppShell>
@@ -573,23 +591,18 @@ export function HandScanPage() {
   return (
       <>
         <AppShell mainClassName="hand-scan-page">
-          <PageBackLink to="/process" />
-          <div className="hand-scan-page__topbar">
-            <h1 className="hand-scan-page__title">손 촬영 및 스캔</h1>
-          </div>
-
-          <div className="hand-scan-page__info-card">
-            <svg className="hand-scan-page__info-card-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
-              <rect x="3" y="7" width="14" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M17 10.5l4-2.2v9.4l-4-2.2" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-              <circle cx="10" cy="12.5" r="2.4" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-            <p className="hand-scan-page__info-card-text">
-              두 카메라가 동시에 촬영하여 손톱 형태와 곡률을 분석합니다.
-              <br />
-              왼손 다섯 손가락을 먼저 촬영한 뒤, 오른손 다섯 손가락을 이어서 촬영합니다.
-            </p>
-          </div>
+          <PageHero
+              eyebrow="Hand Scan"
+              title="손 촬영 및 스캔"
+              description={
+                  <>
+                      두 카메라가 동시에 촬영하여 손톱 형태와 곡률을 분석합니다.
+                      <br />
+                      왼손 다섯 손가락을 먼저 촬영한 뒤, 오른손 다섯 손가락을 이어서 촬영합니다.
+                  </>
+              }
+              align="center"
+          />
 
           <div className="hand-scan__progress-groups">
             {HANDS.map((hand) => (

@@ -47,25 +47,28 @@ const PrintIcon = (
     </svg>
 )
 
-const FitIcon = (
+// 마이페이지의 디자인 아이콘과 동일한 그림(사각 프레임 + 산 모양 + 점)을 가져오되,
+// 다른 카드 아이콘들과 같은 스타일(width/height/aria-hidden)로 맞췄다.
+const DesignIcon = (
     <svg viewBox="0 0 24 24" fill="none" width="26" height="26" aria-hidden="true">
-        <path d="M9 12.5l2.2 2.2L16 9.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.6" />
+        <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="1.7" />
+        <path d="m8 14 2.5-3 2 2L16 9l2 2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="9" cy="9" r="1.1" fill="currentColor" />
     </svg>
 )
 
 const MARQUEE_COLUMN_A: MarqueeItem[] = [
-    { type: 'photo', src: '/images/sample/mood-elegant.png' },
-    { type: 'feature', accent: 'a', title: 'AI 손 스캔', caption: '길이·너비·곡률 정밀 분석', icon: ScanIcon },
-    { type: 'photo', src: '/images/sample/mood-modern.png' },
-    { type: 'feature', accent: 'b', title: '3D 프린팅 출력', caption: '내 손에 꼭 맞는 네일팁', icon: PrintIcon },
+    { type: 'photo', src: '/images/auth-split/design1.png' },
+    { type: 'feature', accent: 'a', title: '손 스캔', caption: '길이·너비·곡률 정밀 분석', icon: ScanIcon },
+    { type: 'photo', src: '/images/auth-split/design1.png' },
+    { type: 'feature', accent: 'd', title: '네일팁 제작', caption: '3D 프린터로 내 손에 꼭 맞는 네일팁 출력', icon: PrintIcon },
 ]
 
 const MARQUEE_COLUMN_B: MarqueeItem[] = [
-    { type: 'photo', src: '/images/sample/mood-lovely.png' },
-    { type: 'feature', accent: 'c', title: '퍼스널 컬러 진단', caption: '나에게 어울리는 컬러 추천', icon: AnalyzeIcon },
-    { type: 'photo', src: '/images/sample/mood-pure.png' },
-    { type: 'feature', accent: 'd', title: '완벽한 핏 & 쉐입', caption: 'AI로 완성하는 나만의 디자인', icon: FitIcon },
+    { type: 'photo', src: '/images/auth-split/design1.png' },
+    { type: 'feature', accent: 'c', title: '피부 톤 맞춤 진단', caption: '나에게 어울리는 색상과 손톱 모양 추천', icon: AnalyzeIcon },
+    { type: 'photo', src: '/images/auth-split/design1.png' },
+    { type: 'feature', accent: 'b', title: 'AI 디자인 생성', caption: 'AI로 완성하는 나만의 디자인', icon: DesignIcon },
 ]
 
 function MarqueeColumn({ items, direction }: { items: MarqueeItem[]; direction: 'up' | 'down' }) {
@@ -75,7 +78,7 @@ function MarqueeColumn({ items, direction }: { items: MarqueeItem[]; direction: 
             <div className={`auth-split__marquee-track auth-split__marquee-track--${direction}`}>
                 {track.map((item, i) =>
                     item.type === 'photo' ? (
-                        <span className="auth-split__frame" key={`${item.src}-${i}`}>
+                        <span className="auth-split__frame auth-split__frame--photo" key={`${item.src}-${i}`}>
                             <img src={item.src} alt="" />
                             <span className="auth-split__frame-tint" />
                         </span>
@@ -112,7 +115,7 @@ export function AuthSplitLayout({ children }: AuthSplitLayoutProps) {
                 <h2 className="auth-split__headline">
                     스캔한 손톱 그대로
                     <br />
-                    나만의 네일 완성
+                    나만의 네일팁 완성
                 </h2>
                 <span className="auth-split__sparkle auth-split__sparkle--1">✦</span>
                 <span className="auth-split__sparkle auth-split__sparkle--2">✧</span>

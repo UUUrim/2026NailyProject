@@ -1,0 +1,50 @@
+.next-step-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: none;
+  background: transparent;
+  color: #de869f;
+  padding: 0.5rem 0.25rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: gap 0.25s ease, color 0.2s ease;
+}
+
+.next-step-button svg {
+  transition: transform 0.25s ease;
+}
+
+.next-step-button:hover {
+  gap: 0.7rem;
+  color: #c96a86;
+}
+
+.next-step-button:hover svg {
+  transform: translateX(5px);
+}
+
+.next-step-button:active {
+  gap: 0.5rem;
+}
+
+.next-step-button:active svg {
+  transform: translateX(2px);
+}
+
+.next-step-button:disabled {
+  color: #c9c9c9;
+  cursor: default;
+}
+
+.next-step-button:disabled:hover {
+  gap: 0.4rem;
+  color: #c9c9c9;
+}
+
+.next-step-button:disabled:hover svg,
+.next-step-button:disabled:active svg {
+  transform: none;
+}

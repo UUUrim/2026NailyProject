@@ -167,6 +167,20 @@ public class ScanService {
                 throw new RuntimeException("수치 데이터 JSON 변환 중 오류가 발생했습니다.", e);
             }
         }
+
+        // 3. 실제로 측정에 성공한 손가락 수를 기준으로 상태를 명확히 표시한다.
+        //    (이전엔 여기서 상태를 아예 안 건드려서, 측정이 5개 다 실패해도 화면에는
+        //    "완료"처럼 보이고 프론트가 Mock 값으로 조용히 메꿔버리는 문제가 있었다.)
+        int succeededCount = resultDto.getFingers() != null ? resultDto.getFingers().size() : 0;
+        if (succeededCount == 0) {
+            handScan.updateStatus(HandScan.ScanStatus.FAILED);
+        } else if (succeededCount < 5) {
+            // 일부만 성공 — 실패로 보긴 애매하지만, 최소한 로그로는 남겨서 나중에 원인 추적 가능하게 함
+            System.err.println("[Scan] scanId=" + scanId + " 측정 부분 성공: " + succeededCount + "/5 손가락만 완료됨");
+            handScan.updateStatus(HandScan.ScanStatus.MEASURED);
+        } else {
+            handScan.updateStatus(HandScan.ScanStatus.MEASURED);
+        }
     }
 
     /**

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
+import { PageHero } from '@/components/layout/PageHero'
 import {
   likeDesign,
   moveLikedDesign,
@@ -11,28 +12,38 @@ import {
   type DesignExtractedDetails,
 } from '@/apis/design'
 import { FavoriteFolderModal } from '@/components/mypage/FavoriteFolderModal'
+import { PillButton } from '@/components/common/PillButton'
 import { DesignDetailsPanel } from '@/components/design/DesignDetailsPanel'
+import { DesignImageDetailModal } from '@/components/design/DesignImageDetailModal'
 import { getMyProfile } from '@/apis/user'
+import { useLeaveWarning } from '@/hooks/useLeaveWarning'
 import { ApiError } from '@/utils/apiClient'
+import { AUTH_CHANGE_EVENT } from '@/utils/auth'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
 
+// 좋아요/공유/상세모달 열림 상태를 모듈 스코프에 스냅샷으로 저장해서, 브라우저 뒤로/앞으로가기로
+// 이 페이지에 돌아왔을 때 화면이 초기화되지 않도록 한다. designId가 일치할 때만 복원해서,
+// 다른 디자인 결과를 보러 온 경우까지 잘못 복원하지 않는다.
+type DesignResultSnapshot = {
+  designId: number | null
+  liked: boolean
+  likedFolder: { folderId: number; name: string } | null
+  shared: boolean
+  showImageDetail: boolean
+}
+
+let designResultSnapshot: DesignResultSnapshot | null = null
+
+// 로그인/로그아웃(계정 전환)이 일어나면 이전 계정의 화면 상태가 다음 계정에게 보이지 않도록
+// 스냅샷을 비운다. 실제 서버에 저장된 좋아요/공유 상태는 계정별로 분리되어 있어 영향 없음.
+window.addEventListener(AUTH_CHANGE_EVENT, () => {
+  designResultSnapshot = null
+})
+
 // 이미지 생성 모델이 꺼져 있는 등, 실제 생성 결과 없이도 이 결과 페이지 UI를 미리 볼 수 있도록 하는 샘플 데이터.
 // designId는 일부러 비워둬서 좋아요 등 실제 서버에 데이터를 남기는 액션은 자연히 비활성화된다.
-const SAMPLE_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 312">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffd6e3"/>
-      <stop offset="1" stop-color="#c9a8ff"/>
-    </linearGradient>
-  </defs>
-  <rect width="400" height="312" rx="16" fill="url(#g)"/>
-  <path d="M170 60c-24 0-40 22-40 55v70c0 30 16 47 40 47s40-17 40-47V115c0-33-16-55-40-55Z" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.9"/>
-  <path d="M230 60c-24 0-40 22-40 55v70c0 30 16 47 40 47s40-17 40-47V115c0-33-16-55-40-55Z" fill="none" stroke="#ffffff" stroke-width="4" opacity="0.55"/>
-  <text x="200" y="272" font-family="sans-serif" font-size="20" font-weight="700" fill="#ffffff" text-anchor="middle">샘플 미리보기</text>
-</svg>
-`)}`
+const SAMPLE_IMAGE = '/images/auth-split/design1.png'
 
 const SAMPLE_DETAILS: DesignExtractedDetails = {
   colorPalette: ['#FDE2EA', '#DE869F', '#C9A8FF'],
@@ -78,13 +89,25 @@ export function NailDesignResultPage() {
   const details = hasRealResult ? ((location.state?.details as DesignExtractedDetails | undefined) ?? null) : SAMPLE_DETAILS
   const context = hasRealResult ? ((location.state?.context as GenerationContext | undefined) ?? null) : SAMPLE_CONTEXT
 
-  const [liked, setLiked] = useState(false)
-  const [likedFolder, setLikedFolder] = useState<{ folderId: number; name: string } | null>(null)
+  // 브라우저 뒤로/앞으로가기(POP)로, 그리고 지금 보려는 designId가 스냅샷에 저장된
+  // designId와 일치할 때만 "돌아온 것"으로 보고 복원한다. 앱 안의 링크/버튼으로 들어온
+  // 경우(다른 디자인을 생성해서 새로 이 페이지에 온 경우 포함)엔 항상 새로 시작한다.
+  const navigationType = useNavigationType()
+  const wasRestoredRef = useRef(
+      navigationType === 'POP' &&
+      !!designResultSnapshot &&
+      designResultSnapshot.designId === designId,
+  )
+  const snapshot = wasRestoredRef.current ? designResultSnapshot : null
+
+  const [liked, setLiked] = useState(snapshot?.liked ?? false)
+  const [likedFolder, setLikedFolder] = useState<{ folderId: number; name: string } | null>(snapshot?.likedFolder ?? null)
   const [isLiking, setIsLiking] = useState(false)
   const [likeModalMode, setLikeModalMode] = useState<'like' | 'move' | null>(null)
   const [userName, setUserName] = useState('')
-  const [shared, setShared] = useState(false)
+  const [shared, setShared] = useState(snapshot?.shared ?? false)
   const [shareBusy, setShareBusy] = useState(false)
+  const [showImageDetail, setShowImageDetail] = useState(snapshot?.showImageDetail ?? false)
 
   useEffect(() => {
     // 샘플 미리보기(로그인 없이도 UI를 볼 수 있게 하는 모드)에서는 프로필을 불러오지 않는다 —
@@ -100,7 +123,8 @@ export function NailDesignResultPage() {
           // 이름 못 가져와도 진행
         })
 
-    if (designId != null) {
+    // 뒤로가기로 복원된 경우엔 shared 값이 스냅샷에 이미 있으므로 다시 불러와 덮어쓰지 않는다.
+    if (designId != null && !wasRestoredRef.current) {
       void getDesignDetail(designId)
           .then((detail) => {
             if (!cancelled) setShared(Boolean(detail.shared))
@@ -114,6 +138,24 @@ export function NailDesignResultPage() {
       cancelled = true
     }
   }, [hasRealResult, designId])
+
+  // 좋아요/공유/상세모달 상태를 모듈 스코프 스냅샷에 반영해 둔다 — 브라우저 뒤로/앞으로가기로
+  // 돌아오면 위 useState 초기값들이 여기서 복원된다.
+  useEffect(() => {
+    designResultSnapshot = { designId, liked, likedFolder, shared, showImageDetail }
+  }, [designId, liked, likedFolder, shared, showImageDetail])
+
+  // 뒤로가기는 그대로 허용한다 — 브라우저 히스토리가 이 페이지의 location.state를 그대로
+  // 들고 있어서 뒤로 왔다 다시 오면 결과가 자연스럽게 복원된다. 새로고침/탭 닫기/헤더
+  // 내비게이션 등 "뒤로가기가 아닌" 방식으로 벗어나려 할 때만 경고한다. 실제 생성된 디자인은
+  // 이미 서버에 저장되어 마이페이지에서 다시 볼 수 있으므로, 여기서는 화면만 초기화될 뿐이다.
+  useLeaveWarning(
+      hasRealResult,
+      '지금 나가면 화면 내용이 초기화돼요. 생성된 디자인은 마이페이지에서 다시 확인할 수 있어요. 그래도 나가시겠어요?',
+      () => {
+        designResultSnapshot = null
+      },
+  )
 
   const handleToggleShare = async () => {
     if (!designId || shareBusy) return
@@ -176,20 +218,27 @@ export function NailDesignResultPage() {
   return (
       <AppShell mainClassName="design-result-page">
         <div className="design-result-v2">
-          <header className="design-result-v2__hero">
-            <p className="design-result-v2__eyebrow">Final Design</p>
-            <h1 className="design-result-v2__title">
-              {userName ? `${userName}님의 네일 디자인이 완성됐어요.` : '나만의 네일 디자인이 완성됐어요.'}
-            </h1>
-            <p className="design-result-v2__lead">
-              채팅에서 다듬고 고른 최종 이미지예요. 마이페이지에서 언제든 다시 확인하실 수 있어요.
-            </p>
-          </header>
+          <PageHero
+              eyebrow="Final Design Result"
+              title="최종 디자인 결과"
+              description="채팅에서 다듬고 고른 최종 이미지예요. 마이페이지에서 언제든 다시 확인할 수 있어요."
+          />
 
           <div className="design-result-v2__body">
             <div className="design-result-v2__stage">
               <div className="design-result-v2__image-wrap">
-                <img src={image} alt="완성된 네일 디자인" className="design-result-v2__image" />
+                <img
+                    src={image}
+                    alt="완성된 네일 디자인"
+                    className="design-result-v2__image"
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: 'zoom-in' }}
+                    onClick={() => setShowImageDetail(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') setShowImageDetail(true)
+                    }}
+                />
                 <button
                     type="button"
                     className={`design-result-v2__heart${liked ? ' is-liked' : ''}`}
@@ -324,20 +373,16 @@ export function NailDesignResultPage() {
           )}
 
           <div className="design-result-v2__actions">
-            <button
-                type="button"
-                className="design-result-v2__btn design-result-v2__btn--ghost"
-                onClick={handleRegenerate}
-            >
+            <PillButton variant="ghost" className="design-result-v2__btn" onClick={handleRegenerate}>
               디자인 다시 생성하기
-            </button>
-            <button
-                type="button"
-                className="design-result-v2__btn design-result-v2__btn--primary"
+            </PillButton>
+            <PillButton
+                variant="primary"
+                className="design-result-v2__btn"
                 onClick={() => navigate('/mypage', { state: { tab: 'designs' } })}
             >
               마이페이지에서 확인하기
-            </button>
+            </PillButton>
           </div>
         </div>
 
@@ -348,6 +393,21 @@ export function NailDesignResultPage() {
             mode={likeModalMode ?? 'like'}
             initialFolderId={likedFolder?.folderId ?? null}
         />
+
+        {showImageDetail && (
+            <DesignImageDetailModal
+                image={{ designId, imageUrl: image, liked, folder: likedFolder }}
+                onClose={() => setShowImageDetail(false)}
+                onLikeChange={(_id, _url, saved) => {
+                  setLiked(!!saved)
+                  setLikedFolder(saved?.folder ?? null)
+                }}
+                onShareChange={(_id, nextShared) => setShared(nextShared)}
+                showDelete={false}
+                showChatHistoryToggle={false}
+                showDesignDetailsToggle={false}
+            />
+        )}
       </AppShell>
   )
 }

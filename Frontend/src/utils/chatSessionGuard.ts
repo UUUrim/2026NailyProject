@@ -20,3 +20,23 @@ export function confirmLeaveChatIfNeeded(): boolean {
     if (!currentGuard) return true
     return currentGuard()
 }
+
+// 우리 커스텀 확인창(confirmLeaveChatIfNeeded)으로 이미 동의를 받은 뒤,
+// window.location.href 같은 실제 브라우저 이동을 강제로 일으켜야 할 때가 있다
+// (예: 같은 경로로 "새로고침"해서 세션을 초기화하는 경우). 이런 경우 브라우저의
+// beforeunload 확인창이 중복으로 한 번 더 뜨는 걸 막기 위한 플래그.
+let bypassNextBeforeUnload = false
+
+/** 방금 사용자에게 이미 확인을 받았으니, 곧 일어날 실제 페이지 이탈에서 beforeunload 확인창을 건너뛰라고 표시. */
+export function markIntentionalNavigation() {
+    bypassNextBeforeUnload = true
+}
+
+/** beforeunload 핸들러 쪽에서 확인. 한 번 확인하면 자동으로 리셋된다(1회성). */
+export function shouldBypassBeforeUnload(): boolean {
+    if (bypassNextBeforeUnload) {
+        bypassNextBeforeUnload = false
+        return true
+    }
+    return false
+}

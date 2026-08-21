@@ -11,6 +11,8 @@ public class ScanHistoryItemDto {
     private String handSide;
     private String status;
     private String shape;
+    private String recommendedShape;
+    private String skinToneHex;
     private String seasonCode;
     private String seasonNameKo;
     private Double avgLengthMm;

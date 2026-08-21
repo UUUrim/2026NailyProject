@@ -2,33 +2,7 @@
   max-width: 960px;
 }
 
-.scan-result-hero {
-  margin-bottom: 2.5rem;
-  padding: 2rem;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #fff5f8 0%, #ffffff 55%, #f8f4ff 100%);
-  border: 1px solid #f3e3ea;
-}
-
-.scan-result-hero__eyebrow {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #de869f;
-  font-weight: 600;
-}
-
-.scan-result-hero h1 {
-  margin: 0 0 0.75rem;
-  font-size: clamp(1.75rem, 4vw, 2.25rem);
-}
-
-.scan-result-hero p {
-  margin: 0;
-  color: #555;
-  line-height: 1.6;
-}
+/* 제목 카드는 공통 PageHero 컴포넌트(page-hero.css)로 대체됨 */
 
 .scan-result-section {
   margin-bottom: 2rem;
@@ -115,68 +89,160 @@
   color: #888;
 }
 
-.scan-result-section--grid {
+/* 피부 톤 분석 — 왼쪽: 대표 피부색 배너 + 톤/명도/채도 슬라이더, 오른쪽: 24색 팔레트 */
+.skin-tone-grid {
   display: grid;
-  grid-template-columns: 1fr 1.4fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
+  align-items: stretch;
+  /* 다른 섹션(.scan-result-section__head)의 제목-카드 간격과 동일하게 맞춘다 */
+  margin-top: 1rem;
 }
 
-.scan-tone-card,
-.scan-season-card {
+@media (max-width: 640px) {
+  .skin-tone-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.skin-tone-card {
   background: #fff;
   border: 1px solid #eee;
-  border-radius: 16px;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.skin-tone-card__banner {
+  position: relative;
+  padding: 1.5rem 1.25rem 3rem;
+}
+
+.skin-tone-card__badge {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: #fff;
+  border-radius: 14px;
+  padding: 0.6rem 0.9rem;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.skin-tone-card__badge p {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #999;
+}
+
+.skin-tone-card__badge strong {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #1a1a1a;
+}
+
+.skin-tone-card__body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.skin-tone-slider__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.skin-tone-slider__label {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.skin-tone-slider__value {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #de869f;
+}
+
+.skin-tone-slider__track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+}
+
+.skin-tone-slider__track--tone {
+  background: linear-gradient(90deg, #8fb4e6 0%, #f0c069 100%);
+}
+
+.skin-tone-slider__track--brightness {
+  background: linear-gradient(90deg, #4a4a4a 0%, #f5efe4 100%);
+}
+
+.skin-tone-slider__track--saturation {
+  background: linear-gradient(90deg, #f4d7de 0%, #d63a72 100%);
+}
+
+.skin-tone-slider__thumb {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: #fff;
+  border: 3px solid #a3235f;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.skin-tone-slider__ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.skin-tone-palette-card {
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 18px;
   padding: 1.25rem;
 }
 
-.scan-tone-card__swatch {
-  width: 72px;
-  height: 72px;
-  border-radius: 16px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  margin: 0.75rem 0;
+.skin-tone-palette-card h3 {
+  margin: 0 0 1rem;
+  font-size: 1rem;
 }
 
-.scan-tone-card__hex {
-  margin: 0;
-  font-family: ui-monospace, monospace;
-  font-weight: 700;
-}
-
-.scan-tone-card__desc,
-.scan-season-card__desc {
-  margin: 0.75rem 0 0;
+.skin-tone-palette-card__desc {
+  margin: 0.9rem 0 0;
   font-size: 0.85rem;
   color: #777;
   line-height: 1.5;
 }
 
-.scan-season-card__name {
-  margin: 0.5rem 0 0.25rem;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #de869f;
-}
-
-.scan-season-card__code {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
-  color: #999;
-}
-
-.scan-palette {
-  display: flex;
-  flex-wrap: wrap;
+.skin-tone-palette-grid {
+  display: grid;
+  /* generateSkinTonePalette()가 6개 색상군 × 4단계(밝은→어두운) 순서로 24색을 만들어서,
+     같은 색상군 4개가 배열에서 연달아 나온다. grid-auto-flow: column으로 세로 방향부터
+     채우면 그 4개가 한 "열"을 위(밝음)→아래(어두움)로 채우고, 다음 색상군은 다음 열로
+     넘어가서 총 6열×4행으로 톤별로 깔끔하게 묶여 보인다. */
+  grid-auto-flow: column;
+  grid-template-rows: repeat(4, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 8px;
 }
 
-.scan-palette__chip {
-  width: 40px;
-  height: 40px;
+.skin-tone-palette-grid__chip {
+  aspect-ratio: 1 / 1;
+  width: 100%;
   border-radius: 10px;
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
   cursor: default;
+  padding: 0;
 }
 
 .scan-shape-grid {
@@ -204,23 +270,36 @@
 .scan-shape-card__badge {
   position: absolute;
   top: 10px;
-  font-size: 0.7rem;
-  padding: 0.2rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  font-size: 0.68rem;
+  padding: 0.22rem 0.55rem;
   border-radius: 999px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
+.scan-shape-card__badge svg {
+  flex-shrink: 0;
+}
+
+/* 추천 배지 — 로즈골드 그라데이션 + 별 아이콘. 선택 배지(비비드 핑크)와는
+   톤이 달라 한눈에 구분되면서도, 그라데이션과 그림자로 고급스러운 느낌을 준다 */
 .scan-shape-card__badge--recommend {
   left: 10px;
-  background: #fff5f8;
-  color: #de869f;
-  border: 1px solid #f0b8cb;
+  background: linear-gradient(135deg, #f7dcd0 0%, #e3ab98 50%, #b76e79 100%);
+  color: #5c2f30;
+  border: none;
+  box-shadow: 0 3px 10px rgba(183, 110, 121, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
+/* 선택 배지 — 네일리 브랜드 핑크 그라데이션 + 체크 아이콘 */
 .scan-shape-card__badge--selected {
   right: 10px;
-  background: #de869f;
+  background: linear-gradient(135deg, #f6c3d4 0%, #de869f 52%, #c26d88 100%);
   color: #fff;
+  border: none;
+  box-shadow: 0 3px 10px rgba(222, 134, 159, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .scan-shape-card.is-selected {
@@ -260,6 +339,77 @@
   letter-spacing: 0.06em;
 }
 
+/* 추천 네일팁 쉐입 — 고를 필요 없이 결과만 보여주는 단순 표시 카드(출력 페이지에서 실제로 고름).
+   배경만 투명이고, 테두리/모서리/여백은 다른 카드(.scan-metric-card 등)와 동일하게 맞춘다.
+   아이콘은 오른쪽 흰 박스 안에 배치한다. */
+.scan-shape-highlight {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  background: transparent;
+  border: 1px solid #eee;
+  border-radius: 16px;
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.scan-shape-highlight__body {
+  min-width: 0;
+}
+
+.scan-shape-highlight__name {
+  margin: 0 0 0.2rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.scan-shape-highlight__label-en {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #b3899a;
+  letter-spacing: 0.08em;
+}
+
+.scan-shape-highlight__desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #555;
+  line-height: 1.5;
+}
+
+.scan-shape-highlight__icon {
+  flex-shrink: 0;
+  width: 110px;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.scan-shape-highlight__icon img {
+  width: 64px;
+  height: 88px;
+  object-fit: contain;
+}
+
+.scan-shape-highlight--skeleton {
+  animation: scan-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+.scan-shape-highlight__icon-skeleton {
+  width: 110px;
+  height: 110px;
+  flex-shrink: 0;
+  background: #ececf1;
+  border-radius: 18px;
+}
+
 .scan-shape-print-btn {
   flex-shrink: 0;
   border: 1px solid #de869f;
@@ -287,7 +437,7 @@
   display: flex;
   justify-content: center;
   gap: 1.50rem;
-  padding-top: 5rem;
+  padding-top: 3rem;
   margin-bottom: 1rem;
 }
 
@@ -302,105 +452,20 @@
   cursor: pointer;
 }
 
-.scan-result-next {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  border: none;
-  background: transparent;
-  color: #de869f;
-  padding: 0.5rem 0.25rem;
-  font-size: 1.05rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: gap 0.25s ease, color 0.2s ease;
-}
-
-.scan-result-next svg {
-  transition: transform 0.25s ease;
-}
-
-.scan-result-next:hover {
-  gap: 0.7rem;
-  color: #c96a86;
-}
-
-.scan-result-next:hover svg {
-  transform: translateX(5px);
-}
-
-.scan-result-next:active {
-  gap: 0.5rem;
-}
-
-.scan-result-next:active svg {
-  transform: translateX(2px);
-}
-
 .scan-result-empty {
   text-align: center;
   padding: 4rem 1rem;
 }
 
-/* Finger detail modal */
-.finger-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-}
-
-.finger-modal__backdrop {
-  position: absolute;
-  inset: 0;
-  border: none;
-  background: rgba(0, 0, 0, 0.45);
-  cursor: pointer;
-}
-
-.finger-modal__panel {
-  position: relative;
-  width: min(720px, 100%);
-  max-height: 90svh;
-  overflow: auto;
-  background: #fff;
-  border-radius: 20px;
-  padding: 1.5rem;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
-}
-
-.finger-modal__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.finger-modal__header h2 {
-  margin: 0;
-  font-size: 1.15rem;
-}
-
-.finger-modal__close {
-  border: none;
-  background: #f5f5f5;
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  cursor: pointer;
-}
+/* Finger detail modal — 바깥 셸(배경/패널/제목/닫기/스크롤)은 ScanXModalShell(mypage-x__modal 계열)을 공유해서 씀 */
 
 .finger-modal__diagram {
   position: relative;
-  margin-bottom: 1rem;
+  /* 바깥 셸(mypage-x__scanx-scroll)의 flex gap이 다음 요소와의 간격을 이미 만들어줌 */
   border-radius: 16px;
   border: 1px solid #f0e6eb;
   background: #fff;
-  padding: 12px 12px 36px;
+  padding: 12px 12px 24px;
 }
 
 .finger-modal__hands-img {
@@ -413,7 +478,7 @@
 
 .finger-modal__hint {
   position: absolute;
-  bottom: 10px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   margin: 0;
@@ -491,10 +556,25 @@
   display: block;
 }
 
-.finger-hotspot:hover .finger-hotspot__tooltip,
+/* 키보드 탭 포커스일 때만 CSS로 자동 표시 — 마우스 호버는 JS로 추적한
+   .is-tooltip-visible이 대신 담당한다(클릭으로 고정 해제해도 마우스가 그대로
+   위에 있으면 :hover가 계속 참이라 안 사라지는 문제를 피하기 위함) */
 .finger-hotspot:focus-within .finger-hotspot__tooltip {
   opacity: 1;
   visibility: visible;
+}
+
+/* 고정(클릭) 또는 호버 중 — JS에서 계산해 붙여주는 상태 클래스 */
+.finger-hotspot.is-tooltip-visible .finger-hotspot__tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.finger-hotspot.is-pinned .finger-hotspot__trigger {
+  transform: scale(1.12);
+  background: #de869f;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(222, 134, 159, 0.45);
 }
 
 /* Thumb hotspots: show tooltip below to avoid clipping at top */
@@ -503,45 +583,180 @@
   top: calc(100% + 10px);
 }
 
-.finger-modal__list-index {
+/* 손가락별 수치 표 — 마이페이지 상세보기(.mypage-x__scanx-finger-panel)와 동일한 스타일 */
+.finger-modal__table {
+  border: 1px solid #f0e6ea;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+}
+
+/* 왼손/오른손 탭 — 마이페이지(.mypage-x__scanx-hand-tabs)와 동일한 스타일 */
+.finger-modal__hand-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.55rem;
+  background: #f7f0f3;
+  border-bottom: 1px solid #f0e6ea;
+}
+
+.finger-modal__hand-tabs button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  gap: 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  padding: 0.55rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #9a848c;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.finger-modal__hand-tabs button em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(176, 150, 160, 0.28);
+  font-style: normal;
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: #a08992;
+}
+
+.finger-modal__hand-tabs button span {
+  line-height: 1;
+}
+
+.finger-modal__hand-tabs button.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, #e39aaa, #de869f);
+  border-color: transparent;
+  box-shadow: 0 6px 14px rgba(196, 96, 126, 0.22);
+}
+
+.finger-modal__hand-tabs button.is-active em {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.finger-modal__hand-tabs button:not(.is-active):hover {
+  background: rgba(255, 255, 255, 0.72);
+  color: #de869f;
+}
+
+.finger-modal__table-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.finger-modal__table-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.62rem 1.1rem;
+  font-size: 0.8rem;
+  color: #444;
+  border-bottom: 1px solid #f7f0f3;
+  transition: background 0.15s;
+}
+
+.finger-modal__table-row:last-child {
+  border-bottom: none;
+}
+
+.finger-modal__table-row > span {
+  flex: 0 0 auto;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.finger-modal__table-row > span:not(:first-child) {
+  min-width: 3.6rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #5a4a50;
+}
+
+.finger-modal__table-row > span small {
+  margin-left: 0.14rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #b0a0a6;
+}
+
+.finger-modal__table-row--head {
+  background: #fffafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #b0a0a6;
+}
+
+.finger-modal__table-row--head span {
+  font-weight: 700;
+  color: #b0a0a6;
+}
+
+/* "길이"/"너비" 헤더 글자만 값 칸 쪽으로 살짝 밀어준다 */
+.finger-modal__table-head-shift {
+  padding-left: 0.9rem;
+}
+
+.finger-modal__table-head-shift--length {
+  padding-left: 1rem;
+}
+
+.finger-modal__table-head-shift--width {
+  padding-left: 0.55rem;
+}
+
+.finger-modal__table-name {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 700;
+  color: #5a4a50;
+}
+
+.finger-modal__table-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   background: #fdeff4;
   color: #de869f;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-style: normal;
+  font-size: 0.68rem;
+  font-weight: 800;
+  flex-shrink: 0;
 }
 
-.finger-modal__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
+/* 일러스트 번호 배지를 클릭해서 고정하면 아래 표에서도 같은 손가락 행을 강조한다 */
+.finger-modal__table-row.is-active {
+  background: #fdeff4;
 }
 
-.finger-modal__list li {
-  display: grid;
-  grid-template-columns: auto 1.1fr repeat(3, 1fr);
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  background: #fafafa;
-  border-radius: 8px;
-  font-size: 0.85rem;
-}
-
-.finger-modal__list-name {
-  font-weight: 600;
+.finger-modal__table-row.is-active .finger-modal__table-badge {
+  background: #de869f;
+  color: #fff;
 }
 
 @media (max-width: 768px) {
   .scan-result-metrics,
-  .scan-result-section--grid,
   .scan-shape-grid {
     grid-template-columns: 1fr;
   }
@@ -555,8 +770,13 @@
     margin-left: auto;
   }
 
-  .finger-modal__list li {
-    grid-template-columns: 1fr 1fr;
+  .finger-modal__table-row {
+    padding: 0.55rem 0.75rem;
+    gap: 0.4rem;
+  }
+
+  .finger-modal__table-row > span:not(:first-child) {
+    min-width: 2.7rem;
   }
 }
 
@@ -613,10 +833,10 @@
   animation: print-modal-icon-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* "완료됐다"는 걸 즉시 알아챌 수 있도록 성공 색(그린)으로 명확히 구분 */
+/* 출력 아이콘과 동일한 핑크 계열로 통일 (배경은 기본 .print-modal__icon-badge와 동일) */
 .print-modal__icon-badge--success {
-  background: linear-gradient(145deg, #4fc789, #2f9e5c);
-  box-shadow: 0 10px 24px rgba(47, 158, 92, 0.32);
+  background: linear-gradient(145deg, #de869f, #c96d88);
+  box-shadow: 0 10px 24px rgba(222, 134, 159, 0.35);
 }
 
 @keyframes print-modal-icon-pop {
@@ -674,6 +894,43 @@
   color: #555;
   font-size: 0.95rem;
   line-height: 1.5;
+}
+
+/* 스캔 분석 진행 중 스켈레톤 */
+@keyframes scan-skeleton-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.scan-metric-card--skeleton,
+.skin-tone-card--skeleton,
+.skin-tone-palette-card--skeleton {
+  animation: scan-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+.scan-metric-card--skeleton .scan-metric-card__value {
+  color: #c9c9d0;
+}
+
+.skin-tone-card--skeleton .skin-tone-card__badge strong {
+  color: #c9c9d0;
+}
+
+.skin-tone-palette-grid__chip--skeleton {
+  background: #ececf1;
+}
+
+.scan-shape-card--skeleton {
+  animation: scan-skeleton-pulse 1.6s ease-in-out infinite;
+  cursor: default;
+}
+
+.scan-shape-card__img-skeleton {
+  width: 100%;
+  height: 60px;
+  margin: 0 auto 0.5rem;
+  background: #ececf1;
+  border-radius: 8px;
 }
 
 .print-modal__actions {

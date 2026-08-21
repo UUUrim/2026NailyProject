@@ -73,4 +73,37 @@ export const ModalActionIcons = {
       <path d="M8 9h8M8 12.5h8M8 16h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   ),
+  /* 겹친 말풍선 손그림 스타일 — 배경 없이 선만 흰색. 뒤쪽(아래) 말풍선은 앞쪽에 가려지는
+     구간을 실제로 그리지 않는 열린 선으로 그려서, 배경이 투명해도 선이 서로 뚫고 지나가
+     보이지 않게 한다(참고 손그림처럼 앞쪽 말풍선 하나만 깨끗하게 위에 겹쳐 보이도록). */
+  chat: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M11.6 15 L8.5 15 4 18.5 6.5 15 H5.4 A2.4 2.4 0 0 1 3 12.6 V8.4 A2.4 2.4 0 0 1 5.4 6 H9.3"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M11.4 3 H18.6 A2.4 2.4 0 0 1 21 5.4 V9.6 A2.4 2.4 0 0 1 18.6 12 H16.5 L19 15.5 13.5 12 H11.4 A2.4 2.4 0 0 1 9 9.6 V5.4 A2.4 2.4 0 0 1 11.4 3 Z"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12.5" cy="7.5" r="0.9" fill="#fff" />
+      <circle cx="15" cy="7.5" r="0.9" fill="#fff" />
+      <circle cx="17.5" cy="7.5" r="0.9" fill="#fff" />
+    </svg>
+  ),
+  image: (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m8 14 2.5-3 2 2L16 9l2 2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="9" cy="9" r="1.1" fill="currentColor" />
+    </svg>
+  ),
 }
