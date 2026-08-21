@@ -525,10 +525,6 @@
 }
 
 .finger-hotspot__tooltip {
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 10px);
-  transform: translateX(-50%);
   min-width: 118px;
   padding: 8px 10px;
   background: #fff;
@@ -539,10 +535,6 @@
   line-height: 1.4;
   text-align: left;
   pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.15s, visibility 0.15s;
-  z-index: 5;
 }
 
 .finger-hotspot__tooltip strong {
@@ -556,18 +548,17 @@
   display: block;
 }
 
-/* 키보드 탭 포커스일 때만 CSS로 자동 표시 — 마우스 호버는 JS로 추적한
-   .is-tooltip-visible이 대신 담당한다(클릭으로 고정 해제해도 마우스가 그대로
-   위에 있으면 :hover가 계속 참이라 안 사라지는 문제를 피하기 위함) */
-.finger-hotspot:focus-within .finger-hotspot__tooltip {
-  opacity: 1;
-  visibility: visible;
+/* document.body에 포털로 띄우는 배지 툴팁 — 모달 스크롤 영역(overflow-y: auto)에 갇혀
+   제목 영역 뒤로 잘리지 않도록, 항상 최상단 레이어(fixed)에서 온전히 그려지게 한다.
+   위치(top/left)는 JS가 배지의 실제 화면 좌표로 계산해 인라인 스타일로 넣어준다. */
+.finger-hotspot__tooltip--portal {
+  position: fixed;
+  z-index: 2200;
+  transform: translate(-50%, -100%);
 }
 
-/* 고정(클릭) 또는 호버 중 — JS에서 계산해 붙여주는 상태 클래스 */
-.finger-hotspot.is-tooltip-visible .finger-hotspot__tooltip {
-  opacity: 1;
-  visibility: visible;
+.finger-hotspot__tooltip--portal.is-below {
+  transform: translateX(-50%);
 }
 
 .finger-hotspot.is-pinned .finger-hotspot__trigger {
@@ -575,12 +566,6 @@
   background: #de869f;
   color: #fff;
   box-shadow: 0 4px 14px rgba(222, 134, 159, 0.45);
-}
-
-/* Thumb hotspots: show tooltip below to avoid clipping at top */
-.finger-hotspot--below .finger-hotspot__tooltip {
-  bottom: auto;
-  top: calc(100% + 10px);
 }
 
 /* 손가락별 수치 표 — 마이페이지 상세보기(.mypage-x__scanx-finger-panel)와 동일한 스타일 */
