@@ -1,4 +1,5 @@
 import { apiClient } from '@/utils/apiClient'
+import type { DesignGenerateResponse } from '@/apis/design'
 
 // ─── 응답 타입 ────────────────────────────────────────────────────────────────
 export interface UserPreferences {
@@ -57,11 +58,14 @@ export async function getPreferences(sessionId: number): Promise<UserPreferences
 
 // ─── 자유 입력 키워드 추출 ────────────────────────────────────────────────────
 
-/** POST /chats/{sessionId}/refine — 자유입력 키워드 추출 */
+/** POST /chats/{sessionId}/refine — 수정 요청 처리 + inpaint 이미지 생성 */
 export async function refineKeywords(
     sessionId: number,
     message: string,
-): Promise<string[]> {
-    const res = await apiClient.post<string[]>(`/chats/${sessionId}/refine`, { message })
+): Promise<DesignGenerateResponse> {  // string[] → DesignGenerateResponse
+    const res = await apiClient.post<DesignGenerateResponse>(
+        `/chats/${sessionId}/refine`,
+        { message },
+    )
     return res.data
 }

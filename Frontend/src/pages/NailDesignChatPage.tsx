@@ -1419,17 +1419,41 @@ export function NailDesignChatPage() {
         }
         reviseLogRef.current.push(text)
         setIsSending(true)
-        try {
-            await refineKeywords(sessionId, text)
-        } catch {
-            // 키워드 추출 실패해도 기존 선호도 기준으로 재생성 시도
-        }
 
-        if (lastDesign?.source === 'photo' && selectedPhotoFile) {
-            await runGenerateDesignFromPhoto(selectedPhotoFile)
-        } else {
-            await runGenerateDesign(lastDesign?.preferences ?? collectedPreferences, lastDesign?.source ?? 'freeform')
+        try {
+            // ★ refine 결과(inpaint 이미지)를 바로 사용, runGenerateDesign 호출 안 함
+            const data = await refineKeywords(sessionId, text)
+
+            setLastDesign({
+                designId: data.designId,
+                imageUrls: data.imageUrls,
+                prompt: data.generatedPrompt ?? '',
+                preferences: lastDesign?.preferences ?? collectedPreferences,
+                source: lastDesign?.source ?? 'freeform',
+                shapeId: lastDesign?.shapeId ?? 'round',
+                details: data.details,
+                context: {
+                    ...(lastDesign?.context ?? {
+                        source: 'freeform',
+                        keywords: [],
+                        referenceImageUrl: null,
+                        handSummary: null,
+                    }),
+                    revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
+                },
+            })
+
+            pushAssistantImages('말씀하신 대로 수정했어요! 어떠세요?', data.imageUrls)
+            setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+
+        } catch (e) {
+            console.error('수정 실패:', e)
+            pushAssistant('수정 중 문제가 생겼어요. 다시 말씀해 주세요.')
+            setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+        } finally {
+            setIsSending(false)
         }
+        // ★ runGenerateDesign / runGenerateDesignFromPhoto 호출 완전히 제거
     }
 
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────

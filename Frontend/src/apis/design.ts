@@ -25,6 +25,16 @@ export interface DesignExtractedDetails {
     colorPalette: DesignDetailItem[] // 디자인에 사용된 컬러 (예: ["#FDE2EA", "#DE869F"])
     textures: DesignDetailItem[]     // 디자인의 질감/텍스처 (예: ["글리터", "그라데이션"])
     nailParts: DesignDetailItem[]    // 디자인에 사용된 네일 파츠 (예: ["펄", "하트 스톤"])
+    swatches?: Record<string, string> //추가: { "glitter": "S3_URL", ... } 비동기 생성이라 null일 수 있음
+}
+
+export async function getDesignSwatches(
+    designId: number
+): Promise<Record<string, string> | null> {
+    const res = await apiClient.get<Record<string, string> | null>(
+        `/designs/${designId}/swatches`
+    )
+    return res.data ?? null
 }
 
 export interface DesignGenerateResponse {

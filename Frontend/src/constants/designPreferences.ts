@@ -222,6 +222,23 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     labelKo: '아트',
     swatchStyle: { background: 'linear-gradient(135deg, #de869f 0%, #a98bff 50%, #7cd6d6 100%)' },
   },
+  //추가: 백엔드 TextureExtractService 키값과 1:1 매핑
+  plain_solid: {
+    labelKo: '기본 젤컬러',
+    swatchStyle: { background: '#f0d8de' },
+  },
+  magnetic_chrome: {
+    labelKo: '마그네틱 크롬',
+    swatchStyle: { background: 'conic-gradient(from 180deg, #7a8899, #3f4d63, #7a8899)' },
+  },
+  drawing: {
+    labelKo: '드로잉 아트',
+    swatchStyle: { background: 'linear-gradient(135deg, #fff 60%, #f0e6ea 100%)' },
+  },
+  '3d_charm': {
+    labelKo: '3D 참',
+    swatchStyle: { background: 'radial-gradient(circle at 40% 35%, #fff 0%, #e8d5db 60%, #d4b8bf 100%)' },
+  },
 }
 
 export type CharmInfo = {

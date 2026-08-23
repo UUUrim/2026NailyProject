@@ -59,7 +59,17 @@ public class NailDesign {
     private String designPlan; // STEP3에서 생성된 5개 손가락 상세 디자인 JSON 원문
 
     @Column(name = "color_palette", columnDefinition = "JSON")
-    private String colorPalette; // 컬러 워크플로우(ComfyUI)가 뽑아낸 hex 리스트 JSON 배열, 예: ["#FDE2EA", "#DE869F"]
+    private String colorPalette; // detect 서버(colors_per_nail)가 뽑아낸 hex 리스트 JSON 배열, 예: ["#FDE2EA", "#DE869F"]
+
+    // ★ 신규 추가: 텍스처 스와치 생성 결과를 JSON으로 저장
+    // 형식: {"glitter": "<S3 URL>", "plain_solid": "<S3 URL>", ...}
+    // S3에 업로드 후 URL을 저장한다 (base64 raw는 너무 커서 DB에 저장 부적합)
+    @Column(name = "swatches_json", columnDefinition = "JSON")
+    private String swatchesJson;
+
+    // ★ 추가: 이미지 생성 시 사용한 seed (inpaint 때 동일 seed 재사용 필요)
+    @Column(name = "seed")
+    private Long seed;
 
     @Column(name = "reference_image_url")
     private String referenceImageUrl; // 사진 기반 생성일 때, 사용자가 업로드한 원본 참고 이미지 S3 URL (채팅 이력 재연용)
@@ -86,6 +96,16 @@ public class NailDesign {
 
     public void updateColorPalette(String colorPalette) {
         this.colorPalette = colorPalette;
+    }
+
+    // ★ 신규 추가
+    public void updateSwatchesJson(String swatchesJson) {
+        this.swatchesJson = swatchesJson;
+    }
+
+    // setter 추가
+    public void updateSeed(Long seed) {
+        this.seed = seed;
     }
 
     public void updateReferenceImageUrl(String referenceImageUrl) {

@@ -1,32 +1,25 @@
 package com.example.nailyproject.service;
 
+import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.SlotData;
-import com.example.nailyproject.entity.ChatMessage;
-import com.example.nailyproject.entity.DesignSession;
-import com.example.nailyproject.entity.NailDesign;
-import com.example.nailyproject.entity.User;
-import com.example.nailyproject.repository.ChatMessageRepository;
-import com.example.nailyproject.repository.DesignSessionRepository;
-import com.example.nailyproject.repository.NailDesignRepository;
+import com.example.nailyproject.entity.*;
+import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * "수정하고 싶어요" 흐름 전용: 이미 확정된 디자인에 대한 사용자의 수정 요청을 해석해서,
- * ChatService와 동일한 slotActions(category/action/value) 스키마로 세션의 extractedPreferences에
- * 직접 반영한다. (예전 버전은 카테고리 구분 없는 키워드 리스트를 refineKeywords 컬럼에
- * 저장만 하고 아무도 읽지 않아서, 수정 요청이 실제로는 반영되지 않는 문제가 있었다.)
+ * 채팅으로 수정 요청이 들어오면 Gemini가 prompt + mask_prompt를 생성하고,
+ * gen 서버 /inpaint로 원본 이미지에서 해당 영역만 재생성한다.
+ * 전체 이미지를 새로 만들지 않아서 원본과 분위기가 크게 달라지지 않는다.
  */
 @Service
 @Transactional
@@ -36,8 +29,12 @@ public class RefineService {
     private final DesignSessionRepository designSessionRepository;
     private final NailDesignRepository nailDesignRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final NailImageService nailImageService;
+    private final S3Service s3Service;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
+    private final NailDesignService nailDesignService;
+    private final NailDetectionService nailDetectionService;
 
     @Value("${gemini.api.key}")
     private String apiKey;
@@ -46,256 +43,257 @@ public class RefineService {
     private String apiUrl;
 
     private static final Pattern HEX_PATTERN = Pattern.compile("^#[0-9A-Fa-f]{6}$");
+    private static final RestTemplate restTemplate = new RestTemplate();
 
     private static final String SYSTEM_PROMPT_TEMPLATE = """
-            당신은 이미 한 번 완성된 네일 디자인을, 사용자의 "수정 요청"에 맞게
-            바꾸는 역할입니다. 처음부터 새로 취향을 묻는 게 아니라, 아래에 주어진
-            "지금까지 확정된 디자인 정보"와 "직전 손가락별 플랜"을 기준으로 사용자가
-            방금 말한 부분만 바꾸세요.
+            당신은 이미 완성된 네일 디자인 이미지에서 사용자가 요청한 부분만 수정하는 역할입니다.
+            원본 이미지에서 수정할 영역만 마스크로 잡아 재생성할 것이므로,
+            아래 두 가지를 정확히 만들어야 합니다.
 
-            [카테고리]
-            mood, designType, color, season, motif, shape
+            [원본 이미지 생성에 사용된 프롬프트]
+            %s
+
+            [직전 손가락별 플랜 (어느 손가락에 뭐가 있었는지 참고)]
+            %s
 
             [핵심 규칙]
-            - "~로 바꿔줘", "~하게 해줘", "~였으면 좋겠어" 같은 요청은 해당 카테고리에
-              add_like로 새 값을 반영하세요. 기존 값을 대체하는 것이므로, 그 카테고리의
-              예전 값과 헷갈리지 않게 새 값 하나만 명확히 넣으세요.
-            - "~는 빼줘", "~말고", "~는 싫어", "~없이" 같은 제거/부정 표현은 절대 무시하지 말고
-              add_dislike로 반영하세요. (예: "하트 모티프를 빼줘" -> motif, add_dislike, "heart")
-            - color는 반드시 hex(#RRGGBB) 형식으로만 작성하세요. "빨간색"처럼 이름으로 쓰지 마세요.
-              색 이름만 언급되고 정확한 톤이 불분명하면, 그 이름에 가장 대표적인 hex를 골라 쓰세요.
-            - "엄지만 ~로 해줘", "네 번째 손가락은 ~ 빼줘"처럼 사용자가 손가락을 직접 지목한
-              요청이면, 해당 손가락 지정을 fingerOverrides(원하는 스타일) 또는 fingerDislikes
-              (피할 것)에 자연스러운 영어로 넣으세요.
-            - [매우 중요] 사용자가 손가락을 직접 지목하지 않았어도, "직전 손가락별 플랜"을
-              보고 그 요청이 특정 손가락 1~2개에만 해당되는 요소라면(예: "별 모양 빼줘"인데
-              직전 플랜에서 별 모양이 ring 손가락에만 있었다면), 그 요청은 사실상 그 손가락에
-              대한 요청입니다. 이 경우 slotActions로 전역 처리만 하지 말고, 반드시
-              fingerDislikes/fingerOverrides에도 해당 손가락(ring 등)을 명시해서
-              "그 손가락의 parts/design_type을 실제로 다시 써야 한다"는 것을 알리세요.
-              그래야 전역 negative 문구("no star")만 붙고 그 손가락 자체 설명은 그대로
-              남아서 서로 모순되는 문제를 막을 수 있습니다.
-            - 언급되지 않은 카테고리는 slotActions에 아예 넣지 마세요 (건드리지 않고 그대로 유지).
-            - value는 전부 영어로 작성하세요. reply 같은 건 필요 없습니다.
+            1. prompt
+               - 수정할 손가락 nail tip 하나를 묘사하는 영어 문장.
+               - 형식: "A studio product photo of individual {shape}-shaped press-on nail tip nailart,
+                 {수정 내용 반영한 묘사}, top-down flat lay view, plain white background,
+                 no shadow, no hands, no fingers, no text, no watermark, no reflection, product shot"
+               - 원본 프롬프트에서 shape, 베이스 컬러 등 변하지 않는 요소는 그대로 유지.
+               - 반드시 사용자가 요청한 수정 내용만 반영.
 
-            [지금까지 확정된 디자인 정보]
-            %s
+            2. mask_prompt
+               - GroundingDINO가 마스크를 탐지할 때 쓸 텍스트.
+               - 반드시 시각적 특징으로 작성하세요 (손가락 이름 X, 위치 X).
+               - 수정할 손톱에 있는 파츠나 컬러로 특징 잡기.
+               - 예시:
+                 * "nail tip with polka dot pattern"
+                 * "nail tip with silver crystal line"
+                 * "dark green nail tip"
+                 * "nail tip with matte surface"
+               - 5단어 이내로 최대한 간결하게 만드세요.
 
-            [직전 손가락별 플랜 (참고용 - 여기서 어느 손가락에 뭐가 있었는지 확인하세요)]
-            %s
+            3. slotActions (기존과 동일, 세션 슬롯 업데이트용)
+               - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
+               - 카테고리: mood, designType, color, season, motif, shape
+               - color는 반드시 hex(#RRGGBB) 형식.
+               - 언급 안 된 카테고리는 넣지 마세요.
 
-            반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만 반환합니다.
+            반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만.
             {
+                "prompt": "A studio product photo of individual ...",
+                "mask_prompt": "nail tip with heart charm",
                 "slotActions": [
-                    {"category": "designType", "action": "add_like", "value": "matte"},
                     {"category": "motif", "action": "add_dislike", "value": "heart"}
                 ],
-                "fingerOverrides": {"ring": "replace the star-shaped charm with a bubble-shaped charm"},
-                "fingerDislikes": {"ring": ["star"]}
+                "fingerOverrides": {"thumb": "replace heart charm with smaller bow charm"},
+                "fingerDislikes": {"thumb": ["large heart"]}
             }
             """;
 
     /**
-     * 사용자의 수정 요청 자유 입력을 받아 slotActions로 해석하고,
-     * 세션의 extractedPreferences/fingerOverrides/fingerDislikes에 바로 반영한다.
+     * 채팅 수정 요청 처리 메인 메서드.
      * POST /chats/{sessionId}/refine
-     *
-     * @return 실제로 적용된 변경 내역을 사람이 읽을 수 있는 문자열 목록으로 반환
-     *         (프론트는 지금 이 반환값 자체를 쓰진 않지만, 디버깅/로그용으로 남겨둔다)
      */
-    public List<String> applyRevision(User user, Long sessionId, String message) {
+    public DesignGenerateResponseDto applyRevision(User user, Long sessionId, String message) throws Exception {
         DesignSession session = designSessionRepository.findByIdAndUserId(sessionId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
 
-        Map<String, SlotData> slots = loadSlots(session.getExtractedPreferences());
+        // 직전 생성 디자인 로드
+        NailDesign prevDesign = nailDesignRepository
+                .findTopBySessionIdOrderByGeneratedAtDesc(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("수정할 디자인이 없습니다."));
 
-        String slotsJson;
-        try {
-            slotsJson = objectMapper.writeValueAsString(slots);
-        } catch (Exception e) {
-            slotsJson = "{}";
-        }
+        String originalPrompt = session.getGeneratedPrompt() != null
+                ? session.getGeneratedPrompt() : prevDesign.getPromptSummary();
+        String previousPlanJson = prevDesign.getDesignPlan() != null
+                ? prevDesign.getDesignPlan() : "(직전 플랜 없음)";
 
-        String previousPlanJson = nailDesignRepository.findTopBySessionIdOrderByGeneratedAtDesc(sessionId)
-                .map(NailDesign::getDesignPlan)
-                .filter(p -> p != null && !p.isBlank())
-                .orElse("(직전 플랜 없음)");
-
-        String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, slotsJson, previousPlanJson);
-
+        // 1. Gemini로 prompt + mask_prompt 생성
+        String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
         Map<String, Object> requestBody = Map.of(
-                "contents", List.of(Map.of("role", "user", "parts", List.of(Map.of("text", message)))),
+                "contents", List.of(Map.of("role", "user",
+                        "parts", List.of(Map.of("text", message)))),
                 "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
                 "generationConfig", Map.of(
                         "responseMimeType", "application/json",
-                        "maxOutputTokens", 1024,
-                        "thinkingConfig", Map.of("thinkingLevel", "LOW")
+                        "maxOutputTokens", 8192,
+                        "thinkingConfig", Map.of("thinkingLevel", "MEDIUM")
                 )
         );
 
         JsonNode responseNode = callGeminiWithRetry(requestBody);
-
-        String aiResponseText;
-        try {
-            aiResponseText = responseNode.path("candidates").get(0)
-                    .path("content").path("parts").get(0).path("text").asText();
-        } catch (Exception e) {
-            System.err.println("수정 요청 응답에서 텍스트를 못 찾음: " + responseNode);
-            return List.of();
-        }
+        String aiText = responseNode.path("candidates").get(0)
+                .path("content").path("parts").get(0).path("text").asText();
 
         JsonNode resultJson;
         try {
-            resultJson = objectMapper.readTree(aiResponseText);
+            resultJson = objectMapper.readTree(aiText);
         } catch (Exception e) {
-            System.err.println("수정 요청 JSON 파싱 실패. 원본 응답: " + aiResponseText);
-            // 파싱에 실패해도 기존 슬롯 그대로 재생성이 진행되도록, 예외를 던지지 않고 조용히 넘어간다.
-            return List.of();
+            System.err.println("수정 요청 JSON 파싱 실패: " + aiText);
+            throw new IllegalStateException("수정 내용을 이해하지 못했어요. 다시 말씀해 주세요.");
+        }
+// ★ 이 줄 추가
+        System.out.println("[RefineService] Gemini 응답: " + aiText);
+
+        String inpaintPrompt = resultJson.path("prompt").asText("");
+        String maskPrompt    = resultJson.path("mask_prompt").asText("");
+
+// ★ 이 줄 추가
+        System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt + " / maskPrompt: " + maskPrompt);
+
+        if (inpaintPrompt.isBlank() || maskPrompt.isBlank()) {
+            throw new IllegalStateException("수정할 영역을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
         }
 
-        List<String> appliedChanges = applySlotActions(slots, resultJson.path("slotActions"));
-
+        // 2. 슬롯 업데이트 (세션 컨텍스트 유지)
+        Map<String, SlotData> slots = loadSlots(session.getExtractedPreferences());
+        applySlotActions(slots, resultJson.path("slotActions"));
         try {
             session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
-        } catch (Exception e) {
-            System.err.println("수정된 슬롯 직렬화 실패: " + e.getMessage());
-        }
-
-        mergeFingerOverrides(resultJson.path("fingerOverrides"), session.getFingerOverrides(), session::updateFingerOverrides);
-        mergeFingerDislikes(resultJson.path("fingerDislikes"), session.getFingerDislikes(), session::updateFingerDislikes);
-
+        } catch (Exception ignored) {}
+        mergeFingerOverrides(resultJson.path("fingerOverrides"),
+                session.getFingerOverrides(), session::updateFingerOverrides);
+        mergeFingerDislikes(resultJson.path("fingerDislikes"),
+                session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
-        // 이 수정 요청도 채팅 이력에 남겨야, 나중에 마이페이지에서 "채팅 이력 보기"로
-        // 다시 볼 때 이 turn이 빠지지 않는다. (예전엔 슬롯 반영만 하고 메시지 저장을
-        // 안 해서, 재생성 전 수정 요청 대화가 재연에서 통째로 누락되는 문제가 있었다.)
-        chatMessageRepository.save(ChatMessage.builder()
-                .session(session)
-                .role(ChatMessage.MessageRole.user)
-                .content(message)
-                .build());
-        chatMessageRepository.save(ChatMessage.builder()
-                .session(session)
-                .role(ChatMessage.MessageRole.assistant)
-                .content(appliedChanges.isEmpty()
-                        ? "네, 알겠습니다! 요청하신 내용으로 다시 만들어드릴게요."
-                        : "네, 알겠습니다! 말씀하신 대로 반영해서 다시 만들어드릴게요.")
-                .build());
+        // 3. 원본 이미지 → base64 변환 (S3 URL에서 다운로드)
+        String originalImageUrl = prevDesign.getImageUrls().get(0);
+        byte[] originalImageBytes = restTemplate.getForObject(originalImageUrl, byte[].class);
+        if (originalImageBytes == null) {
+            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
+        }
+        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
 
-        return appliedChanges;
+        // 4. gen 서버 /inpaint 호출 — seed는 원본과 동일해야 퀄리티 유지
+        Long seed = prevDesign.getSeed(); // NailDesign에 seed 컬럼 필요
+        String inpaintedBase64 = nailImageService.inpaintNail(
+                originalImageBase64, inpaintPrompt, maskPrompt, seed
+        );
+
+        // 5. 수정된 이미지 S3 업로드
+        byte[] inpaintedBytes = Base64.getDecoder().decode(inpaintedBase64);
+        String s3Key = "designs/user_" + user.getId() + "/inpaint_" + UUID.randomUUID() + ".png";
+        String newImageUrl = s3Service.uploadImageBytes(inpaintedBytes, s3Key);
+
+        // ★ 추가: 컬러 팔레트 추출
+        String colorPaletteJson = null;
+        try {
+            List<Map<String, Object>> perNailColors =
+                    nailDetectionService.extractColorsPerNail(inpaintedBase64);
+            List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
+            colorPaletteJson = objectMapper.writeValueAsString(palette);
+        } catch (Exception e) {
+            System.err.println("inpaint 컬러 팔레트 추출 실패: " + e.getMessage());
+        }
+
+        // 6. 새 NailDesign 저장 (원본 seed + 수정된 프롬프트 기록)
+        NailDesign newDesign = NailDesign.builder()
+                .user(user)
+                .session(session)
+                .imageUrls(new ArrayList<>(List.of(newImageUrl)))
+                .promptSummary(inpaintPrompt)
+                .aiModel("z-image-turbo + lora-v1 (inpaint)")
+                .status(NailDesign.DesignStatus.DRAFT)
+                .designPlan(prevDesign.getDesignPlan()) // 플랜은 그대로 유지
+                .colorPalette(colorPaletteJson)
+                .seed(seed)
+                .build();
+        nailDesignRepository.save(newDesign);
+        session.updateGeneratedPrompt(originalPrompt); // 원본 프롬프트 유지
+        designSessionRepository.save(session);
+
+        // 7. 채팅 이력 저장
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session).role(ChatMessage.MessageRole.user).content(message).build());
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session).role(ChatMessage.MessageRole.assistant)
+                .content("말씀하신 대로 수정했어요! 어떠세요?").build());
+
+        return DesignGenerateResponseDto.builder()
+                .designId(newDesign.getId())
+                .status(newDesign.getStatus().name())
+                .generatedPrompt(inpaintPrompt)
+                .imageUrls(newDesign.getImageUrls())
+                .details(nailDesignService.buildDetails(newDesign)) // 수정 후 details는 프론트에서 별도 요청
+                .build();
     }
 
-    private Map<String, SlotData> loadSlots(String extractedPreferencesJson) {
-        if (extractedPreferencesJson == null || extractedPreferencesJson.isBlank()) return new HashMap<>();
+    // -------------------------------------------------------------------------
+    // 슬롯 업데이트 (기존 로직 유지)
+    // -------------------------------------------------------------------------
+    private Map<String, SlotData> loadSlots(String json) {
+        if (json == null || json.isBlank()) return new HashMap<>();
         try {
-            return objectMapper.readValue(extractedPreferencesJson,
+            return objectMapper.readValue(json,
                     objectMapper.getTypeFactory().constructMapType(HashMap.class, String.class, SlotData.class));
         } catch (Exception e) {
-            System.err.println("extractedPreferences 파싱 실패, 빈 슬롯으로 진행: " + extractedPreferencesJson);
             return new HashMap<>();
         }
     }
 
-    /**
-     * slotActions를 슬롯 맵에 반영한다. "수정" 의도이므로, add_like는 그 카테고리의
-     * 기존 liked 값을 교체(성립하지 않는 조합이 같이 남지 않도록)하고, add_dislike는
-     * disliked 목록에 추가한다(상충하는 liked 값이 있으면 제거).
-     */
-    private List<String> applySlotActions(Map<String, SlotData> slots, JsonNode slotActionsNode) {
-        List<String> applied = new ArrayList<>();
-        if (slotActionsNode == null || !slotActionsNode.isArray()) return applied;
-
+    private void applySlotActions(Map<String, SlotData> slots, JsonNode slotActionsNode) {
+        if (slotActionsNode == null || !slotActionsNode.isArray()) return;
         for (JsonNode action : slotActionsNode) {
-            String category = action.path("category").asText("");
+            String category   = action.path("category").asText("");
             String actionType = action.path("action").asText("");
-            String value = action.path("value").asText("");
+            String value      = action.path("value").asText("");
             if (category.isBlank() || actionType.isBlank() || value.isBlank()) continue;
-
-            if ("color".equals(category) && !HEX_PATTERN.matcher(value.trim()).matches()) {
-                System.err.println("수정 요청의 색상 값이 hex 형식이 아니라 무시함: " + value);
-                continue;
-            }
+            if ("color".equals(category) && !HEX_PATTERN.matcher(value.trim()).matches()) continue;
 
             SlotData slot = slots.computeIfAbsent(category, k -> new SlotData());
-
             if ("add_like".equals(actionType)) {
                 slot.getLiked().clear();
                 slot.getLiked().add(value);
                 slot.getDisliked().remove(value);
-                applied.add(category + ": " + value + " (좋아함으로 반영)");
             } else if ("add_dislike".equals(actionType)) {
                 if (!slot.getDisliked().contains(value)) slot.getDisliked().add(value);
                 slot.getLiked().remove(value);
-                applied.add(category + ": " + value + " (제외로 반영)");
             }
         }
-        return applied;
     }
 
-    /**
-     * fingerOverrides/fingerDislikes는 손가락별 자유 텍스트 JSON 객체다.
-     * 새로 받은 지정을 기존 값 위에 덮어써서 병합한다 (같은 손가락이면 새 지정이 우선).
-     */
-    /** fingerOverrides: 손가락별 값이 문자열 하나("이 손가락은 이렇게 해줘")인 JSON 객체. 새 지정이 기존 값을 대체. */
-    private void mergeFingerOverrides(JsonNode newNode, String existingJson, java.util.function.Consumer<String> updater) {
+    private void mergeFingerOverrides(JsonNode newNode, String existingJson,
+                                      java.util.function.Consumer<String> updater) {
         if (newNode == null || !newNode.isObject() || newNode.isEmpty()) return;
-
         Map<String, String> merged = new HashMap<>();
         if (existingJson != null && !existingJson.isBlank()) {
             try {
-                JsonNode existingNode = objectMapper.readTree(existingJson);
-                existingNode.fields().forEachRemaining(entry -> merged.put(entry.getKey(), entry.getValue().asText()));
-            } catch (Exception ignored) {
-            }
+                objectMapper.readTree(existingJson).fields()
+                        .forEachRemaining(e -> merged.put(e.getKey(), e.getValue().asText()));
+            } catch (Exception ignored) {}
         }
-        newNode.fields().forEachRemaining(entry -> merged.put(entry.getKey(), entry.getValue().asText()));
-
-        try {
-            updater.accept(objectMapper.writeValueAsString(merged));
-        } catch (Exception e) {
-            System.err.println("손가락별 지정 병합 실패: " + e.getMessage());
-        }
+        newNode.fields().forEachRemaining(e -> merged.put(e.getKey(), e.getValue().asText()));
+        try { updater.accept(objectMapper.writeValueAsString(merged)); } catch (Exception ignored) {}
     }
 
-    /** fingerDislikes: 손가락별 값이 문자열 배열(["star", ...])인 JSON 객체. 기존 배열에 새 값을 합집합으로 추가. */
-    private void mergeFingerDislikes(JsonNode newNode, String existingJson, java.util.function.Consumer<String> updater) {
+    private void mergeFingerDislikes(JsonNode newNode, String existingJson,
+                                     java.util.function.Consumer<String> updater) {
         if (newNode == null || !newNode.isObject() || newNode.isEmpty()) return;
-
         Map<String, List<String>> merged = new HashMap<>();
         if (existingJson != null && !existingJson.isBlank()) {
             try {
-                JsonNode existingNode = objectMapper.readTree(existingJson);
-                existingNode.fields().forEachRemaining(entry -> {
+                objectMapper.readTree(existingJson).fields().forEachRemaining(e -> {
                     List<String> items = new ArrayList<>();
-                    entry.getValue().forEach(v -> items.add(v.asText()));
-                    merged.put(entry.getKey(), items);
+                    e.getValue().forEach(v -> items.add(v.asText()));
+                    merged.put(e.getKey(), items);
                 });
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
-        newNode.fields().forEachRemaining(entry -> {
-            List<String> items = merged.computeIfAbsent(entry.getKey(), k -> new ArrayList<>());
-            entry.getValue().forEach(v -> {
-                String text = v.asText();
-                if (!items.contains(text)) items.add(text);
-            });
+        newNode.fields().forEachRemaining(e -> {
+            List<String> items = merged.computeIfAbsent(e.getKey(), k -> new ArrayList<>());
+            e.getValue().forEach(v -> { if (!items.contains(v.asText())) items.add(v.asText()); });
         });
-
-        try {
-            updater.accept(objectMapper.writeValueAsString(merged));
-        } catch (Exception e) {
-            System.err.println("손가락별 비선호 병합 실패: " + e.getMessage());
-        }
+        try { updater.accept(objectMapper.writeValueAsString(merged)); } catch (Exception ignored) {}
     }
 
-    /**
-     * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
-     */
     private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
         WebClient webClient = webClientBuilder.build();
         int maxAttempts = 3;
-        long backoffMillis = 1500;
-
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 return webClient.post()
@@ -305,28 +303,16 @@ public class RefineService {
                         .bodyToMono(JsonNode.class)
                         .block();
             } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-                int statusCode = e.getStatusCode().value();
-                boolean isRetryable = statusCode == 429 || statusCode == 503;
-                boolean hasAttemptsLeft = attempt < maxAttempts;
-
-                System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
-                        + e.getStatusCode() + " " + e.getResponseBodyAsString());
-
-                if (isRetryable && hasAttemptsLeft) {
-                    try {
-                        Thread.sleep(backoffMillis * attempt);
-                    } catch (InterruptedException ie) {
+                int code = e.getStatusCode().value();
+                if ((code == 429 || code == 503) && attempt < maxAttempts) {
+                    try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                     }
                     continue;
                 }
-
-                if (isRetryable) {
-                    throw new IllegalStateException("지금 AI 서버가 혼잡해서 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
-                }
-                throw new IllegalStateException("수정 요청 처리용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+                throw new IllegalStateException("AI 서버 오류: " + e.getStatusCode());
             }
         }
-        throw new IllegalStateException("수정 요청 처리용 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+        throw new IllegalStateException("AI 응답 실패");
     }
 }

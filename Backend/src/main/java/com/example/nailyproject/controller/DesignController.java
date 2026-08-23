@@ -16,6 +16,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import java.net.URI;
 import java.util.Base64;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -210,6 +211,27 @@ public class DesignController {
                 .contentType(MediaType.IMAGE_PNG)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .body(imageBytes);
+    }
+
+    /**
+     * 스와치 조회 GET /designs/{designId}/swatches
+     * null이면 아직 생성 중, 값 있으면 완료
+     */
+    @GetMapping("/{designId}/swatches")
+    public ResponseEntity<ApiResponse<Map<String, String>>> getSwatches(
+            @PathVariable Long designId) {
+
+        Map<String, String> swatches = nailDesignService.getSwatches(designId);
+
+        if (swatches == null) {
+            return ResponseEntity.ok(
+                    ApiResponse.success(200, "스와치 생성 중", null)
+            );
+        }
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "스와치 조회 성공", swatches)
+        );
     }
 
     /**
