@@ -127,6 +127,14 @@ public class ScanService {
      * POST /scans/{scanId}/analyze/result
      */
     public void receiveAnalyzeResult(Long scanId, ScanResultRequestDto resultDto) {
+        // TEMP DEBUG: fingers가 왜 null로 오는지 원인 찾는 중 - 원인 확인되면 제거할 것.
+        try {
+            System.out.println("[DEBUG receiveAnalyzeResult] scanId=" + scanId
+                    + " rawBody=" + objectMapper.writeValueAsString(resultDto));
+        } catch (JsonProcessingException e) {
+            System.out.println("[DEBUG receiveAnalyzeResult] scanId=" + scanId + " (직렬화 실패: " + e.getMessage() + ")");
+        }
+
         HandScan handScan = handScanRepository.findById(scanId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 

@@ -90,10 +90,16 @@ cloud:
 
 analysis:
   server:
-    # 일단 둘 중 하나 주석 처리 해두긴 하지만, 스캔 할 때 localhost:8003 필요한가? 모르겠네. 주석 필요하다면 풀어도 됨 
-    # url: http://localhost:8003  # 로컬 통합 서버 (scan+printer)
-    url: https://sermon-friction-unequal.ngrok-free.dev  # 통합 서버 ngrok
+    # 지금은 Backend도 이 데스크톱에서 로컬로 돌리는 중이라 ngrok 안 거치고 바로 접근.
+    # 클라우드에 Backend를 올릴 때는 아래를 다시 ngrok 주소로 바꿔야 함.
+    url: http://localhost:8003  # 로컬 통합 서버 (scan+printer)
+    # url: https://sermon-friction-unequal.ngrok-free.dev  # 통합 서버 ngrok (배포용)
 
 printer:
   server:
     url: ${analysis.server.url}  # 같은 주소 재사용
+
+naily:
+  gen-server-url: https://scalded-lard-seduce.ngrok-free.dev     #생성 서버 (예서 컴퓨터, port 8000)
+  detect-server-url: https://armhole-iphone-monitor.ngrok-free.dev  #검출 서버 (학교 컴퓨터, port 8001)
+

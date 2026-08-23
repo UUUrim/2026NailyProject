@@ -350,15 +350,21 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
     """
     worker = MeasureWorker(finger, ARUCO_SIZE_MM)
     worker.start()
-    history = deque(maxlen=_LIVE_MEDIAN_N)
-    last_t  = 0.0
+    history  = deque(maxlen=_LIVE_MEDIAN_N)
+    last_t   = 0.0
+    deadline = time.time() + 60   # safety net: without this, a finger the
+                                   # operator never manages to hold steady
+                                   # (or forgets to force-capture) blocks the
+                                   # whole pipeline forever - side view already
+                                   # has this same 30s timeout.
     _S.force_capture_top.clear()
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (실시간 측정)")
 
     accepted = None
+    frame = None
     try:
-        while True:
+        while time.time() < deadline:
             ret, frame = cap.read()
             if not ret:
                 return False
@@ -404,7 +410,10 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
         worker.stop()
 
     if accepted is None:
-        return False
+        if frame is None:
+            return False
+        print(f"  [{finger}] 탑뷰 타임아웃(60s) - 마지막 프레임으로 대체")
+        accepted = {"frame": frame}
 
     h = accepted["frame"].shape[0]
     y2 = h - CROP_BOTTOM_PX if CROP_BOTTOM_PX > 0 else h
@@ -492,7 +501,18 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
     local_dir = os.path.join(BASE, "photos", userid, session, hand)
     os.makedirs(local_dir, exist_ok=True)
 
-    cap_top = cv2.VideoCapture(CAMERA_TOP, cv2.CAP_DSHOW)
+    # DSHOW가 가끔 "raised unknown C++ exception!"과 함께 첫 시도를 그냥 실패시킴 -
+    # 특히 이전 세션이 카메라를 놓아준 직후 바로 다시 열 때 흔한, 알려진 Windows
+    # DirectShow 특성. 짧게 대기 후 재시도하면 대부분 통과하므로, 첫 실패로 바로
+    # 스캔 전체를 죽이지 않고 몇 번 더 시도해본다.
+    cap_top = None
+    for attempt in range(4):
+        cap_top = cv2.VideoCapture(CAMERA_TOP, cv2.CAP_DSHOW)
+        if cap_top.isOpened():
+            break
+        cap_top.release()
+        print(f"[Capture] 탑뷰 카메라 열기 실패 (시도 {attempt + 1}/4) - 재시도")
+        time.sleep(0.8)
     cap_top.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
     cap_top.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     if not cap_top.isOpened():

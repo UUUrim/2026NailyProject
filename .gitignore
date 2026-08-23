@@ -95,6 +95,7 @@ scan/SCAN_PIPELINE.md
 scan/out_*/
 scan/out_live
 scan/out_live/*
+scan/out_5f_20mm/
 scan/test/
 scan/sh_images/
 scan/ys_images/
@@ -128,4 +129,3 @@ venv/
 scan/_phone_check/
 *.bak
 *.bak_*
-
