@@ -1,0 +1,487 @@
+.auth-split {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: 1fr 1.08fr;
+  background: #f6f6f6;
+}
+
+.auth-split__visual {
+  position: relative;
+  border-right: 1px solid #ececec;
+  background: linear-gradient(165deg, #fbeee7 0%, #f6e3ec 60%, #f1e2f2 100%);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.auth-split__logo {
+  position: absolute;
+  top: 0.5rem;
+  left: 2rem;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.auth-split__logo-image {
+  height: 6.5rem;
+  width: auto;
+  display: block;
+}
+
+.auth-split__eyebrow {
+  position: absolute;
+  top: 8.35rem;
+  left: 2rem;
+  z-index: 6;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #de869f;
+}
+
+.auth-split__headline {
+  position: absolute;
+  top: 9.55rem;
+  left: 2rem;
+  z-index: 6;
+  max-width: 15.5rem;
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1.34;
+  letter-spacing: -0.01em;
+  color: #2b1f27;
+}
+
+/* 배경 은은한 색감 번짐 (아주 절제해서 2개만) */
+.auth-split__glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(64px);
+  z-index: 0;
+  opacity: 0.55;
+}
+
+.auth-split__glow--pink {
+  width: 20rem;
+  height: 20rem;
+  top: -7rem;
+  right: -6rem;
+  background: rgba(222, 134, 159, 0.4);
+}
+
+.auth-split__glow--purple {
+  width: 18rem;
+  height: 18rem;
+  bottom: -8rem;
+  left: -7rem;
+  background: rgba(169, 139, 255, 0.28);
+}
+
+.auth-split__sparkle {
+  position: absolute;
+  z-index: 2;
+  color: #de869f;
+  font-size: 1rem;
+  animation: authTwinkle 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.auth-split__sparkle--1 { top: 8.6rem; left: 13.8rem; }
+.auth-split__sparkle--2 { top: 11.9rem; left: 12.6rem; font-size: 0.7rem; animation-delay: 0.8s; }
+
+@keyframes authTwinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* 세로로 천천히 흐르는 갤러리: 네일 무드 사진 + 브랜드 정체성(스캔·출력·디자인) 카드 */
+.auth-split__marquee {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  gap: 1rem;
+  padding: 0 1.75rem;
+}
+
+.auth-split__marquee-col {
+  flex: 1;
+  overflow: hidden;
+}
+
+.auth-split__marquee-track {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.auth-split__marquee-track--up {
+  animation: authMarqueeUp 44s linear infinite;
+}
+
+.auth-split__marquee-track--down {
+  animation: authMarqueeDown 50s linear infinite;
+}
+
+.auth-split__marquee-col:first-child {
+  margin-top: -3.5rem;
+}
+
+@keyframes authMarqueeUp {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+@keyframes authMarqueeDown {
+  from { transform: translateY(-50%); }
+  to { transform: translateY(0); }
+}
+
+.auth-split__frame {
+  position: relative;
+  display: block;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  aspect-ratio: 3 / 4;
+  box-shadow: 0 12px 26px rgba(43, 31, 39, 0.14);
+  flex-shrink: 0;
+}
+
+.auth-split__frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.94) contrast(1.02);
+}
+
+.auth-split__frame-tint {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(200deg, rgba(255, 233, 224, 0.2) 0%, rgba(222, 134, 159, 0.36) 100%);
+  mix-blend-mode: soft-light;
+}
+
+/* 네일리 정체성 카드: 스캔 / 출력 / 진단 / 디자인 */
+.auth-split__feature {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.4rem;
+  padding: 1rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.auth-split__feature--a { background: linear-gradient(155deg, #fdf0f4, #f6e3ec); color: #de869f; }
+.auth-split__feature--b { background: linear-gradient(155deg, #f1ecfd, #ece3fb); color: #8a6fd1; }
+.auth-split__feature--c { background: linear-gradient(155deg, #fff6e6, #fdecd2); color: #cf8f2e; }
+.auth-split__feature--d { background: linear-gradient(155deg, #e9f8f2, #dcf3ea); color: #3f9c7d; }
+
+.auth-split__feature-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 6px 14px rgba(43, 31, 39, 0.1);
+}
+
+.auth-split__feature-title {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: #2b1f27;
+}
+
+.auth-split__feature-caption {
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: #6b5860;
+}
+
+/* 상/하단 스크림: 텍스트 가독성 및 마스크 효과 */
+.auth-split__scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.auth-split__scrim--top {
+  top: 0;
+  height: 14.5rem;
+  background: linear-gradient(to bottom, #fbeee7 0%, #fbeee7 40%, rgba(251, 238, 231, 0) 100%);
+}
+
+.auth-split__scrim--bottom {
+  bottom: 0;
+  height: 6rem;
+  background: linear-gradient(to top, #f1e2f2 0%, rgba(241, 226, 242, 0) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-split__sparkle,
+  .auth-split__marquee-track--up,
+  .auth-split__marquee-track--down {
+    animation: none;
+  }
+}
+
+.auth-split__panel {
+  background: #f6f6f6;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-split__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 7.5rem;
+  padding: 0 52px 0 0;
+}
+
+.auth-split__nav {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+}
+
+.auth-split__link {
+  font-size: 14px;
+  text-decoration: none;
+  color: #1f1f1f;
+  font-weight: 600;
+}
+
+.auth-split__cta {
+  background: #de869f;
+  color: #fff;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.auth-split__profile {
+  display: inline-flex;
+  color: #de869f;
+  text-decoration: none;
+}
+
+.auth-split__content {
+  flex: 1;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 24px 52px 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.signup-box {
+  width: 100%;
+}
+
+.signup-box--landing {
+  max-width: 300px;
+  margin-top: 0;
+}
+
+.signup-box__title {
+  margin: 0 0 28px;
+  font-size: 23px;
+  line-height: 1.22;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+
+.signup-box__primary,
+.signup-box__submit {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: #de869f;
+  color: #fff;
+  height: 42px;
+  font-size: 16px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.signup-box__submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.signup-box__divider {
+  margin: 24px 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #777;
+  font-size: 14px;
+}
+
+.signup-box__divider::before,
+.signup-box__divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #d9d9d9;
+}
+
+.signup-box__social {
+  display: grid;
+  gap: 10px;
+}
+
+.signup-box__social-button {
+  height: 42px;
+  border: 1px solid #dfdfdf;
+  border-radius: 8px;
+  background: #f8f8f8;
+  color: #1e1e1e;
+  text-decoration: none;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.signup-box__social-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.signup-box__heading {
+  margin: 0 0 40px;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.signup-box__label {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.signup-box__email-grid {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.signup-box__input {
+  width: 100%;
+  height: 42px;
+  border: 1px solid #dfdfdf;
+  border-radius: 7px;
+  background: #f7f7f7;
+  font-size: 13px;
+  padding: 0 12px;
+  margin-bottom: 8px;
+}
+
+.signup-box__inline-button {
+  height: 42px;
+  border: 1px solid #dfdfdf;
+  border-radius: 7px;
+  background: #f7f7f7;
+  font-size: 12px;
+  color: #777;
+  cursor: pointer;
+}
+
+.signup-box__inline-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.signup-box__status {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #a54b69;
+  line-height: 1.45;
+}
+
+/* 각 입력칸 바로 밑에 뜨는 필드별 안내(성공/오류) 문구 */
+.signup-box__field-message {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* signup-box__email-grid 내부(이메일/인증코드 행)에 배치되는 안내 문구:
+   grid gap(8px)이 이미 위쪽 간격을 만들어주므로 자체 margin은 최소화한다. */
+.signup-box__email-grid .signup-box__field-message {
+  grid-column: 1 / -1;
+  margin: -6px 0 0;
+}
+
+.signup-box__field-message.is-error {
+  color: #d23b3b;
+}
+
+.signup-box__field-message.is-success {
+  color: #2e7d4f;
+}
+
+.signup-box__notice-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.signup-box__notice-link:hover {
+  color: #de869f;
+}
+
+.signup-box__provider-email {
+  height: 42px;
+  background: #ededed;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: #777;
+  margin-bottom: 16px;
+}
+
+.signup-box__notice {
+  margin: 14px 0 0;
+  color: #8f8f8f;
+  font-size: 11px;
+  line-height: 1.45;
+}

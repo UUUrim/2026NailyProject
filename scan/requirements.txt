@@ -1,0 +1,15 @@
+# Packages actually needed to run scan/ (rebuilt 2026-08-21 from the real
+# import statements across scan/*.py). The old file had unrelated
+# Django/Channels dependencies mixed in from a different project.
+# Versions pinned to what's installed in this project's venv.
+
+boto3==1.43.18
+botocore==1.43.18
+fastapi==0.141.1
+numpy==2.4.3
+opencv-contrib-python==4.13.0.92
+opencv-python==4.13.0.92
+pydantic==2.11.3
+requests==2.34.2
+scipy==1.17.1
+uvicorn==0.52.4

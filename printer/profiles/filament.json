@@ -1,0 +1,12 @@
+{
+	"filament_extruder_variant": [
+		"Direct Drive Standard"
+	],
+	"filament_settings_id": [
+		"Generic PLA Silk @BBL A1 - 복사"
+	],
+	"from": "User",
+	"inherits": "Generic PLA Silk @BBL A1",
+	"name": "Generic PLA Silk @BBL A1 - 복사",
+	"version": "2.1.0.19"
+}

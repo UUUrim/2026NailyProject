@@ -1,0 +1,60 @@
+.alert-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+}
+
+.alert-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+}
+
+.alert-modal__panel {
+    position: relative;
+    width: min(90vw, 320px);
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 28px 24px 20px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    animation: alert-modal-pop 0.15s ease-out;
+}
+
+@keyframes alert-modal-pop {
+    from {
+        opacity: 0;
+        transform: scale(0.94);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.alert-modal__message {
+    margin: 0 0 20px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #333;
+    word-break: keep-all;
+}
+
+.alert-modal__confirm {
+    width: 100%;
+    height: 39px;
+    border: 0;
+    border-radius: 5px;
+    background: #de869f;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}

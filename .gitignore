@@ -1,0 +1,131 @@
+__pycache__
+scan/__pycache__
+
+.claude
+claude
+
+### backend
+naily_backup.sql
+HELP.md
+
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+Backend/build/
+
+Backend/.gradle
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+Backend/src/main/resources/application-key.yml
+**/src/main/resources/templates/
+
+
+##### front
+
+Frontend/dist
+Frontend/node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+
+#################### scan
+
+.env
+scan/.env
+
+scan/photos
+scan/results
+scan/SCAN_PIPELINE.md
+
+# scan 테스트 산출물
+scan/out_*/
+scan/out_live
+scan/out_live/*
+scan/test/
+scan/sh_images/
+scan/ys_images/
+scan/2026-08-15_test/*
+scan/_lunula_*
+scan/daily_summary_2026-08-15.txt
+scan/nail_stl_square_test/
+scan/ccurve_images_wj/
+
+
+#################### printer
+
+# [주의] "printer/*"처럼 폴더 전체를 통으로 무시하면 안 됨 — 그러면
+# merge_fingers.py / server.py / slice_and_print.py / s3_helper.py 같은
+# 실제 소스코드까지 git이 무시해버림. 결과물/테스트 산출물만 콕 집어서 무시할 것.
+printer/output/
+printer/stl/
+
+# printer 테스트 산출물
+printer/test_*
+printer/profiles/nail_tip_process2.json
+printer/profiles/combined_settings.json
+printer/profiles/process_fixed.json
+
+
+
+results/
+photos/
+venv/
+**/__pycache__/
+scan/_phone_check/
+*.bak
+*.bak_*
+
