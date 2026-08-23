@@ -62,36 +62,34 @@ public class ScanService {
      * [2단계] 프론트엔드에서 찍은 사진 5장 S3 업로드
      * POST /scans/{scanId}/images?finger=thumb
      */
-    public String uploadFingerImage(User user, Long scanId, ScanImg.Finger finger, MultipartFile file) throws IOException {
+    public Map<String, String> uploadFingerImages(User user, Long scanId, ScanImg.Finger finger,
+                                                  MultipartFile fileTop, MultipartFile fileSide) throws IOException {
         HandScan handScan = handScanRepository.findByIdAndUserId(scanId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 경로: photos/{userid}/{session}/{hand}/{finger}.jpg
-        String s3Key = String.format("photos/%s/%d/%s/%s.jpg",
+        // 경로: photos/{userid}/{session}/{hand}/{finger}_top.jpg, {finger}_side.jpg
+        String basePath = String.format("photos/%s/%d/%s/%s",
                 user.getId(),
                 scanId,
                 handScan.getHandSide().name().toLowerCase(),
                 finger.name().toLowerCase()
         );
 
-        // s3Service.uploadImage는 이제 단순히 URL 문자열을 반환하는 것이 아니라,
-        // 위에서 만든 s3Key 경로에 파일을 업로드하도록 수정되어야 합니다.
-        String imageUrl = s3Service.uploadImageWithKey(file, s3Key);
+        String imageUrlTop = s3Service.uploadImageWithKey(fileTop, basePath + "_top.jpg");
+        String imageUrlSide = s3Service.uploadImageWithKey(fileSide, basePath + "_side.jpg");
 
         // DB 저장 (기존 이미지 있으면 교체)
         scanImgRepository.findByHandScanAndFinger(handScan, finger)
-                .ifPresent(existing -> {
-                    // s3Service.deleteFile(existing.getImageUrl()); // 덮어쓰기 되므로 생략 가능
-                    scanImgRepository.delete(existing);
-                });
+                .ifPresent(existing -> scanImgRepository.delete(existing));
 
         scanImgRepository.save(ScanImg.builder()
                 .handScan(handScan)
                 .finger(finger)
-                .imageUrl(imageUrl)
+                .imageUrl(imageUrlTop)
+                .imageUrlSide(imageUrlSide)
                 .build());
 
-        return imageUrl;
+        return Map.of("imageUrlTop", imageUrlTop, "imageUrlSide", imageUrlSide);
     }
 
     /**
@@ -102,13 +100,8 @@ public class ScanService {
         HandScan handScan = handScanRepository.findByIdAndUserId(scanId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 5장 다 올라왔는지 체크
-        List<ScanImg> images = scanImgRepository.findByHandScan(handScan);
-        if (images.size() < 5) {
-            throw new IllegalStateException("모든 손가락 이미지를 업로드해주세요. (" + images.size() + "/5)");
-        }
-
-        handScan.updateStatus(HandScan.ScanStatus.ANALYZING); // 상태: 분석 중
+        // A안: 사진 촬영은 스캔 서버가 직접 담당 → 프론트 업로드 체크 없음
+        handScan.updateStatus(HandScan.ScanStatus.ANALYZING);
 
         // 파이썬 FastAPI로 보낼 데이터 조합
         Map<String, Object> requestBody = Map.of(
@@ -134,6 +127,14 @@ public class ScanService {
      * POST /scans/{scanId}/analyze/result
      */
     public void receiveAnalyzeResult(Long scanId, ScanResultRequestDto resultDto) {
+        // TEMP DEBUG: fingers가 왜 null로 오는지 원인 찾는 중 - 원인 확인되면 제거할 것.
+        try {
+            System.out.println("[DEBUG receiveAnalyzeResult] scanId=" + scanId
+                    + " rawBody=" + objectMapper.writeValueAsString(resultDto));
+        } catch (JsonProcessingException e) {
+            System.out.println("[DEBUG receiveAnalyzeResult] scanId=" + scanId + " (직렬화 실패: " + e.getMessage() + ")");
+        }
+
         HandScan handScan = handScanRepository.findById(scanId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
@@ -155,19 +156,45 @@ public class ScanService {
                 resultDto.getOverallSize()
         );
 
-        // 2. ScanImg (자식들) 업데이트: 각 손가락별 측정 수치와 팁 호수 저장
+        // 2. ScanImg 업데이트 (A안: 스캔 서버가 사진 직접 촬영 → DB에 레코드 없을 수 있음 → 없으면 생성)
         for (ScanResultRequestDto.FingerResult fingerResult : resultDto.getFingers()) {
             ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
+            String annotatedUrl = fingerResult.getAnnotatedImageUrl() != null
+                    ? fingerResult.getAnnotatedImageUrl() : "";
+
             ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
-                    .orElseThrow(() -> new IllegalArgumentException("해당 손가락을 찾을 수 없습니다."));
+                    .orElseGet(() -> scanImgRepository.save(
+                            ScanImg.builder()
+                                    .handScan(handScan)
+                                    .finger(fingerEnum)
+                                    .imageUrl(annotatedUrl)   // annotated 이미지를 대표 이미지로 저장
+                                    .build()
+                    ));
 
             try {
-                // 손가락별 수치는 JSON 형태로 변환해서 저장
                 String measurementsJson = objectMapper.writeValueAsString(fingerResult.getMeasurements());
                 scanImg.updateAnalysisResult(measurementsJson, fingerResult.getSize());
+                // 스캔 서버가 annotated URL을 보내줬으면 imageUrl 업데이트
+                if (!annotatedUrl.isEmpty()) {
+                    scanImg.updateImageUrl(annotatedUrl);
+                }
             } catch (Exception e) {
                 throw new RuntimeException("수치 데이터 JSON 변환 중 오류가 발생했습니다.", e);
             }
+        }
+
+        // 3. 실제로 측정에 성공한 손가락 수를 기준으로 상태를 명확히 표시한다.
+        //    (이전엔 여기서 상태를 아예 안 건드려서, 측정이 5개 다 실패해도 화면에는
+        //    "완료"처럼 보이고 프론트가 Mock 값으로 조용히 메꿔버리는 문제가 있었다.)
+        int succeededCount = resultDto.getFingers() != null ? resultDto.getFingers().size() : 0;
+        if (succeededCount == 0) {
+            handScan.updateStatus(HandScan.ScanStatus.FAILED);
+        } else if (succeededCount < 5) {
+            // 일부만 성공 — 실패로 보긴 애매하지만, 최소한 로그로는 남겨서 나중에 원인 추적 가능하게 함
+            System.err.println("[Scan] scanId=" + scanId + " 측정 부분 성공: " + succeededCount + "/5 손가락만 완료됨");
+            handScan.updateStatus(HandScan.ScanStatus.MEASURED);
+        } else {
+            handScan.updateStatus(HandScan.ScanStatus.MEASURED);
         }
     }
 

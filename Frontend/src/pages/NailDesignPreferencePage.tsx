@@ -353,7 +353,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useLocation  } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
-import { PageBackLink } from '@/components/layout/PageBackLink'
 import {
   buildDesignPrompt,
   INITIAL_PREFERENCES,
@@ -368,8 +367,8 @@ import {
 } from '@/constants/designPreferences'
 import { getHandScanResult } from '@/utils/handScanStorage'
 import { getRecommendedSeasonCode } from '@/utils/personalColorStorage'
-import { createChatSession, savePreferences, refineKeywords } from '@/api/chat'
-import { generateDesign } from '@/api/design'
+import { createChatSession, savePreferences, refineKeywords } from '@/apis/chat'
+import { generateDesign } from '@/apis/design'
 import { ApiError } from '@/utils/apiClient'
 import '@/styles/nail-design.css'
 
@@ -551,7 +550,6 @@ export function NailDesignPreferencePage() {
 
   return (
       <AppShell mainClassName="nail-design-page__content">
-        <PageBackLink to="/scan/result" label="분석 결과" />
         <div className="nail-design-page">
           <h1 className="nail-design-page__title">네일 디자인 선호도 선택</h1>
           <p className="nail-design-page__subtitle">

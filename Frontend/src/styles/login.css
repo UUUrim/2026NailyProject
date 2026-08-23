@@ -1,12 +1,12 @@
 .login-wireframe {
-  min-height: 100svh;
-  background: #f7f7f7;
+  flex: 1;
+  background: #ffffff;
   padding: 0;
 }
 
 .login-wireframe__canvas {
-  min-height: 100svh;
-  background: #f7f7f7;
+  flex: 1;
+  background: #ffffff;
   display: flex;
   flex-direction: column;
 }
@@ -171,6 +171,8 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
+  color: #333;
+  text-decoration: none;
 }
 
 .social-login__icon-image {

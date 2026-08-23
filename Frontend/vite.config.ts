@@ -10,6 +10,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    exclude: ['@mediapipe/tasks-vision'],
+  },
   server: {
     proxy: {
       '/api': {
@@ -23,6 +26,7 @@ export default defineConfig({
       },
       '/chats': { target: 'http://localhost:8080', changeOrigin: true },
       '/designs': { target: 'http://localhost:8080', changeOrigin: true },
+      '/scans': { target: 'http://localhost:8080', changeOrigin: true },
     }
   }
 })

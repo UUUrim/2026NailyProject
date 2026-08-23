@@ -4,8 +4,7 @@ import com.example.nailyproject.entity.SavedDesign;
 import lombok.Builder;
 import lombok.Getter;
 
-import java.time.LocalDateTime;
-import java.util.List;
+import java.time.format.DateTimeFormatter;
 
 //이걸 찜목록 불러오기용으로
 
@@ -15,8 +14,10 @@ public class SavedDesignResponseDto {
 
     private Long designId;
     private String imageUrl;
-    private LocalDateTime savedAt;
+    private String savedAt; // yyyy. M. d. HH:mm:ss
     private FolderInfo folder;
+
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
     @Getter
     @Builder
@@ -37,7 +38,7 @@ public class SavedDesignResponseDto {
         return SavedDesignResponseDto.builder()
                 .designId(savedDesign.getNailDesign().getId())
                 .imageUrl(savedDesign.getImageUrl())
-                .savedAt(savedDesign.getSavedAt())
+                .savedAt(savedDesign.getSavedAt() != null ? savedDesign.getSavedAt().format(FORMATTER) : "")
                 .folder(folderInfo)
                 .build();
     }

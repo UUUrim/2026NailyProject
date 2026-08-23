@@ -1,0 +1,418 @@
+/* ══════════════════════════════════════════════════════════════════════
+   네일팁 출력 페이지 (Print)
+   ══════════════════════════════════════════════════════════════════════ */
+
+.print-page {
+    padding-bottom: 3rem;
+}
+
+.print-page__inner {
+    max-width: 760px;
+    margin: 0 auto;
+}
+
+/* 헤더의 네일리 로고 시작 지점과 좌측을 맞춘다.
+   root-layout__page(1.5rem)와 헤더(2rem)의 좌측 여백 차이(0.5rem)만 보정. */
+.print-page > .page-back-link {
+    margin-left: 0.5rem;
+}
+
+.print-page__loading {
+    padding: 4rem 1rem;
+    text-align: center;
+    color: #8a727c;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+/* ── 빈 상태 (분석 완료 기록 없음) ── */
+
+.print-page__empty {
+    max-width: 420px;
+    width: min(100%, 420px);
+    margin: 2rem auto 0;
+    padding: 2.4rem 1.6rem;
+    border-radius: 22px;
+    border: 1px dashed #ecd9e0;
+    background: linear-gradient(160deg, #fff8fb 0%, #fff 60%);
+    text-align: center;
+}
+
+.print-page__empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.4rem;
+    height: 3.4rem;
+    margin-bottom: 1rem;
+    border-radius: 999px;
+    /* 마이페이지 확인모달(mypage-x__confirm-icon)과 동일한 은은한 그라데이션 + 그림자 */
+    background: linear-gradient(145deg, #de869f, #c96d88);
+    color: #fff;
+    box-shadow: 0 8px 20px rgba(222, 134, 159, 0.32);
+}
+
+.print-page__empty h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #262626;
+    letter-spacing: -0.02em;
+}
+
+.print-page__empty p {
+    margin: 0 0 1.4rem;
+    font-size: 0.86rem;
+    color: #8a727c;
+    line-height: 1.6;
+}
+
+/* 색상/그림자는 공용 PillButton(pill-button.css)이 담당하고, 여기서는 이 화면 전용 크기만 오버라이드한다 */
+.pill-button.print-page__empty-cta {
+    min-width: 0;
+    height: auto;
+    padding: 0.8rem 1.6rem;
+    font-size: 0.88rem;
+}
+
+/* 제목 카드는 공통 PageHero 컴포넌트(page-hero.css)로 대체됨 */
+
+/* ── 섹션 공통 ── */
+
+.print-page__section {
+    margin-bottom: 2.2rem;
+}
+
+.print-page__section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.print-page__section-head h2 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 800;
+    color: #262626;
+    letter-spacing: -0.01em;
+}
+
+.print-page__section-count {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #b3899a;
+}
+
+.print-page__section-sub {
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+    color: #8a727c;
+    line-height: 1.6;
+}
+
+.print-page__section-sub strong {
+    color: #c96d88;
+    font-weight: 800;
+}
+
+/* ── 분석 결과 선택 리스트 ── */
+
+.print-session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.print-session-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 1px solid #f0e1e7;
+    border-radius: 16px;
+    background: #fff;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.print-session-card.is-selected {
+    border-color: #de869f;
+    background: #fff8fb;
+    box-shadow: 0 6px 18px rgba(222, 134, 159, 0.14);
+}
+
+.print-session-card__select {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    padding: 0.9rem 0.95rem;
+    text-align: left;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.print-session-card__select:disabled {
+    cursor: default;
+}
+
+.print-session-list.is-locked .print-session-card:not(.is-selected) {
+    opacity: 0.5;
+}
+
+.print-session-card__radio {
+    flex-shrink: 0;
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-top: 0.15rem;
+    border-radius: 999px;
+    border: 1.5px solid #ddc3cc;
+    background: #fff;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.print-session-card.is-selected .print-session-card__radio {
+    border-color: #de869f;
+    background: #de869f;
+    box-shadow: inset 0 0 0 3px #fff;
+}
+
+.print-session-card__swatch {
+    flex-shrink: 0;
+    width: 2.2rem;
+    height: 2.2rem;
+    margin-top: 0.1rem;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.7);
+}
+
+.print-session-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.print-session-card__date {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: #262626;
+    letter-spacing: -0.01em;
+}
+
+.print-session-card__season {
+    font-size: 0.82rem;
+    font-weight: 800;
+    /* 스와치 색상과 무관하게 항상 같은 브랜드 색으로 고정 */
+    color: #c96d88;
+}
+
+.print-session-card__metrics,
+.print-session-card__shape {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #8a727c;
+    line-height: 1.4;
+}
+
+.print-session-card__detail-btn {
+    flex-shrink: 0;
+    margin-right: 0.9rem;
+    border: 1px solid rgba(222, 134, 159, 0.3);
+    border-radius: 999px;
+    background: #fff;
+    color: #c45f7e;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.print-session-card__detail-btn:hover {
+    background: #fff0f5;
+    border-color: #de869f;
+}
+
+/* ── 하단 액션 ── */
+
+.print-page__error {
+    margin: 0 0 1rem;
+    font-size: 0.82rem;
+    color: #d23b3b;
+    font-weight: 700;
+    text-align: center;
+}
+
+.print-page__actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 1rem;
+}
+
+.print-page__submit {
+    min-width: 14rem;
+    border: none;
+    border-radius: 999px;
+    padding: 0.95rem 2rem;
+    background: linear-gradient(135deg, #de869f, #c77d96);
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 12px 28px rgba(222, 134, 159, 0.32);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.print-page__submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 16px 32px rgba(222, 134, 159, 0.38);
+}
+
+.print-page__submit:disabled {
+    opacity: 0.45;
+    cursor: default;
+    box-shadow: none;
+}
+
+/* 이미 출력 신청을 마친 상태 — 더 이상 클릭할 수 없다는 게 분명히 드러나도록
+   무채색 톤으로 명시적인 비활성 스타일을 주되, 커서는 평범한 기본 모양을 유지한다 */
+.print-page__submit.is-done {
+    opacity: 0.6;
+    background: #f1eef0;
+    color: #ab97a0;
+    border: 1.5px solid #e6dde1;
+    box-shadow: none;
+    cursor: default;
+}
+
+/* 분석 결과 페이지의 "다음 단계로" 버튼과 동일한 텍스트 링크 스타일 */
+.print-page__design-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border: none;
+    background: transparent;
+    color: #de869f;
+    padding: 0.5rem 0.25rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-top: 3rem;
+    cursor: pointer;
+    transition: gap 0.25s ease, color 0.2s ease;
+}
+
+.print-page__design-cta svg {
+    flex-shrink: 0;
+    transition: transform 0.25s ease;
+}
+
+.print-page__design-cta:hover {
+    gap: 0.7rem;
+    color: #c96a86;
+}
+
+.print-page__design-cta:hover svg {
+    transform: translateX(5px);
+}
+
+.print-page__design-cta:active {
+    gap: 0.5rem;
+}
+
+.print-page__design-cta:active svg {
+    transform: translateX(2px);
+}
+
+@media (max-width: 560px) {
+    .print-session-card {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .print-session-card__detail-btn {
+        align-self: flex-end;
+        margin: 0 0.95rem 0.85rem;
+    }
+
+    .print-page__submit {
+        width: 100%;
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   프린터 실시간 진행 상황 위젯 (PrinterProgressWidget)
+   ══════════════════════════════════════════════════════════════════════ */
+
+.printer-progress {
+    padding: 1.2rem 1.4rem;
+    border-radius: 18px;
+    border: 1px solid #f0dde4;
+    background: linear-gradient(160deg, #fff8fb 0%, #fff 70%);
+}
+
+.printer-progress--loading,
+.printer-progress--error {
+    text-align: center;
+    color: #8a727c;
+    font-size: 0.9rem;
+    font-weight: 600;
+    padding: 1.6rem 1rem;
+}
+
+.printer-progress--error {
+    color: #c0392b;
+}
+
+.printer-progress__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+}
+
+.printer-progress__state {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #4a3540;
+}
+
+.printer-progress__percentage {
+    font-weight: 800;
+    font-size: 1.15rem;
+    color: #de869f;
+}
+
+.printer-progress__bar {
+    position: relative;
+    width: 100%;
+    height: 10px;
+    border-radius: 999px;
+    background: #f3e4ea;
+    overflow: hidden;
+    margin-bottom: 0.7rem;
+}
+
+.printer-progress__bar span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #de869f, #c77d96);
+    transition: width 0.4s ease;
+}
+
+.printer-progress__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    font-size: 0.82rem;
+    color: #8a727c;
+}

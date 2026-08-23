@@ -247,8 +247,21 @@ def guide_line_row(corners, x):
     evaluated at column x — extends that edge (rather than a fixed offset)
     so the guide line follows the marker's own tilt if the camera isn't
     perfectly square to the mat.
+
+    The bottom two corners are picked by actual pixel position (largest y),
+    not by a fixed cv2.aruco TL,TR,BR,BL index assumption: that ordering is
+    relative to the marker's OWN rotation, which shifts with how the marker
+    is physically mounted. On one rig corners[3]/corners[2] really were the
+    bottom two and this worked; on another (same code, marker mounted at a
+    different rotation) they turned out to be two corners on the same short
+    edge, nearly stacked vertically — extrapolating that near-vertical
+    "edge" out to a finger 300+px away sent the guide row thousands of
+    pixels off-screen, which fed a garbage cuticle_y into every measurement
+    (length_mm computed as 900+ instead of ~15) while leaving the on-screen
+    guide line invisible, since it was drawn far outside the visible frame.
     """
-    bl, br = corners[3], corners[2]   # cv2.aruco order: TL,TR,BR,BL
+    order = sorted(range(4), key=lambda i: corners[i][1], reverse=True)
+    bl, br = sorted((corners[order[0]], corners[order[1]]), key=lambda p: p[0])
     if abs(br[0] - bl[0]) < 1e-6:
         return float(bl[1])
     slope = (br[1] - bl[1]) / (br[0] - bl[0])

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+requests
+python-multipart
+boto3
+trimesh
+networkx
+lxml
+numpy
+bambulabs_api

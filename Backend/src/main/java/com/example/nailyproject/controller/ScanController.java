@@ -46,20 +46,20 @@ public class ScanController {
 
     /**
      * 손가락 이미지 업로드 POST /scans/{scanId}/images?finger=THUMB
+     * 탑뷰(fileTop)와 측면뷰(fileSide) 두 장을 한 번에 받아 각각 저장합니다.
      */
     @PostMapping("/{scanId}/images")
     public ResponseEntity<ApiResponse<Map<String, String>>> uploadFingerImage(
             @AuthenticationPrincipal User user,
             @PathVariable Long scanId,
             @RequestParam("finger") ScanImg.Finger finger,
-            @RequestParam("file") MultipartFile file) throws IOException {
+            @RequestParam("fileTop") MultipartFile fileTop,
+            @RequestParam("fileSide") MultipartFile fileSide) throws IOException {
 
-        // 백엔드가 파일을 직접 받아서 S3에 올리도록
-        String imageUrl = scanService.uploadFingerImage(user, scanId, finger, file);
+        Map<String, String> urls = scanService.uploadFingerImages(user, scanId, finger, fileTop, fileSide);
 
         return ResponseEntity.ok(
-                ApiResponse.success(200, "이미지가 업로드되었습니다.",
-                        Map.of("imageUrl", imageUrl))
+                ApiResponse.success(200, "이미지가 업로드되었습니다.", urls)
         );
     }
 
@@ -130,6 +130,17 @@ public class ScanController {
         return ResponseEntity.ok(
                 ApiResponse.success(200, "최근 스캔 결과 조회 성공.", data)
         );
+    }
+
+    /**
+     * 400 - 필수 파일(파트) 누락
+     */
+    @ExceptionHandler(org.springframework.web.multipart.support.MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingPart(
+            org.springframework.web.multipart.support.MissingServletRequestPartException e) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(400, "필수 파일이 누락되었습니다: " + e.getRequestPartName()));
     }
 
     /**

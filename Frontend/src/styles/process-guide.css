@@ -9,7 +9,7 @@
 
 .process-v2__eyebrow {
   margin: 0 0 0.75rem;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #de869f;
@@ -18,7 +18,7 @@
 
 .process-v2__hero h1 {
   margin: 0 0 1rem;
-  font-size: clamp(2rem, 5vw, 2.75rem);
+  font-size: clamp(1.75rem, 4.4vw, 2.4rem);
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
@@ -27,6 +27,7 @@
   margin: 0 auto;
   max-width: 480px;
   color: #666;
+  font-size: 0.94rem;
   line-height: 1.6;
 }
 
@@ -43,8 +44,13 @@
   display: grid;
   grid-template-columns: 72px 1fr;
   gap: 1.25rem;
+  align-items: center;
   position: relative;
-  padding-bottom: 2rem;
+  margin-bottom: 2rem;
+}
+
+.process-v2__step:last-child {
+  margin-bottom: 0;
 }
 
 .process-v2__step-marker {
@@ -63,8 +69,8 @@
 .process-v2__connector {
   position: absolute;
   left: 35px;
-  top: 76px;
-  bottom: 0;
+  top: calc(50% + 38px);
+  bottom: -2rem;
   width: 2px;
   background: linear-gradient(180deg, #de869f 0%, transparent 100%);
   opacity: 0.35;
@@ -97,7 +103,7 @@
 .process-v2__cta-wrap {
   display: flex;
   justify-content: center;
-  margin-top: 1rem;
+  margin-top: 3.5rem;
 }
 
 .process-v2__cta {
@@ -133,6 +139,6 @@
 
   .process-v2__connector {
     left: 27px;
-    top: 60px;
+    top: calc(50% + 30px);
   }
 }

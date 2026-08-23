@@ -8,38 +8,238 @@
 .auth-split__visual {
   position: relative;
   border-right: 1px solid #ececec;
-  background: #cfcfcf;
+  background: linear-gradient(165deg, #fbeee7 0%, #f6e3ec 60%, #f1e2f2 100%);
   overflow: hidden;
+  isolation: isolate;
 }
 
 .auth-split__logo {
-  position: absolute; /*수정*/
-  top: 1.25rem; /*수정*/
-  left: 2rem; /*수정*/
-  font-family: var(--font-brand);
-  color: #de869f;
-  font-size: 2rem;
-  font-weight: 400; /*수정*/
-  line-height: 1;
-  text-decoration: none;  /*수정*/
-}
-
-.auth-split__line {
   position: absolute;
-  top: 0;
+  top: 0.5rem;
+  left: 2rem;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.auth-split__logo-image {
+  height: 6.5rem;
+  width: auto;
+  display: block;
+}
+
+.auth-split__eyebrow {
+  position: absolute;
+  top: 8.35rem;
+  left: 2rem;
+  z-index: 6;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #de869f;
+}
+
+.auth-split__headline {
+  position: absolute;
+  top: 9.55rem;
+  left: 2rem;
+  z-index: 6;
+  max-width: 15.5rem;
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1.34;
+  letter-spacing: -0.01em;
+  color: #2b1f27;
+}
+
+/* 배경 은은한 색감 번짐 (아주 절제해서 2개만) */
+.auth-split__glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(64px);
+  z-index: 0;
+  opacity: 0.55;
+}
+
+.auth-split__glow--pink {
+  width: 20rem;
+  height: 20rem;
+  top: -7rem;
+  right: -6rem;
+  background: rgba(222, 134, 159, 0.4);
+}
+
+.auth-split__glow--purple {
+  width: 18rem;
+  height: 18rem;
+  bottom: -8rem;
+  left: -7rem;
+  background: rgba(169, 139, 255, 0.28);
+}
+
+.auth-split__sparkle {
+  position: absolute;
+  z-index: 2;
+  color: #de869f;
+  font-size: 1rem;
+  animation: authTwinkle 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.auth-split__sparkle--1 { top: 8.8rem; left: 14rem; }
+.auth-split__sparkle--2 { top: 11.4rem; left: 14rem; font-size: 0.7rem; animation-delay: 0.8s; }
+
+@keyframes authTwinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* 세로로 천천히 흐르는 갤러리: 네일 무드 사진 + 브랜드 정체성(스캔·출력·디자인) 카드 */
+.auth-split__marquee {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  gap: 1rem;
+  padding: 0 1.75rem;
+}
+
+.auth-split__marquee-col {
+  flex: 1;
+  overflow: hidden;
+}
+
+.auth-split__marquee-track {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.auth-split__marquee-track--up {
+  animation: authMarqueeUp 45s linear infinite;
+}
+
+.auth-split__marquee-track--down {
+  animation: authMarqueeDown 45s linear infinite;
+}
+
+.auth-split__marquee-col:first-child {
+  margin-top: -3.5rem;
+}
+
+@keyframes authMarqueeUp {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+@keyframes authMarqueeDown {
+  from { transform: translateY(-50%); }
+  to { transform: translateY(0); }
+}
+
+.auth-split__frame {
+  position: relative;
+  display: block;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  aspect-ratio: 3 / 4;
+  box-shadow: 0 12px 26px rgba(43, 31, 39, 0.14);
+  flex-shrink: 0;
+}
+
+/* 디자인 이미지(design1.png)는 원본 비율(768x512 = 3:2) 그대로 보여줘서
+   object-fit: cover가 위아래 여백까지 끌고 오는 크롭 없이 이미지 꽉 채우게 한다 */
+.auth-split__frame--photo {
+  aspect-ratio: 3 / 2;
+}
+
+.auth-split__frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(0.94) contrast(1.02);
+}
+
+.auth-split__frame-tint {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(200deg, rgba(255, 233, 224, 0.2) 0%, rgba(222, 134, 159, 0.36) 100%);
+  mix-blend-mode: soft-light;
+}
+
+/* 네일리 정체성 카드: 스캔 / 출력 / 진단 / 디자인 — 사진 카드보다 세로 길이를 조금 줄인다 */
+.auth-split__feature {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.4rem;
+  padding: 1rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  aspect-ratio: 5 / 6;
+}
+
+.auth-split__feature--a { background: linear-gradient(155deg, #fdf0f4, #f6e3ec); color: #de869f; }
+.auth-split__feature--b { background: linear-gradient(155deg, #f1ecfd, #ece3fb); color: #8a6fd1; }
+.auth-split__feature--c { background: linear-gradient(155deg, #fff6e6, #fdecd2); color: #cf8f2e; }
+.auth-split__feature--d { background: linear-gradient(155deg, #e8f5fb, #dbeef8); color: #3f93c9; }
+
+.auth-split__feature-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 6px 14px rgba(43, 31, 39, 0.1);
+}
+
+.auth-split__feature-title {
+  font-size: 0.86rem;
+  font-weight: 800;
+  color: #2b1f27;
+}
+
+.auth-split__feature-caption {
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: #6b5860;
+}
+
+/* 상/하단 스크림: 텍스트 가독성 및 마스크 효과 */
+.auth-split__scrim {
+  position: absolute;
   left: 0;
-  width: 180%;
-  height: 1px;
-  background: rgba(170, 170, 170, 0.45);
-  transform-origin: top left;
+  right: 0;
+  z-index: 2;
+  pointer-events: none;
 }
 
-.auth-split__line--left {
-  transform: rotate(56deg);
+.auth-split__scrim--top {
+  top: 0;
+  height: 14.5rem;
+  background: linear-gradient(to bottom, #fbeee7 0%, #fbeee7 40%, rgba(251, 238, 231, 0) 100%);
 }
 
-.auth-split__line--right {
-  transform: rotate(-56deg) translate(-42%, 356%);
+.auth-split__scrim--bottom {
+  bottom: 0;
+  height: 6rem;
+  background: linear-gradient(to top, #f1e2f2 0%, rgba(241, 226, 242, 0) 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-split__sparkle,
+  .auth-split__marquee-track--up,
+  .auth-split__marquee-track--down {
+    animation: none;
+  }
 }
 
 .auth-split__panel {
@@ -51,8 +251,10 @@
 
 .auth-split__header {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  padding: 26px 52px 0 0;
+  height: 7.5rem;
+  padding: 0 52px 0 0;
 }
 
 .auth-split__nav {
@@ -65,21 +267,36 @@
   gap: 18px;
 }
 
+/* 공통 헤더(landing-header__login)와 동일한 스타일 */
 .auth-split__link {
-  font-size: 14px;
-  text-decoration: none;
-  color: #1f1f1f;
+  font-size: 0.9375rem;
+  color: #1a1a1a;
   font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.2s;
 }
 
+.auth-split__link:hover {
+  opacity: 0.7;
+}
+
+/* 공통 헤더(landing-header__signup)와 동일한 스타일 */
 .auth-split__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1.25rem;
+  border-radius: 999px;
   background: #de869f;
   color: #fff;
+  font-size: 0.9375rem;
+  font-weight: 600;
   text-decoration: none;
-  border-radius: 999px;
-  padding: 9px 14px;
-  font-size: 14px;
-  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.auth-split__cta:hover {
+  background: #d0768f;
 }
 
 .auth-split__profile {
@@ -123,9 +340,10 @@
   border-radius: 8px;
   background: #de869f;
   color: #fff;
-  height: 46px;
-  font-size: 28px;
+  height: 42px;
+  font-size: 16px;
   font-weight: 600;
+  margin-top: 22px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -144,7 +362,7 @@
   align-items: center;
   gap: 14px;
   color: #777;
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .signup-box__divider::before,
@@ -160,13 +378,14 @@
 }
 
 .signup-box__social-button {
-  height: 44px;
+  height: 42px;
   border: 1px solid #dfdfdf;
   border-radius: 8px;
   background: #f8f8f8;
   color: #1e1e1e;
   text-decoration: none;
-  font-size: 22px;
+  font-size: 14px;
+  font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -174,13 +393,13 @@
 }
 
 .signup-box__social-icon {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   object-fit: contain;
 }
 
 .signup-box__heading {
-  margin: 0 0 24px;
+  margin: 0 0 40px;
   font-size: 32px;
   line-height: 1.15;
 }
@@ -188,15 +407,22 @@
 .signup-box__label {
   display: block;
   margin: 0 0 8px;
-  font-size: 20px;
+  font-size: 14px;
   font-weight: 500;
+}
+
+/* 제목(라벨)과 다음 섹션 간 간격을 모두 24px로 통일한다. input은 inline-block이라
+   앞 요소의 margin과 collapse되지 않고 더해지므로, 입력칸의 margin-bottom(8px)에
+   16px를 더해 24px를 만든다. */
+.signup-box__label--section {
+  margin-top: 16px;
 }
 
 .signup-box__email-grid {
   display: grid;
   grid-template-columns: 1fr 64px;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
 }
 
 .signup-box__input {
@@ -208,6 +434,13 @@
   font-size: 13px;
   padding: 0 12px;
   margin-bottom: 8px;
+}
+
+/* 그리드 안(이메일/인증코드 입력칸)에서는 grid의 gap(8px)이 이미 세로 간격을 만들어주므로,
+   입력칸 자체의 margin-bottom과 중복으로 더해지지 않도록 0으로 없앤다.
+   (이렇게 해야 이메일→인증코드 간격이 비밀번호→비밀번호 확인 간격(8px)과 같아진다) */
+.signup-box__email-grid .signup-box__input {
+  margin-bottom: 0;
 }
 
 .signup-box__inline-button {
@@ -232,6 +465,87 @@
   line-height: 1.45;
 }
 
+/* 각 입력칸 바로 밑에 뜨는 필드별 안내(성공/오류) 문구 */
+.signup-box__field-message {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* signup-box__email-grid 내부(이메일/인증코드 행)에 배치되는 안내 문구:
+   grid gap(8px) + margin-top(-4px) = 4px, 다른 입력칸-메세지 간격(8px 마진 - 4px = 4px)과 동일 */
+.signup-box__email-grid .signup-box__field-message {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+}
+
+.signup-box__field-message.is-error {
+  color: #d23b3b;
+}
+
+.signup-box__field-message.is-success {
+  color: #2e7d4f;
+}
+
+/* 비밀번호 조건 체크리스트 — 마이페이지 비밀번호 변경(.mypage-x__password-rules)과 동일한 스타일 */
+.signup-box__password-rules {
+  margin: -4px 0 8px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.signup-box__password-rules li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  transition: color 0.15s;
+}
+
+.signup-box__password-rules li span {
+  display: inline-flex;
+  width: 14px;
+  justify-content: center;
+  font-weight: 800;
+  transition: color 0.15s;
+}
+
+.signup-box__password-rules li.is-unmet {
+  color: #d23b3b;
+}
+
+.signup-box__password-rules li.is-unmet span {
+  color: #d23b3b;
+}
+
+.signup-box__password-rules li.is-met {
+  color: #2e7d4f;
+}
+
+.signup-box__password-rules li.is-met span {
+  color: #2e7d4f;
+}
+
+.signup-box__notice-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.signup-box__notice-link:hover {
+  color: #de869f;
+}
+
 .signup-box__provider-email {
   height: 42px;
   background: #ededed;
@@ -246,7 +560,7 @@
 }
 
 .signup-box__notice {
-  margin: 14px 0 0;
+  margin: 6px 0 0;
   color: #8f8f8f;
   font-size: 11px;
   line-height: 1.45;

@@ -1,83 +1,20 @@
-.app-shell {
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  background: #fafafa;
-  color: #1a1a1a;
-}
-
-.app-shell__header {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.app-shell__header-inner {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 1rem 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.app-shell__logo {
-  font-family: var(--font-brand);
-  font-size: 2rem;
-  color: #de869f;
-  text-decoration: none;
-  line-height: 1;
-}
-
-.app-shell__nav {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.app-shell__login {
-  font-size: 0.9375rem;
-  color: #1a1a1a;
-  text-decoration: none;
-}
-
-.app-shell__signup {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 1.25rem;
-  border-radius: 999px;
-  background: #de869f;
-  color: #fff;
-  font-size: 0.9375rem;
-  text-decoration: none;
-}
-
-.app-shell__profile {
-  display: inline-flex;
-  color: #de869f;
-  text-decoration: none;
-}
-
-.app-shell__main {
-  flex: 1;
-  width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 2rem 1.5rem 3rem;
-}
-
 .page-back-link {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   margin-bottom: 1.25rem;
-  font-size: 0.9rem;
+  border: none;
+  border-radius: 999px;
+  background: none;
   color: #666;
-  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
 
 .page-back-link:hover {
-  color: #de869f;
+  background: var(--naily-pink-light, #fdf5f8);
+  color: var(--naily-pink, #de869f);
 }

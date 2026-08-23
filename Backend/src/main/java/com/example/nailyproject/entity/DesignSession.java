@@ -44,6 +44,12 @@ public class DesignSession {
     @Column(name = "extracted_preferences", columnDefinition = "JSON")
     private String extractedPreferences; // JSON 형태로 저장
 
+    @Column(name = "finger_overrides", columnDefinition = "JSON")
+    private String fingerOverrides;
+
+    @Column(name = "finger_dislikes", columnDefinition = "JSON")
+    private String fingerDislikes;
+
     public enum SessionStatus {
         IN_PROGRESS, COMPLETED, CANCELLED
     }
@@ -54,12 +60,31 @@ public class DesignSession {
     @Column(name = "refine_keywords", columnDefinition = "JSON")
     private String refineKeywords; // 자유입력 키워드 JSON 배열
 
+    @Column(name = "reference_image_url")
+    private String referenceImageUrl; // 사진 기반 흐름에서 최초 업로드한 참고 이미지 S3 URL — 재생성 시 재사용
+
     public void updateRefineKeywords(String refineKeywords) {
         this.refineKeywords = refineKeywords;
     }
 
+    public void updateReferenceImageUrl(String referenceImageUrl) {
+        this.referenceImageUrl = referenceImageUrl;
+    }
+
     public void updateExtractedPreferences(String extractedPreferences) {
         this.extractedPreferences = extractedPreferences;
+    }
+
+    public void updateFingerOverrides(String fingerOverrides) {
+        this.fingerOverrides = fingerOverrides;
+    }
+
+    public void updateFingerDislikes(String fingerDislikes) {
+        this.fingerDislikes = fingerDislikes;
+    }
+
+    public void updateStatus(SessionStatus status) {
+        this.status = status;
     }
 
     public void updateGeneratedPrompt(String generatedPrompt) {
