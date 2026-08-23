@@ -99,11 +99,8 @@ export interface ScanHistoryItem {
     handSide: string | null
     status: string | null
     shape: string | null
-<<<<<<< HEAD
-=======
     recommendedShape: string | null
     skinToneHex: string | null
->>>>>>> origin/seunghee
     seasonCode: string | null
     seasonNameKo: string | null
     avgLengthMm: number | null
