@@ -1,51 +1,56 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useNavigationType } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
-import { PageBackLink } from '@/components/layout/PageBackLink'
+import { PageHero } from '@/components/layout/PageHero'
 import { FingerDetailModal } from '@/components/handScan/FingerDetailModal'
-import { getNailShape, NAIL_SHAPES } from '@/constants/nailShapes'
-import { createPrintOrder } from '@/apis/prints'
-import { getScanResult, generateStl, type ScanResultResponse } from '@/apis/scan'
+import { NextStepButton } from '@/components/common/NextStepButton'
+import { getNailShape } from '@/constants/nailShapes'
+import { getScanResult, type ScanResultResponse } from '@/apis/scan'
 import { getMyProfile } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
-import { PERSONAL_COLOR_SWATCHES, SEASON_ROWS } from '@/constants/designPreferences'
+import { analyzeSkinTone, generateSkinTonePalette } from '@/utils/skinTone'
+import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/utils/nailMetrics'
+import { useLeaveWarning } from '@/hooks/useLeaveWarning'
+import { AUTH_CHANGE_EVENT } from '@/utils/auth'
 import '@/styles/hand-scan-result.css'
 import type { FingerDetail } from '@/utils/handScanAnalysis'
 
+const LEAVE_DURING_ANALYSIS_WARNING =
+    '지금 나가면 분석이 중단되어 다시 촬영해야 해요. 그래도 나가시겠어요?'
+const LEAVE_AFTER_ANALYSIS_WARNING =
+    '지금 나가면 진행 상황이 초기화돼요. 분석 결과는 마이페이지에서 다시 확인할 수 있어요. 그래도 나가시겠어요?'
+
 // 이 페이지 상태를 모듈 스코프에 스냅샷으로 저장해서, 디자인 채팅 등 다른 페이지로 이동했다가
-// (뒤로가기 포함) 돌아와도 분석 결과·선택한 쉐입·출력 신청 상태가 초기화되지 않도록 한다.
+// (뒤로가기 포함) 돌아와도 분석 결과가 초기화되지 않도록 한다.
 // 다른 스캔 결과를 보러 온 경우(scanId가 다름)까지 잘못 복원하지 않도록 scanId가 일치할 때만 사용한다.
 type HandScanResultSnapshot = {
     leftScanId: number | null
     rightScanId: number | null
     leftResult: ScanResultResponse | null
     rightResult: ScanResultResponse | null
-    selectedShape: string
-    printConfirmed: boolean
     userName: string
+    showFingerModal: boolean
 }
 
 let handScanResultSnapshot: HandScanResultSnapshot | null = null
 
-// 네일팁 출력 페이지(PrintPage)의 출력 신청 모달과 아이콘을 통일한다.
-const PrinterIcon = (
-    <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
-        <path
-            d="M7 8V4h10v4M6 17h12a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-        />
-        <rect x="8" y="14" width="8" height="6" stroke="currentColor" strokeWidth="1.6" />
-    </svg>
-)
+// 손가락별 measurements JSON(scan/server.py → ScanImg.measurements)의 필드 형태.
+// cCurveMm이 실제 파이프라인 필드명이고, cCurve/curve는 옛 목업 데이터 호환용 fallback이다.
+type FingerMeasurements = {
+    lengthMm?: number
+    length?: number
+    widthMm?: number
+    width?: number
+    cCurveMm?: number
+    cCurve?: number
+    curve?: number
+}
 
-const CheckIcon = (
-    <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
-        <path d="M5 12.5 10 17.5 19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-)
+// 로그인/로그아웃(계정 전환)이 일어나면 이전 계정의 분석 결과 화면이 다음 계정에게
+// 보이지 않도록 스냅샷을 비운다. 실제 서버에 저장된 이력은 계정별로 분리되어 있어 영향 없음.
+window.addEventListener(AUTH_CHANGE_EVENT, () => {
+    handScanResultSnapshot = null
+})
 
 function MetricCard({
                         title,
@@ -73,6 +78,38 @@ function MetricCard({
     )
 }
 
+function SkinToneSlider({
+                            label,
+                            valueLabel,
+                            percent,
+                            minLabel,
+                            maxLabel,
+                            trackClass,
+                        }: {
+    label: string
+    valueLabel: string
+    percent: number
+    minLabel: string
+    maxLabel: string
+    trackClass: string
+}) {
+    return (
+        <div className="skin-tone-slider">
+            <div className="skin-tone-slider__head">
+                <span className="skin-tone-slider__label">{label}</span>
+                <span className="skin-tone-slider__value">{valueLabel}</span>
+            </div>
+            <div className={`skin-tone-slider__track ${trackClass}`}>
+                <span className="skin-tone-slider__thumb" style={{ left: `${percent}%` }} />
+            </div>
+            <div className="skin-tone-slider__ends">
+                <span>{minLabel}</span>
+                <span>{maxLabel}</span>
+            </div>
+        </div>
+    )
+}
+
 export function HandScanResultPage() {
     const navigate = useNavigate()
     const location = useLocation()
@@ -81,9 +118,13 @@ export function HandScanResultPage() {
         | null) ?? {}
     const fromMypage = !!(location.state as { fromMypage?: boolean } | null)?.fromMypage
 
-    // 지금 보려는 scanId와 스냅샷에 저장된 scanId가 일치할 때만 "돌아온 것"으로 보고 복원한다.
+    // 브라우저 뒤로/앞으로가기(POP)로, 그리고 지금 보려는 scanId와 스냅샷에 저장된
+    // scanId가 일치할 때만 "돌아온 것"으로 보고 복원한다. 앱 안의 링크/버튼으로
+    // 들어온 경우엔 같은 scanId라도 항상 새로 불러온다.
+    const navigationType = useNavigationType()
     const wasRestoredRef = useRef(
-        !!handScanResultSnapshot &&
+        navigationType === 'POP' &&
+            !!handScanResultSnapshot &&
             handScanResultSnapshot.leftScanId === (leftScanId ?? null) &&
             handScanResultSnapshot.rightScanId === (rightScanId ?? null),
     )
@@ -93,11 +134,7 @@ export function HandScanResultPage() {
     const [rightResult, setRightResult] = useState<ScanResultResponse | null>(snapshot?.rightResult ?? null)
     const [isLoading, setIsLoading] = useState(!wasRestoredRef.current)
     const [error, setError] = useState<string | null>(null)
-    const [showFingerModal, setShowFingerModal] = useState(false)
-    const [selectedShape, setSelectedShape] = useState<string>(snapshot?.selectedShape ?? 'round')
-    const [isGeneratingStl, setIsGeneratingStl] = useState(false)
-    const [printModalStep, setPrintModalStep] = useState<'confirm' | 'done' | null>(null)
-    const [printConfirmed, setPrintConfirmed] = useState(snapshot?.printConfirmed ?? false)
+    const [showFingerModal, setShowFingerModal] = useState(snapshot?.showFingerModal ?? false)
     const [userName, setUserName] = useState(snapshot?.userName ?? '')
     // 분석 결과를 아직 기다리는 중인지(폴링이 끝나지 않았는지) — 이 사이에 페이지를 벗어나면
     // 분석이 완료되지 않아 결과가 저장되지 않고, 손 촬영을 다시 해야 한다.
@@ -113,7 +150,7 @@ export function HandScanResultPage() {
     // 왼손/오른손이 같은 값을 주면 그대로 사용(=둘 다 반영된 합의값).
     // 드물게 서로 다르면, 분석 파이프라인이 더 진행된(COMPLETED) 쪽을 우선하고,
     // 그마저 같으면 왼손을 우선한다.
-    function pickHandField<K extends 'shape' | 'seasonCode' | 'seasonNameKo'>(
+    function pickHandField<K extends 'shape' | 'recommendedShape'>(
         field: K,
         left: ScanResultResponse | null,
         right: ScanResultResponse | null,
@@ -167,8 +204,6 @@ export function HandScanResultPage() {
 
             if (leftRes) setLeftResult(leftRes)
             if (rightRes) setRightResult(rightRes)
-            const combinedShape = pickHandField('shape', leftRes, rightRes)
-            if (combinedShape) setSelectedShape(combinedShape)
 
             return [leftRes?.status ?? null, rightRes?.status ?? null]
         }
@@ -196,29 +231,30 @@ export function HandScanResultPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [leftScanId, rightScanId, fromMypage])
 
-    // 분석 결과를 기다리는 동안 페이지를 벗어나면 분석이 완료되지 않아 결과가 저장되지 않고
-    // 손 촬영을 다시 해야 하므로, 새로고침/탭 닫기와 브라우저 뒤로가기 모두 경고로 막는다.
-    useEffect(() => {
-        if (!isAnalyzing) return
+    // 분석이 끝난 뒤에는 뒤로가기를 그대로 허용한다 — 스냅샷이 항상 복원해주므로 내용이
+    // 사라지지 않는다. 새로고침/탭 닫기/헤더 내비게이션 등 "뒤로가기가 아닌" 방식으로 벗어나려
+    // 할 때만 경고하고, 그래도 나가면 스냅샷을 비워서 다음엔 처음부터 새로 진행하도록 한다.
+    useLeaveWarning(
+        !!(leftScanId || rightScanId),
+        isAnalyzing ? LEAVE_DURING_ANALYSIS_WARNING : LEAVE_AFTER_ANALYSIS_WARNING,
+        () => {
+            handScanResultSnapshot = null
+        },
+    )
 
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            e.preventDefault()
-            e.returnValue = '' // 커스텀 문구는 브라우저 정책상 표시되지 않고 기본 확인창만 뜬다
-        }
-        window.addEventListener('beforeunload', handleBeforeUnload)
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-    }, [isAnalyzing])
-
+    // 분석이 "진행 중"일 때는 뒤로가기도 예외적으로 막는다 — 아직 결과가 나오지 않은 상태라
+    // 스냅샷을 복원해도 이어서 보여줄 완성된 결과가 없기 때문에, 다른 페이지들과 달리 여기서는
+    // 뒤로가기도 경고 후 진행되게 하고, 그래도 나가면 분석을 중단시키고(=폴링을 멈추고 스냅샷을
+    // 비워서) 다음엔 손 촬영부터 새로 하도록 한다.
     useEffect(() => {
         if (!isAnalyzing) return
 
         window.history.pushState(null, '', window.location.href)
 
         const handlePopState = () => {
-            const confirmed = window.confirm(
-                '지금 나가면 분석이 완료되지 않아 결과가 저장되지 않아요. 손 촬영을 다시 진행해야 해요. 그래도 나가시겠어요?',
-            )
+            const confirmed = window.confirm(LEAVE_DURING_ANALYSIS_WARNING)
             if (confirmed) {
+                handScanResultSnapshot = null
                 window.removeEventListener('popstate', handlePopState)
                 window.history.back()
             } else {
@@ -230,7 +266,7 @@ export function HandScanResultPage() {
         return () => window.removeEventListener('popstate', handlePopState)
     }, [isAnalyzing])
 
-    // 분석 결과·선택한 쉐입·출력 신청 상태를 모듈 스코프 스냅샷에 반영해 둔다.
+    // 분석 결과 상태를 모듈 스코프 스냅샷에 반영해 둔다.
     // 다른 페이지로 이동했다가(디자인 채팅 등) 돌아와도 위 useState 초기값이 여기서 복원된다.
     useEffect(() => {
         handScanResultSnapshot = {
@@ -238,20 +274,18 @@ export function HandScanResultPage() {
             rightScanId: rightScanId ?? null,
             leftResult,
             rightResult,
-            selectedShape,
-            printConfirmed,
             userName,
+            showFingerModal,
         }
-    }, [leftScanId, rightScanId, leftResult, rightResult, selectedShape, printConfirmed, userName])
+    }, [leftScanId, rightScanId, leftResult, rightResult, userName, showFingerModal])
 
-    // 왼손 결과를 베이스로 하고, shape/seasonCode/seasonNameKo는 양손 결과를 함께 반영해서 병합
+    // 왼손 결과를 베이스로 하고, shape/recommendedShape는 양손 결과를 함께 반영해서 병합
     const baseResult = leftResult ?? rightResult
     const result = baseResult
         ? {
             ...baseResult,
             shape: pickHandField('shape', leftResult, rightResult) ?? baseResult.shape,
-            seasonCode: pickHandField('seasonCode', leftResult, rightResult) ?? baseResult.seasonCode,
-            seasonNameKo: pickHandField('seasonNameKo', leftResult, rightResult) ?? baseResult.seasonNameKo,
+            recommendedShape: pickHandField('recommendedShape', leftResult, rightResult) ?? baseResult.recommendedShape,
         }
         : null
 
@@ -261,52 +295,17 @@ export function HandScanResultPage() {
     const rightFailed = !rightScanId || rightResult?.status === 'FAILED'
     const scanFailed = !isLoading && leftFailed && rightFailed && !!(leftScanId || rightScanId)
 
-    const handleGoToDesign = () => {
-        navigate('/design/chat', {
-            state: {
-                scanId: leftScanId ?? rightScanId ?? null,
-                leftScanId,
-                rightScanId,
-                seasonCode: result?.seasonCode ?? null,
-            },
+    // 이 페이지에서는 더 이상 쉐입을 고르거나 출력 신청을 하지 않고, 네일팁 출력 페이지로
+    // 넘어가서 진행한다. 이 분석 결과를 바로 이어서 고를 수 있도록 scanId를 함께 전달한다.
+    const handleGoToPrint = () => {
+        navigate('/print', {
+            state: { leftScanId, rightScanId },
         })
-    }
-
-    const handleOpenPrintConfirm = () => {
-        if (printConfirmed || isGeneratingStl) return
-        setPrintModalStep('confirm')
-    }
-
-    const handleClosePrintModal = () => {
-        if (isGeneratingStl) return
-        setPrintModalStep(null)
-    }
-
-    const handleConfirmPrint = async () => {
-        if (!leftScanId && !rightScanId) return
-        setIsGeneratingStl(true)
-        try {
-            // 왼손/오른손 각각 STL 생성 요청 (10손가락 전체)
-            await Promise.all([
-                leftScanId ? generateStl(leftScanId, selectedShape) : Promise.resolve(),
-                rightScanId ? generateStl(rightScanId, selectedShape) : Promise.resolve(),
-            ])
-            const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
-            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId })
-            setPrintConfirmed(true)
-            setPrintModalStep('done')
-        } catch (e) {
-            const msg = e instanceof ApiError ? e.message : 'STL 생성 요청에 실패했습니다.'
-            alert(msg)
-        } finally {
-            setIsGeneratingStl(false)
-        }
     }
 
     if (!leftScanId && !rightScanId) {
         return (
             <AppShell>
-                <PageBackLink to="/scan/hand" label="손 촬영" />
                 <div className="scan-result-empty">
                     <p>{error ?? '손 스캔 결과가 없습니다. 먼저 손 촬영을 진행해 주세요.'}</p>
                     <button type="button" className="scan-result-cta" onClick={() => navigate('/scan/hand')}>
@@ -320,7 +319,6 @@ export function HandScanResultPage() {
     if (error) {
         return (
             <AppShell>
-                <PageBackLink to="/scan/hand" label="손 촬영" />
                 <div className="scan-result-empty">
                     <p>{error}</p>
                     <button type="button" className="scan-result-cta" onClick={() => navigate('/scan/hand')}>
@@ -331,9 +329,9 @@ export function HandScanResultPage() {
         )
     }
 
-    const recommended = result ? getNailShape(result.shape) : null
-    const seasonRow = result ? SEASON_ROWS.find(r => r.code === result.seasonCode) : undefined
-    const personalColorSwatches = result?.seasonCode ? (PERSONAL_COLOR_SWATCHES[result.seasonCode] ?? []) : []
+    const recommended = result?.recommendedShape ? getNailShape(result.recommendedShape) : null
+    const skinToneAnalysis = result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null
+    const skinTonePalette = result?.skinToneHex ? generateSkinTonePalette(result.skinToneHex, 24) : []
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락
     const apiFingers = [...(leftResult?.fingers ?? []), ...(rightResult?.fingers ?? [])]
@@ -342,15 +340,15 @@ export function HandScanResultPage() {
 
     const FINGER_OVERLAYS = [
         { x: 42, y: 47 },
-        { x: 35, y: 24 },
+        { x: 35, y: 23 },
         { x: 27, y: 16 },
         { x: 19, y: 22 },
-        { x: 14, y: 34 },
+        { x: 14, y: 33 },
         { x: 58, y: 47 },
-        { x: 65, y: 24 },
+        { x: 65, y: 23 },
         { x: 73, y: 16 },
         { x: 81, y: 22 },
-        { x: 86, y: 34 },
+        { x: 86, y: 33 },
     ]
 
     const FINGER_NAMES = [
@@ -367,7 +365,7 @@ export function HandScanResultPage() {
     ]
 
     const fingerDetails: FingerDetail[] = displayFingers.map((finger, index) => {
-        let measurements: any = {}
+        let measurements: FingerMeasurements = {}
 
         try {
             const parsed = JSON.parse(finger.measurements ?? '{}')
@@ -380,23 +378,24 @@ export function HandScanResultPage() {
             id: `finger-${index}`,
             name: FINGER_NAMES[index] ?? finger.finger,
 
-            // 백엔드 값이 있으면 사용
-            // 없으면 임시 Mock 값
+            // 백엔드(scan/server.py) 실측값을 그대로 사용. 값이 없는 경우에만 임시 Mock 값으로 대체.
             lengthMm: Number(
-                measurements?.lengthMm ??
-                measurements?.length ??
+                measurements.lengthMm ??
+                measurements.length ??
                 (12 + index * 0.3)
             ),
 
             widthMm: Number(
-                measurements?.widthMm ??
-                measurements?.width ??
+                measurements.widthMm ??
+                measurements.width ??
                 (9 + index * 0.2)
             ),
 
+            // 실제 파이프라인이 내려주는 곡률 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
             cCurve: Number(
-                measurements?.cCurve ??
-                measurements?.curve ??
+                measurements.cCurveMm ??
+                measurements.cCurve ??
+                measurements.curve ??
                 0.55
             ),
 
@@ -405,46 +404,52 @@ export function HandScanResultPage() {
     })
 
     // 손톱 기본 지표: 왼손 5개 + 오른손 5개 = 10손가락 실측 평균
-    // (percentile/comparisonLabel은 전체 사용자 모집단 통계 API가 아직 없어 임시값 유지)
+    // percentile/comparisonLabel은 전체 사용자 모집단 통계 API가 없어, 성인 평균 손톱 규격을
+    // 고정 기준값(NAIL_BASELINE)으로 두고 실측 평균이 그 기준과 얼마나 차이 나는지로 계산한다.
+    const lengthValue = Number(average(fingerDetails.map((f) => f.lengthMm)).toFixed(1))
+    const widthValue = Number(average(fingerDetails.map((f) => f.widthMm)).toFixed(1))
+    const cCurveValue = Number(average(fingerDetails.map((f) => f.cCurve)).toFixed(2))
+
+    const lengthPercentile = percentileAgainstBaseline(lengthValue, NAIL_BASELINE.length)
+    const widthPercentile = percentileAgainstBaseline(widthValue, NAIL_BASELINE.width)
+    const cCurvePercentile = percentileAgainstBaseline(cCurveValue, NAIL_BASELINE.cCurve)
+
     const AVERAGE_METRICS = {
         length: {
-            value: Number(average(fingerDetails.map((f) => f.lengthMm)).toFixed(1)),
+            value: lengthValue,
             unit: 'mm',
-            percentile: 68,
-            comparisonLabel: '평균보다 약간 긺',
+            percentile: lengthPercentile,
+            comparisonLabel: labelByPercentile(lengthPercentile, '평균보다 짧은 편', '평균보다 긴 편', '평균과 비슷함'),
         },
         width: {
-            value: Number(average(fingerDetails.map((f) => f.widthMm)).toFixed(1)),
+            value: widthValue,
             unit: 'mm',
-            percentile: 55,
-            comparisonLabel: '평균과 비슷함',
+            percentile: widthPercentile,
+            comparisonLabel: labelByPercentile(widthPercentile, '좁은 편', '넓은 편', '평균과 비슷함'),
         },
         cCurve: {
-            value: Number(average(fingerDetails.map((f) => f.cCurve)).toFixed(2)),
+            value: cCurveValue,
             unit: '',
-            percentile: 72,
-            comparisonLabel: '곡률이 뚜렷한 편',
+            percentile: cCurvePercentile,
+            comparisonLabel: labelByPercentile(cCurvePercentile, '완만한 편', '뚜렷한 편', '평균 범위'),
         },
     }
 
     if (scanFailed) {
         return (
             <AppShell mainClassName="scan-result-page">
-                {fromMypage
-                    ? <PageBackLink to="/mypage" label="손 분석 기록" state={{ tab: 'scan' }} />
-                    : <PageBackLink to="/scan/hand" label="손 촬영" />
-                }
+                <PageHero
+                    eyebrow="Hand Scan Analysis"
+                    title="손 스캔 분석 실패"
+                    description={
+                        <>
+                            손톱 측정에 실패했어요. 마커가 잘 보이도록 다시 촬영해 주세요.
+                            (조명, 초점, 마커가 프레임 안에 온전히 들어왔는지 확인해 주세요.)
+                        </>
+                    }
+                />
 
-                <header className="scan-result-hero">
-                    <p className="scan-result-hero__eyebrow">Hand Scan Analysis</p>
-                    <h1>손 스캔 분석 실패</h1>
-                    <p>
-                        손톱 측정에 실패했어요. 마커가 잘 보이도록 다시 촬영해 주세요.
-                        (조명, 초점, 마커가 프레임 안에 온전히 들어왔는지 확인해 주세요.)
-                    </p>
-                </header>
-
-                <div style={{ padding: '2rem 0' }}>
+                <div className="scan-result-actions" style={{ paddingTop: '2rem' }}>
                     <button
                         type="button"
                         className="scan-result-cta"
@@ -459,21 +464,16 @@ export function HandScanResultPage() {
 
     return (
         <AppShell mainClassName="scan-result-page">
-            {fromMypage
-                ? <PageBackLink to="/mypage" label="손 분석 기록" state={{ tab: 'scans' }} />
-                : <PageBackLink to="/scan/hand" label="손 촬영" />
-            }
-
-            <header className="scan-result-hero">
-                <p className="scan-result-hero__eyebrow">Hand Scan Analysis</p>
-                <h1>손 스캔 분석 결과</h1>
-                <p>{isLoading ? '분석중...' : '손 스캔이 완료되었습니다.'}</p>
-            </header>
+            <PageHero
+                eyebrow="Hand Analysis"
+                title="손 분석 결과"
+                description={isLoading ? '분석 중...' : `${userName ? `${userName}님의` : '나의'} 손톱 수치와 피부 톤, 추천 쉐입을 확인해 보세요.`}
+            />
 
             <section className="scan-result-section">
                 <div className="scan-result-section__head">
                     <h2>손톱 기본 지표</h2>
-                    {apiFingers.length > 0 && (
+                    {!isLoading && apiFingers.length > 0 && (
                         <button type="button" className="scan-result-link" onClick={() => setShowFingerModal(true)}>
                             상세보기
                         </button>
@@ -514,224 +514,134 @@ export function HandScanResultPage() {
                 {/*</div>*/}
             </section>
 
-            {isLoading ? (
-                <section className="scan-result-section scan-result-section--grid" aria-hidden="true">
-                    <article className="scan-tone-card scan-tone-card--skeleton">
-                        <h2>퍼스널 컬러</h2>
-                        <p className="scan-tone-card__hex" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                            분석중...
-                        </p>
-                    </article>
-                    <article className="scan-season-card scan-season-card--skeleton">
-                        <h2>추천 컬러</h2>
-                        <div className="scan-palette">
-                            {Array.from({ length: 8 }).map((_, i) => (
-                                <span key={i} className="scan-palette__chip scan-palette__chip--skeleton" />
-                            ))}
-                        </div>
-                    </article>
-                </section>
-            ) : (
-                result?.seasonCode && (
-                    <section className="scan-result-section scan-result-section--grid">
-                        <article className="scan-tone-card">
-                            <h2>퍼스널 컬러</h2>
-                            <p className="scan-tone-card__hex" style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-                                {result.seasonNameKo ?? result.seasonCode}
-                            </p>
-                            {seasonRow && (
-                                <p className="scan-tone-card__desc">
-                                    {seasonRow.tone} 톤 · {seasonRow.brightness} · {seasonRow.saturation}
-                                </p>
-                            )}
+            <section className="scan-result-section">
+                <h2>피부 톤 분석</h2>
+                {isLoading ? (
+                    <div className="skin-tone-grid" aria-hidden="true">
+                        <article className="skin-tone-card skin-tone-card--skeleton">
+                            <div className="skin-tone-card__banner" style={{ background: '#eee' }}>
+                                <div className="skin-tone-card__badge">
+                                    <p>대표 피부색</p>
+                                    <strong>···</strong>
+                                </div>
+                            </div>
+                            <div className="skin-tone-card__body">
+                                <p className="scan-result-section__sub">분석중...</p>
+                            </div>
                         </article>
+                        <article className="skin-tone-palette-card skin-tone-palette-card--skeleton">
+                            <h3>추천 컬러</h3>
+                            <div className="skin-tone-palette-grid">
+                                {Array.from({ length: 24 }).map((_, i) => (
+                                    <span key={i} className="skin-tone-palette-grid__chip skin-tone-palette-grid__chip--skeleton" />
+                                ))}
+                            </div>
+                        </article>
+                    </div>
+                ) : (
+                    result?.skinToneHex && skinToneAnalysis && (
+                        <div className="skin-tone-grid">
+                            <article className="skin-tone-card">
+                                <div
+                                    className="skin-tone-card__banner"
+                                    style={{ background: result.skinToneHex }}
+                                >
+                                    <div className="skin-tone-card__badge">
+                                        <p>대표 피부색</p>
+                                        <strong>{result.skinToneHex}</strong>
+                                    </div>
+                                </div>
+                                <div className="skin-tone-card__body">
+                                    <SkinToneSlider
+                                        label="톤"
+                                        valueLabel={skinToneAnalysis.tone.label}
+                                        percent={skinToneAnalysis.tone.percent}
+                                        minLabel="쿨"
+                                        maxLabel="웜"
+                                        trackClass="skin-tone-slider__track--tone"
+                                    />
+                                    <SkinToneSlider
+                                        label="명도"
+                                        valueLabel={skinToneAnalysis.brightness.label}
+                                        percent={skinToneAnalysis.brightness.percent}
+                                        minLabel="어두운"
+                                        maxLabel="밝은"
+                                        trackClass="skin-tone-slider__track--brightness"
+                                    />
+                                    <SkinToneSlider
+                                        label="채도 (혈색)"
+                                        valueLabel={skinToneAnalysis.saturation.label}
+                                        percent={skinToneAnalysis.saturation.percent}
+                                        minLabel="없음"
+                                        maxLabel="있음"
+                                        trackClass="skin-tone-slider__track--saturation"
+                                    />
+                                </div>
+                            </article>
 
-                        {personalColorSwatches.length > 0 && (
-                            <article className="scan-season-card">
-                                <h2>추천 컬러</h2>
-                                <div className="scan-palette">
-                                    {personalColorSwatches.map((hex) => (
+                            <article className="skin-tone-palette-card">
+                                <h3>추천 컬러</h3>
+                                <div className="skin-tone-palette-grid">
+                                    {skinTonePalette.map((hex, i) => (
                                         <button
-                                            key={hex}
+                                            key={`${hex}-${i}`}
                                             type="button"
-                                            className="scan-palette__chip"
+                                            className="skin-tone-palette-grid__chip"
                                             style={{ background: hex }}
                                             title={hex}
                                             aria-label={`팔레트 색 ${hex}`}
                                         />
                                     ))}
                                 </div>
-                                <p className="scan-season-card__desc">
-                                    {result.seasonNameKo} 타입에 어울리는 추천 컬러 팔레트입니다.
+                                <p className="skin-tone-palette-card__desc">
+                                    {userName ? `${userName}님과` : '회원님과'} 어울리는 컬러들이에요.
                                 </p>
                             </article>
-                        )}
-                    </section>
-                )
+                        </div>
+                    )
+                )}
+            </section>
+
+            {isLoading ? (
+                <section className="scan-result-section" aria-hidden="true">
+                    <h2>추천 네일팁 쉐입</h2>
+                    <div className="scan-shape-highlight scan-shape-highlight--skeleton">
+                        <div className="scan-shape-highlight__body">
+                            <p className="scan-shape-highlight__name">&nbsp;</p>
+                            <p className="scan-shape-highlight__desc">분석중...</p>
+                        </div>
+                        <div className="scan-shape-highlight__icon-skeleton" />
+                    </div>
+                </section>
+            ) : (
+                <section className="scan-result-section">
+                    <h2>추천 네일팁 쉐입</h2>
+                    {recommended ? (
+                        <div className="scan-shape-highlight">
+                            <div className="scan-shape-highlight__body">
+                                <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
+                                <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
+                                <p className="scan-shape-highlight__desc">
+                                    {userName ? `${userName}님은 ` : '회원님께는 '}
+                                    {recommended.description}이 잘 어울려요.
+                                </p>
+                            </div>
+                            <div className="scan-shape-highlight__icon" aria-hidden="true">
+                                <img src={recommended.image} alt="" />
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="scan-result-section__sub">AI가 추천 쉐입을 분석하고 있어요.</p>
+                    )}
+                </section>
             )}
 
-    {isLoading ? (
-        <section className="scan-result-section" aria-hidden="true">
-            <h2>네일팁 모양 선택</h2>
-            <p className="scan-result-section__sub">분석중...</p>
-            <div className="scan-shape-grid">
-                {NAIL_SHAPES.map((shape) => (
-                    <article key={shape.id} className="scan-shape-card scan-shape-card--skeleton">
-                        <div className="scan-shape-card__img-skeleton" />
-                        <h3>&nbsp;</h3>
-                        <p>&nbsp;</p>
-                    </article>
-                ))}
-            </div>
-        </section>
-    ) : (
-        <section className="scan-result-section">
-            <div className="scan-result-section__head">
-                <h2>네일팁 모양 선택</h2>
-                <button
-                    type="button"
-                    className="scan-shape-print-btn"
-                    onClick={handleOpenPrintConfirm}
-                    disabled={printConfirmed || isGeneratingStl}
-                >
-                    {printConfirmed ? '출력 신청 완료 ✓' : '네일팁 출력하기'}
-                </button>
-            </div>
-            <p className="scan-result-section__sub">
-                {recommended ? (
-                    <>추천 쉐입은 <strong>{recommended.labelKo}</strong>입니다. 원하는 모양을 선택해 주세요.</>
-                ) : (
-                    <>AI가 추천 쉐입을 분석하고 있어요. 분석이 끝나면 자동으로 추천 배지가 표시됩니다. 먼저 원하는 모양을 선택해 주세요.</>
-                )}
-            </p>
-            <div className={`scan-shape-grid ${printConfirmed ? 'is-locked' : ''}`}>
-                {NAIL_SHAPES.map((shape) => {
-                    const isRecommended = !!result && shape.id === result.shape
-                    const isSelected = shape.id === selectedShape
-                    return (
-                        <article
-                            key={shape.id}
-                            className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''} ${printConfirmed ? 'is-locked' : ''}`}
-                            onClick={() => {
-                                if (printConfirmed) return
-                                setSelectedShape(shape.id)
-                            }}
-                            role="button"
-                            tabIndex={printConfirmed ? -1 : 0}
-                            onKeyDown={(e) => {
-                                if (printConfirmed) return
-                                if (e.key === 'Enter') setSelectedShape(shape.id)
-                            }}
-                            aria-pressed={isSelected}
-                            aria-disabled={printConfirmed}
-                        >
-                            {isRecommended && (
-                                <span className="scan-shape-card__badge scan-shape-card__badge--recommend">추천</span>
-                            )}
-                            {isSelected && (
-                                <span className="scan-shape-card__badge scan-shape-card__badge--selected">선택</span>
-                            )}
-                            <img src={shape.image} alt={shape.labelKo} />
-                            <h3>{shape.labelKo}</h3>
-                            <p>{shape.labelEn}</p>
-                        </article>
-                    )
-                })}
-            </div>
-        </section>
-    )}
-
             <div className="scan-result-actions">
-            <button
-            type="button"
-            className="scan-result-next"
-            onClick={handleGoToDesign}
-            >
-            다음 단계로
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-            d="M5 12h12M13 6l6 6-6 6"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            />
-        </svg>
-</button>
-</div>
+                <NextStepButton label="네일팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
+            </div>
 
             {showFingerModal && apiFingers.length > 0 && (
                 <FingerDetailModal fingers={fingerDetails} onClose={() => setShowFingerModal(false)} />
-            )}
-
-            {printModalStep && createPortal(
-                <div className="print-modal">
-                    <button
-                        type="button"
-                        className="print-modal__backdrop"
-                        onClick={handleClosePrintModal}
-                        disabled={isGeneratingStl}
-                    />
-                    <div className="print-modal__panel" role="dialog" aria-modal="true">
-                        {printModalStep === 'confirm' ? (
-                            <>
-                                <span className="print-modal__icon-badge" aria-hidden="true">{PrinterIcon}</span>
-                                <h2>네일팁 출력 안내</h2>
-                                <p>
-                                    {userName || '회원'} 님의 손 스캔 정보를 기반으로 만든
-                                    <br />
-                                    <strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape} 네일팁이 3D 프린터로 출력</strong>됩니다.
-                                    <br />
-                                    출력을 진행하시겠습니까?
-                                </p>
-                                <div className="print-modal__actions">
-                                    <button
-                                        type="button"
-                                        className="print-modal__btn print-modal__btn--ghost"
-                                        onClick={handleClosePrintModal}
-                                        disabled={isGeneratingStl}
-                                    >
-                                        취소
-                                    </button>
-                                    <button
-                                        type="button"
-                                        className="print-modal__btn"
-                                        onClick={() => void handleConfirmPrint()}
-                                        disabled={isGeneratingStl}
-                                    >
-                                        {isGeneratingStl ? '출력 요청 중...' : '출력하기'}
-                                    </button>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <span className="print-modal__icon-badge print-modal__icon-badge--success" aria-hidden="true">
-                                  {CheckIcon}
-                                </span>
-                                <h2>출력 신청 완료</h2>
-                                <p>
-                                    당신의 네일팁이{' '}
-                                    <br />
-                                    <strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape}</strong>
-                                    {' '}(으)로 출력 신청되었습니다.
-                                    <br />
-                                    <br />
-                                    출력을 기다리는 동안 다음 단계로 넘어가
-                                    <br />
-                                    네일 디자인을 생성해 보세요!
-                                </p>
-                                <button
-                                    type="button"
-                                    className="print-modal__btn"
-                                    onClick={handleClosePrintModal}
-                                >
-                                    확인
-                                </button>
-                            </>
-                        )}
-                    </div>
-                </div>,
-                document.body,
             )}
         </AppShell>
     )

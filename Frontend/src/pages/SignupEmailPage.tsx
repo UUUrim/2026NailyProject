@@ -4,6 +4,7 @@ import { AuthSplitLayout } from '@/components/auth/AuthSplitLayout'
 import { sendVerificationCode, verifyEmailCode, signup } from '@/apis/user'
 import { login } from '@/apis/user'
 import { ApiError } from '@/utils/apiClient'
+import { getPasswordRuleChecks, isPasswordValid } from '@/utils/passwordRules'
 import { LegalDocumentModal } from '@/components/common/LegalDocumentModal'
 import {
   TERMS_OF_SERVICE,
@@ -112,8 +113,8 @@ export function SignupEmailPage() {
       setCodeMessage('이메일 인증을 완료해 주세요.')
       hasError = true
     }
-    if (password.length < 8) {
-      setPasswordMessage('비밀번호는 8자 이상이어야 합니다.')
+    if (!isPasswordValid(password)) {
+      setPasswordMessage('비밀번호 조건을 모두 만족해야 합니다.')
       hasError = true
     } else if (password !== passwordConfirm) {
       setPasswordMessage('비밀번호가 일치하지 않습니다.')
@@ -178,7 +179,7 @@ export function SignupEmailPage() {
                   id="signup-email"
                   className="signup-box__input"
                   type="email"
-                  placeholder="아이디로 사용할 이메일을 입력해 주세요"
+                  placeholder="아이디로 사용할 이메일을 입력해 주세요."
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={emailVerified}
@@ -200,7 +201,7 @@ export function SignupEmailPage() {
 
               <input
                   className="signup-box__input"
-                  placeholder="인증코드 6자리를 입력해 주세요"
+                  placeholder="인증코드 6자리를 입력해 주세요."
                   value={verificationInput}
                   onChange={(e) => setVerificationInput(e.target.value)}
                   maxLength={6}
@@ -230,33 +231,43 @@ export function SignupEmailPage() {
                 className="signup-box__input"
                 type="password"
                 autoComplete="new-password"
-                placeholder="영문, 숫자, 특수문자를 모두 포함한 8-20자"
+                placeholder="영문 대소문자, 숫자, 특수문자를 모두 포함한 8자 이상"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
             />
+            {password.length > 0 && (
+                <ul className="signup-box__password-rules">
+                  {getPasswordRuleChecks(password).map((rule) => (
+                      <li key={rule.key} className={rule.passed ? 'is-met' : 'is-unmet'}>
+                        <span aria-hidden="true">{rule.passed ? '✓' : '✕'}</span>
+                        {rule.label}
+                      </li>
+                  ))}
+                </ul>
+            )}
             <input
                 className="signup-box__input"
                 type="password"
                 autoComplete="new-password"
-                placeholder="비밀번호를 한 번 더 입력해 주세요"
+                placeholder="비밀번호를 한 번 더 입력해 주세요."
                 value={passwordConfirm}
                 onChange={(e) => setPasswordConfirm(e.target.value)}
             />
             {passwordMessage && <p className="signup-box__field-message is-error">{passwordMessage}</p>}
 
-            <label className="signup-box__label" htmlFor="signup-name">
+            <label className="signup-box__label signup-box__label--section" htmlFor="signup-name">
               이름
             </label>
             <input
                 id="signup-name"
                 className="signup-box__input"
-                placeholder="본명을 입력해 주세요"
+                placeholder="본명을 입력해 주세요."
                 value={name}
                 onChange={(e) => setName(e.target.value)}
             />
             {nameMessage && <p className="signup-box__field-message is-error">{nameMessage}</p>}
 
-            <label className="signup-box__label" htmlFor="signup-nickname">
+            <label className="signup-box__label signup-box__label--section" htmlFor="signup-nickname">
               닉네임
             </label>
             <input

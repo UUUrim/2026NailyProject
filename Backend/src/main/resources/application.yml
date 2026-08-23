@@ -90,7 +90,9 @@ cloud:
 
 analysis:
   server:
-    url: http://localhost:8003  # 로컬 통합 서버 (scan+printer)
+    # 일단 둘 중 하나 주석 처리 해두긴 하지만, 스캔 할 때 localhost:8003 필요한가? 모르겠네. 주석 필요하다면 풀어도 됨 
+    # url: http://localhost:8003  # 로컬 통합 서버 (scan+printer)
+    url: https://sermon-friction-unequal.ngrok-free.dev  # 통합 서버 ngrok
 
 printer:
   server:

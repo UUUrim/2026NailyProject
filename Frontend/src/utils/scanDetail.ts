@@ -7,9 +7,13 @@ export type ScanSession = {
   scannedAt: string
   leftScanId: number | null
   rightScanId: number | null
+  skinToneHex: string | null
   seasonCode: string | null
   seasonNameKo: string | null
   shape: string | null
+  // AI가 분석 직후 추천한 쉐입 — shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서,
+  // "추천" 배지/문구 표시는 반드시 이 필드를 기준으로 해야 한다
+  recommendedShape: string | null
   status: string | null
   avgLengthMm: number | null
   avgWidthMm: number | null
@@ -27,6 +31,7 @@ export type FingerStat = {
 
 export type ScanDetail = {
   scannedAt: string
+  skinToneHex: string | null
   seasonCode: string | null
   seasonNameKo: string | null
   shapeId: string | null
@@ -82,6 +87,7 @@ function parseFingerMeasurements(measurements: string | null | undefined) {
       cCurve?: number
       curve?: number
     }
+    // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
     return {
       lengthMm: Number(m.lengthMm ?? m.length ?? 12),
       widthMm: Number(m.widthMm ?? m.width ?? 9),
@@ -119,9 +125,11 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
 
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
+    skinToneHex: left?.skinToneHex || right?.skinToneHex || null,
     seasonCode: left?.seasonCode || right?.seasonCode || null,
     seasonNameKo: left?.seasonNameKo || right?.seasonNameKo || null,
-    shapeId: left?.shape || right?.shape || null,
+    // "추천" 쉐입 표시이므로 출력 신청 시 덮어써지는 shape가 아니라 recommendedShape를 써야 한다
+    shapeId: left?.recommendedShape || right?.recommendedShape || null,
     avgLength,
     avgWidth,
     avgCurve,
@@ -278,9 +286,11 @@ export function buildScanSessions(scans: ScanHistoryItem[]): ScanSession[] {
       scannedAt: laterScannedAt(left.scannedAt, right.scannedAt),
       leftScanId: left.scanId,
       rightScanId: right.scanId,
+      skinToneHex: left.skinToneHex ?? right.skinToneHex ?? null,
       seasonCode: left.seasonCode ?? right.seasonCode ?? null,
       seasonNameKo: left.seasonNameKo ?? right.seasonNameKo ?? null,
       shape: left.shape ?? right.shape ?? null,
+      recommendedShape: left.recommendedShape ?? right.recommendedShape ?? null,
       status: pickAnalysisStatus(left.status, right.status),
       avgLengthMm: avgNullable(left.avgLengthMm, right.avgLengthMm),
       avgWidthMm: avgNullable(left.avgWidthMm, right.avgWidthMm),

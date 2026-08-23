@@ -27,7 +27,7 @@ export function HeroPanel({
         aria-hidden="true"
       />
       <div className="hero-panel__inner">
-        {showHeader && <Header />}
+        {showHeader && <Header overlay />}
         <div className="hero-panel__content">
           <ScrollReveal delay={variant === 'top' ? 0 : 80}>
             {showTitle && <h1 className="hero-panel__title">Own your Nail</h1>}

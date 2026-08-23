@@ -1,0 +1,41 @@
+.pill-button {
+  min-width: 11.5rem;
+  height: 2.9rem;
+  padding: 0 1.35rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.pill-button--primary {
+  border: none;
+  background: linear-gradient(135deg, #de869f, #c77d96);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(222, 134, 159, 0.28);
+}
+
+.pill-button--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(222, 134, 159, 0.34);
+}
+
+.pill-button--ghost {
+  border: 1px solid rgba(222, 134, 159, 0.35);
+  background: #fff;
+  color: #c45f7e;
+}
+
+.pill-button--ghost:hover {
+  background: #fff7fa;
+  transform: translateY(-1px);
+}
+
+.pill-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+  box-shadow: none;
+}

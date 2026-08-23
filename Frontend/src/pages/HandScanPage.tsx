@@ -3,11 +3,19 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageBackLink } from '@/components/layout/PageBackLink'
-import { startScan, requestAnalyze, getMyScans } from '@/apis/scan'
+import { PageHero } from '@/components/layout/PageHero'
+import { startScan, uploadFingerImage, requestAnalyze, getMyScans } from '@/apis/scan'
+import { CameraFeedSelect } from '@/components/handScan/CameraFeedSelect'
 import { CameraSetupPreview } from '@/components/handScan/CameraSetupPreview'
 import { ScanDetailModal } from '@/components/mypage/ScanDetailModal'
+import { PillButton } from '@/components/common/PillButton'
+import { WarningIcon } from '@/components/icons/WarningIcon'
+import { useFingerAlignment } from '@/hooks/useFingerAlignment'
 import { useAuth } from '@/hooks/useAuth'
+import { useLeaveWarning } from '@/hooks/useLeaveWarning'
+import { useSnapshotRestore } from '@/hooks/useSnapshotRestore'
 import { ApiError } from '@/utils/apiClient'
+import { AUTH_CHANGE_EVENT } from '@/utils/auth'
 import {
   buildScanSessions,
   formatMetricCurve,
@@ -15,6 +23,7 @@ import {
   representativePersonalColor,
   type ScanSession,
 } from '@/utils/scanDetail'
+import { analyzeSkinTone } from '@/utils/skinTone'
 import { getNailShape } from '@/constants/nailShapes'
 import '@/styles/hand-scan.css'
 
@@ -24,6 +33,7 @@ const SCAN_SERVER_URL = import.meta.env.VITE_SCAN_SERVER_URL ?? 'http://localhos
 // 폰이 접속할 카메라 페이지 주소. localhost는 폰에서 못 열기 때문에
 // SCAN_SERVER_URL과 별개로 관리 — ngrok 등 폰이 실제로 도달 가능한 주소를 넣어야 함.
 const PHONE_CAM_URL = import.meta.env.VITE_PHONE_CAM_URL ?? SCAN_SERVER_URL
+
 
 function formatScanDateLabel(raw: string): string {
   const d = new Date(raw)
@@ -60,16 +70,33 @@ const HAND_LABELS: Record<HandSide, string> = {
   RIGHT: '오른손',
 }
 
+// 왼손 5손가락 → 오른손 5손가락, 총 10단계
 type ScanStep = { hand: HandSide; finger: Finger }
 const STEPS: ScanStep[] = HANDS.flatMap((hand) => FINGERS.map((finger) => ({ hand, finger })))
 
+function pickDefaultDevices(devices: MediaDeviceInfo[]): [string, string] {
+  if (devices.length === 0) return ['default', 'default']
+  if (devices.length === 1) return [devices[0].deviceId, devices[0].deviceId]
+  return [devices[0].deviceId, devices[1].deviceId]
+}
+
+// 촬영 진행 상태(몇 번째 손가락까지 찍었는지)를 모듈 스코프에 스냅샷으로 저장해서, 다른 페이지로
+// 갔다가 돌아와도 처음부터 다시 찍지 않아도 되도록 한다. 카메라 스트림 자체는 하드웨어 리소스라
+// 여기 포함하지 않고(다시 열 때 새로 요청), 서버에 이미 업로드된 진행 상황만 보존한다.
 type HandScanSnapshot = {
   currentStepIndex: number
   scanIds: Record<HandSide, number | null>
   uploadedSteps: Set<string>
   isDone: boolean
 }
+
 let handScanSnapshot: HandScanSnapshot | null = null
+
+// 로그인/로그아웃(계정 전환)이 일어나면 이전 계정의 촬영 진행 상황이 다음 계정에게
+// 보이지 않도록 스냅샷을 비운다. 실제 서버에 저장된 이력은 계정별로 분리되어 있어 영향 없음.
+window.addEventListener(AUTH_CHANGE_EVENT, () => {
+  handScanSnapshot = null
+})
 
 export function HandScanPage() {
   const navigate = useNavigate()

@@ -8,6 +8,8 @@ import { NailDesignPreferencePage } from '@/pages/NailDesignPreferencePage'
 import { NailDesignChatPage } from '@/pages/NailDesignChatPage'
 import { NailDesignResultPage } from '@/pages/NailDesignResultPage'
 import { PrintPage } from '@/pages/PrintPage'
+import { PrintPagePreview } from '@/pages/PrintPagePreview'
+import { HandScanResultPagePreview } from '@/pages/HandScanResultPagePreview'
 import { ProcessGuidePage } from '@/pages/ProcessGuidePage'
 import { SignupEmailPage } from '@/pages/SignupEmailPage'
 import { SignupGooglePage } from '@/pages/SignupGooglePage'
@@ -35,6 +37,8 @@ function App() {
                 <Route path="/scan/hand" element={<HandScanPage />} />
                 <Route path="/scan/result" element={<HandScanResultPage />} />
                 <Route path="/print" element={<PrintPage />} />
+                <Route path="/preview/print" element={<PrintPagePreview />} />
+                <Route path="/preview/scan-result" element={<HandScanResultPagePreview />} />
                 <Route path="/design/preferences" element={<NailDesignPreferencePage />} />
                 <Route path="/design/chat" element={<NailDesignChatPage />} />
                 <Route path="/design/result" element={<NailDesignResultPage />} />

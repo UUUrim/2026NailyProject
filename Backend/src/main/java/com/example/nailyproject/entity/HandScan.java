@@ -36,7 +36,13 @@ public class HandScan {
 
     // 분석 결과
     @Column(name = "shape", length = 50)
-    private String shape; // 손가락 형태 (almond, round 등)
+    private String shape; // 손가락 형태 (almond, round 등) — STL 생성/출력 시 유저가 고른 쉐입으로 덮어써질 수 있음
+
+    // AI가 분석 직후 추천한 쉐입 — updateShape()로 덮어써지지 않고 최초 값을 그대로 보존한다.
+    // (마이페이지/출력 페이지의 "추천" 배지·문구는 반드시 이 필드를 기준으로 표시해야
+    // 출력 신청 후에도 추천 배지가 유저가 고른 쉐입으로 옮겨가지 않는다)
+    @Column(name = "recommended_shape", length = 50)
+    private String recommendedShape;
 
     @Column(name = "skin_tone_hex", length = 10)
     private String skinToneHex; // 피부톤 HEX
@@ -90,6 +96,7 @@ public class HandScan {
             String overallSize
     ) {
         this.shape = shape;
+        this.recommendedShape = shape;
         this.skinToneHex = skinToneHex;
         this.recommendedColors = recommendedColors;
         this.seasonCode = seasonCode;

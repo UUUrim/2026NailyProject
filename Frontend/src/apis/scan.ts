@@ -19,6 +19,9 @@ export interface ScanResultResponse {
     handSide: string
     status: string
     shape: string
+    // AI가 분석 직후 추천한 쉐입 — shape는 이후 STL 생성/출력 신청 시 유저가 고른 쉐입으로 바뀔 수 있어서,
+    // "추천" 배지/문구는 반드시 이 필드를 써야 한다 (shape를 쓰면 출력 신청 후 추천 배지가 옮겨가 보이는 버그가 생김)
+    recommendedShape: string | null
     skinToneHex: string
     recommendedColors: string[]
     seasonCode: string        // ← 추가
@@ -96,6 +99,11 @@ export interface ScanHistoryItem {
     handSide: string | null
     status: string | null
     shape: string | null
+<<<<<<< HEAD
+=======
+    recommendedShape: string | null
+    skinToneHex: string | null
+>>>>>>> origin/seunghee
     seasonCode: string | null
     seasonNameKo: string | null
     avgLengthMm: number | null
