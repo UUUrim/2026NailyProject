@@ -1,0 +1,13 @@
+# color 서비스 (피부톤 분석 + 실시간 세션 API, skin_tone_api_v2.py) 의존성
+# model/requirements.txt 와는 별도 — 이 서비스는 GPU/torch 불필요, CPU만으로 동작
+
+fastapi
+uvicorn[standard]
+python-multipart   # FastAPI UploadFile(File 업로드) 처리에 필요
+pymysql
+
+numpy
+pillow
+opencv-python-headless
+
+requests   # naily_pipeline.py의 seg 서버 호출, test_realtime_session.py 테스트 스크립트용
