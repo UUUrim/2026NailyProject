@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
+import { PageHero } from '@/components/layout/PageHero'
 import {
   likeDesign,
   moveLikedDesign,
@@ -68,6 +69,8 @@ export function NailDesignResultPage() {
   const location = useLocation()
   const navigate = useNavigate()
 
+  // 이 페이지는 새로고침/뒤로가기/헤더 링크 등 어떤 방식으로 들어오든 location.state에
+  // 결과가 남아있으면 그대로 보여준다(의도적으로 POP 여부를 구분하지 않고, 이탈 경고도 없음).
   const hasRealResult = Boolean((location.state?.imageUrls as string[] | undefined)?.length)
   const designId = (location.state?.designId as number | undefined) ?? null
   const imageUrls = hasRealResult ? (location.state!.imageUrls as string[]) : [SAMPLE_IMAGE]
@@ -212,15 +215,11 @@ export function NailDesignResultPage() {
   return (
       <AppShell mainClassName="design-result-page">
         <div className="design-result-v2">
-          <header className="design-result-v2__hero">
-            <p className="design-result-v2__eyebrow">Final Design</p>
-            <h1 className="design-result-v2__title">
-              {userName ? `${userName}님의 네일 디자인이 완성됐어요.` : '나만의 네일 디자인이 완성됐어요.'}
-            </h1>
-            <p className="design-result-v2__lead">
-              채팅에서 다듬고 고른 최종 이미지예요. 마이페이지에서 언제든 다시 확인하실 수 있어요.
-            </p>
-          </header>
+          <PageHero
+              eyebrow="Final Design"
+              title={userName ? `${userName}님의 네일 디자인이 완성됐어요.` : '나만의 네일 디자인이 완성됐어요.'}
+              description="채팅에서 다듬고 고른 최종 이미지예요. 마이페이지에서 언제든 다시 확인하실 수 있어요."
+          />
 
           <div className="design-result-v2__body">
             <div className="design-result-v2__stage">

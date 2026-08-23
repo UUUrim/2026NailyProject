@@ -294,7 +294,7 @@ const SECTION_META: Record<SectionId, { subtitle: string; title: string; descrip
     description: '양손 촬영을 모두 마친 손 스캔 분석 결과예요. 항목을 누르면 상세 결과를 볼 수 있어요.',
   },
   designs: {
-    subtitle: 'Design',
+    subtitle: 'Designs',
     title: '디자인 이력',
     description: '생성한 최종 네일 디자인만 모아놨어요. 이미지를 눌러 자세히 확인해 보세요.',
   },

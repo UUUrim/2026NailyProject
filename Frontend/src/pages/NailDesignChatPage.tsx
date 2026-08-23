@@ -1839,8 +1839,8 @@ export function NailDesignChatPage() {
                                     <p className="design-chat-sidebar__empty-text">
                                         손 스캔 정보가 없습니다.
                                         <br />
-                                        {userName ? `${userName} 님의` : '회원님의'} 손 스캔 정보를 바탕으로 디자인을 생성하시고 싶다면,
-                                        먼저 손 촬영을 진행해 주세요.
+                                        {userName ? `${userName} 님의` : '회원님의'} 손 정보를 바탕으로 맞춤 디자인을 생성하려면,
+                                        먼저 손을 촬영해 주세요.
                                     </p>
                                     <button
                                         type="button"

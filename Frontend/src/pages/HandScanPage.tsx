@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
-import { PageBackLink } from '@/components/layout/PageBackLink'
 import { PageHero } from '@/components/layout/PageHero'
 import { startScan, uploadFingerImage, requestAnalyze, getMyScans } from '@/apis/scan'
 import { CameraFeedSelect } from '@/components/handScan/CameraFeedSelect'
@@ -20,7 +19,6 @@ import {
   buildScanSessions,
   formatMetricCurve,
   isFullyAnalyzedSession,
-  representativePersonalColor,
   type ScanSession,
 } from '@/utils/scanDetail'
 import { analyzeSkinTone } from '@/utils/skinTone'
@@ -104,6 +102,10 @@ export function HandScanPage() {
   const { isLoggedIn } = useAuth()
   const skipRescanGate = searchParams.get('rescan') === '1'
 
+  // 뒤로가기(POP)로 돌아온 경우에만 촬영 진행 상황을 복원한다. 헤더 링크 등으로
+  // 새로 들어온 경우(PUSH/REPLACE)엔 처음부터 새로 촬영하도록 스냅샷을 버린다.
+  const restored = useSnapshotRestore(handScanSnapshot, () => { handScanSnapshot = null })
+
   const [isFullscreen, setIsFullscreen]     = useState(false)
   const [cameraError, setCameraError]       = useState<string | null>(null)
   const [isUploading, setIsUploading]       = useState(false)
@@ -112,14 +114,14 @@ export function HandScanPage() {
   const [topCameraIdx, setTopCameraIdx]     = useState(0)
   const [sideCameraIdx, setSideCameraIdx]   = useState(-2)
 
-  const [currentStepIndex, setCurrentStepIndex] = useState(handScanSnapshot?.currentStepIndex ?? 0)
+  const [currentStepIndex, setCurrentStepIndex] = useState(restored?.currentStepIndex ?? 0)
   const [scanIds, setScanIds] = useState<Record<HandSide, number | null>>(
-      handScanSnapshot?.scanIds ?? { LEFT: null, RIGHT: null },
+      restored?.scanIds ?? { LEFT: null, RIGHT: null },
   )
   const [uploadedSteps, setUploadedSteps] = useState<Set<string>>(
-      handScanSnapshot?.uploadedSteps ?? new Set(),
+      restored?.uploadedSteps ?? new Set(),
   )
-  const [isDone, setIsDone] = useState(handScanSnapshot?.isDone ?? false)
+  const [isDone, setIsDone] = useState(restored?.isDone ?? false)
 
   const [gateStatus, setGateStatus] = useState<'checking' | 'show' | 'pass'>(
       skipRescanGate || !isLoggedIn ? 'pass' : 'checking',
@@ -288,6 +290,13 @@ export function HandScanPage() {
     handScanSnapshot = { currentStepIndex, scanIds, uploadedSteps, isDone }
   }, [currentStepIndex, scanIds, uploadedSteps, isDone])
 
+  // ── 이탈 경고: 촬영을 진행 중일 때 새로고침/탭 닫기/헤더 링크로 나가려 하면 경고 ──
+  useLeaveWarning(
+      !isDone && (currentStepIndex > 0 || scanIds.LEFT !== null || scanIds.RIGHT !== null),
+      '지금 나가면 촬영 진행 상황이 초기화돼 처음부터 다시 찍어야 해요. 그래도 나가시겠어요?',
+      () => { handScanSnapshot = null },
+  )
+
   // ── ESC 키 ───────────────────────────────────────────────────
   useEffect(() => {
     if (!isFullscreen) return
@@ -429,10 +438,13 @@ export function HandScanPage() {
 
   // ── 게이트: 이전 기록 있음 ─────────────────────────────────────
   if (gateStatus === 'show' && latestCompletedSession) {
-    const session     = latestCompletedSession
-    const dateLabel   = formatScanDateLabel(session.scannedAt)
-    const repColor    = representativePersonalColor(session.seasonCode)
-    const shapeLabel  = session.shape ? getNailShape(session.shape)?.labelKo ?? session.shape : null
+    const session = latestCompletedSession
+    const dateLabel = formatScanDateLabel(session.scannedAt)
+    const skinHex = session.skinToneHex
+    const toneLabel = skinHex ? analyzeSkinTone(skinHex).tone.label.replace(/\s+/g, '') : '미분석'
+    const shapeLabel = session.recommendedShape
+        ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
+        : null
     const metricsLine = [
       `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
       `너비 ${session.avgWidthMm != null ? `${Number(session.avgWidthMm).toFixed(1).replace(/\.0$/, '')}mm` : '-'}`,
@@ -444,15 +456,13 @@ export function HandScanPage() {
           <AppShell mainClassName="hand-scan-page hand-scan-page--gate">
             <section className="hand-scan-rescan-gate" aria-labelledby="rescan-gate-title">
               <div className="hand-scan-rescan-gate__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
-                  <path d="M12 3.8 21.2 19.5H2.8L12 3.8z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-                  <path d="M12 9.2v5.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  <circle cx="12" cy="16.9" r="1.1" fill="currentColor" />
-                </svg>
+                <WarningIcon width={28} height={28} />
               </div>
+
               <h2 id="rescan-gate-title" className="hand-scan-rescan-gate__title">
                 이미 손 분석 결과 기록이 있습니다.
               </h2>
+
               <div className="hand-scan-rescan-gate__record">
                 <div className="hand-scan-rescan-gate__record-head">
                   <span className="hand-scan-rescan-gate__record-label">최근 분석 기록</span>
@@ -469,35 +479,54 @@ export function HandScanPage() {
                     className="hand-scan-rescan-gate__record-open"
                     onClick={() => setDetailSession(session)}
                 >
-                  <span className="hand-scan-rescan-gate__record-swatch" style={{ background: repColor }} aria-hidden="true" />
+                  <span
+                      className="hand-scan-rescan-gate__record-swatch"
+                      style={{ background: skinHex ?? '#de869f' }}
+                      aria-hidden="true"
+                  />
                   <span className="hand-scan-rescan-gate__record-body">
-                  <strong className="hand-scan-rescan-gate__record-date">{dateLabel}</strong>
-                  <span className="hand-scan-rescan-gate__record-season" style={{ color: repColor }}>
-                    {session.seasonNameKo ?? '미분석'}
+                    <strong className="hand-scan-rescan-gate__record-date">{dateLabel}</strong>
+                    <span className="hand-scan-rescan-gate__record-season">{toneLabel}</span>
+                    <span className="hand-scan-rescan-gate__record-metrics">{metricsLine}</span>
+                    <span className="hand-scan-rescan-gate__record-shape">
+                      추천 쉐입: {shapeLabel ?? '미정'}
+                    </span>
                   </span>
-                  <span className="hand-scan-rescan-gate__record-metrics">{metricsLine}</span>
-                  <span className="hand-scan-rescan-gate__record-shape">추천 쉐입: {shapeLabel ?? '미정'}</span>
-                </span>
                 </button>
               </div>
+
               <p className="hand-scan-rescan-gate__desc">
-                새로 스캔하면 분석 결과가 추가로 저장됩니다.<br />
+                새로 스캔하면 분석 결과가 추가로 저장됩니다.
+                <br />
                 손이 달라졌거나 더 정확한 측정이 필요할 때만 다시 진행해 주세요.
               </p>
+
               <div className="hand-scan-rescan-gate__actions">
-                <button type="button" className="hand-scan-rescan-gate__btn hand-scan-rescan-gate__btn--secondary" onClick={handleConfirmRescan}>
+                <PillButton
+                    variant="ghost"
+                    className="hand-scan-rescan-gate__btn"
+                    onClick={handleConfirmRescan}
+                >
                   다시 스캔하기
-                </button>
-                <button
-                    type="button"
-                    className="hand-scan-rescan-gate__btn hand-scan-rescan-gate__btn--primary"
-                    onClick={() => navigate('/print', { state: { leftScanId: session.leftScanId, rightScanId: session.rightScanId } })}
+                </PillButton>
+                <PillButton
+                    variant="primary"
+                    className="hand-scan-rescan-gate__btn"
+                    onClick={() =>
+                        navigate('/print', {
+                          state: {
+                            leftScanId: session.leftScanId,
+                            rightScanId: session.rightScanId,
+                          },
+                        })
+                    }
                 >
                   네일팁 출력하러 가기
-                </button>
+                </PillButton>
               </div>
             </section>
           </AppShell>
+
           <ScanDetailModal session={detailSession} onClose={() => setDetailSession(null)} />
         </>
     )
@@ -507,22 +536,17 @@ export function HandScanPage() {
   return (
       <>
         <AppShell mainClassName="hand-scan-page">
-          <PageBackLink to="/process" />
-          <div className="hand-scan-page__topbar">
-            <h1 className="hand-scan-page__title">손 촬영 및 스캔</h1>
-          </div>
-
-          <div className="hand-scan-page__info-card">
-            <svg className="hand-scan-page__info-card-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true">
-              <rect x="3" y="7" width="14" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M17 10.5l4-2.2v9.4l-4-2.2" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-              <circle cx="10" cy="12.5" r="2.4" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-            <p className="hand-scan-page__info-card-text">
-              두 카메라가 동시에 촬영하여 손톱 형태와 곡률을 분석합니다.<br />
-              왼손 다섯 손가락을 먼저 촬영한 뒤, 오른손 다섯 손가락을 이어서 촬영합니다.
-            </p>
-          </div>
+          <PageHero
+              eyebrow="Hand Scan"
+              title="손 촬영 및 스캔"
+              description={
+                <>
+                  두 카메라가 동시에 촬영하여 손톱 형태와 곡률을 분석합니다.<br />
+                  왼손 다섯 손가락을 먼저 촬영한 뒤, 오른손 다섯 손가락을 이어서 촬영합니다.
+                </>
+              }
+              align="center"
+          />
 
           <div className="hand-scan__progress-groups">
             {HANDS.map((hand) => (
