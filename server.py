@@ -271,17 +271,17 @@ class PhoneCamera:
     that get the phone to take one full-sensor-resolution photo on demand, so
     the accepted image isn't limited to preview quality.
 
-    The phone is mounted sideways in the capture rig (physically unavoidable
-    given the mount), so every frame comes in rotated 90 deg from upright -
-    confirmed by rotating a real captured photo both ways and checking which
-    one shows the finger resting on the rig's table with the ArUco card flat
-    beside it, the way the rig is actually built. Rotating here, at the single
-    point frames enter the system, means the live preview, the saved side.jpg
-    and the debug overlay all agree - nothing downstream needs to know the
-    phone is mounted sideways.
+    The phone is mounted upright in the capture rig, but the camera ends up
+    facing the finger upside down - confirmed by rotating a real captured
+    photo through all four orientations and checking which one shows the
+    finger resting on the rig's table with the ArUco card flat beside it,
+    the way the rig is actually built. Rotating here, at the single point
+    frames enter the system, means the live preview, the saved side.jpg and
+    the debug overlay all agree - nothing downstream needs to know the phone
+    is mounted upside down.
     """
 
-    ROTATE = cv2.ROTATE_90_CLOCKWISE
+    ROTATE = cv2.ROTATE_180
 
     def __init__(self):
         self._lock            = threading.Lock()
