@@ -135,6 +135,7 @@
   font-size: 0.84rem;
   font-weight: 600;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition: background 0.18s, color 0.18s, transform 0.18s;
 }
@@ -1914,6 +1915,15 @@
 .mypage-x__scanx-hand-name {
   font-weight: 700;
   color: #5a4a50;
+}
+
+.mypage-x__scanx-finger-empty {
+  margin: 0;
+  padding: 1.4rem 1.25rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #9a848c;
+  text-align: center;
 }
 
 .mypage-x__scanx-hand-row span:not(:first-child) {

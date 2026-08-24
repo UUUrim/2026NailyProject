@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { AppShell } from '@/components/layout/AppShell'
+import { AppShell } from '@/shared/layout/AppShell'
 import '@/styles/process-guide.css'
 
 const STEPS = [
