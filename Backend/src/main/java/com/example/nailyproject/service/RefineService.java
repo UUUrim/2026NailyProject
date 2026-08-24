@@ -63,7 +63,7 @@ public class RefineService {
                  {수정 내용 반영한 묘사}, top-down flat lay view, plain white background,
                  no shadow, no hands, no fingers, no text, no watermark, no reflection, product shot"
                - 원본 프롬프트에서 shape, 베이스 컬러 등 변하지 않는 요소는 그대로 유지.
-               - 반드시 사용자가 요청한 수정 내용만 반영.
+               - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             2. mask_prompt
                - GroundingDINO가 마스크를 탐지할 때 쓸 텍스트.
@@ -81,6 +81,9 @@ public class RefineService {
                - 카테고리: mood, designType, color, season, motif, shape
                - color는 반드시 hex(#RRGGBB) 형식.
                - 언급 안 된 카테고리는 넣지 마세요.
+               
+            [중요 규칙]
+            - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만.
             {
@@ -101,6 +104,9 @@ public class RefineService {
     public DesignGenerateResponseDto applyRevision(User user, Long sessionId, String message) throws Exception {
         DesignSession session = designSessionRepository.findByIdAndUserId(sessionId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
+
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session).role(ChatMessage.MessageRole.user).content(message).build());
 
         // 직전 생성 디자인 로드
         NailDesign prevDesign = nailDesignRepository
@@ -163,7 +169,7 @@ public class RefineService {
 
         // 3. 원본 이미지 → base64 변환 (S3 URL에서 다운로드)
         String originalImageUrl = prevDesign.getImageUrls().get(0);
-        byte[] originalImageBytes = restTemplate.getForObject(originalImageUrl, byte[].class);
+        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
         if (originalImageBytes == null) {
             throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
         }
@@ -208,8 +214,6 @@ public class RefineService {
         designSessionRepository.save(session);
 
         // 7. 채팅 이력 저장
-        chatMessageRepository.save(ChatMessage.builder()
-                .session(session).role(ChatMessage.MessageRole.user).content(message).build());
         chatMessageRepository.save(ChatMessage.builder()
                 .session(session).role(ChatMessage.MessageRole.assistant)
                 .content("말씀하신 대로 수정했어요! 어떠세요?").build());

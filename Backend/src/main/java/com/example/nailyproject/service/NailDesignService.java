@@ -316,11 +316,11 @@ public class NailDesignService {
             nailDesignRepository.save(design);
         }
 
-        // ★ 확정 시 스와치 생성 (이미 있으면 건너뜀)
+        // 확정 시 스와치 생성 (이미 있으면 건너뜀)
         if (design.getSwatchesJson() == null || design.getSwatchesJson().isBlank()) {
             final Long finalDesignId = designId;
             final Long finalUserId = user.getId();
-            final String finalPrompt = design.getPromptSummary();
+            final String finalPrompt = buildFullPromptForSwatch(design);
 
             new Thread(() -> {
                 try {
@@ -379,13 +379,13 @@ public class NailDesignService {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
         Long sessionId = design.getSession().getId();
 
-        record TimelineEntry(java.time.LocalDateTime time, com.example.nailyproject.dto.response.ChatMessageResponseDto dto) {}
-
+        record TimelineEntry(java.time.LocalDateTime time, int order, com.example.nailyproject.dto.response.ChatMessageResponseDto dto) {}
         List<TimelineEntry> timeline = new ArrayList<>();
 
         for (ChatMessage m : chatMessageRepository.findBySessionOrderBySentAtAsc(design.getSession())) {
             timeline.add(new TimelineEntry(
                     m.getSentAt(),
+                    0,
                     com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
                             .role(m.getRole().name())
                             .content(m.getContent())
@@ -405,6 +405,7 @@ public class NailDesignService {
                         ? d.getGeneratedAt().minusSeconds(1) : null;
                 timeline.add(new TimelineEntry(
                         referenceTime,
+                        0,
                         com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
                                 .role("user")
                                 .content("이 사진으로 만들어줘")
@@ -416,6 +417,7 @@ public class NailDesignService {
 
             timeline.add(new TimelineEntry(
                     d.getGeneratedAt(),
+                    1,
                     com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
                             .role("assistant")
                             .content(isFinalConfirmed ? "짜잔! 이런 디자인은 어떠세요? (최종 확정)" : "짜잔! 이런 디자인은 어떠세요?")
@@ -427,7 +429,8 @@ public class NailDesignService {
         }
 
         return timeline.stream()
-                .sorted(Comparator.comparing(e -> e.time() != null ? e.time() : java.time.LocalDateTime.MIN))
+                .sorted(Comparator.comparing((TimelineEntry e) -> e.time() != null ? e.time() : java.time.LocalDateTime.MIN)
+                        .thenComparingInt(TimelineEntry::order))
                 .map(TimelineEntry::dto)
                 .toList();
     }
@@ -701,8 +704,7 @@ public class NailDesignService {
         final Long finalUserId = user.getId();
 
 
-        sendPlanToPartsGenerator(user.getId(), handScan != null ? handScan.getId() : null, nailDesign.getId(), plan);
-
+        triggerPartsDetection(nailDesign, plan);
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
                 .status(nailDesign.getStatus().name())
@@ -980,27 +982,106 @@ public class NailDesignService {
         return base;
     }
 
-    /**
-     * 파츠 생성기로 plan 전달 (비동기 fire-and-forget)
-     */
-    private void sendPlanToPartsGenerator(Long userId, Long scanId, Long designId, JsonNode plan) {
-        try {
-            Map<String, Object> body = new HashMap<>();
-            body.put("userId", userId);
-            body.put("scanId", scanId);
-            body.put("designId", designId);
-            body.put("plan", plan);
 
-            webClientBuilder.build().post()
-                    .uri(analysisServerUrl + "/generate/parts-from-plan")
-                    .bodyValue(body)
-                    .retrieve()
-                    .bodyToMono(Void.class)
-                    .doOnError(e -> System.err.println("파츠 생성기 호출 실패(미구현 상태일 수 있음): " + e.getMessage()))
-                    .onErrorResume(e -> reactor.core.publisher.Mono.empty())
-                    .subscribe();
-        } catch (Exception e) {
-            System.err.println("파츠 생성기 호출 중 예외: " + e.getMessage());
+    /**
+     * plan에서 파츠 이름 추출 → detect 서버 /parts 호출 (비동기 fire-and-forget)
+     */
+    private void triggerPartsDetection(NailDesign nailDesign, JsonNode plan) {
+        List<String> partNames = extractPartNamesFromPlan(plan);
+        if (partNames.isEmpty()) {
+            System.out.println("[Parts] plan에 파츠 없음, 검출 스킵");
+            return;
         }
+
+        String imageUrl = (nailDesign.getImageUrls() != null && !nailDesign.getImageUrls().isEmpty())
+                ? nailDesign.getImageUrls().get(0) : null;
+        if (imageUrl == null) return;
+
+        final Long designId = nailDesign.getId();
+
+        new Thread(() -> {
+            try {
+                byte[] imageBytes = s3Service.downloadImageBytes(imageUrl);
+                String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
+
+                Map<String, List<String>> detected = nailDetectionService.detectParts(imageBase64, partNames);
+
+                // ★ base64 크롭 → S3 업로드 → URL 맵 구성
+                Map<String, List<String>> partsUrlMap = new LinkedHashMap<>();
+                for (Map.Entry<String, List<String>> entry : detected.entrySet()) {
+                    List<String> urls = new ArrayList<>();
+                    for (int i = 0; i < entry.getValue().size(); i++) {
+                        String cropBase64 = entry.getValue().get(i);
+                        if (cropBase64 == null || cropBase64.isBlank()) continue;
+                        try {
+                            byte[] cropBytes = Base64.getDecoder().decode(cropBase64);
+                            String s3Key = "designs/user_" + nailDesign.getUser().getId()
+                                    + "/parts_" + entry.getKey().replace(" ", "_")
+                                    + "_" + designId + "_" + i + ".png";
+                            String url = s3Service.uploadImageBytes(cropBytes, s3Key);
+                            urls.add(url);
+                        } catch (Exception e) {
+                            System.err.println("[Parts] 크롭 S3 업로드 실패: " + e.getMessage());
+                        }
+                    }
+                    if (!urls.isEmpty()) partsUrlMap.put(entry.getKey(), urls);
+                }
+
+                // ★ DB 저장
+                if (!partsUrlMap.isEmpty()) {
+                    nailDesignRepository.findById(designId).ifPresent(d -> {
+                        try {
+                            d.updatePartsJson(objectMapper.writeValueAsString(partsUrlMap));
+                            nailDesignRepository.save(d);
+                            System.out.println("[Parts] 검출 완료 저장 designId=" + designId);
+                        } catch (Exception e) {
+                            System.err.println("[Parts] DB 저장 실패: " + e.getMessage());
+                        }
+                    });
+                }
+
+            } catch (Exception e) {
+                System.err.println("[Parts] 파츠 검출 실패 designId=" + designId + ": " + e.getMessage());
+            }
+        }, "parts-detect-" + designId).start();
+    }
+
+    private List<String> extractPartNamesFromPlan(JsonNode plan) {
+        List<String> parts = new ArrayList<>();
+        for (String fingerName : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            JsonNode finger = plan.get(fingerName);
+            if (finger == null) continue;
+            JsonNode partsList = finger.get("parts");
+            if (partsList != null && partsList.isArray()) {
+                partsList.forEach(p -> {
+                    String part = p.asText().trim();
+                    if (!part.isBlank() && !"none".equalsIgnoreCase(part) && !parts.contains(part)) {
+                        parts.add(part);
+                    }
+                });
+            }
+        }
+        return parts;
+    }
+
+    /**
+     * 스와치 생성용 전체 프롬프트 조합
+     * 원본 combinedPrompt + 수정 내역(fingerOverrides)을 합쳐서 반환
+     */
+    private String buildFullPromptForSwatch(NailDesign design) {
+        if (design.getSession() != null) {
+            String sessionPrompt = design.getSession().getGeneratedPrompt();
+            String fingerOverrides = design.getSession().getFingerOverrides();
+
+            if (sessionPrompt != null && !sessionPrompt.isBlank()) {
+                if (fingerOverrides != null && !fingerOverrides.isBlank()) {
+                    // 원본 프롬프트 + 수정된 손가락 내역 합산
+                    return sessionPrompt + "\n[Finger modifications]: " + fingerOverrides;
+                }
+                return sessionPrompt;
+            }
+        }
+        // 세션 없는 경우 (채팅 없이 직접 생성된 디자인)
+        return design.getPromptSummary();
     }
 }
