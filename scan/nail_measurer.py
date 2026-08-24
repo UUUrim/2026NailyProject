@@ -75,6 +75,13 @@ try:
 except ImportError:
     _ENDON_AVAILABLE = False
 
+# ── Skin LAB metrics (brightness/saturation/warmness for color recommendation) ──
+try:
+    from skin_color import analyze_skin as _analyze_skin
+    _SKIN_COLOR_AVAILABLE = True
+except ImportError:
+    _SKIN_COLOR_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────────────────────
 # Constants
@@ -154,13 +161,15 @@ def detect_aruco(image: np.ndarray, aruco_size_mm: float):
         det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
         corners, ids, _ = det.detectMarkers(gray)
         if ids is not None and len(ids) > 0:
-            c     = corners[0][0]
-            sides = [np.linalg.norm(c[i] - c[(i+1) % 4]) for i in range(4)]
-            avg   = float(np.mean(sides))
-            mpp   = aruco_size_mm / avg
-            print(f"  [ArUco] dict={name}  id={int(ids[0][0])}  "
+            c        = corners[0][0]
+            sides    = [np.linalg.norm(c[i] - c[(i+1) % 4]) for i in range(4)]
+            avg      = float(np.mean(sides))
+            mpp      = aruco_size_mm / avg
+            # ids is (N,1) on OpenCV 4.x but (N,) on 5.x — np.ravel handles both.
+            marker_id = int(np.ravel(ids)[0])
+            print(f"  [ArUco] dict={name}  id={marker_id}  "
                   f"avg_side={avg:.1f}px  →  {mpp:.5f} mm/px")
-            return mpp, c, int(ids[0][0])
+            return mpp, c, marker_id
     raise RuntimeError(
         "ArUco marker not detected.\n"
         "  → Ensure marker is fully visible, sharp, and well-lit.\n"
@@ -1588,6 +1597,10 @@ def measure_top(image: np.ndarray, mpp: float,
     else:
         hex_color = "#FFFFFF"
 
+    # LAB skin metrics for color recommendation (same skin_mask as above,
+    # so it shares the nail-plate/polish exclusion the hex sample already has).
+    skin_lab = _analyze_skin(image, skin_mask) if _SKIN_COLOR_AVAILABLE else None
+
     # Prefer the MEASURED fold-to-fold width (side-lit photos).  The nail is
     # widest near the free edge and narrows toward the cuticle, so report the
     # widest measured row — that is the dimension a tip has to cover.
@@ -1611,6 +1624,15 @@ def measure_top(image: np.ndarray, mpp: float,
         "width_source":    "lateral_folds" if lateral else "constant_half",
         "length_mm":       l_mm,
         "skin_tone_hex":   hex_color,
+        "skin_L":          skin_lab["L"] if skin_lab else None,
+        "skin_a":          skin_lab["a"] if skin_lab else None,
+        "skin_b":          skin_lab["b"] if skin_lab else None,
+        "skin_C":          skin_lab["C"] if skin_lab else None,
+        "skin_warmness":   skin_lab["warmness"] if skin_lab else None,
+        "skin_brightness": skin_lab["brightness"] if skin_lab else None,
+        "skin_saturation": skin_lab["saturation"] if skin_lab else None,
+        "skin_contrast":   skin_lab["contrast"] if skin_lab else None,
+        "skin_undertone":  skin_lab["undertone"] if skin_lab else None,
         "mpp_mm_per_px":   round(float(mpp), 6),
         "nail_polygon_px": smooth.tolist(),
         **cc_data,
