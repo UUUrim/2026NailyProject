@@ -1386,8 +1386,11 @@
 
 .mypage-x__scanx-palette {
   display: grid;
-  grid-template-columns: repeat(8, 34px);
-  grid-template-rows: repeat(3, 34px);
+  /* generateSkinTonePalette()가 6개 색상군 × 5단계(밝은→어두운) 순서로 30색을 만든다.
+     grid-auto-flow: column으로 세로부터 채워서 색상군마다 한 열을 이루게 한다. */
+  grid-auto-flow: column;
+  grid-template-columns: repeat(6, 34px);
+  grid-template-rows: repeat(5, 34px);
   gap: 8px;
 }
 
@@ -3384,6 +3387,11 @@
 /* 다른 모달 위에 겹쳐 뜨는 모달(예: 이미지 상세모달 위의 채팅 이력 모달) */
 .mypage-x__modal--stacked {
   z-index: 2100;
+}
+
+/* --stacked보다 한 겹 더 위(예: 채팅 이력 모달 안에서 이미지를 눌러 뜨는 축소판 상세모달) */
+.mypage-x__modal--stacked-2 {
+  z-index: 2200;
 }
 
 .mypage-x__modal-backdrop {

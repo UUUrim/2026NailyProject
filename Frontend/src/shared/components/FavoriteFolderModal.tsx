@@ -154,7 +154,7 @@ export function FavoriteFolderModal({
         >
           ✕
         </button>
-        <h2 className="mypage-x__fav-folder-title">폴더 선택</h2>
+        <h2 className="mypage-x__fav-folder-title">찜 폴더 선택</h2>
 
         {loading ? (
           <p className="mypage-x__loading">폴더를 불러오는 중...</p>

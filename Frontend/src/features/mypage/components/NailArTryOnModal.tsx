@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { drawNailOverlays } from '@/features/mypage/utils/nailArRenderer'
 import { getHandLandmarker } from '@/features/mypage/utils/handLandmarker'
 import { prepareNailDesignAsset, type NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
+import '@/styles/mypage.css'
 import '@/styles/nail-ar-tryon.css'
 
 type NailArTryOnModalProps = {
@@ -175,7 +176,12 @@ export function NailArTryOnModal({ imageUrl, onClose }: NailArTryOnModalProps) {
             <h2 className="nail-ar-tryon__title">AR 네일 미리보기</h2>
             <p className="nail-ar-tryon__subtitle">{message}</p>
           </div>
-          <button type="button" className="nail-ar-tryon__close" onClick={onClose} aria-label="닫기">
+          <button
+            type="button"
+            className="mypage-x__modal-close mypage-x__modal-close--plain nail-ar-tryon__close"
+            onClick={onClose}
+            aria-label="닫기"
+          >
             ✕
           </button>
         </div>

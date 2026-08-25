@@ -208,7 +208,7 @@ export function HandScanResultPageContent() {
                         <article className="skin-tone-palette-card skin-tone-palette-card--skeleton">
                             <h3>추천 컬러</h3>
                             <div className="skin-tone-palette-grid">
-                                {Array.from({ length: 24 }).map((_, i) => (
+                                {Array.from({ length: 30 }).map((_, i) => (
                                     <span key={i} className="skin-tone-palette-grid__chip skin-tone-palette-grid__chip--skeleton" />
                                 ))}
                             </div>

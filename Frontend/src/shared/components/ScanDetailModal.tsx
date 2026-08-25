@@ -180,7 +180,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
         const skinHex = detail.skinToneHex ?? FALLBACK_SKIN_COLOR
         const analysis = detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null
         const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
-        const palette = detail.skinToneHex ? generateSkinTonePalette(detail.skinToneHex, 24) : []
+        const palette = detail.skinToneHex ? generateSkinTonePalette(detail.skinToneHex, 30) : []
         const shapeLabel = detail.shapeId
           ? getNailShape(detail.shapeId)?.labelKo ?? detail.shapeId
           : null

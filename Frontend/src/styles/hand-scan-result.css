@@ -110,11 +110,18 @@
   border: 1px solid #eee;
   border-radius: 18px;
   overflow: hidden;
+  /* .skin-tone-grid의 align-items: stretch로 오른쪽 추천 컬러 카드(30색, 6×5)와 높이를
+     맞춰 늘어나는데, 그냥 두면 늘어난 만큼 카드 아래에 빈 여백만 생긴다. 세로 flex로 바꿔서
+     .skin-tone-card__body가 남는 높이를 자연스럽게 나눠 갖도록 한다. */
+  display: flex;
+  flex-direction: column;
 }
 
 .skin-tone-card__banner {
   position: relative;
-  padding: 1.5rem 1.25rem 3rem;
+  /* 대표 피부색 영역을 더 넉넉하게 보여주기 위해 아래쪽 여백을 늘림
+     (카드 전체 높이는 .skin-tone-card__body가 flex: 1로 남는 공간을 가져가며 그대로 유지됨) */
+  padding: 1.5rem 1.25rem 5rem;
 }
 
 .skin-tone-card__badge {
@@ -145,7 +152,12 @@
   padding: 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.75rem;
+  flex: 1;
+  /* space-between이면 카드가 늘어난 만큼 그 여유 공간이 전부 슬라이더 사이 간격으로
+     들어가 버려서 간격이 오히려 넓어진다. 슬라이더 간격은 위 gap 값으로 고정해서 좁게
+     유지하고, 남는 여유 공간은 이 블록을 세로 중앙에 두는 방식으로 처리한다. */
+  justify-content: center;
 }
 
 .skin-tone-slider__head {
@@ -225,12 +237,12 @@
 
 .skin-tone-palette-grid {
   display: grid;
-  /* generateSkinTonePalette()가 6개 색상군 × 4단계(밝은→어두운) 순서로 24색을 만들어서,
-     같은 색상군 4개가 배열에서 연달아 나온다. grid-auto-flow: column으로 세로 방향부터
-     채우면 그 4개가 한 "열"을 위(밝음)→아래(어두움)로 채우고, 다음 색상군은 다음 열로
-     넘어가서 총 6열×4행으로 톤별로 깔끔하게 묶여 보인다. */
+  /* generateSkinTonePalette()가 6개 색상군 × 5단계(밝은→어두운) 순서로 30색을 만들어서,
+     같은 색상군 5개가 배열에서 연달아 나온다. grid-auto-flow: column으로 세로 방향부터
+     채우면 그 5개가 한 "열"을 위(밝음)→아래(어두움)로 채우고, 다음 색상군은 다음 열로
+     넘어가서 총 6열×5행으로 톤별로 깔끔하게 묶여 보인다. */
   grid-auto-flow: column;
-  grid-template-rows: repeat(4, 1fr);
+  grid-template-rows: repeat(5, 1fr);
   grid-template-columns: repeat(6, 1fr);
   gap: 8px;
 }

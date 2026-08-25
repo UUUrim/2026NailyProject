@@ -367,69 +367,11 @@ export function useNailDesignChatPage() {
     const [freeformShapePickerOpen, setFreeformShapePickerOpen] = useState(false)
 
     const [showAnalysisPanel, setShowAnalysisPanel] = useState(chatSessionSnapshot?.showAnalysisPanel ?? false)
-    const [preview3DImage, setPreview3DImage] = useState<string | null>(null)
+    // 확대/이동은 공용 DesignImageDetailModal이 담당하므로, 여기서는 어떤 이미지를 확대해서 보여줄지만 들고 있는다.
     const [zoomedImage, setZoomedImage] = useState<string | null>(null)
+    const openZoomedImage = (url: string) => setZoomedImage(url)
+    const closeZoomedImage = () => setZoomedImage(null)
 
-    // ── 확대 이미지 확대/축소/이동 (MyPage의 디테일 이미지 확대 방식과 동일) ──────
-    const [imageZoom, setImageZoom] = useState(1)
-    const [imagePan, setImagePan] = useState({ x: 0, y: 0 })
-    const [isImageDragging, setIsImageDragging] = useState(false)
-    const imageDragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
-    const zoomedImageViewportRef = useRef<HTMLDivElement | null>(null)
-
-    const IMAGE_ZOOM_MIN = 1
-    const IMAGE_ZOOM_MAX = 4
-    const IMAGE_WHEEL_ZOOM_SENSITIVITY = 0.0015
-
-    const openZoomedImage = (url: string) => {
-        setImageZoom(1)
-        setImagePan({ x: 0, y: 0 })
-        setZoomedImage(url)
-    }
-
-    const closeZoomedImage = () => {
-        setZoomedImage(null)
-        setImageZoom(1)
-        setImagePan({ x: 0, y: 0 })
-    }
-
-    useEffect(() => {
-        const viewport = zoomedImageViewportRef.current
-        if (!viewport || !zoomedImage) return
-
-        const onWheel = (e: WheelEvent) => {
-            e.preventDefault()
-            setImageZoom((z) => {
-                const next = Math.min(
-                    IMAGE_ZOOM_MAX,
-                    Math.max(IMAGE_ZOOM_MIN, Number((z - e.deltaY * IMAGE_WHEEL_ZOOM_SENSITIVITY).toFixed(2))),
-                )
-                if (next === IMAGE_ZOOM_MIN) setImagePan({ x: 0, y: 0 })
-                return next
-            })
-        }
-
-        viewport.addEventListener('wheel', onWheel, { passive: false })
-        return () => viewport.removeEventListener('wheel', onWheel)
-    }, [zoomedImage])
-
-    const handleZoomedImagePointerDown = (e: ReactMouseEvent<HTMLImageElement>) => {
-        if (imageZoom <= IMAGE_ZOOM_MIN) return
-        setIsImageDragging(true)
-        imageDragStartRef.current.x = e.clientX
-        imageDragStartRef.current.y = e.clientY
-        imageDragStartRef.current.panX = imagePan.x
-        imageDragStartRef.current.panY = imagePan.y
-    }
-
-    const handleZoomedImagePointerMove = (e: ReactMouseEvent<HTMLImageElement>) => {
-        if (!isImageDragging) return
-        const dx = e.clientX - imageDragStartRef.current.x
-        const dy = e.clientY - imageDragStartRef.current.y
-        setImagePan({ x: imageDragStartRef.current.panX + dx, y: imageDragStartRef.current.panY + dy })
-    }
-
-    const stopZoomedImageDragging = () => setIsImageDragging(false)
     const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.leftAnalysis ?? null)
     const [rightAnalysis, setRightAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.rightAnalysis ?? null)
     // 헤더로 단독 진입했을 때 드롭다운으로 고를 수 있는 과거 분석 결과 목록(양손 다 촬영된 세션만)
@@ -1140,9 +1082,16 @@ export function useNailDesignChatPage() {
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────
     const handlePhotoFileChange = (file: File | null) => {
         if (!file) return
-        if (selectedPhotoPreviewUrl) URL.revokeObjectURL(selectedPhotoPreviewUrl)
         setSelectedPhotoFile(file)
-        setSelectedPhotoPreviewUrl(URL.createObjectURL(file))
+        setSelectedPhotoPreviewUrl(null)
+        // blob: URL은 이 페이지를 벗어났다가(뒤로가기 등) 다시 돌아왔을 때 무효화되어 이미지가
+        // 안 보이는 문제가 있다. 히스토리를 넘나들어도 항상 그대로 보이는 data: URL로 미리보기를
+        // 만들어서 디자인 결과 화면의 "참고 사진"에도 안전하게 재사용한다.
+        const reader = new FileReader()
+        reader.onload = () => {
+            if (typeof reader.result === 'string') setSelectedPhotoPreviewUrl(reader.result)
+        }
+        reader.readAsDataURL(file)
     }
 
     const handlePhotoConfirm = () => {
@@ -1450,7 +1399,7 @@ export function useNailDesignChatPage() {
             curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
             skinToneHex,
             skinToneAnalysis: skinToneHex ? analyzeSkinTone(skinToneHex) : null,
-            skinTonePalette: skinToneHex ? generateSkinTonePalette(skinToneHex, 24) : [],
+            skinTonePalette: skinToneHex ? generateSkinTonePalette(skinToneHex, 30) : [],
         }
     }, [leftAnalysis, rightAnalysis])
 
@@ -1507,13 +1456,7 @@ export function useNailDesignChatPage() {
         freeformShapePickerOpen,
         showAnalysisPanel,
         setShowAnalysisPanel,
-        preview3DImage,
-        setPreview3DImage,
         zoomedImage,
-        imageZoom,
-        imagePan,
-        isImageDragging,
-        zoomedImageViewportRef,
         leftAnalysis,
         rightAnalysis,
         scanSessions,
@@ -1521,6 +1464,7 @@ export function useNailDesignChatPage() {
         messagesRef,
         chatContainerRef,
         textareaRef,
+        scrollMessagesToBottom,
         manualSeasonCode,
         setManualSeasonCode,
         detectedSeasonCode,
@@ -1548,9 +1492,6 @@ export function useNailDesignChatPage() {
         toggleOptionTooltip,
         openZoomedImage,
         closeZoomedImage,
-        handleZoomedImagePointerDown,
-        handleZoomedImagePointerMove,
-        stopZoomedImageDragging,
         adjustTextareaHeight,
     }
 }

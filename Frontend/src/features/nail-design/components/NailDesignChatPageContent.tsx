@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 import { createPortal } from 'react-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
-import { getNailShape } from '@/shared/constants/nailShapes'
+import { DesignImageDetailModal } from '@/features/mypage/components/DesignImageDetailModal'
 import { parseDateFlexible, type ScanSession } from '@/shared/utils/scanDetail'
 import {
     PREFERENCE_OPTIONS,
@@ -11,7 +11,6 @@ import {
     SHAPE_PREVIEW_IMAGES,
     type PreferenceKey,
 } from '@/shared/constants/designPreferences'
-import { NailPreview3D } from '@/features/nail-design/components/NailPreview3D'
 import { useNailDesignChatPage, QMARK_TOKEN, MENU_OPTIONS } from '@/features/nail-design/hooks/useNailDesignChatPage'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
@@ -345,7 +344,6 @@ export function NailDesignChatPageContent() {
         isAwaitingGenerateConfirm,
         selectedInQuickReply,
         preferenceStepIndex,
-        lastDesign,
         selectedPhotoFile,
         selectedPhotoPreviewUrl,
         photoInputRef,
@@ -366,13 +364,7 @@ export function NailDesignChatPageContent() {
         freeformShapePickerOpen,
         showAnalysisPanel,
         setShowAnalysisPanel,
-        preview3DImage,
-        setPreview3DImage,
         zoomedImage,
-        imageZoom,
-        imagePan,
-        isImageDragging,
-        zoomedImageViewportRef,
         leftAnalysis,
         rightAnalysis,
         scanSessions,
@@ -380,6 +372,7 @@ export function NailDesignChatPageContent() {
         messagesRef,
         chatContainerRef,
         textareaRef,
+        scrollMessagesToBottom,
         manualSeasonCode,
         setManualSeasonCode,
         detectedSeasonCode,
@@ -407,9 +400,6 @@ export function NailDesignChatPageContent() {
         toggleOptionTooltip,
         openZoomedImage,
         closeZoomedImage,
-        handleZoomedImagePointerDown,
-        handleZoomedImagePointerMove,
-        stopZoomedImageDragging,
         adjustTextareaHeight,
     } = useNailDesignChatPage()
 
@@ -638,26 +628,9 @@ export function NailDesignChatPageContent() {
                                                         src={url}
                                                         alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'}
                                                         onClick={() => openZoomedImage(url)}
+                                                        onLoad={scrollMessagesToBottom}
                                                         style={{ cursor: 'zoom-in' }}
                                                     />
-                                                    {bubble.isDesignResult && (
-                                                        <button
-                                                            type="button"
-                                                            className="design-chat__bubble-3d-badge"
-                                                            onClick={() => setPreview3DImage(url)}
-                                                        >
-                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                                <path
-                                                                    d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"
-                                                                    stroke="currentColor"
-                                                                    strokeWidth="1.6"
-                                                                    strokeLinejoin="round"
-                                                                />
-                                                                <path d="M12 12v9M12 12L4 7.5M12 12l8-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                                                            </svg>
-                                                            3D
-                                                        </button>
-                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -1212,7 +1185,7 @@ export function NailDesignChatPageContent() {
                                             type="button"
                                             className="design-chat__quickreply-confirm"
                                             onClick={handlePhotoConfirm}
-                                            disabled={isSending}
+                                            disabled={isSending || !selectedPhotoPreviewUrl}
                                         >
                                             🎨 이 사진으로 생성하기
                                         </button>
@@ -1283,69 +1256,17 @@ export function NailDesignChatPageContent() {
                 </div>
             </div>
 
-            {preview3DImage && lastDesign && (
-                <div className="design-3d-modal" role="dialog" aria-modal="true">
-                    <button
-                        type="button"
-                        className="design-3d-modal__backdrop"
-                        aria-label="닫기"
-                        onClick={() => setPreview3DImage(null)}
-                    />
-                    <div className="design-3d-modal__panel">
-                        <header className="design-3d-modal__header">
-                            <h2>3D 미리보기</h2>
-                            <button type="button" onClick={() => setPreview3DImage(null)} aria-label="닫기">
-                                ×
-                            </button>
-                        </header>
-                        <p className="design-3d-modal__desc">
-                            {getNailShape(lastDesign.shapeId)?.labelKo ?? lastDesign.shapeId} 쉐입에 디자인을 입힌 모습이에요.
-                        </p>
-                        <NailPreview3D textureUrl={preview3DImage} shapeId={lastDesign.shapeId} />
-                    </div>
-                </div>
-            )}
-
     {zoomedImage && (
-        <div className="mypage-x__modal" role="dialog" aria-modal="true">
-            <button
-                type="button"
-                className="mypage-x__modal-backdrop"
-                aria-label="닫기"
-                onClick={closeZoomedImage}
-            />
-            <div className="mypage-x__modal-panel design-chat__image-zoom-panel">
-                <button
-                    type="button"
-                    className="mypage-x__modal-close"
-                    onClick={closeZoomedImage}
-                    aria-label="닫기"
-                >
-                    ✕
-                </button>
-
-                <div
-                    ref={zoomedImageViewportRef}
-                    className={`mypage-x__modal-image-viewport design-chat__image-zoom-viewport${imageZoom > 1 ? ' is-zoomed' : ''}${isImageDragging ? ' is-dragging' : ''}`}
-                    onMouseUp={stopZoomedImageDragging}
-                    onMouseLeave={stopZoomedImageDragging}
-                >
-                    <img
-                        src={zoomedImage}
-                        alt="확대된 이미지"
-                        className="mypage-x__modal-image"
-                        draggable={false}
-                        style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
-                        onMouseDown={handleZoomedImagePointerDown}
-                        onMouseMove={handleZoomedImagePointerMove}
-                    />
-
-                    <div className="mypage-x__modal-zoom-controls">
-                        <span className="mypage-x__modal-zoom-value">{Math.round(imageZoom * 100)}%</span>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <DesignImageDetailModal
+            image={{ designId: null, imageUrl: zoomedImage, liked: false, folder: null }}
+            onClose={closeZoomedImage}
+            showDelete={false}
+            showChatHistoryToggle={false}
+            showDesignDetailsToggle={false}
+            showLike={false}
+            showShare={false}
+            showAr={false}
+        />
     )}
 
     {tooltipAnchor &&

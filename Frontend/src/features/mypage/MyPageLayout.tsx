@@ -572,7 +572,6 @@ export function MyPageLayout() {
         <MyPageModals
             detailImage={detailImage}
             closeDetailImage={closeDetailImage}
-            likedKeySet={likedKeySet}
             handleDetailLikeChange={handleDetailLikeChange}
             handleDetailShareChange={handleDetailShareChange}
             handleDetailDeleted={handleDetailDeleted}
