@@ -28,10 +28,6 @@ import '@/styles/hand-scan.css'
 // 스캔 서버 주소 (로컬: http://localhost:8000, 데모: ngrok URL) — 데스크톱 브라우저 기준.
 const SCAN_SERVER_URL = import.meta.env.VITE_SCAN_SERVER_URL ?? 'http://localhost:8000'
 
-// 폰이 접속할 카메라 페이지 주소. localhost는 폰에서 못 열기 때문에
-// SCAN_SERVER_URL과 별개로 관리 — ngrok 등 폰이 실제로 도달 가능한 주소를 넣어야 함.
-const PHONE_CAM_URL = import.meta.env.VITE_PHONE_CAM_URL ?? SCAN_SERVER_URL
-
 
 function formatScanDateLabel(raw: string): string {
   const d = new Date(raw)
@@ -346,11 +342,6 @@ export function HandScanPage() {
                         className="hand-scan-fs__video"
                         alt="사이드뷰 스캔 피드"
                     />
-                ) : null}
-                {sideCameraIdx === -2 ? (
-                    <p className="hand-scan-fs__phone-hint">
-                      폰 브라우저에서 {PHONE_CAM_URL}/phone/side 를 열어 카메라를 연결하세요
-                    </p>
                 ) : null}
                 <div className="hand-scan-fs__feed-select-wrap">
                   <label className="hand-scan-fs__feed-select-label">

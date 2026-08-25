@@ -414,6 +414,14 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
 
 # ─────────────────────────────────────────────────────────────
 # 4. C-curve from nail fold brightness (top photo only)
+#
+# Reinstated as a FALLBACK: the real measurement is the side/phone end-on
+# photo (see measure_finger's ccurve_path), and overrides this whenever it
+# succeeds. This rough brightness-based guess only fills in when that
+# fails - e.g. the side-view finger-localisation being fooled by a bright
+# reflective object elsewhere in frame (seen on a real capture where 4 of 5
+# fingers got no side-view reading) - so a finger doesn't end up with no
+# c-curve value at all just because one photo had a stray reflection in it.
 # ─────────────────────────────────────────────────────────────
 
 def estimate_ccurve_from_nailfold(image: np.ndarray,
@@ -500,7 +508,6 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
         "thickness_mm":  thick,
         "_ccurve_debug": scan_debug,
     }
-
 
 # ─────────────────────────────────────────────────────────────
 # 4b. Nail axis refinement (correct off-centre nails)
@@ -1345,7 +1352,7 @@ def measure_top(image: np.ndarray, mpp: float,
     cut_idx   = min(cuticle_y - tip_y, len(widths)-1)
     length_px = float(cuticle_y - tip_y)
 
-    # ── C-curve from nail fold ────────────────────────────────
+    # ── C-curve from nail fold (fallback - see measure_finger's override) ──
     cc_data = estimate_ccurve_from_nailfold(
         image, finger_mask,
         tip_y, cuticle_y,
@@ -1701,24 +1708,14 @@ def draw_annotated(image, data, aruco_corners, finger):
         cv2.putText(vis, "alt?", (xr + 6, cuticle_y_alt + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
 
-    # C-curve scan lines
-    length_px = cuticle_y - tip_y
-    scan_colors = [(255,100,0),(0,255,100),(255,0,255)]
-    for frac, col in zip([0.30, 0.50, 0.70], scan_colors):
-        row = int(tip_y + length_px * frac)
-        cv2.line(vis,
-                 (tip_x-int(nail_half), row),
-                 (tip_x+int(nail_half), row),
-                 col, 1)
-
-    # Labels
+    # Labels. No C-curve/arc-radius row here any more - c-curve is measured
+    # from the side/phone end-on photo now, not from this top-view shot, so
+    # this frame has nothing real to show for it.
     lx = tip_x + int(nail_half) + 20
     for txt, dy, col in [
         (f"W:    {data['width_mm']}mm",              40,  color),
         (f"L:    {data['length_mm']}mm",             100, color),
-        (f"C:    {data['c_curve_mm']}mm",            160, color),
-        (f"R:    {data['arc_radius_mm']}mm",         220, color),
-        (f"Skin: {data['skin_tone_hex']}",           280, (0,200,255)),
+        (f"Skin: {data['skin_tone_hex']}",           160, (0,200,255)),
     ]:
         cv2.putText(vis, txt, (lx, tip_y+dy),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,0), 5)
@@ -1745,9 +1742,14 @@ def measure_finger(top_path: str, finger: str,
                    ccurve_table_edge: bool = True) -> dict:
     """
     ccurve_path : optional path to an end-on (tip-facing) photo.
-        When provided, C-curve is measured directly from that image
-        using the nail width as scale reference (no ArUco needed).
-        When omitted, the brightness-drop fallback is used instead.
+        When provided and it measures successfully, C-curve is taken from
+        that image using the nail width as scale reference (no ArUco
+        needed) - this is the trustworthy reading. When omitted, or when
+        it's provided but measurement fails (e.g. the side-view finger
+        localisation gets fooled by a bright reflective object elsewhere
+        in frame), the brightness-drop fallback from the top-view photo is
+        used instead so the finger still gets SOME c-curve reading rather
+        than none.
     ccurve_table_edge : the end-on photo is a finger draped over a table/mat
         edge (arm resting on the desk behind it) rather than isolated
         against a plain background — the current capture standard. Set
@@ -1797,9 +1799,10 @@ def measure_finger(top_path: str, finger: str,
         if ccurve_path and not os.path.isfile(ccurve_path):
             print(f"  [C-curve] WARN ccurve photo not found: {ccurve_path}")
 
+    c_curve_str = f"{data['c_curve_mm']}mm" if data['c_curve_mm'] is not None else "N/A"
     print(f"  width={data['width_mm']}mm  "
           f"length={data['length_mm']}mm  "
-          f"c-curve={data['c_curve_mm']}mm  "
+          f"c-curve={c_curve_str}  "
           f"skin={data['skin_tone_hex']}")
 
     print(f"\n[3/3] W/L correction + save …")
@@ -1819,7 +1822,9 @@ def measure_finger(top_path: str, finger: str,
     print(f"  │  C-curve         : {data['c_curve_mm']} mm  "
           f"[{data.get('_ccurve_method', '?')}]")
     print(f"  │  Arc radius      : {data['arc_radius_mm']} mm")
-    print(f"  │  Thickness (est) : {data['thickness_mm']} mm")
+    _thick = data.get('thickness_mm')
+    print(f"  │  Thickness       : "
+          f"{f'{_thick} mm' if _thick is not None else 'not measured (STL uses 0.6mm default)'}")
     print(f"  │  Skin tone       : {data['skin_tone_hex']}")
     print(f"  │  W/L flag        : {data['wl_ratio_check']['flag']}")
     print(f"  └────────────────────────────────────────────")
@@ -1854,12 +1859,12 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
         "meta": {
             "aruco_physical_size_mm": aruco_size_mm,
             "nails_detected":         len(clean),
-            "measurement_method":     "single top photo + nail fold brightness",
+            "measurement_method":     "top photo (width/length) + side/phone end-on photo (c-curve, brightness fallback if unavailable)",
             "notes": {
                 "width_mm":            "75th pct of stable row-scan nail plate width",
                 "length_mm":           "Tip to cuticle via Sobel edge detection",
                 "corrected_length_mm": "width / Jung et al. (2015) W/L ratio",
-                "c_curve_mm":          "Estimated from nail fold brightness drop at 30/50/70% of nail",
+                "c_curve_mm":          "Side/phone end-on photo when available, else brightness-drop estimate from the top photo",
                 "arc_radius_mm":       "R = w²/(8h) + h/2",
                 "skin_tone_hex":       "Median BGR of skin ring around nail",
             },
@@ -1870,7 +1875,7 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
             r["finger"]: {
                 "bounding_box_mm": {
                     "x": r["width_mm"],
-                    "y": r["thickness_mm"],
+                    "y": r.get("thickness_mm", 0.6),
                     "z": r["length_mm"],
                 },
                 "curvature": {
@@ -1952,7 +1957,7 @@ def build_profile(results: list) -> dict:
             "finger":           finger,
             "width_mm":         w,
             "length_mm":        l,
-            "c_curve_mm":       r["c_curve_mm"],
+            "c_curve_mm":       r.get("c_curve_mm"),
             "arc_radius_mm":    r.get("arc_radius_mm"),
             "c_curve_method":   r.get("_ccurve_method", "?"),
             "width_vs_avg_mm":  round(w - std["width_mm"], 2),
@@ -1969,7 +1974,11 @@ def build_profile(results: list) -> dict:
     n = len(fingers)
     avg_width_mm   = round(sum(f["width_mm"] for f in fingers) / n, 2)
     avg_length_mm  = round(sum(f["length_mm"] for f in fingers) / n, 2)
-    avg_c_curve_mm = round(sum(f["c_curve_mm"] for f in fingers) / n, 2)
+    # c_curve_mm is only ever set from a side/phone end-on photo now - None
+    # for any finger that didn't get one, so average over just the fingers
+    # that have a real reading rather than crashing sum() on a None.
+    c_curve_vals   = [f["c_curve_mm"] for f in fingers if f["c_curve_mm"] is not None]
+    avg_c_curve_mm = round(sum(c_curve_vals) / len(c_curve_vals), 2) if c_curve_vals else None
 
     width_size  = _majority([f["width_size"]  for f in fingers])
     length_size = _majority([f["length_size"] for f in fingers])
@@ -1978,8 +1987,8 @@ def build_profile(results: list) -> dict:
     length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
     width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
     summary_text = (
-        f"손톱 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요. "
-        f"평균 C-curve는 {avg_c_curve_mm}mm입니다."
+        f"손톱 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
+        + (f" 평균 C-curve는 {avg_c_curve_mm}mm입니다." if avg_c_curve_mm is not None else "")
     )
 
     summary = {

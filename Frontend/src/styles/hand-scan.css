@@ -307,23 +307,6 @@
     background: #000;
 }
 
-/* 작은 배지로 표시 — 화면 전체를 덮지 않아서 라이브 영상을 계속 볼 수 있음 */
-.hand-scan-fs__phone-hint {
-    position: absolute;
-    left: 12px;
-    bottom: 12px;
-    z-index: 2;
-    margin: 0;
-    max-width: calc(100% - 24px);
-    padding: 6px 12px;
-    border-radius: 8px;
-    color: #ffd54a;
-    font-size: 12px;
-    line-height: 1.4;
-    background: rgba(0, 0, 0, 0.6);
-    pointer-events: none;
-}
-
 .hand-scan-fs__divider {
     background: linear-gradient(
             180deg,
