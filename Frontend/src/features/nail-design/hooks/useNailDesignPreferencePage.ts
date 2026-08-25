@@ -4,15 +4,17 @@ import {
   buildDesignPrompt,
   INITIAL_PREFERENCES,
   type NailDesignPreferences,
-  PERSONAL_COLOR_SWATCHES,
   PREFERENCE_LIMITS,
   type PreferenceKey,
 } from '@/shared/constants/designPreferences'
 import { getHandScanResult } from '@/features/nail-design/utils/handScanStorage'
-import { getRecommendedSeasonCode } from '@/features/nail-design/utils/personalColorStorage'
+import { generateSkinTonePalette } from '@/shared/utils/skinTone'
 import { createChatSession, savePreferences, refineKeywords } from '@/features/nail-design/api/chat'
 import { generateDesign } from '@/entities/design/api'
 import { ApiError } from '@/shared/utils/apiClient'
+
+// Backend가 유효한 피부 LAB 데이터를 못 뽑았을 때 내려주는 기본 피부색(scan/skin_color.py 기준)
+const DEFAULT_SKIN_HEX = '#C8A882'
 
 export function togglePreference(
     prev: NailDesignPreferences,
@@ -51,7 +53,6 @@ export function useNailDesignPreferencePage() {
   const navigate = useNavigate()
   const location = useLocation()
   const incomingScanId = (location.state?.scanId as number | undefined) ?? 0
-  const incomingSeasonCode = (location.state?.seasonCode as string | undefined) ?? null
   const scanResult = getHandScanResult()
   const scanShape = scanResult?.recommendedShape
 
@@ -60,15 +61,13 @@ export function useNailDesignPreferencePage() {
     shape: scanShape ? [scanShape] : [],
   }))
   const [colorMethod, setColorMethod] = useState<'palette' | 'picker'>('palette')
-  const [selectedSeasonCode, setSelectedSeasonCode] = useState<string>(
-      () => incomingSeasonCode ?? getRecommendedSeasonCode() ?? 'spring_light',
-  )
   const [pickerColor, setPickerColor] = useState<string>('#DE869F')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
   const prompt = useMemo(() => buildDesignPrompt(preferences), [preferences])
-  const seasonSwatches = PERSONAL_COLOR_SWATCHES[selectedSeasonCode] ?? []
+  const skinToneHex = scanResult?.skinToneHex ?? DEFAULT_SKIN_HEX
+  const skinSwatches = useMemo(() => generateSkinTonePalette(skinToneHex, 24), [skinToneHex])
   const isValidHex = /^#[0-9a-fA-F]{6}$/.test(pickerColor)
 
   const handleToggle = (key: PreferenceKey, value: string) => {
@@ -129,18 +128,15 @@ export function useNailDesignPreferencePage() {
   }
 
   return {
-    incomingSeasonCode,
     preferences,
     setPreferences,
     colorMethod,
     setColorMethod,
-    selectedSeasonCode,
-    setSelectedSeasonCode,
     pickerColor,
     setPickerColor,
     isSubmitting,
     errorMessage,
-    seasonSwatches,
+    skinSwatches,
     isValidHex,
     handleToggle,
     toggleColor,

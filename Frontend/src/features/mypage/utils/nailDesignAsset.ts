@@ -284,7 +284,7 @@ function findVerticalSplitLines(
 function splitByProjection(
   sourceCanvas: HTMLCanvasElement,
   width: number,
-  height: number,
+  _height: number,
   data: Uint8ClampedArray,
   bounds: ContentBounds,
 ): FingerNailAsset[] {
@@ -329,7 +329,7 @@ function splitByProjection(
 function splitRowIntoFive(
   sourceCanvas: HTMLCanvasElement,
   width: number,
-  height: number,
+  _height: number,
   data: Uint8ClampedArray | null,
   bounds: ContentBounds,
 ): FingerNailAsset[] {

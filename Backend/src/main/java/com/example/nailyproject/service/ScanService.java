@@ -34,6 +34,7 @@ public class ScanService {
     private final S3Service s3Service;
     private final WebClient.Builder webClientBuilder;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final PrintOrderService printOrderService;
 
     @Value("${analysis.server.url:http://localhost:8000}")
     private String analysisServerUrl;
@@ -127,14 +128,6 @@ public class ScanService {
      * POST /scans/{scanId}/analyze/result
      */
     public void receiveAnalyzeResult(Long scanId, ScanResultRequestDto resultDto) {
-        // TEMP DEBUG: fingers가 왜 null로 오는지 원인 찾는 중 - 원인 확인되면 제거할 것.
-        try {
-            System.out.println("[DEBUG receiveAnalyzeResult] scanId=" + scanId
-                    + " rawBody=" + objectMapper.writeValueAsString(resultDto));
-        } catch (JsonProcessingException e) {
-            System.out.println("[DEBUG receiveAnalyzeResult] scanId=" + scanId + " (직렬화 실패: " + e.getMessage() + ")");
-        }
-
         HandScan handScan = handScanRepository.findById(scanId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
@@ -151,35 +144,42 @@ public class ScanService {
                 resultDto.getShape(),
                 resultDto.getSkinToneHex(),
                 recommendedColorsJson,
-                resultDto.getSeasonCode(),
-                resultDto.getSeasonNameKo(),
+                resultDto.getTone(),
+                resultDto.getBrightness(),
+                resultDto.getSaturation(),
                 resultDto.getOverallSize()
         );
 
         // 2. ScanImg 업데이트 (A안: 스캔 서버가 사진 직접 촬영 → DB에 레코드 없을 수 있음 → 없으면 생성)
-        for (ScanResultRequestDto.FingerResult fingerResult : resultDto.getFingers()) {
-            ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
-            String annotatedUrl = fingerResult.getAnnotatedImageUrl() != null
-                    ? fingerResult.getAnnotatedImageUrl() : "";
+        // fingers가 null일 수 있음 — 스캔 서버가 측정 파이프라인 도중 예외를 만나면
+        // {"success": false, "message": ...}만 콜백으로 보내는데, 그 응답엔 fingers 자체가
+        // 없어서 null로 역직렬화된다. 이 경우도 "0개 성공"으로 취급해서 처리를 계속 진행하고,
+        // 아래 상태 분류(FAILED)로 정상 처리되도록 한다.
+        if (resultDto.getFingers() != null) {
+            for (ScanResultRequestDto.FingerResult fingerResult : resultDto.getFingers()) {
+                ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
+                String annotatedUrl = fingerResult.getAnnotatedImageUrl() != null
+                        ? fingerResult.getAnnotatedImageUrl() : "";
 
-            ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
-                    .orElseGet(() -> scanImgRepository.save(
-                            ScanImg.builder()
-                                    .handScan(handScan)
-                                    .finger(fingerEnum)
-                                    .imageUrl(annotatedUrl)   // annotated 이미지를 대표 이미지로 저장
-                                    .build()
-                    ));
+                ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
+                        .orElseGet(() -> scanImgRepository.save(
+                                ScanImg.builder()
+                                        .handScan(handScan)
+                                        .finger(fingerEnum)
+                                        .imageUrl(annotatedUrl)   // annotated 이미지를 대표 이미지로 저장
+                                        .build()
+                        ));
 
-            try {
-                String measurementsJson = objectMapper.writeValueAsString(fingerResult.getMeasurements());
-                scanImg.updateAnalysisResult(measurementsJson, fingerResult.getSize());
-                // 스캔 서버가 annotated URL을 보내줬으면 imageUrl 업데이트
-                if (!annotatedUrl.isEmpty()) {
-                    scanImg.updateImageUrl(annotatedUrl);
+                try {
+                    String measurementsJson = objectMapper.writeValueAsString(fingerResult.getMeasurements());
+                    scanImg.updateAnalysisResult(measurementsJson, fingerResult.getSize());
+                    // 스캔 서버가 annotated URL을 보내줬으면 imageUrl 업데이트
+                    if (!annotatedUrl.isEmpty()) {
+                        scanImg.updateImageUrl(annotatedUrl);
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException("수치 데이터 JSON 변환 중 오류가 발생했습니다.", e);
                 }
-            } catch (Exception e) {
-                throw new RuntimeException("수치 데이터 JSON 변환 중 오류가 발생했습니다.", e);
             }
         }
 
@@ -236,16 +236,24 @@ public class ScanService {
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
         // 1. 손가락별로 완성된 STL 파일 S3 주소 업데이트
-        for (StlResultRequestDto.StlFingerResult fingerResult : resultDto.getFingers()) {
-            ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
-            ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
-                    .orElseThrow(() -> new IllegalArgumentException("해당 손가락을 찾을 수 없습니다."));
+        // fingers가 null일 수 있음 — 파이썬 쪽 STL 생성 파이프라인이 예외를 만나면
+        // {"success": false, "message": ...}만 콜백으로 보내는데 fingers 자체가 없다.
+        if (resultDto.getFingers() != null) {
+            for (StlResultRequestDto.StlFingerResult fingerResult : resultDto.getFingers()) {
+                ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
+                ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
+                        .orElseThrow(() -> new IllegalArgumentException("해당 손가락을 찾을 수 없습니다."));
 
-            scanImg.updateStlUrl(fingerResult.getStlUrl());
+                scanImg.updateStlUrl(fingerResult.getStlUrl());
+            }
         }
 
         // 2. 모든 과정이 끝났으므로 최종 상태를 COMPLETED로 변경!
         handScan.updateStatus(HandScan.ScanStatus.COMPLETED);
+
+        // 3. 이 손의 STL 생성이 방금 끝났으니, 이 scanId를 기다리고 있던 출력 주문이 있으면
+        //    (양손 다 필요한 주문이면 나머지 손도 끝났는지 확인 후) 병합을 시작한다.
+        printOrderService.tryStartMergeForScan(scanId);
     }
 
     /**

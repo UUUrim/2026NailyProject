@@ -7,7 +7,6 @@ import { parseDateFlexible, type ScanSession } from '@/shared/utils/scanDetail'
 import {
     PREFERENCE_OPTIONS,
     PREFERENCE_OPTION_INFO,
-    SEASON_ROWS,
     SHAPE_PREVIEW_IMAGES,
     type PreferenceKey,
 } from '@/shared/constants/designPreferences'
@@ -116,95 +115,6 @@ function QuestionMarkIcon({ className, size = 16 }: { className?: string; size?:
             />
             <circle cx="12" cy="16.6" r="1" fill="currentColor" />
         </svg>
-    )
-}
-function SeasonDropdown({
-                            value,
-                            onChange,
-                            disabled,
-                        }: {
-    value: string
-    onChange: (code: string) => void
-    disabled?: boolean
-}) {
-    const [open, setOpen] = useState(false)
-    const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
-    const wrapRef = useRef<HTMLDivElement | null>(null)
-    const triggerRef = useRef<HTMLButtonElement | null>(null)
-    const menuRef = useRef<HTMLDivElement | null>(null)
-
-    useEffect(() => {
-        const handleOutsideClick = (e: MouseEvent) => {
-            const target = e.target as Node
-            if (wrapRef.current?.contains(target)) return
-            if (menuRef.current?.contains(target)) return
-            setOpen(false)
-        }
-        document.addEventListener('mousedown', handleOutsideClick)
-        return () => document.removeEventListener('mousedown', handleOutsideClick)
-    }, [])
-
-    const current = SEASON_ROWS.find((row) => row.code === value)
-
-    const toggleOpen = (e: ReactMouseEvent) => {
-        e.stopPropagation()
-        if (disabled) return
-        const rect = triggerRef.current?.getBoundingClientRect()
-        if (rect) {
-            setMenuPos({ top: rect.bottom + 6, left: rect.right })
-        }
-        setOpen((prev) => !prev)
-    }
-
-    return (
-        <div className="design-chat__season-dropdown" ref={wrapRef}>
-            <button
-                ref={triggerRef}
-                type="button"
-                className="design-chat__season-dropdown-trigger"
-                onClick={toggleOpen}
-                disabled={disabled}
-            >
-                <span>{current?.nameKo ?? '퍼스널컬러'}</span>
-                <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden="true"
-                    className={`design-chat__season-dropdown-chevron${open ? ' is-open' : ''}`}
-                >
-                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-            </button>
-
-            {open && menuPos &&
-                createPortal(
-                    <div
-                        ref={menuRef}
-                        className="design-chat__season-dropdown-menu"
-                        style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateX(-100%)' }}
-                    >
-                        <div className="design-chat__season-dropdown-menu-scroll">
-                            {SEASON_ROWS.map((row) => (
-                                <button
-                                    key={row.code}
-                                    type="button"
-                                    className={`design-chat__season-dropdown-option${row.code === value ? ' is-active' : ''}`}
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        onChange(row.code)
-                                        setOpen(false)
-                                    }}
-                                >
-                                    {row.nameKo}
-                                </button>
-                            ))}
-                        </div>
-                    </div>,
-                    document.body,
-                )}
-        </div>
     )
 }
 // 사이드바 헤더의 "분석 결과 선택" 드롭다운 — 손 분석 이력(양손 다 촬영된 세션)을
@@ -380,9 +290,6 @@ export function NailDesignChatPageContent() {
         messagesRef,
         chatContainerRef,
         textareaRef,
-        manualSeasonCode,
-        setManualSeasonCode,
-        detectedSeasonCode,
         hasScanColorPalette,
         colorPickerPalette,
         isMultiConfirmVisible,
@@ -721,12 +628,6 @@ export function NailDesignChatPageContent() {
                                     <p className="design-chat__quickreply-question">{activeQuickReply.question}</p>
                                 </button>
 
-                                {(activeQuickReply.id === 'pref-color' ||
-                                        (activeQuickReply.id.startsWith('freeform-actions') && freeformColorPickerOpen)) &&
-                                    !hasScanColorPalette && (
-                                        <SeasonDropdown value={manualSeasonCode} onChange={setManualSeasonCode} disabled={isSending} />
-                                    )}
-
                                 <button
                                     type="button"
                                     className="design-chat__quickreply-chevron-btn"
@@ -754,9 +655,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                detectedSeasonCode && (
-                                                    <p className="design-chat__color-picker-label">내 퍼스널컬러 팔레트</p>
-                                                )
+                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
                                             )}
 
                                             <div className="design-chat__color-main">
@@ -862,9 +761,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                detectedSeasonCode && (
-                                                    <p className="design-chat__color-picker-label">내 퍼스널컬러 팔레트</p>
-                                                )
+                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
                                             )}
 
                                             <div className="design-chat__color-main">

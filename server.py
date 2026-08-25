@@ -83,6 +83,7 @@ load_dotenv(os.path.join(_SCAN_DIR, ".env"))
 from merge_fingers   import merge_hand, merge_both_hands          # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
+from skin_color import recommend_nail_colors, lab_to_rgb_hex      # scan/
 
 # 탑뷰 라이브 프리뷰 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정 화면을
 # 웹 스트림에도 그대로 재사용한다. 매 프레임 nail_measurer로 실측정을 돌리되,
@@ -358,6 +359,52 @@ class PhoneCamera:
 
 _phone_cam = PhoneCamera()
 
+# 탑뷰 카메라를 손(왼손→오른손) 사이마다 release()/reopen 하지 않고 세션 내내 계속
+# 잡고 있는다. Windows DSHOW는 방금 놓아준 카메라를 곧바로 다시 열 때 예외를 던지는
+# 경우가 잦아서(_capture_all_fingers의 재시도 루프로도 못 잡을 만큼 자주), 아예
+# 재오픈 자체를 안 하는 쪽이 근본적으로 더 안전하다. /camera/config로 인덱스가
+# 바뀔 때만 새로 연다.
+_top_cam_lock  = threading.Lock()
+_top_cam       = None
+_top_cam_index = None
+
+def _get_top_cam() -> cv2.VideoCapture:
+    global _top_cam, _top_cam_index
+    with _top_cam_lock:
+        if _top_cam is not None and _top_cam_index == CAMERA_TOP and _top_cam.isOpened():
+            return _top_cam
+
+        if _top_cam is not None:
+            _top_cam.release()
+            _top_cam = None
+
+        cap = None
+        for attempt in range(4):
+            try:
+                cap = cv2.VideoCapture(CAMERA_TOP, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    break
+                cap.release()
+            except Exception as e:
+                # DSHOW가 가끔 "raised unknown C++ exception!"과 함께 첫 시도를 그냥
+                # 실패시킴 - isOpened()가 False인 경우만 재시도하면 이 예외는 못 잡아서
+                # 재시도 루프 자체가 통째로 건너뛰어지고 1번 시도만에 바로 실패한다.
+                print(f"[Capture] 탑뷰 카메라 열기 예외 (시도 {attempt + 1}/4): {e!r} - 재시도")
+                cap = None
+                time.sleep(0.8)
+                continue
+            print(f"[Capture] 탑뷰 카메라 열기 실패 (시도 {attempt + 1}/4) - 재시도")
+            time.sleep(0.8)
+
+        if cap is None or not cap.isOpened():
+            raise RuntimeError(f"탑뷰 카메라(인덱스 {CAMERA_TOP})를 열 수 없습니다.")
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        _top_cam       = cap
+        _top_cam_index = CAMERA_TOP
+        return _top_cam
+
 
 def _push_frame(q: _q.Queue, frame: np.ndarray):
     if q.full():
@@ -564,22 +611,9 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
     local_dir = os.path.join(BASE, "photos", userid, session, hand)
     os.makedirs(local_dir, exist_ok=True)
 
-    # DSHOW가 가끔 "raised unknown C++ exception!"과 함께 첫 시도를 그냥 실패시킴 -
-    # 특히 이전 세션이 카메라를 놓아준 직후 바로 다시 열 때 흔한, 알려진 Windows
-    # DirectShow 특성. 짧게 대기 후 재시도하면 대부분 통과하므로, 첫 실패로 바로
-    # 스캔 전체를 죽이지 않고 몇 번 더 시도해본다.
-    cap_top = None
-    for attempt in range(4):
-        cap_top = cv2.VideoCapture(CAMERA_TOP, cv2.CAP_DSHOW)
-        if cap_top.isOpened():
-            break
-        cap_top.release()
-        print(f"[Capture] 탑뷰 카메라 열기 실패 (시도 {attempt + 1}/4) - 재시도")
-        time.sleep(0.8)
-    cap_top.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap_top.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-    if not cap_top.isOpened():
-        raise RuntimeError(f"탑뷰 카메라(인덱스 {CAMERA_TOP})를 열 수 없습니다.")
+    # 왼손 끝나고 release() 했다가 오른손에서 바로 다시 여는 게 DSHOW 예외의 원인이었다 -
+    # 이제 손 사이에 놓지 않고 세션 내내 계속 잡고 있는 카메라를 그대로 재사용한다.
+    cap_top = _get_top_cam()
 
     cap_side = None
     if CAMERA_SIDE == -2:
@@ -624,8 +658,9 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
         _S.active = False
         top_idle_stop.set()
         time.sleep(0.1)   # let the idle loop's in-flight read() finish before release()
-        cap_top.release()
-        if cap_side:
+        # cap_top은 release() 안 함 - 세션 내내(왼손→오른손) 계속 잡고 있는 공용 카메라라서
+        # 여기서 놓아버리면 다음 손 시작할 때 다시 여는 지점에서 DSHOW 예외가 재발한다.
+        if cap_side and cap_side is not _phone_cam:
             cap_side.release()
 
     return local_dir
@@ -689,11 +724,11 @@ def _upload_results(userid: str, session: str, hand: str):
 
 def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    photos_root  = os.path.join(BASE, "photos",  userid, session, hand)
     s3_prefix    = f"results/{userid}/{session}/{hand}"
 
     fingers_data = []
     skin_tones   = []
+    skin_metrics = []
     sizes        = []
 
     for finger in FINGER_ORDER:
@@ -713,6 +748,17 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             skin_tone = fd.get("skin_tone_hex", "")
             if skin_tone: skin_tones.append(skin_tone)
             sizes.append(nail_size)
+
+            # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
+            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/server.py와 동일).
+            if fd.get("skin_L") is not None:
+                skin_metrics.append({
+                    "L":          fd["skin_L"],
+                    "a":          fd["skin_a"],
+                    "b":          fd["skin_b"],
+                    "warmness":   fd["skin_warmness"],
+                    "saturation": fd["skin_saturation"],
+                })
             # profile.json fingers 배열에서 이 손가락 데이터 찾기
             finger_prof = next(
                 (f for f in prof.get("fingers", []) if f.get("finger") == finger),
@@ -745,17 +791,29 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     skin_tone_hex = skin_tones[0] if skin_tones else "#C8A882"
     overall_size  = max(set(sizes), key=sizes.count) if sizes else "average"
     recommended_colors = []
-    season_code = season_name_ko = None
+    tone = brightness = saturation = None
 
-    from personal_color import diagnose_personal_color
-    for finger in ("index", "middle", "ring", "thumb"):
-        d = diagnose_personal_color(os.path.join(photos_root, f"{finger}_top.jpg"))
-        if d and "error" not in d:
-            skin_tone_hex      = d["skinToneHex"]
-            recommended_colors = d["recommendedColors"]
-            season_code        = d["seasonCode"]
-            season_name_ko     = d["seasonNameKo"]
-            break
+    # 유효한 손가락들의 LAB 평균으로 피부색/웜쿨/명도/채도/추천컬러 30개를
+    # 한 번에 계산한다 (scan/server.py의 build_callback_data와 동일한 방식).
+    if skin_metrics:
+        avg_L    = sum(m["L"] for m in skin_metrics) / len(skin_metrics)
+        avg_a    = sum(m["a"] for m in skin_metrics) / len(skin_metrics)
+        avg_b    = sum(m["b"] for m in skin_metrics) / len(skin_metrics)
+        avg_warm = sum(m["warmness"] for m in skin_metrics) / len(skin_metrics)
+        avg_sat  = sum(m["saturation"] for m in skin_metrics) / len(skin_metrics)
+
+        skin_tone_hex = lab_to_rgb_hex(avg_L, avg_a, avg_b)
+        brightness    = round(avg_L / 100.0, 3)
+        saturation    = round(avg_sat, 3)
+
+        result = recommend_nail_colors(avg_L, avg_a, avg_b, avg_warm, avg_sat)
+        recommended_colors = [c["hex"] for c in result["best"]]
+        tone = result["skin_summary"]["tone"]
+        print(f"  [SkinColor] tone={tone} brightness={brightness} "
+              f"saturation={saturation} colors={len(recommended_colors)}개 "
+              f"({len(skin_metrics)}손가락 평균)")
+    else:
+        print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
     # summary_text: 왼손 profile.json summary에서 가져옴
     summary_text = ""
@@ -777,8 +835,9 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
         "overallSize":       overall_size,
         "summaryText":       summary_text,
         "recommendedColors": recommended_colors,
-        "seasonCode":        season_code,
-        "seasonNameKo":      season_name_ko,
+        "tone":              tone,
+        "brightness":        brightness,
+        "saturation":        saturation,
         "fingers":           fingers_data,
     }
 
