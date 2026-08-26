@@ -13,3 +13,8 @@ pydantic==2.11.3
 requests==2.34.2
 scipy==1.17.1
 uvicorn==0.52.4
+# export_shape_templates.py 전용(1회성 GLB 템플릿 export) - printer/merge_fingers.py에서도
+# 이미 쓰고 있어 새 라이브러리는 아님. 버전 고정 없음(printer/requirements.txt와 동일).
+trimesh
+# trimesh의 GLB material export 경로가 PIL을 요구함(실제로 이미지 텍스처를 안 붙여도).
+pillow

@@ -160,6 +160,10 @@ public class NailDesignService {
             System.err.println("컬러 팔레트 추출 실패, 색상 없이 진행: " + e.getMessage());
         }
 
+        // 4. detect 서버에서 손가락별 네일팁 매트 이미지 추출 → S3 업로드 후 URL 리스트 JSON
+        //    (AR 미리보기가 로컬 세그멘테이션 대신 이걸 우선 사용 - nailDesignAsset.ts 참고)
+        String nailTipCropsJson = fetchAndUploadNailTipCrops(userId, imageBase64);
+
         NailDesign design = NailDesign.builder()
                 .user(user)
                 .session(session)
@@ -168,10 +172,41 @@ public class NailDesignService {
                 .aiModel("z-image-turbo + lora-v1 (diffusers)")
                 .status(NailDesign.DesignStatus.DRAFT)
                 .colorPalette(colorPaletteJson)
+                .nailTipCropsJson(nailTipCropsJson)
                 .seed(seed)
                 .build();
 
         return nailDesignRepository.save(design);
+    }
+
+    private String fetchAndUploadNailTipCrops(Long userId, String imageBase64) {
+        try {
+            Map<String, List<String>> parts = nailDetectionService.detectParts(imageBase64, List.of("nail tip"));
+            List<String> crops = parts.get("nail tip");
+            if (crops == null || crops.size() != 5) return null;
+
+            List<String> urls = new ArrayList<>();
+            for (int i = 0; i < crops.size(); i++) {
+                urls.add(uploadNailTipCrop(userId, crops.get(i), i));
+            }
+            return objectMapper.writeValueAsString(urls);
+        } catch (Exception e) {
+            System.err.println("네일팁 크롭 추출 실패, AR 미리보기는 기존 세그멘테이션으로 폴백: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // detect 서버의 /parts 응답 값이 이미 호스팅된 URL인지 raw base64인지 확정된 문서가 없어
+    // 둘 다 받아준다: URL이면 그대로 쓰고, 아니면 우리 S3에 업로드해서 우리 도메인 URL로 정규화한다
+    // (S3Service.uploadImageBytes()가 이미 그 패턴 - 원본 디자인 이미지도 이렇게 저장한다).
+    private String uploadNailTipCrop(Long userId, String crop, int index) {
+        if (crop.startsWith("http://") || crop.startsWith("https://")) {
+            return crop;
+        }
+        String base64 = crop.contains(",") ? crop.substring(crop.indexOf(',') + 1) : crop;
+        byte[] bytes = Base64.getDecoder().decode(base64);
+        String s3Key = "designs/user_" + userId + "/nail-tips/" + UUID.randomUUID() + "_" + index + ".png";
+        return s3Service.uploadImageBytes(bytes, s3Key);
     }
 
     //단어 사이 하이픈 제거용
@@ -525,7 +560,41 @@ public class NailDesignService {
                 .shared(design.isShared())
                 .owner(isOwner)
                 .details(buildDetails(design))
+                .shape(extractShape(design))
+                .nailTipCropUrls(extractNailTipCropUrls(design))
                 .build();
+    }
+
+    /**
+     * generateDesign()이 저장해 둔 손가락별 네일팁 매트 이미지 URL JSON 배열을 파싱한다.
+     * 없거나(옛날 디자인) 추출이 실패했던 디자인이면 null - AR 미리보기가 로컬 세그멘테이션으로
+     * 폴백한다.
+     */
+    private List<String> extractNailTipCropUrls(NailDesign design) {
+        if (design.getNailTipCropsJson() == null || design.getNailTipCropsJson().isBlank()) return null;
+        try {
+            return objectMapper.readValue(
+                    design.getNailTipCropsJson(),
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * designPlan JSON에 저장된 원본 shape 키워드(round/oval/almond/square/stiletto/
+     * ballerina)를 뽑아낸다. buildCombinedPromptFromPlan()이 프롬프트용으로
+     * toPromptText()를 거치기 전 원본 값이라 AR 미리보기의 3D 템플릿 파일명과 그대로 매칭된다.
+     */
+    private String extractShape(NailDesign design) {
+        if (design.getDesignPlan() == null || design.getDesignPlan().isBlank()) return null;
+        try {
+            JsonNode plan = objectMapper.readTree(design.getDesignPlan());
+            String shape = plan.path("shape").asText(null);
+            return (shape == null || shape.isBlank()) ? null : shape;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Transactional
