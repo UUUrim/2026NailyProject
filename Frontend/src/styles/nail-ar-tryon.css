@@ -74,6 +74,8 @@
 }
 
 .nail-ar-tryon__canvas {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -82,6 +84,30 @@
 }
 
 .nail-ar-tryon__canvas.is-visible {
+  opacity: 1;
+}
+
+/* 3D 쉐입 템플릿 렌더링 시, 위 2D 캔버스(카메라 배경) 위에 겹쳐서 손톱 메시만 그리는
+   투명 WebGL 캔버스. 2D 폴백일 때는 만들어지지 않는다. */
+.nail-ar-tryon__mesh-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Must match .nail-ar-tryon__canvas's object-fit exactly - both canvases
+     share the same internal pixel size (video's native resolution) and the
+     nail meshes are positioned in that same pixel space. Without this, the
+     video canvas (cover: uniform scale, cropped) and this mesh canvas
+     (default fill: non-uniform stretch to the box) would map that shared
+     pixel space to the screen differently, so the nail overlay drifts away
+     from the actual finger the more the container's aspect ratio differs
+     from the camera's. */
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.nail-ar-tryon__mesh-canvas.is-visible {
   opacity: 1;
 }
 

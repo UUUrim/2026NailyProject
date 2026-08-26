@@ -25,6 +25,8 @@ export function NailDesignResultPageContent() {
     likeModalMode,
     setLikeModalMode,
     shared,
+    shape,
+    nailTipCropUrls,
     detailsWithSwatches,
     handleToggleLike,
     confirmLikeWithFolder,
@@ -267,7 +269,14 @@ export function NailDesignResultPageContent() {
             />
         )}
 
-        {arPreviewOpen && <NailArTryOnModal imageUrl={image} onClose={() => setArPreviewOpen(false)} />}
+        {arPreviewOpen && (
+            <NailArTryOnModal
+                imageUrl={image}
+                shape={shape}
+                nailTipCropUrls={nailTipCropUrls}
+                onClose={() => setArPreviewOpen(false)}
+            />
+        )}
 
         {/* 참고 사진 확대 보기 — 확대/이동 말고는 아무 기능도 없는 축소판 상세모달 */}
         {referencePhotoOpen && context?.referenceImageUrl && (

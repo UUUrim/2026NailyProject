@@ -96,6 +96,8 @@ export function useNailDesignResultPage() {
   const [userName, setUserName] = useState('')
   const [shared, setShared] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
+  const [shape, setShape] = useState<string | null>(null)
+  const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
 
   // ★ 스와치 폴링
   useEffect(() => {
@@ -145,7 +147,10 @@ export function useNailDesignResultPage() {
     if (designId != null) {
       void getDesignDetail(designId)
           .then((detail) => {
-            if (!cancelled) setShared(Boolean(detail.shared))
+            if (cancelled) return
+            setShared(Boolean(detail.shared))
+            setShape(detail.shape ?? null)
+            setNailTipCropUrls(detail.nailTipCropUrls ?? null)
           })
           .catch(() => {})
 
@@ -231,6 +236,8 @@ export function useNailDesignResultPage() {
     userName,
     shared,
     shareBusy,
+    shape,
+    nailTipCropUrls,
     detailsWithSwatches,
     handleToggleShare,
     handleToggleLike,

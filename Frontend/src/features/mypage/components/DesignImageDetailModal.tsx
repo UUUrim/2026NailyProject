@@ -125,6 +125,8 @@ export function DesignImageDetailModal({
   const [isBusy, setIsBusy] = useState(false)
   const [showDesignDetails, setShowDesignDetails] = useState(false)
   const [arTryOnImageUrl, setArTryOnImageUrl] = useState<string | null>(null)
+  const [shape, setShape] = useState<string | null>(null)
+  const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
   const [likeModalTarget, setLikeModalTarget] = useState<LikeModalTarget | null>(null)
 
   // 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글)
@@ -163,6 +165,8 @@ export function DesignImageDetailModal({
       setOwner(undefined)
       setShared(false)
       setDetails(null)
+      setShape(null)
+      setNailTipCropUrls(null)
       return
     }
 
@@ -175,6 +179,8 @@ export function DesignImageDetailModal({
     setOwner(undefined)
     setShared(false)
     setDetails(null)
+    setShape(null)
+    setNailTipCropUrls(null)
 
     if (image.designId == null) return
     let cancelled = false
@@ -186,6 +192,8 @@ export function DesignImageDetailModal({
         setOwner(detail.owner)
         setDetails(detail.details ?? null)
         setCreatedAt((prev) => detail.createdAt || prev)
+        setShape(detail.shape ?? null)
+        setNailTipCropUrls(detail.nailTipCropUrls ?? null)
       })
       .catch(() => {
         /* 상세 실패해도 이미지는 볼 수 있게 유지 */
@@ -524,7 +532,14 @@ export function DesignImageDetailModal({
         initialFolderId={likeModalTarget?.currentFolderId ?? null}
       />
 
-      {arTryOnImageUrl && <NailArTryOnModal imageUrl={arTryOnImageUrl} onClose={() => setArTryOnImageUrl(null)} />}
+      {arTryOnImageUrl && (
+        <NailArTryOnModal
+          imageUrl={arTryOnImageUrl}
+          shape={shape}
+          nailTipCropUrls={nailTipCropUrls}
+          onClose={() => setArTryOnImageUrl(null)}
+        />
+      )}
 
       {chatHistoryZoomImage && (
         <DesignImageDetailModal
