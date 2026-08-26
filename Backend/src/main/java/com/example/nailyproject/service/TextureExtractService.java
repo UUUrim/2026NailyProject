@@ -37,7 +37,7 @@ public class TextureExtractService {
             and colors actually used in the design.
 
             Supported textures (use EXACTLY these keys):
-              glitter, marble, magnetic_chrome, powder, matte, drawing, 3d_charm, plain_solid
+              glitter, marble, magnetic_chrome, powder, matte, 3d_charm, plain_solid
 
             Rules:
             - Extract only textures that genuinely appear in the prompt. Do NOT invent textures.
@@ -48,7 +48,6 @@ public class TextureExtractService {
               Use descriptive English color names like "dusty rose pink", "ivory", "Hazelnut".
               Set color to null if the texture has its own inherent color (e.g. magnetic_chrome).
             - If a design has gradient/ombre/french/cheek → classify as plain_solid.
-            - If a design has embossed line art / hand-drawn / doodle → classify as drawing.
             - Respond ONLY with a JSON array. No markdown, no explanation, no preamble.
 
             Output format:
@@ -90,10 +89,22 @@ public class TextureExtractService {
             String cleaned = text.replaceAll("```json|```", "").trim();
             JsonNode arrayNode = objectMapper.readTree(cleaned);
             List<Map<String, Object>> result = new ArrayList<>();
+            int charmIndex = 1;
             if (arrayNode.isArray()) {
                 for (JsonNode item : arrayNode) {
                     Map<String, Object> pair = new java.util.LinkedHashMap<>();
-                    pair.put("texture", item.path("texture").asText());
+                    String texture = item.path("texture").asText();
+
+                    //3d_charm 중복 처리
+                    if ("3d_charm".equals(texture)) {
+                        String charmShape = item.has("charm_shape")
+                                ? item.get("charm_shape").asText().toLowerCase().replace(" ", "_")
+                                : String.valueOf(charmIndex);
+                        texture = charmIndex == 1 ? "3d_charm_" + charmShape : "3d_charm_" + charmShape + "_" + charmIndex;
+                        charmIndex++;
+                    }
+
+                    pair.put("texture", texture);
                     pair.put("color", item.has("color") && !item.get("color").isNull()
                             ? item.get("color").asText() : null);
                     if (item.has("charm_shape")) {
@@ -102,7 +113,12 @@ public class TextureExtractService {
                     if (item.has("charm_material")) {
                         pair.put("charm_material", item.get("charm_material").asText());
                     }
-                    result.add(pair);
+                    final String finalTexture = texture;
+                    boolean alreadyExists = result.stream()
+                            .anyMatch(p -> finalTexture.equals(p.get("texture")));
+                    if (!alreadyExists) {
+                        result.add(pair);
+                    }
                 }
             }
             System.out.println("[TextureExtractService] 추출된 텍스처 쌍: " + result);

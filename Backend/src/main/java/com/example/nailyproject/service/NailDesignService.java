@@ -150,16 +150,7 @@ public class NailDesignService {
         String s3Key = "designs/user_" + userId + "/" + UUID.randomUUID() + ".png";
         String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
 
-        // 3. detect 서버에서 손톱별 컬러 추출 → colorPalette JSON
-        String colorPaletteJson = null;
-        try {
-            List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNail(imageBase64);
-            List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
-            colorPaletteJson = objectMapper.writeValueAsString(palette);
-        } catch (Exception e) {
-            System.err.println("컬러 팔레트 추출 실패, 색상 없이 진행: " + e.getMessage());
-        }
-
+        // 3. 컬러 추출 / 파츠 검출은 confirmDesign() 시점에 수행
         NailDesign design = NailDesign.builder()
                 .user(user)
                 .session(session)
@@ -167,7 +158,6 @@ public class NailDesignService {
                 .promptSummary(prompt)
                 .aiModel("z-image-turbo + lora-v1 (diffusers)")
                 .status(NailDesign.DesignStatus.DRAFT)
-                .colorPalette(colorPaletteJson)
                 .seed(seed)
                 .build();
 
@@ -316,7 +306,20 @@ public class NailDesignService {
             nailDesignRepository.save(design);
         }
 
-        // 확정 시 스와치 생성 (이미 있으면 건너뜀)
+        // ★ 컬러 추출 — 동기 (확정 응답 전에 완료되어야 프론트에서 바로 보임)
+        try {
+            byte[] imgBytes = s3Service.downloadImageBytes(design.getImageUrls().get(0));
+            String imgBase64 = Base64.getEncoder().encodeToString(imgBytes);
+            List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNail(imgBase64);
+            List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
+            design.updateColorPalette(objectMapper.writeValueAsString(palette));
+            nailDesignRepository.save(design);
+            System.out.println("[Color] 팔레트 저장 완료 designId=" + designId);
+        } catch (Exception e) {
+            System.err.println("[Color] 컬러 추출 실패: " + e.getMessage());
+        }
+
+        // 확정 시 스와치 + 파츠 생성 (이미 있으면 건너뜀) — 비동기
         if (design.getSwatchesJson() == null || design.getSwatchesJson().isBlank()) {
             final Long finalDesignId = designId;
             final Long finalUserId = user.getId();
@@ -324,6 +327,33 @@ public class NailDesignService {
 
             new Thread(() -> {
                 try {
+                    byte[] imgBytes = s3Service.downloadImageBytes(design.getImageUrls().get(0));
+                    String imgBase64 = Base64.getEncoder().encodeToString(imgBytes);
+
+//                    // 컬러 추출
+//                    try {
+//                        List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNail(imgBase64);
+//                        List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
+//                        String colorPaletteJson = objectMapper.writeValueAsString(palette);
+//                        nailDesignRepository.findById(finalDesignId).ifPresent(d -> {
+//                            d.updateColorPalette(colorPaletteJson);
+//                            nailDesignRepository.save(d);
+//                            System.out.println("[Color] 팔레트 저장 완료 designId=" + finalDesignId);
+//                        });
+//                    } catch (Exception e) {
+//                        System.err.println("[Color] 컬러 추출 실패: " + e.getMessage());
+//                    }
+                    // ★ 파츠 검출
+                    try {
+                        if (design.getDesignPlan() != null) {
+                            JsonNode planNode = objectMapper.readTree(design.getDesignPlan());
+                            triggerPartsDetection(design, planNode);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[Parts] 파츠 검출 실패: " + e.getMessage());
+                    }
+
+                    // 스와치 생성
                     List<Map<String, Object>> texturePairs =
                             textureExtractService.extractTextureColorPairs(finalPrompt);
                     if (texturePairs.isEmpty()) return;
@@ -334,6 +364,12 @@ public class NailDesignService {
                     Map<String, String> swatchUrlMap = new LinkedHashMap<>();
                     for (Map.Entry<String, String> entry : swatchBase64Map.entrySet()) {
                         if (entry.getValue() == null || entry.getValue().isBlank()) continue;
+
+                        // ★ mercury_chrome은 이미 S3 URL — base64 디코딩 없이 바로 저장
+                        if ("mercury_chrome".equals(entry.getKey())) {
+                            swatchUrlMap.put("mercury_chrome", entry.getValue());
+                            continue;
+                        }
                         try {
                             byte[] swatchBytes = Base64.getDecoder().decode(entry.getValue());
                             String swatchKey = "designs/user_" + finalUserId
@@ -350,7 +386,7 @@ public class NailDesignService {
                             try {
                                 d.updateSwatchesJson(objectMapper.writeValueAsString(swatchUrlMap));
                                 nailDesignRepository.save(d);
-                                System.out.println("[Swatch] " + swatchUrlMap.size() + "개 스와치 저장 완료");
+                                System.out.println("[Swatch] " + swatchUrlMap.size() + "개 스와치 저장 완료: " + swatchUrlMap.keySet());
                             } catch (Exception e) {
                                 System.err.println("[Swatch] DB 저장 실패: " + e.getMessage());
                             }
@@ -704,13 +740,13 @@ public class NailDesignService {
         final Long finalUserId = user.getId();
 
 
-        triggerPartsDetection(nailDesign, plan);
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
                 .status(nailDesign.getStatus().name())
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
+                .keywords(extractKeywordsFromSlots(slots, session)) //디자인결과화면 선택옵션 단어
                 .build();
     }
 
@@ -768,7 +804,7 @@ public class NailDesignService {
         return DesignGenerateResponseDto.Details.builder()
                 .colorPalette(colorPalette)
                 .textures(new ArrayList<>(textures))
-                .nailParts(new ArrayList<>(nailParts))
+                .nailParts(buildNailPartsWithImages(nailDesign, nailParts))
                 .swatches(swatchMap.isEmpty() ? null : swatchMap)
                 .build();
     }
@@ -1006,11 +1042,11 @@ public class NailDesignService {
 
                 Map<String, List<String>> detected = nailDetectionService.detectParts(imageBase64, partNames);
 
-                // ★ base64 크롭 → S3 업로드 → URL 맵 구성
+                // S3 업로드
                 Map<String, List<String>> partsUrlMap = new LinkedHashMap<>();
                 for (Map.Entry<String, List<String>> entry : detected.entrySet()) {
                     List<String> urls = new ArrayList<>();
-                    for (int i = 0; i < entry.getValue().size(); i++) {
+                    for (int i = 0; i < Math.min(1, entry.getValue().size()); i++) {
                         String cropBase64 = entry.getValue().get(i);
                         if (cropBase64 == null || cropBase64.isBlank()) continue;
                         try {
@@ -1027,7 +1063,7 @@ public class NailDesignService {
                     if (!urls.isEmpty()) partsUrlMap.put(entry.getKey(), urls);
                 }
 
-                // ★ DB 저장
+                // DB 저장
                 if (!partsUrlMap.isEmpty()) {
                     nailDesignRepository.findById(designId).ifPresent(d -> {
                         try {
@@ -1039,7 +1075,6 @@ public class NailDesignService {
                         }
                     });
                 }
-
             } catch (Exception e) {
                 System.err.println("[Parts] 파츠 검출 실패 designId=" + designId + ": " + e.getMessage());
             }
@@ -1051,17 +1086,55 @@ public class NailDesignService {
         for (String fingerName : List.of("thumb", "index", "middle", "ring", "pinky")) {
             JsonNode finger = plan.get(fingerName);
             if (finger == null) continue;
-            JsonNode partsList = finger.get("parts");
-            if (partsList != null && partsList.isArray()) {
-                partsList.forEach(p -> {
+
+            // ★ parts_detect 있으면 우선 사용, 없으면 parts에서 simplify
+            JsonNode detectList = finger.get("parts_detect");
+            if (detectList != null && detectList.isArray() && detectList.size() > 0) {
+                detectList.forEach(p -> {
                     String part = p.asText().trim();
                     if (!part.isBlank() && !"none".equalsIgnoreCase(part) && !parts.contains(part)) {
-                        parts.add(part);
+                        parts.add(part + " on nail tip");
                     }
                 });
+            } else {
+                JsonNode partsList = finger.get("parts");
+                if (partsList != null && partsList.isArray()) {
+                    partsList.forEach(p -> {
+                        String part = simplifyPartName(p.asText().trim());
+                        if (!part.isBlank() && !"none".equalsIgnoreCase(part) && !parts.contains(part)) {
+                            parts.add(part);
+                        }
+                    });
+                }
             }
         }
         return parts;
+    }
+
+    private String simplifyPartName(String part) {
+        if (part.isBlank()) return part;
+
+        // 리본 → bow 치환
+        String simplified = part.replaceAll("(?i)\\bribbon\\b", "bow");
+
+        // 형용사/수식어 제거
+        simplified = simplified
+                .replaceAll("(?i)\\b(large|small|tiny|oversized|3D|iridescent|metallic|crystal|glossy|matte|clear|embedded|holographic|internal|fine|soft|smooth|subtle|shaped|single|double)\\b", "")
+                .replaceAll("(?i)\\b(with|and|of|from|at|in|the|a|an)\\b", " ")
+                .replaceAll("(?i)-shaped", "")
+                .replaceAll("-", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        // 중복 단어 제거 후 앞 2단어만
+        String[] words = simplified.split(" ");
+        List<String> unique = new ArrayList<>();
+        for (String w : words) {
+            if (!unique.contains(w)) unique.add(w);
+        }
+        simplified = String.join(" ", unique.subList(0, Math.min(1, unique.size())));
+
+        return simplified + " on nail tip";
     }
 
     /**
@@ -1083,5 +1156,55 @@ public class NailDesignService {
         }
         // 세션 없는 경우 (채팅 없이 직접 생성된 디자인)
         return design.getPromptSummary();
+    }
+
+    public List<String> extractKeywordsFromSlots(Map<String, SlotData> slots, DesignSession session) {
+        List<String> keywords = new ArrayList<>();
+        for (String cat : List.of("mood", "designType", "motif", "season", "shape")) {
+            List<String> liked = getLiked(slots, cat);
+            liked.stream()
+                    .filter(v -> v != null && !v.isBlank() && !"none".equalsIgnoreCase(v) && !"상관없음".equalsIgnoreCase(v))
+                    .forEach(keywords::add);
+        }
+        // color는 hex → 이름 변환
+        List<String> colors = getLiked(slots, "color");
+        if (!colors.isEmpty()) {
+            try {
+                colorNameService.resolveColorNames(colors)
+                        .stream()
+                        .filter(v -> v != null && !v.isBlank())
+                        .forEach(keywords::add);
+            } catch (Exception e) {
+                colors.forEach(keywords::add); // 변환 실패 시 hex 그대로
+            }
+        }
+        return keywords;
+    }
+
+    private List<Object> buildNailPartsWithImages(NailDesign nailDesign, LinkedHashSet<String> nailParts) {
+        // partsJson 없으면 텍스트 파츠만 반환
+        if (nailDesign.getPartsJson() == null || nailDesign.getPartsJson().isBlank()) {
+            return new ArrayList<>(nailParts);
+        }
+        // partsJson 있으면 이미지 파츠만 사용 (텍스트 파츠 제외 — 중복 방지)
+        List<Object> result = new ArrayList<>();
+        try {
+            JsonNode partsNode = objectMapper.readTree(nailDesign.getPartsJson());
+            partsNode.fields().forEachRemaining(entry -> {
+                JsonNode urlsNode = entry.getValue();
+                if (urlsNode.isArray() && urlsNode.size() > 0) {
+                    String url = urlsNode.get(0).asText();  // 첫 번째 인스턴스만
+                    if (!url.isBlank()) {
+                        Map<String, String> partItem = new LinkedHashMap<>();
+                        partItem.put("label", entry.getKey());
+                        partItem.put("imageUrl", url);
+                        result.add(partItem);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            System.err.println("partsJson 파싱 실패: " + e.getMessage());
+        }
+        return result;
     }
 }

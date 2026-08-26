@@ -37,7 +37,7 @@ public class NailDetectionService {
         Map<String, Object> body = new HashMap<>();
         body.put("image_base64", imageBase64);
         body.put("segment_prompt", "nail tip");
-        body.put("threshold", 0.35);
+        body.put("threshold", 0.2);
         body.put("mask_shrink", 6);
         body.put("min_area", 200);
         body.put("color_diff_threshold", 40.0);

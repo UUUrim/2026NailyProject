@@ -93,7 +93,14 @@ public class TextureSwatchService {
                 continue;
             }
 
-            String template = TEMPLATES.get(texture);
+            //3d_charm은 파츠 검출 이미지 사용 → 스와치 생성 스킵
+            if (texture.startsWith("3d_charm")) {
+                System.out.println("[TextureSwatchService] " + texture + " — 파츠 검출 이미지 사용, 스와치 생성 스킵");
+                continue;
+            }
+
+            String templateKey = texture.startsWith("3d_charm") ? "3d_charm" : texture;
+            String template = TEMPLATES.get(templateKey);
             if (template == null) {
                 System.err.println("[TextureSwatchService] 알 수 없는 텍스처 키: " + texture + " — 건너뜀");
                 continue;
@@ -128,9 +135,10 @@ public class TextureSwatchService {
         return result;
     }
 
+    private static final String MERCURY_CHROME_S3_URL =
+            "https://naily-scans.s3.amazonaws.com/assets/mercury_chrome.png";
+
     private String getMercuryChromeFixed() {
-        // TODO: S3에 올린 mercury_chrome 고정 에셋 base64로 반환
-        System.out.println("[TextureSwatchService] mercury_chrome 고정 에셋 미설정 — 건너뜀");
-        return null;
+        return MERCURY_CHROME_S3_URL;
     }
 }

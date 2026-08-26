@@ -11,12 +11,6 @@
     margin: 0 auto;
 }
 
-/* 헤더의 네일리 로고 시작 지점과 좌측을 맞춘다.
-   root-layout__page(1.5rem)와 헤더(2rem)의 좌측 여백 차이(0.5rem)만 보정. */
-.print-page > .page-back-link {
-    margin-left: 0.5rem;
-}
-
 .print-page__loading {
     padding: 4rem 1rem;
     text-align: center;

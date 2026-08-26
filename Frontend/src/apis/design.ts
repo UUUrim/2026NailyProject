@@ -43,6 +43,7 @@ export interface DesignGenerateResponse {
     generatedPrompt: string
     imageUrls: string[] // 1장
     details?: DesignExtractedDetails
+    keywords?: string[]
 }
 
 export interface DesignImageResponse {

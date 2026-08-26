@@ -37,7 +37,7 @@ public class FingerDesignPlanService {
         아래처럼 "시각적 스타일 요소"를 최대한 세밀하게 관찰해서 motif/design_type/
         parts에 녹여내세요:
         - 화풍/장르: anime, chibi, cartoon, cel-shaded, manga style 등 (특정 작품명이 있다면 포함하세요.)
-        - 색상: 주조색, 보조색, 그라데이션 방향, 톤(파스텔/비비드/딥 등)
+        - 색상: 주조색, 보조색, 그라데이션 방향, 톤(파스텔/비비드/딥 등) 등 이미지에 나오는 색 사용
         - 선/윤곽: 굵은 아웃라인 여부, 셀셰이딩 여부, 부드러운 선 vs 각진 선 등
         - 질감/마감: 글로시, 매트, 글리터, 펄, 크리스탈 등 표면 느낌 등
         - 형태 모티프: 이미지 속 반복되는 도형/패턴(별, 구름, 줄무늬, 물방울 등)그리고
@@ -110,6 +110,12 @@ public class FingerDesignPlanService {
         색을 요청한 경우, 또는 참고 이미지에 서로 다른 색이 함께 나타나는 경우에만
         그 손가락의 base_color를 채우세요. 그 외(지정도 없고 참고 이미지도 없는 경우)
         손가락은 base_color를 빈 문자열("")로 두세요.
+        
+       [참고 이미지 색상 규칙 - 매우 중요]
+            - 이미지에서 실제로 보이는 색만 사용하세요.
+            - 이미지의 배경색, 주조색을 최우선으로 반영하세요.
+            - 로고/텍스트/아이콘의 색보다 전체 배경/분위기 색을 우선하세요.
+            - 이미지에 없는 색을 창작하거나 추측하지 마세요.
 
         [손가락별 지정 - 매우 중요]
             확정된 입력 정보에 "손가락별 지정"이 포함되어 있다면, 그 지정을 절대적으로
@@ -170,6 +176,19 @@ public class FingerDesignPlanService {
             피해야 할 값으로 표시되어 있다면, parts 태그에도 "3D"가 들어간 표현
             (예: "3D ribbon", "3D pearl stud")을 절대 쓰지 말고, 대신 "art" 또는 "sticker"
             스타일로 대체하세요. 이 제약은 손가락별 지정이 있든 없든 모든 손가락에 동일하게 적용됩니다.
+            
+            [parts_detect 작성 규칙 - 매우 중요]
+                    parts_detect는 파츠 검출 서버에 넘기는 단순 명사 리스트입니다.
+                    parts와 동일한 파츠를 1~2단어 단순 영어 명사로만 표현하세요.
+                    - 형용사, 크기, 재질, 색상 설명 절대 금지
+                    - 파츠가 없으면 빈 배열 []
+                    - ribbon은 반드시 bow로 명시하세요.
+                    - 예시:
+                      "large 3D metallic star shaped charm" → "star"
+                      "3D ribbon bow charm" → "bow"
+                      "rhinestone crystal cluster" → "rhinestone"
+                      "transparent bubble sphere" → "bubble"
+                      "line of small crystals" → "crystal"
 
         [규칙]
         - motif가 필요 없는 손가락은 motif를 "none"으로 두세요.
@@ -212,12 +231,13 @@ public class FingerDesignPlanService {
         반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만 반환합니다.
         {
           "shape": "...", "mood": "...", "season": "...", "color": "...","designType": "...", "motif": "...",
-          "thumb": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "index": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "middle": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "ring": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "pinky": { "design_type": "", "base_color": "", "motif": "none", "parts": [] }
+          "thumb": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "index": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "middle": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "ring": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "pinky": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] }
         }
+        
         """;
 
     /**

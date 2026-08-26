@@ -66,15 +66,21 @@ public class RefineService {
                - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             2. mask_prompt
-               - GroundingDINO가 마스크를 탐지할 때 쓸 텍스트.
-               - 반드시 시각적 특징으로 작성하세요 (손가락 이름 X, 위치 X).
-               - 수정할 손톱에 있는 파츠나 컬러로 특징 잡기.
-               - 예시:
-                 * "nail tip with polka dot pattern"
-                 * "nail tip with silver crystal line"
-                 * "dark green nail tip"
-                 * "nail tip with matte surface"
-               - 5단어 이내로 최대한 간결하게 만드세요.
+                           - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
+                           - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
+                           - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
+                           - 형식: "nail tip with {현재 존재하는 특징}"
+                           - 특징은 색상 또는 파츠 중 하나로만 잡으세요.
+                           - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
+                           - 10단어 이내로 작성하세요.
+                           - 좋은 예시:
+                             * "nail tip with heart charm" (현재 하트 파츠가 있을 때)
+                             * "nail tip with white base" (현재 흰색일 때)
+                             * "nail tip with glitter" (현재 글리터가 있을 때)
+                           - 나쁜 예시 (절대 금지):
+                             * 수정 후 결과물 색상 ("nail tip with aquatic blue gradient" 등)
+                             * "nail tip with previous design" (의미 없음)
+                             * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
 
             3. slotActions (기존과 동일, 세션 슬롯 업데이트용)
                - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
@@ -186,16 +192,16 @@ public class RefineService {
         String s3Key = "designs/user_" + user.getId() + "/inpaint_" + UUID.randomUUID() + ".png";
         String newImageUrl = s3Service.uploadImageBytes(inpaintedBytes, s3Key);
 
-        // ★ 추가: 컬러 팔레트 추출
-        String colorPaletteJson = null;
-        try {
-            List<Map<String, Object>> perNailColors =
-                    nailDetectionService.extractColorsPerNail(inpaintedBase64);
-            List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
-            colorPaletteJson = objectMapper.writeValueAsString(palette);
-        } catch (Exception e) {
-            System.err.println("inpaint 컬러 팔레트 추출 실패: " + e.getMessage());
-        }
+//        // ★ 추가: 컬러 팔레트 추출
+//        String colorPaletteJson = null;
+//        try {
+//            List<Map<String, Object>> perNailColors =
+//                    nailDetectionService.extractColorsPerNail(inpaintedBase64);
+//            List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
+//            colorPaletteJson = objectMapper.writeValueAsString(palette);
+//        } catch (Exception e) {
+//            System.err.println("inpaint 컬러 팔레트 추출 실패: " + e.getMessage());
+//        }
 
         // 6. 새 NailDesign 저장 (원본 seed + 수정된 프롬프트 기록)
         NailDesign newDesign = NailDesign.builder()
@@ -206,7 +212,7 @@ public class RefineService {
                 .aiModel("z-image-turbo + lora-v1 (inpaint)")
                 .status(NailDesign.DesignStatus.DRAFT)
                 .designPlan(prevDesign.getDesignPlan()) // 플랜은 그대로 유지
-                .colorPalette(colorPaletteJson)
+//                .colorPalette(colorPaletteJson)
                 .seed(seed)
                 .build();
         nailDesignRepository.save(newDesign);
@@ -224,6 +230,7 @@ public class RefineService {
                 .generatedPrompt(inpaintPrompt)
                 .imageUrls(newDesign.getImageUrls())
                 .details(nailDesignService.buildDetails(newDesign)) // 수정 후 details는 프론트에서 별도 요청
+                .keywords(nailDesignService.extractKeywordsFromSlots(slots, session))
                 .build();
     }
 

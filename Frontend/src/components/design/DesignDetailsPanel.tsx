@@ -80,14 +80,13 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
 
     const normalizedCharms = (details?.nailParts ?? []).map((item, i) => normalizeDetailItem(item, i, 'charm'))
 
-    // ★ 스와치: details.swatches의 모든 항목을 직접 렌더링
-    // textures 리스트가 아닌 swatches 맵 기준으로 렌더링해서 모든 스와치가 표시됨
+    // 스와치
     const swatchEntries = details?.swatches
-        ? Object.entries(details.swatches).filter(([key]) => key !== '3d_charm')
+        ? Object.entries(details.swatches).filter(([key]) => !key.startsWith('3d_charm'))
         : []
 
     const charmSwatchEntries = details?.swatches
-        ? Object.entries(details.swatches).filter(([key]) => key === '3d_charm')
+        ? Object.entries(details.swatches).filter(([key]) => key.startsWith('3d_charm'))
         : []
 
     return (
@@ -127,7 +126,8 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 ) : swatchEntries.length > 0 ? (
                     <div className="design-result-v2__texture-row">
                         {swatchEntries.map(([textureKey, swatchUrl]) => {
-                            const info = TEXTURE_INFO[textureKey]
+                            const infoKey = textureKey.startsWith('3d_charm') ? '3d_charm' : textureKey
+                            const info = TEXTURE_INFO[infoKey]
                             return (
                                 <div className="design-result-v2__texture-item" key={textureKey}>
                                     <DetailThumb
@@ -179,14 +179,23 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 {normalizedCharms.length > 0 || charmSwatchEntries.length > 0 ? (
                     <div className="design-result-v2__charm-row">
                         {/* 스와치에서 온 3d_charm */}
-                        {charmSwatchEntries.map(([key, url]) => (
-                            <div className="design-result-v2__charm-item" key={key}>
-                                <DetailThumb imageUrl={url} shape="square" alt="3D 참">
-                                    <span className="design-result-v2__thumb-icon">✧</span>
-                                </DetailThumb>
-                                <span className="design-result-v2__charm-label">3D 참</span>
-                            </div>
-                        ))}
+                        {charmSwatchEntries.map(([key, url]) => {
+                            // "3d_charm_wisteria_floral" → "wisteria floral"
+                            // "3d_charm_ribbon_3" → "ribbon"  (숫자 suffix 제거)
+                            const shapePart = key
+                                .replace(/^3d_charm_?/, '')   // 앞 prefix 제거
+                                .replace(/_\d+$/, '')          // 끝 숫자 suffix 제거
+                                .replace(/_/g, ' ')            // _ → 공백
+                            const label = shapePart ? shapePart : '3D 참'
+                            return (
+                                <div className="design-result-v2__charm-item" key={key}>
+                                    <DetailThumb imageUrl={url} shape="square" alt={label}>
+                                        <span className="design-result-v2__thumb-icon">✧</span>
+                                    </DetailThumb>
+                                    <span className="design-result-v2__charm-label">{label}</span>
+                                </div>
+                            )
+                        })}
                         {/* designPlan에서 온 파츠 */}
                         {normalizedCharms.map((item) => {
                             const info = item.label ? CHARM_INFO[item.label] ?? CHARM_INFO_BY_KO[item.label] : undefined
@@ -195,7 +204,6 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                                     <DetailThumb imageUrl={item.imageUrl} shape="square" alt={info?.labelKo ?? item.label ?? '네일 파츠'}>
                                         <span className="design-result-v2__thumb-icon">{info?.icon ?? '✧'}</span>
                                     </DetailThumb>
-                                    <span className="design-result-v2__charm-label">{info?.labelKo ?? item.label}</span>
                                 </div>
                             )
                         })}
