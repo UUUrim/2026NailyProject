@@ -604,11 +604,11 @@ function extractFingerNails(prepared: PreparedImage): FingerNailAsset[] {
       )
     }
 
-    return splitByProjection(width, data, backgroundMask, bounds)
+    return splitByProjection(width, height, data, backgroundMask, bounds)
   }
 
   const bounds = getContentBounds(width, height, null)
-  return splitRowIntoFive(canvas, width, null, null, bounds)
+  return splitRowIntoFive(canvas, width, height, null, null, bounds)
 }
 
 // A crop already comes pre-matted (background removed) by the detect
