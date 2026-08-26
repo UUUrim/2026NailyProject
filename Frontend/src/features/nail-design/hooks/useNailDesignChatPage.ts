@@ -5,7 +5,7 @@ import { getMyProfile } from '@/entities/user/api'
 import { getMyScans, getScanResult, type ScanResultResponse } from '@/entities/scan/api'
 import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
-import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
@@ -644,10 +644,20 @@ export function useNailDesignChatPage() {
 
     const buildScanAutoIntro = (): { text: string; colorSwatches: string[] } => {
         const skinToneHex = leftAnalysis?.skinToneHex || rightAnalysis?.skinToneHex || null
-        const toneLabel = skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null
+        const tone = leftAnalysis?.tone || rightAnalysis?.tone || null
+        const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
+        const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
+        const toneLabel =
+            skinToneAnalysisFromMetrics(tone, brightness, saturation)?.tone.label ??
+            (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
         const shapeId = leftAnalysis?.shape || rightAnalysis?.shape || null
         const shapeLabel = shapeId ? getNailShape(shapeId)?.labelKo ?? shapeId : null
-        const colorSwatches = skinToneHex ? generateSkinTonePalette(skinToneHex, 24).slice(0, 6) : []
+        const recommendedColors = leftAnalysis?.recommendedColors?.length
+            ? leftAnalysis.recommendedColors
+            : rightAnalysis?.recommendedColors ?? []
+        const colorSwatches = recommendedColors.length > 0
+            ? pickSpreadColors(recommendedColors, 6)
+            : skinToneHex ? pickSpreadColors(generateSkinTonePalette(skinToneHex, 24), 6) : []
 
         const seasonPart = toneLabel ? `${toneLabel} 피부톤` : '내 피부톤'
         const shapePart = shapeLabel ? `${shapeLabel} 쉐입` : '추천 쉐입'
@@ -1369,7 +1379,14 @@ export function useNailDesignChatPage() {
         // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는
         // 반드시 recommendedShape를 써야 한다 (ScanResultResponse 타입 주석 참고)
         const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
-        const toneLabel = skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null
+        const tone = leftAnalysis?.tone ?? rightAnalysis?.tone ?? null
+        const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
+        const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
+        const backendSkinToneAnalysis = skinToneAnalysisFromMetrics(tone, brightness, saturation)
+        const toneLabel = backendSkinToneAnalysis?.tone.label ?? (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
+        const recommendedColors = leftAnalysis?.recommendedColors?.length
+            ? leftAnalysis.recommendedColors
+            : rightAnalysis?.recommendedColors ?? []
         const shapeId = leftAnalysis?.recommendedShape ?? rightAnalysis?.recommendedShape ?? null
         const shapeInfo = shapeId ? getNailShape(shapeId) : undefined
 
@@ -1393,8 +1410,13 @@ export function useNailDesignChatPage() {
             widthCompareLabel: labelByPercentile(widthPct, '좁은 편', '넓은 편', '평균과 비슷함'),
             curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
             skinToneHex,
-            skinToneAnalysis: skinToneHex ? analyzeSkinTone(skinToneHex) : null,
-            skinTonePalette: skinToneHex ? generateSkinTonePalette(skinToneHex, 30) : [],
+            skinToneAnalysis: backendSkinToneAnalysis ?? (skinToneHex ? analyzeSkinTone(skinToneHex) : null),
+            skinTonePalette:
+                recommendedColors.length > 0
+                    ? recommendedColors
+                    : skinToneHex
+                        ? generateSkinTonePalette(skinToneHex, 30)
+                        : [],
         }
     }, [leftAnalysis, rightAnalysis])
 

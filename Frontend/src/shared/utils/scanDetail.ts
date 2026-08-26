@@ -11,6 +11,7 @@ export type ScanSession = {
   tone: string | null
   brightness: number | null
   saturation: number | null
+  recommendedColors: string[]
   shape: string | null
   // AI가 분석 직후 추천한 쉐입 — shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서,
   // "추천" 배지/문구 표시는 반드시 이 필드를 기준으로 해야 한다
@@ -36,6 +37,7 @@ export type ScanDetail = {
   tone: string | null
   brightness: number | null
   saturation: number | null
+  recommendedColors: string[]
   shapeId: string | null
   avgLength: number
   avgWidth: number
@@ -130,6 +132,7 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
     tone: left?.tone || right?.tone || null,
     brightness: left?.brightness ?? right?.brightness ?? null,
     saturation: left?.saturation ?? right?.saturation ?? null,
+    recommendedColors: (left?.recommendedColors?.length ? left.recommendedColors : right?.recommendedColors) ?? [],
     // "추천" 쉐입 표시이므로 출력 신청 시 덮어써지는 shape가 아니라 recommendedShape를 써야 한다
     shapeId: left?.recommendedShape || right?.recommendedShape || null,
     avgLength,
@@ -294,6 +297,7 @@ export function buildScanSessions(scans: ScanHistoryItem[]): ScanSession[] {
       tone: left.tone ?? right.tone ?? null,
       brightness: left.brightness ?? right.brightness ?? null,
       saturation: left.saturation ?? right.saturation ?? null,
+      recommendedColors: (left.recommendedColors?.length ? left.recommendedColors : right.recommendedColors) ?? [],
       shape: left.shape ?? right.shape ?? null,
       recommendedShape: left.recommendedShape ?? right.recommendedShape ?? null,
       status: pickAnalysisStatus(left.status, right.status),

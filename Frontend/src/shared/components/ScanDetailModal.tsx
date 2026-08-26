@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getScanResult } from '@/entities/scan/api'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
-import { analyzeSkinTone, classifySkinLevel, generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, classifySkinLevel, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import {
   buildScanDetail,
   dateKeyOf,
@@ -178,9 +178,18 @@ export function ScanDetailModal({ session, onClose }: Props) {
         <p className="mypage-x__empty">분석 결과를 불러오는 중...</p>
       ) : (() => {
         const skinHex = detail.skinToneHex ?? FALLBACK_SKIN_COLOR
-        const analysis = detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null
+        // scan/skin_color.py가 10손가락 LAB 평균으로 계산해 API에 내려주는 실제 진단값을 우선 쓰고,
+        // (구버전 스캔 등) 값이 없을 때만 대표 피부색 hex 하나로 만든 대체 추정치를 쓴다.
+        const analysis =
+          skinToneAnalysisFromMetrics(detail.tone, detail.brightness, detail.saturation) ??
+          (detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null)
         const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
-        const palette = detail.skinToneHex ? generateSkinTonePalette(detail.skinToneHex, 30) : []
+        const palette =
+          detail.recommendedColors.length > 0
+            ? detail.recommendedColors
+            : detail.skinToneHex
+              ? generateSkinTonePalette(detail.skinToneHex, 30)
+              : []
         const shapeLabel = detail.shapeId
           ? getNailShape(detail.shapeId)?.labelKo ?? detail.shapeId
           : null
