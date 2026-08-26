@@ -1,74 +1,146 @@
 import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import type { NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
+import { FINGERS, computeFingerPlacement, type Point } from '@/features/mypage/utils/fingerLandmarks'
 
-type FingerConfig = {
-  tip: number
-  dip: number
-  scale: number
-  nailIndex: number
+// How much a fore/aft tilt narrows the far edge of the nail quad, for a basic
+// perspective cue when the hand rotates. Bounded so a noisy depth reading
+// can't invert or flatten it.
+const MAX_TILT_TAPER = 0.32
+
+// Builds the destination quad (tip-left, tip-right, base-right, base-left)
+// the nail image gets warped onto: a rectangle anchored at the cuticle point
+// (baseX, baseY) and extending nailLength toward the fingertip, rotated by
+// angle. Tapered at the tip/base ends by tipTaper/baseTaper to give a
+// foreshortening cue when the finger tilts toward or away from the camera.
+//
+// Local frame: y=0 is the cuticle (anchored at baseX,baseY), y=+nailLength
+// is the fingertip - matches computeFingerPlacement()'s angle convention,
+// where a local point (0, v) rotates to world offset v*(dirX,dirY), i.e.
+// toward the fingertip for v>0.
+function getNailQuad(
+  baseX: number,
+  baseY: number,
+  angle: number,
+  nailWidth: number,
+  nailLength: number,
+  tipTaper: number,
+  baseTaper: number,
+): [Point, Point, Point, Point] {
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const tipHalfW = (nailWidth / 2) * tipTaper
+  const baseHalfW = (nailWidth / 2) * baseTaper
+
+  const local: Point[] = [
+    { x: -tipHalfW, y: nailLength },
+    { x: tipHalfW, y: nailLength },
+    { x: baseHalfW, y: 0 },
+    { x: -baseHalfW, y: 0 },
+  ]
+
+  return local.map((p) => ({
+    x: baseX + p.x * cos - p.y * sin,
+    y: baseY + p.x * sin + p.y * cos,
+  })) as [Point, Point, Point, Point]
 }
 
-const FINGERS: FingerConfig[] = [
-  { tip: 4, dip: 3, scale: 1.05, nailIndex: 0 },
-  { tip: 8, dip: 7, scale: 1, nailIndex: 1 },
-  { tip: 12, dip: 11, scale: 1, nailIndex: 2 },
-  { tip: 16, dip: 15, scale: 0.96, nailIndex: 3 },
-  { tip: 20, dip: 19, scale: 0.9, nailIndex: 4 },
-]
+// Solves the 2D affine matrix mapping source triangle -> destination
+// triangle (the standard 3-point affine solve). Combining two such triangles
+// lets a rectangular source image be warped onto an arbitrary quadrilateral
+// with plain Canvas 2D transforms - no WebGL needed.
+function affineFromTriangles(src: [Point, Point, Point], dst: [Point, Point, Point]) {
+  const [s0, s1, s2] = src
+  const [d0, d1, d2] = dst
 
-function toPixel(
-  landmark: NormalizedLandmark,
-  width: number,
-  height: number,
-  mirror: boolean,
+  const denom = s0.x * (s1.y - s2.y) + s1.x * (s2.y - s0.y) + s2.x * (s0.y - s1.y)
+  if (Math.abs(denom) < 1e-6) return null
+
+  const a = (d0.x * (s1.y - s2.y) + d1.x * (s2.y - s0.y) + d2.x * (s0.y - s1.y)) / denom
+  const b = (d0.y * (s1.y - s2.y) + d1.y * (s2.y - s0.y) + d2.y * (s0.y - s1.y)) / denom
+  const c = (d0.x * (s2.x - s1.x) + d1.x * (s0.x - s2.x) + d2.x * (s1.x - s0.x)) / denom
+  const d = (d0.y * (s2.x - s1.x) + d1.y * (s0.x - s2.x) + d2.y * (s1.x - s0.x)) / denom
+  const e =
+    (d0.x * (s1.x * s2.y - s2.x * s1.y) + d1.x * (s2.x * s0.y - s0.x * s2.y) + d2.x * (s0.x * s1.y - s1.x * s0.y)) /
+    denom
+  const f =
+    (d0.y * (s1.x * s2.y - s2.x * s1.y) + d1.y * (s2.x * s0.y - s0.x * s2.y) + d2.y * (s0.x * s1.y - s1.x * s0.y)) /
+    denom
+
+  return { a, b, c, d, e, f }
+}
+
+function drawTriangleWarp(
+  ctx: CanvasRenderingContext2D,
+  image: CanvasImageSource,
+  srcTri: [Point, Point, Point],
+  dstTri: [Point, Point, Point],
 ) {
-  const x = mirror ? (1 - landmark.x) * width : landmark.x * width
-  const y = landmark.y * height
-  return { x, y }
+  const m = affineFromTriangles(srcTri, dstTri)
+  if (!m) return
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(dstTri[0].x, dstTri[0].y)
+  ctx.lineTo(dstTri[1].x, dstTri[1].y)
+  ctx.lineTo(dstTri[2].x, dstTri[2].y)
+  ctx.closePath()
+  ctx.clip()
+  ctx.transform(m.a, m.b, m.c, m.d, m.e, m.f)
+  ctx.drawImage(image, 0, 0)
+  ctx.restore()
 }
 
-function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
-  return Math.hypot(a.x - b.x, a.y - b.y)
+// Warps the full source canvas onto an arbitrary quad by splitting both into
+// two triangles (TL/TR/BL and TR/BR/BL) and affine-mapping each pair - a
+// standard piecewise-affine approximation of a perspective warp.
+function drawImageWarped(ctx: CanvasRenderingContext2D, source: HTMLCanvasElement, quad: [Point, Point, Point, Point]) {
+  const w = source.width
+  const h = source.height
+  const srcTL: Point = { x: 0, y: 0 }
+  const srcTR: Point = { x: w, y: 0 }
+  const srcBR: Point = { x: w, y: h }
+  const srcBL: Point = { x: 0, y: h }
+  const [dstTL, dstTR, dstBR, dstBL] = quad
+
+  drawTriangleWarp(ctx, source, [srcTL, srcTR, srcBL], [dstTL, dstTR, dstBL])
+  drawTriangleWarp(ctx, source, [srcTR, srcBR, srcBL], [dstTR, dstBR, dstBL])
 }
 
 function drawFingerNail(
   ctx: CanvasRenderingContext2D,
   landmarks: NormalizedLandmark[],
-  finger: FingerConfig,
+  finger: (typeof FINGERS)[number],
   asset: NailDesignAsset,
   width: number,
   height: number,
   mirror: boolean,
 ) {
-  const tip = landmarks[finger.tip]
-  const dip = landmarks[finger.dip]
   const nailAsset = asset.fingerNails[finger.nailIndex]
-  if (!tip || !dip || !nailAsset) return
+  if (!nailAsset) return
 
-  const tipPx = toPixel(tip, width, height, mirror)
-  const dipPx = toPixel(dip, width, height, mirror)
+  const placement = computeFingerPlacement(landmarks, finger, width, height, mirror, (segment) =>
+    segment * nailAsset.aspectRatio * 0.85,
+  )
+  if (!placement) return
 
-  const segment = distance(tipPx, dipPx)
-  if (segment < 6) return
+  const { baseX, baseY, angle, width: nailWidth, tilt } = placement
+  // Preserve the cutout's own proportions - derive length from the measured
+  // width instead of an independent landmark-based length estimate, so the
+  // design is scaled, never stretched/squashed.
+  const nailLength = nailWidth / nailAsset.aspectRatio
+  const tipTaper = 1 - Math.max(0, tilt) * MAX_TILT_TAPER
+  const baseTaper = 1 - Math.max(0, -tilt) * MAX_TILT_TAPER
 
-  const centerX = dipPx.x + (tipPx.x - dipPx.x) * 0.72
-  const centerY = dipPx.y + (tipPx.y - dipPx.y) * 0.72
-  const angle = Math.atan2(tipPx.y - dipPx.y, tipPx.x - dipPx.x) - Math.PI / 2
-
-  const nailLength = segment * 1.05 * finger.scale
-  const nailWidth = nailLength * nailAsset.aspectRatio * 0.78
+  const quad = getNailQuad(baseX, baseY, angle, nailWidth, nailLength, tipTaper, baseTaper)
 
   ctx.save()
-  ctx.translate(centerX, centerY)
-  ctx.rotate(angle)
   ctx.globalAlpha = 0.94
-  ctx.drawImage(
-    nailAsset.canvas,
-    -nailWidth / 2,
-    -nailLength * 0.12,
-    nailWidth,
-    nailLength,
-  )
+  // Cast against the nail's own alpha shape (a precise cutout, not a bounding
+  // box) so the shadow grounds it on the finger instead of floating.
+  ctx.shadowColor = 'rgba(10, 8, 12, 0.35)'
+  ctx.shadowBlur = Math.max(2, nailLength * 0.05)
+  ctx.shadowOffsetY = nailLength * 0.03
+  drawImageWarped(ctx, nailAsset.canvas, quad)
   ctx.restore()
 }
 

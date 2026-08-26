@@ -80,7 +80,7 @@ export function HandScanResultPagePreviewContent() {
     const analysis = buildHandScanAnalysis(MOCK_SKIN_HEX)
     const recommended = getNailShape(analysis.recommendedShape)
     const skinToneAnalysis = analyzeSkinTone(analysis.skinToneHex)
-    const skinTonePalette = generateSkinTonePalette(analysis.skinToneHex, 24)
+    const skinTonePalette = generateSkinTonePalette(analysis.skinToneHex, 30)
 
     return (
         <AppShell mainClassName="scan-result-page">

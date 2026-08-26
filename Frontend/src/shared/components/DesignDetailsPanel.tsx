@@ -16,6 +16,106 @@ function isHexColorString(value: string): boolean {
     return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim())
 }
 
+// 색상환(hue)에서 이 값보다 간격이 벌어진 지점을 "다른 색상 묶음"의 경계로 본다.
+// (30도 단위 같은 고정 그리드로 자르면, 예를 들어 hue 179와 181처럼 사실상 같은 색인데
+// 그리드 경계에 걸려 서로 다른 묶음으로 쪼개지는 문제가 생긴다. 그래서 고정 그리드 대신
+// 팔레트에 실제로 존재하는 색들 사이의 "빈 간격"을 기준으로 묶음을 나눈다.)
+const HUE_GAP_THRESHOLD = 28
+// 채도가 이보다 낮으면 색상값(hue)이 거의 의미 없는 무채색/톤다운 컬러로 보고, hue와 무관하게
+// 하나의 "무채색" 묶음으로 합친다. (예: 베이지·라벤더그레이·그레이지·다크그레이는 hue가 서로
+// 크게 달라도 채도가 다 낮으면 사람 눈엔 "같은 무채색 계열"로 보인다 — 8% 같은 낮은 기준이면
+// 이런 색들이 hue만으로 갈라져서 따로따로 묶여버린다)
+const MIN_CHROMA_SATURATION = 15
+
+function hexToHsl(hex: string): [number, number, number] {
+    const clean = hex.replace('#', '')
+    const full = clean.length === 3 ? clean.split('').map((c) => c + c).join('') : clean
+    const int = parseInt(full, 16)
+    const r = (int >> 16) & 255
+    const g = (int >> 8) & 255
+    const b = int & 255
+    const rn = r / 255
+    const gn = g / 255
+    const bn = b / 255
+    const max = Math.max(rn, gn, bn)
+    const min = Math.min(rn, gn, bn)
+    const l = (max + min) / 2
+    const d = max - min
+    if (d === 0) return [0, 0, l * 100]
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    let h: number
+    if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0)
+    else if (max === gn) h = (bn - rn) / d + 2
+    else h = (rn - gn) / d + 4
+    return [h * 60, s * 100, l * 100]
+}
+
+type HueLight = { hue: number; light: number }
+
+function hueLightOf(hex: string): HueLight {
+    const [h, , l] = hexToHsl(hex)
+    return { hue: ((h % 360) + 360) % 360, light: l }
+}
+
+/**
+ * 색상환(hue) 위에서 색들이 실제로 몰려 있는 구간끼리 묶는다. 색상값 순으로 원을 한 바퀴
+ * 돌면서 "가장 크게 비어 있는 구간"을 찾아 그 자리를 이음매로 삼아 원을 펼치고(그래야 빨강
+ * 계열처럼 0도 근처에 몰린 색이 이음매에 걸려 반으로 쪼개지지 않는다), 이어서 이웃한 색끼리
+ * 간격이 HUE_GAP_THRESHOLD보다 벌어지는 지점마다 새 묶음으로 자른다.
+ */
+function clusterBySimilarHue<T extends { key: string }>(items: T[], hueOf: (item: T) => number): T[][] {
+    if (items.length <= 1) return items.length === 1 ? [items] : []
+
+    const sorted = [...items].sort((a, b) => hueOf(a) - hueOf(b))
+    const n = sorted.length
+
+    let seamIndex = 0
+    let largestGap = -1
+    for (let i = 0; i < n; i += 1) {
+        const current = hueOf(sorted[i])
+        const next = hueOf(sorted[(i + 1) % n])
+        const gap = i === n - 1 ? 360 - current + next : next - current
+        if (gap > largestGap) {
+            largestGap = gap
+            seamIndex = i
+        }
+    }
+    const opened = [...sorted.slice(seamIndex + 1), ...sorted.slice(0, seamIndex + 1)]
+
+    const groups: T[][] = [[opened[0]]]
+    for (let i = 1; i < opened.length; i += 1) {
+        const gap = (hueOf(opened[i]) - hueOf(opened[i - 1]) + 360) % 360
+        if (gap > HUE_GAP_THRESHOLD) groups.push([opened[i]])
+        else groups[groups.length - 1].push(opened[i])
+    }
+    return groups
+}
+
+/**
+ * 1) 추출된 컬러 칩들을 색상값(hue)이 비슷한 것끼리 묶고(채도가 낮은 무채색은 별도 묶음),
+ * 2) 각 묶음은 묶음의 평균 명도를 기준으로 밝은 묶음 → 어두운 묶음 순으로 배치하고,
+ * 3) 묶음 내부도 밝은 색 → 어두운 색 순으로 정렬한다.
+ */
+function sortPaletteByShade(items: NormalizedDetail[]): NormalizedDetail[] {
+    const withHex = items.filter((item) => item.hex)
+    const withoutHex = items.filter((item) => !item.hex)
+
+    const infoByKey = new Map(withHex.map((item) => [item.key, hueLightOf(item.hex as string)]))
+    const saturationOf = (item: NormalizedDetail) => hexToHsl(item.hex as string)[1]
+    const chroma = withHex.filter((item) => saturationOf(item) >= MIN_CHROMA_SATURATION)
+    const gray = withHex.filter((item) => saturationOf(item) < MIN_CHROMA_SATURATION)
+
+    const hueGroups = clusterBySimilarHue(chroma, (item) => infoByKey.get(item.key)!.hue)
+    const groups = [...hueGroups, ...(gray.length > 0 ? [gray] : [])].map((group) => {
+        const sorted = [...group].sort((a, b) => infoByKey.get(b.key)!.light - infoByKey.get(a.key)!.light)
+        const avgLight = sorted.reduce((sum, item) => sum + infoByKey.get(item.key)!.light, 0) / sorted.length
+        return { sorted, avgLight }
+    })
+    groups.sort((a, b) => b.avgLight - a.avgLight)
+
+    return [...groups.flatMap((group) => group.sorted), ...withoutHex]
+}
+
 function normalizeDetailItem(item: DesignDetailItem, index: number, keyPrefix: string): NormalizedDetail {
     if (typeof item === 'string') {
         const trimmed = item.trim()
@@ -76,7 +176,11 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
         )
     }
 
-    const normalizedPalette = (details?.colorPalette ?? []).map((item, i) => normalizeDetailItem(item, i, 'palette'))
+    // 컬러 팔레트는 항상 비슷한 색상끼리 묶어 연한 색 → 진한 색 순으로 보여준다
+    // (디자인 결과 화면·마이페이지 상세모달·홈 갤러리 모두 공용으로 이 컴포넌트를 쓴다)
+    const normalizedPalette = sortPaletteByShade(
+        (details?.colorPalette ?? []).map((item, i) => normalizeDetailItem(item, i, 'palette')),
+    )
 
     const normalizedCharms = (details?.nailParts ?? []).map((item, i) => normalizeDetailItem(item, i, 'charm'))
 

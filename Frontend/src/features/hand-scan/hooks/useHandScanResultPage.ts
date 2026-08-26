@@ -242,7 +242,7 @@ export function useHandScanResultPage() {
 
     const recommended = result?.recommendedShape ? getNailShape(result.recommendedShape) : null
     const skinToneAnalysis = result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null
-    const skinTonePalette = result?.skinToneHex ? generateSkinTonePalette(result.skinToneHex, 24) : []
+    const skinTonePalette = result?.skinToneHex ? generateSkinTonePalette(result.skinToneHex, 30) : []
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락
     const apiFingers = [...(leftResult?.fingers ?? []), ...(rightResult?.fingers ?? [])]

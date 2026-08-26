@@ -364,7 +364,12 @@
 
 .design-chat-sidebar__palette {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    /* 분석 결과 화면(.skin-tone-palette-grid)과 동일하게, generateSkinTonePalette()가
+       색상군 5개씩 연달아 만들어내는 순서를 grid-auto-flow: column으로 세로부터 채워서
+       같은 색상군이 한 열을 밝은 색(위) → 어두운 색(아래) 순으로 이루게 한다. */
+    grid-auto-flow: column;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(5, 1fr);
     gap: 0.3rem;
     margin-top: 0.8rem;
 }
@@ -669,31 +674,6 @@
     border-radius: 12px;
     border: 1px solid rgba(0, 0, 0, 0.06);
     display: block;
-}
-
-.design-chat__bubble-3d-badge {
-    position: absolute;
-    right: 6px;
-    bottom: 6px;
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 0.2rem 0.45rem;
-    border: none;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.65);
-    color: #fff;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-    cursor: pointer;
-    backdrop-filter: blur(4px);
-    transition: background 0.15s, transform 0.15s;
-}
-
-.design-chat__bubble-3d-badge:hover {
-    background: var(--naily-pink, #de869f);
-    transform: scale(1.05);
 }
 
 /* ── 퀵리플라이 카드 ── */
@@ -1390,7 +1370,8 @@
     flex: 1;
     min-width: 0;
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    /* 추천 컬러 30색(6색상군 × 5단계)을 10열 × 3행으로 배치 */
+    grid-template-columns: repeat(10, 1fr);
     align-content: start;
     gap: 0.3rem;
     /* 스와치 호버 확대(transform)가 상위 스크롤 영역 크기 계산에 영향을 주지 않도록 격리 */
@@ -1609,15 +1590,4 @@
     font-size: 0.75rem;
     color: #8a8a8a;
     text-align: center;
-}
-
-/* 채팅 속 이미지 확대 모달 — MyPage의 상세보기(--lg, 880px)보다 작게 */
-.design-chat__image-zoom-panel {
-    width: min(90vw, 560px);
-    max-height: 80vh;
-    padding: 1rem;
-}
-
-.design-chat__image-zoom-viewport {
-    height: min(50vh, 420px);
 }

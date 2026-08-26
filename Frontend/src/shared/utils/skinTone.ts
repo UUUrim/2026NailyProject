@@ -113,18 +113,18 @@ export function analyzeSkinTone(hex: string): SkinToneAnalysis {
 }
 
 /**
- * 대표 피부색 hex를 기준으로 어울리는 컬러 24색을 만든다.
+ * 대표 피부색 hex를 기준으로 어울리는 컬러 30색을 만든다.
  * 피부색의 실제 색상각(hue)을 기준 삼아 60도 간격의 6개 색상군을 두고,
- * 각 색상군마다 밝기를 달리한 4가지 톤을 뽑아 6*4=24색을 구성한다.
+ * 각 색상군마다 밝기를 달리한 5가지 톤을 뽑아 6*5=30색을 구성한다.
  */
-export function generateSkinTonePalette(hex: string, count = 24): string[] {
+export function generateSkinTonePalette(hex: string, count = 30): string[] {
   const [r, g, b] = hexToRgb(hex)
   const [baseHue] = rgbToHsl(r, g, b)
 
   const familyCount = 6
   const perFamily = Math.round(count / familyCount)
-  const lightnessSteps = [86, 72, 58, 42]
-  const saturationSteps = [40, 55, 62, 55]
+  const lightnessSteps = [88, 76, 64, 52, 40]
+  const saturationSteps = [38, 50, 62, 58, 46]
 
   const colors: string[] = []
   for (let f = 0; f < familyCount; f += 1) {
