@@ -357,7 +357,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <div className="mypage-x__scanx-meter" aria-hidden="true">
                     <i style={{ width: `${curvePct}%` }} />
                   </div>
-                  <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
+                  <span className="mypage-x__scanx-metric-hint">C-curve</span>
                 </article>
               </div>
             </section>
