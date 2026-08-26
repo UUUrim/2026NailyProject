@@ -144,8 +144,8 @@ export function NailDesignResultPageContent() {
                           <h2>내 손 분석 정보를 반영했어요</h2>
                           <div className="design-result-v2__origin-hand">
                             <div className="design-result-v2__origin-stat">
-                              <span className="design-result-v2__origin-stat-label">퍼스널 컬러</span>
-                              <span className="design-result-v2__origin-stat-value">{context.handSummary.seasonNameKo}</span>
+                              <span className="design-result-v2__origin-stat-label">피부 톤</span>
+                              <span className="design-result-v2__origin-stat-value">{context.handSummary.toneLabel}</span>
                             </div>
                             <div className="design-result-v2__origin-stat">
                               <span className="design-result-v2__origin-stat-label">추천 쉐입</span>

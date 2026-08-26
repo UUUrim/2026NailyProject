@@ -3,8 +3,10 @@ package com.example.nailyproject.service;
 import com.example.nailyproject.dto.request.PrintOrderRequestDto;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
 import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
+import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.PrintOrder;
 import com.example.nailyproject.entity.User;
+import com.example.nailyproject.repository.HandScanRepository;
 import com.example.nailyproject.repository.PrintOrderRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,6 +33,7 @@ import java.util.stream.Collectors;
 public class PrintOrderService {
 
     private final PrintOrderRepository printOrderRepository;
+    private final HandScanRepository handScanRepository;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -47,7 +50,14 @@ public class PrintOrderService {
 
     /**
      * 사용자가 "네일팁 출력하기"를 눌렀을 때 호출.
-     * 주문을 QUEUED로 기록한 뒤, printer/server.py에 병합 요청을 비동기로 날린다.
+     * 주문을 QUEUED로 기록한다. 프론트가 이 직전에 호출한 generateStl()은 "STL 생성을
+     * 요청했다"는 응답만 즉시 돌려주고 실제 생성은 파이썬 쪽에서 백그라운드로 계속 진행되는
+     * 웹훅 방식이라, 이 시점엔 아직 STL 파일이 S3에 없는 게 보통이다. 그런데도 여기서 바로
+     * 병합(requestMerge)을 시작하면 printer 서버가 아직 없는 STL을 다운로드하려다 대부분
+     * "측정 실패로 추정"으로 건너뛰는 레이스 컨디션이 생긴다 — 실제로는 측정 실패가 아니라
+     * 그냥 아직 안 끝난 것뿐이었음. 그래서 여기서는 바로 병합을 시작하지 않고, 왼손/오른손
+     * 각각의 STL 생성 완료 웹훅(ScanService.receiveStlResult → tryStartMergeForScan)이
+     * 도착할 때마다 준비됐는지 확인해서, 필요한 손이 전부 끝났을 때만 병합을 시작한다.
      */
     public PrintOrderResponseDto createPrintOrder(User user, PrintOrderRequestDto request) {
         PrintOrder order = PrintOrder.builder()
@@ -60,11 +70,48 @@ public class PrintOrderService {
 
         PrintOrder saved = printOrderRepository.save(order);
 
-        // 병합 요청은 시간이 좀 걸리는 작업이라(STL 다운로드 + trimesh 병합),
-        // 응답을 기다리지 않고 바로 반환한다 — printer 서버가 끝나면 콜백으로 알려준다.
-        requestMerge(saved);
+        // 이미 두 손 다 STL 생성이 끝나 있는 드문 경우(예: 재신청)엔 웹훅을 더 기다릴 필요 없이
+        // 바로 병합을 시작한다. 보통은 아직 안 끝나 있어서 여기선 QUEUED로 남고,
+        // tryStartMergeForScan()이 나중에 병합을 시작시킨다.
+        if (isReadyToMerge(saved)) {
+            requestMerge(saved);
+        }
 
         return toDto(saved);
+    }
+
+    /**
+     * STL 생성 완료 웹훅(ScanService.receiveStlResult)이 scanId 하나에 대해 도착할 때마다
+     * 호출된다. 이 scanId를 기다리던 QUEUED 상태 출력 주문이 있는지 찾아서, 그 주문에 필요한
+     * 손(왼손/오른손)의 STL이 전부 끝났으면 그제서야 병합을 시작한다.
+     */
+    public void tryStartMergeForScan(Long scanId) {
+        List<PrintOrder> waiting = new java.util.ArrayList<>(
+                printOrderRepository.findByStatusAndLeftScanId(PrintOrder.PrintStatus.QUEUED, scanId));
+        waiting.addAll(printOrderRepository.findByStatusAndRightScanId(PrintOrder.PrintStatus.QUEUED, scanId));
+
+        for (PrintOrder order : waiting) {
+            if (isReadyToMerge(order)) {
+                requestMerge(order);
+            }
+        }
+    }
+
+    /** 주문이 참조하는 손(들)의 HandScan이 전부 STL 생성까지 끝난(COMPLETED) 상태인지 확인 */
+    private boolean isReadyToMerge(PrintOrder order) {
+        if (order.getLeftScanId() != null && !isScanStlDone(order.getLeftScanId())) {
+            return false;
+        }
+        if (order.getRightScanId() != null && !isScanStlDone(order.getRightScanId())) {
+            return false;
+        }
+        return order.getLeftScanId() != null || order.getRightScanId() != null;
+    }
+
+    private boolean isScanStlDone(Long scanId) {
+        return handScanRepository.findById(scanId)
+                .map(scan -> scan.getStatus() == HandScan.ScanStatus.COMPLETED)
+                .orElse(false);
     }
 
     /**

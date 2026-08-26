@@ -24,8 +24,9 @@ export interface ScanResultResponse {
     recommendedShape: string | null
     skinToneHex: string
     recommendedColors: string[]
-    seasonCode: string        // ← 추가
-    seasonNameKo: string      // ← 추가
+    tone: string | null       // warm/cool/neutral
+    brightness: number | null // 0~1
+    saturation: number | null // 0~1
     overallSize: string
     fingers: FingerResult[]
     scannedAt: string
@@ -101,8 +102,9 @@ export interface ScanHistoryItem {
     shape: string | null
     recommendedShape: string | null
     skinToneHex: string | null
-    seasonCode: string | null
-    seasonNameKo: string | null
+    tone: string | null
+    brightness: number | null
+    saturation: number | null
     avgLengthMm: number | null
     avgWidthMm: number | null
     avgCurve: number | null

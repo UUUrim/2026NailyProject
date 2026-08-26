@@ -73,7 +73,7 @@ def download_finger_stls(userid: str, session: str, hand: str, shapes: dict, loc
         except client.exceptions.ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
             if error_code in ("404", "NoSuchKey"):
-                print(f"  [건너뜀] {finger}의 STL이 S3에 없음 (측정 실패로 추정): {s3_key}")
+                print(f"  [건너뜀] {finger}의 STL이 S3에 없음 (STL 생성이 아직 안 끝났거나 실패): {s3_key}")
                 missing.append(finger)
             else:
                 raise  # 404가 아닌 다른 에러(권한 문제 등)는 그대로 올려서 확실히 드러나게 함

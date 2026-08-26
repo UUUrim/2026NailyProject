@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { startScan, uploadFingerImage, requestAnalyze } from '@/entities/scan/api'
+import { startScan, requestAnalyze } from '@/entities/scan/api'
 import { useMyScansQuery } from '@/entities/scan/queries'
-import { useFingerAlignment } from '@/features/hand-scan/hooks/useFingerAlignment'
 import { useAuth } from '@/shared/hooks/useAuth'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { useSnapshotRestore } from '@/shared/hooks/useSnapshotRestore'
@@ -16,10 +15,6 @@ import {
 
 // 스캔 서버 주소 (로컬: http://localhost:8000, 데모: ngrok URL) — 데스크톱 브라우저 기준.
 const SCAN_SERVER_URL = import.meta.env.VITE_SCAN_SERVER_URL ?? 'http://localhost:8000'
-
-// 폰이 접속할 카메라 페이지 주소. localhost는 폰에서 못 열기 때문에
-// SCAN_SERVER_URL과 별개로 관리 — ngrok 등 폰이 실제로 도달 가능한 주소를 넣어야 함.
-const PHONE_CAM_URL = import.meta.env.VITE_PHONE_CAM_URL ?? SCAN_SERVER_URL
 
 function pickLatestCompletedSession(sessions: ScanSession[]): ScanSession | null {
   const completed = sessions.filter(isFullyAnalyzedSession)
@@ -53,12 +48,6 @@ export const HAND_LABELS: Record<HandSide, string> = {
 // 왼손 5손가락 → 오른손 5손가락, 총 10단계
 type ScanStep = { hand: HandSide; finger: Finger }
 export const STEPS: ScanStep[] = HANDS.flatMap((hand) => FINGERS.map((finger) => ({ hand, finger })))
-
-function pickDefaultDevices(devices: MediaDeviceInfo[]): [string, string] {
-  if (devices.length === 0) return ['default', 'default']
-  if (devices.length === 1) return [devices[0].deviceId, devices[0].deviceId]
-  return [devices[0].deviceId, devices[1].deviceId]
-}
 
 // 촬영 진행 상태(몇 번째 손가락까지 찍었는지)를 모듈 스코프에 스냅샷으로 저장해서, 다른 페이지로
 // 갔다가 돌아와도 처음부터 다시 찍지 않아도 되도록 한다. 카메라 스트림 자체는 하드웨어 리소스라
@@ -188,7 +177,10 @@ export function useHandScanPage() {
                   scanIdsRef.current = { ...scanIdsRef.current, RIGHT: nextScanId }
                 }
                 await requestAnalyze(nextScanId)
-              } catch { /* 에러 무시 */ }
+              } catch (e) {
+                console.error('[HandScan] 오른손 스캔 시작 실패', e)
+                setCameraError(e instanceof ApiError ? e.message : '오른손 스캔 시작에 실패했습니다. 새로고침 후 다시 시도해 주세요.')
+              }
             }
             void doRightScan()
           }
@@ -291,7 +283,6 @@ export function useHandScanPage() {
   return {
     navigate,
     SCAN_SERVER_URL,
-    PHONE_CAM_URL,
     isFullscreen,
     cameraError,
     isUploading,

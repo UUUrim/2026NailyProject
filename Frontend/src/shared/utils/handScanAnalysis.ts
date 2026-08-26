@@ -1,5 +1,5 @@
 import type { NailShapeId } from '@/shared/constants/nailShapes'
-import { PERSONAL_COLOR_SWATCHES, SEASON_ROWS } from '@/shared/constants/designPreferences'
+import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
 
 export type MetricComparison = {
   value: number
@@ -24,8 +24,7 @@ export type FingerDetail = {
 }
 
 export type HandScanAnalysis = {
-  seasonCode: string
-  seasonNameKo: string
+  toneLabel: string
   summary: string
   skinToneHex: string
   personalColorPalette: string[]
@@ -77,20 +76,14 @@ function comparisonLabel(percentile: number, small: string, large: string, avera
   return average
 }
 
-function pickShape(seasonCode: string, avgLength: number): NailShapeId {
+function pickShape(skinToneHex: string, avgLength: number): NailShapeId {
   const shapes: NailShapeId[] = ['square', 'oval', 'round', 'almond', 'stiletto', 'ballerina']
-  const index = (hashString(seasonCode) + Math.round(avgLength * 10)) % shapes.length
+  const index = (hashString(skinToneHex) + Math.round(avgLength * 10)) % shapes.length
   return shapes[index] ?? 'oval'
 }
 
-function skinToneFromSeason(seasonCode: string): string {
-  const palette = PERSONAL_COLOR_SWATCHES[seasonCode] ?? ['#E8C4B8']
-  return palette[1] ?? '#E8C4B8'
-}
-
-export function buildHandScanAnalysis(seasonCode: string): HandScanAnalysis {
-  const seasonRow = SEASON_ROWS.find((row) => row.code === seasonCode)
-  const seed = hashString(seasonCode)
+export function buildHandScanAnalysis(skinToneHex: string): HandScanAnalysis {
+  const seed = hashString(skinToneHex)
   const baseLength = 11.5 + (seed % 30) / 10
   const baseWidth = 9.2 + (seed % 20) / 10
   const baseCurve = 0.42 + (seed % 25) / 100
@@ -111,16 +104,14 @@ export function buildHandScanAnalysis(seasonCode: string): HandScanAnalysis {
     }
   })
 
-  const palette = PERSONAL_COLOR_SWATCHES[seasonCode] ?? PERSONAL_COLOR_SWATCHES.spring_light
+  const palette = generateSkinTonePalette(skinToneHex, 24)
 
   return {
-    seasonCode,
-    seasonNameKo: seasonRow?.nameKo ?? seasonCode,
-    //summary: `손톱 길이·너비·곡률과 피부 톤을 분석해 ${seasonRow?.nameKo ?? '퍼스널 컬러'} 타입으로 분류했습니다.`,
+    toneLabel: analyzeSkinTone(skinToneHex).tone.label,
     summary: '손톱 길이·너비·곡률과 피부 톤을 분석했습니다.',
-    skinToneHex: skinToneFromSeason(seasonCode),
+    skinToneHex,
     personalColorPalette: palette,
-    recommendedShape: pickShape(seasonCode, baseLength),
+    recommendedShape: pickShape(skinToneHex, baseLength),
     length: {
       value: baseLength,
       unit: 'mm',
