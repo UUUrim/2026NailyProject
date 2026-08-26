@@ -245,11 +245,39 @@ def measure_ccurve(image_path: str, width_mm: float,
                    debug_out: str = None,
                    thickness_mm: float = 0.85,
                    table_edge: bool = False,
-                   edge_margin_px: int = 350) -> dict:
+                   edge_margin_px: int = 350,
+                   top_crop_frac: float = 0.0,
+                   bottom_crop_frac: float = 0.0) -> dict:
 
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot open: {image_path}")
+
+    # ── 0. Ceiling/floor crop ──────────────────────────────────
+    # Box-style rigs shoot the end-on photo through a hole in a far wall,
+    # with the phone framing enough of the box to also catch its ceiling
+    # (bright strip light + blue alignment LEDs) and a long stretch of the
+    # near-camera mat. Neither is background in the "isolated finger on a
+    # dark backdrop" sense the mask/split logic below assumes: the ceiling
+    # is brighter and more textured than the finger itself, and the mat can
+    # end up merged into the same contour as the finger (both are large,
+    # uniform-ish regions with weak contrast at the box's dark corners) —
+    # confirmed on real rig photos where the "finger" contour it picked
+    # actually traced the ceiling light housing. Slicing off fixed top/
+    # bottom bands before any of that runs removes the confusing content
+    # outright rather than trying to out-threshold it.
+    if top_crop_frac > 0 or bottom_crop_frac > 0:
+        H0, W0 = img.shape[:2]
+        y0 = int(H0 * top_crop_frac)
+        y1 = H0 - int(H0 * bottom_crop_frac)
+        if y1 - y0 < 50:
+            raise RuntimeError(
+                f"top_crop_frac={top_crop_frac} + bottom_crop_frac="
+                f"{bottom_crop_frac} leaves almost nothing ({y1-y0}px) — "
+                "check the fractions.")
+        img = img[y0:y1, :]
+        print(f"  [Crop] top={top_crop_frac:.2f} bottom={bottom_crop_frac:.2f} "
+              f"→ {img.shape[1]}×{img.shape[0]} (rows {y0}:{y1} of {H0})")
 
     located = False
     if table_edge:
@@ -616,6 +644,14 @@ def main():
                         "loses its background reference and picks the "
                         "wrong split point - confirmed failing at 220, "
                         "clean at 300-400 on real rig photos.")
+    p.add_argument("--top-crop-frac", type=float, default=0.0,
+                   help="Fraction of image height to cut off the top "
+                        "before measuring (e.g. 0.28 to remove a box rig's "
+                        "ceiling/light fixture from the frame).")
+    p.add_argument("--bottom-crop-frac", type=float, default=0.0,
+                   help="Fraction of image height to cut off the bottom "
+                        "before measuring (e.g. 0.12 to remove excess "
+                        "near-camera mat).")
     args = p.parse_args()
 
     print(f"\nC-curve measurement: {args.image}")
@@ -623,7 +659,9 @@ def main():
 
     result = measure_ccurve(args.image, args.width_mm, args.debug_out,
                              table_edge=args.table_edge,
-                             edge_margin_px=args.edge_margin_px)
+                             edge_margin_px=args.edge_margin_px,
+                             top_crop_frac=args.top_crop_frac,
+                             bottom_crop_frac=args.bottom_crop_frac)
 
     print(f"\n  ┌─ C-CURVE RESULT ─────────────────────────────")
     print(f"  │  Sagitta (C-curve)  : {result['c_curve_mm']} mm")
