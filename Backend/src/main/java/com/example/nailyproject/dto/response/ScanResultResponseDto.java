@@ -81,7 +81,8 @@ public class ScanResultResponseDto {
                 .build();
     }
 
-    private static List<String> parseRecommendedColors(String raw, ObjectMapper objectMapper) {
+    // ScanHistoryItemDto(마이페이지 목록 조회)도 동일한 JSON 문자열 필드를 파싱해야 해서 공개해 둔다.
+    public static List<String> parseRecommendedColors(String raw, ObjectMapper objectMapper) {
         if (raw == null || raw.isBlank()) {
             return Collections.emptyList();
         }

@@ -102,6 +102,7 @@ export interface ScanHistoryItem {
     shape: string | null
     recommendedShape: string | null
     skinToneHex: string | null
+    recommendedColors: string[]
     tone: string | null
     brightness: number | null
     saturation: number | null

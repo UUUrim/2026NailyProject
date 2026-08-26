@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { getNailShape } from '@/shared/constants/nailShapes'
-import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { type ScanSession } from '@/shared/utils/scanDetail'
 import { formatMetricCurve, formatDateTimeFull } from '@/features/mypage/shared'
 
@@ -30,8 +30,16 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
     const skinHex = session.skinToneHex
-    const toneLabel = skinHex ? analyzeSkinTone(skinHex).tone.label.replace(/\s+/g, '') : '미분석'
-    const palettePreview = skinHex ? generateSkinTonePalette(skinHex, 5) : []
+    const toneLabel = (
+        skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+        (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
+    )?.replace(/\s+/g, '') ?? '미분석'
+    const palettePreview =
+        session.recommendedColors.length > 0
+            ? pickSpreadColors(session.recommendedColors, 5)
+            : skinHex
+                ? pickSpreadColors(generateSkinTonePalette(skinHex, 30), 5)
+                : []
     const metricsLine = [
         `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
         `너비 ${session.avgWidthMm != null ? `${Number(session.avgWidthMm).toFixed(1).replace(/\.0$/, '')}mm` : '-'}`,
