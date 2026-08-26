@@ -68,6 +68,19 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase()
 }
 
+/**
+ * 30색 팔레트(색상군별로 묶여 있어 인접 색끼리 색상각이 비슷함)에서 앞의 N개만 자르면
+ * 같은 색상군 안에서만 뽑혀 미리보기 스와치가 죄다 비슷한 색으로 보인다 — 그 대신
+ * 목록 전체에 걸쳐 고르게 간격을 두고 뽑아서, 짧은 미리보기에서도 서로 다른 색상군이
+ * 골고루 섞여 보이게 한다.
+ */
+export function pickSpreadColors<T>(items: T[], count: number): T[] {
+  if (count <= 0) return []
+  if (items.length <= count) return items
+  const step = items.length / count
+  return Array.from({ length: count }, (_, i) => items[Math.floor(i * step)])
+}
+
 export type SkinToneMetric = {
   /** 슬라이더에서 손잡이가 위치할 값 (0~100) */
   percent: number
@@ -91,7 +104,33 @@ function clampPercent(value: number, min: number, max: number): number {
   return Math.round(Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)))
 }
 
-/** 대표 피부색 hex만으로 톤(쿨~웜)/명도/채도(혈색) 슬라이더 값을 계산한다 */
+/**
+ * scan/skin_color.py(recommend_nail_colors)가 10손가락 LAB 평균으로 계산해서
+ * API로 내려주는 실제 진단값(tone/brightness/saturation)을 슬라이더 형태로 변환한다.
+ * analyzeSkinTone()은 이 값이 없는(구버전 스캔 등) 경우에만 쓰는 대체 추정치다.
+ */
+export function skinToneAnalysisFromMetrics(
+  tone: string | null,
+  brightness: number | null,
+  saturation: number | null,
+): SkinToneAnalysis | null {
+  if (tone == null || brightness == null || saturation == null) return null
+
+  const toneLabel = tone === 'warm' ? '웜톤' : tone === 'cool' ? '쿨톤' : '뉴트럴 톤'
+  const toneScore = tone === 'warm' ? 80 : tone === 'cool' ? 20 : 50
+
+  const brightnessLabel = brightness > 0.65 ? '밝은 편' : brightness < 0.55 ? '어두운 편' : '보통 밝기'
+  // skin_color.py: saturation = chroma / 40.0 — 기존 chroma 기준(20/12)을 같은 스케일로 환산
+  const saturationLabel = saturation > 0.5 ? '혈색이 있는 편' : saturation < 0.3 ? '혈색이 적은 편' : '보통'
+
+  return {
+    tone: { percent: toneScore, label: toneLabel },
+    brightness: { percent: Math.round(Math.min(100, Math.max(0, brightness * 100))), label: brightnessLabel },
+    saturation: { percent: Math.round(Math.min(100, Math.max(0, saturation * 100))), label: saturationLabel },
+  }
+}
+
+/** 대표 피부색 hex만으로 톤(쿨~웜)/명도/채도(혈색) 슬라이더 값을 계산한다 (백엔드 값이 없을 때의 대체 추정치) */
 export function analyzeSkinTone(hex: string): SkinToneAnalysis {
   const [r, g, b] = hexToRgb(hex)
   const [L, a, bLab] = rgbToLab(r, g, b)

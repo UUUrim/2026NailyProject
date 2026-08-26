@@ -6,7 +6,7 @@ import {
     formatMetricCurve,
     type ScanSession,
 } from '@/shared/utils/scanDetail'
-import { analyzeSkinTone } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import '@/styles/hand-scan-result.css'
 import '@/styles/print.css'
 import '@/styles/mypage.css'
@@ -23,13 +23,13 @@ const SESSIONS_PAGE_SIZE = 5
 // 1번 기록은 recommendedShape(round)와 shape(oval)를 일부러 다르게 넣어서, 이미 다른 쉐입으로
 // 출력 신청을 마친 기록에서도 "추천" 배지가 원래 AI 추천값(round)에 고정되는지 확인할 수 있게 했다.
 const MOCK_SESSIONS: ScanSession[] = [
-    { key: '1', scannedAt: '2026-08-10T14:20:00', leftScanId: 101, rightScanId: 102, skinToneHex: '#F3D2B8', tone: 'warm', brightness: 0.78, saturation: 0.32, shape: 'oval', recommendedShape: 'round', status: 'COMPLETED', avgLengthMm: 12.4, avgWidthMm: 9.6, avgCurve: 0.58 },
-    { key: '2', scannedAt: '2026-08-05T10:05:00', leftScanId: 103, rightScanId: 104, skinToneHex: '#EFC7B0', tone: 'cool', brightness: 0.7, saturation: 0.4, shape: 'oval', recommendedShape: 'oval', status: 'COMPLETED', avgLengthMm: 13.1, avgWidthMm: 9.0, avgCurve: 0.51 },
-    { key: '3', scannedAt: '2026-07-28T18:42:00', leftScanId: 105, rightScanId: 106, skinToneHex: '#C89A78', tone: 'warm', brightness: 0.55, saturation: 0.45, shape: 'almond', recommendedShape: 'almond', status: 'COMPLETED', avgLengthMm: 12.9, avgWidthMm: 8.7, avgCurve: 0.63 },
-    { key: '4', scannedAt: '2026-07-20T09:15:00', leftScanId: 107, rightScanId: 108, skinToneHex: '#D9AFA0', tone: 'cool', brightness: 0.6, saturation: 0.5, shape: 'stiletto', recommendedShape: 'stiletto', status: 'COMPLETED', avgLengthMm: 14.2, avgWidthMm: 8.2, avgCurve: 0.47 },
-    { key: '5', scannedAt: '2026-07-12T16:30:00', leftScanId: 109, rightScanId: 110, skinToneHex: '#F0D0BE', tone: 'warm', brightness: 0.8, saturation: 0.35, shape: 'ballerina', recommendedShape: 'ballerina', status: 'COMPLETED', avgLengthMm: 11.8, avgWidthMm: 10.1, avgCurve: 0.55 },
-    { key: '6', scannedAt: '2026-07-01T11:00:00', leftScanId: 111, rightScanId: 112, skinToneHex: '#E4C9BC', tone: 'cool', brightness: 0.68, saturation: 0.3, shape: 'square', recommendedShape: 'square', status: 'COMPLETED', avgLengthMm: 12.0, avgWidthMm: 9.9, avgCurve: 0.44 },
-    { key: '7', scannedAt: '2026-06-20T13:50:00', leftScanId: 113, rightScanId: 114, skinToneHex: '#D3A587', tone: 'warm', brightness: 0.58, saturation: 0.42, shape: 'round', recommendedShape: 'round', status: 'COMPLETED', avgLengthMm: 13.5, avgWidthMm: 9.3, avgCurve: 0.60 },
+    { key: '1', scannedAt: '2026-08-10T14:20:00', leftScanId: 101, rightScanId: 102, skinToneHex: '#F3D2B8', tone: 'warm', brightness: 0.78, saturation: 0.32, recommendedColors: [], shape: 'oval', recommendedShape: 'round', status: 'COMPLETED', avgLengthMm: 12.4, avgWidthMm: 9.6, avgCurve: 0.58 },
+    { key: '2', scannedAt: '2026-08-05T10:05:00', leftScanId: 103, rightScanId: 104, skinToneHex: '#EFC7B0', tone: 'cool', brightness: 0.7, saturation: 0.4, recommendedColors: [], shape: 'oval', recommendedShape: 'oval', status: 'COMPLETED', avgLengthMm: 13.1, avgWidthMm: 9.0, avgCurve: 0.51 },
+    { key: '3', scannedAt: '2026-07-28T18:42:00', leftScanId: 105, rightScanId: 106, skinToneHex: '#C89A78', tone: 'warm', brightness: 0.55, saturation: 0.45, recommendedColors: [], shape: 'almond', recommendedShape: 'almond', status: 'COMPLETED', avgLengthMm: 12.9, avgWidthMm: 8.7, avgCurve: 0.63 },
+    { key: '4', scannedAt: '2026-07-20T09:15:00', leftScanId: 107, rightScanId: 108, skinToneHex: '#D9AFA0', tone: 'cool', brightness: 0.6, saturation: 0.5, recommendedColors: [], shape: 'stiletto', recommendedShape: 'stiletto', status: 'COMPLETED', avgLengthMm: 14.2, avgWidthMm: 8.2, avgCurve: 0.47 },
+    { key: '5', scannedAt: '2026-07-12T16:30:00', leftScanId: 109, rightScanId: 110, skinToneHex: '#F0D0BE', tone: 'warm', brightness: 0.8, saturation: 0.35, recommendedColors: [], shape: 'ballerina', recommendedShape: 'ballerina', status: 'COMPLETED', avgLengthMm: 11.8, avgWidthMm: 10.1, avgCurve: 0.55 },
+    { key: '6', scannedAt: '2026-07-01T11:00:00', leftScanId: 111, rightScanId: 112, skinToneHex: '#E4C9BC', tone: 'cool', brightness: 0.68, saturation: 0.3, recommendedColors: [], shape: 'square', recommendedShape: 'square', status: 'COMPLETED', avgLengthMm: 12.0, avgWidthMm: 9.9, avgCurve: 0.44 },
+    { key: '7', scannedAt: '2026-06-20T13:50:00', leftScanId: 113, rightScanId: 114, skinToneHex: '#D3A587', tone: 'warm', brightness: 0.58, saturation: 0.42, recommendedColors: [], shape: 'round', recommendedShape: 'round', status: 'COMPLETED', avgLengthMm: 13.5, avgWidthMm: 9.3, avgCurve: 0.60 },
 ]
 
 function formatScanDateLabel(raw: string): string {
@@ -107,9 +107,10 @@ export function PrintPagePreviewContent() {
                         {pagedSessions.map((session) => {
                             const isSelected = session.key === selectedKey
                             const repColor = session.skinToneHex ?? '#de869f'
-                            const toneLabel = session.skinToneHex
-                                ? analyzeSkinTone(session.skinToneHex).tone.label.replace(/\s+/g, '')
-                                : '미분석'
+                            const toneLabel = (
+                                skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+                                (session.skinToneHex ? analyzeSkinTone(session.skinToneHex).tone.label : null)
+                            )?.replace(/\s+/g, '') ?? '미분석'
                             const shapeLabel = session.recommendedShape
                                 ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
                                 : null

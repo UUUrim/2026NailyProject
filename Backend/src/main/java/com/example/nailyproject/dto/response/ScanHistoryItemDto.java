@@ -3,6 +3,8 @@ package com.example.nailyproject.dto.response;
 import lombok.Builder;
 import lombok.Getter;
 
+import java.util.List;
+
 // 마이페이지 '손 분석 결과 이력' 목록용 요약 DTO
 @Getter
 @Builder
@@ -13,6 +15,7 @@ public class ScanHistoryItemDto {
     private String shape;
     private String recommendedShape;
     private String skinToneHex;
+    private List<String> recommendedColors;
     private String tone;
     private Double brightness;
     private Double saturation;
