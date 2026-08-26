@@ -372,7 +372,7 @@ export function MyPageLayout() {
     }
   }
 
-  const pageSizeForSection = (id: SectionId) => (id === 'designs' ? 12 : 10)
+  const pageSizeForSection = (id: SectionId) => (id === 'designs' || id === 'favorites' ? 12 : 10)
 
   const paginate = <T,>(items: T[], id: SectionId) => {
     const size = pageSizeForSection(id)

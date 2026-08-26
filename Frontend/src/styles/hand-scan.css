@@ -474,7 +474,7 @@
     padding: 10px 20px;
     max-width: min(90vw, 420px);
     text-align: center;
-    font-size: clamp(0.95rem, 2vw, 1.1rem);
+    font-size: clamp(0.78rem, 1.6vw, 0.92rem);
     font-weight: 600;
     line-height: 1.4;
     color: #fff;
@@ -582,8 +582,8 @@
     }
 
     .hand-scan-fs__prompt {
-        font-size: 1rem;
-        padding: 12px 20px;
+        font-size: 0.85rem;
+        padding: 10px 18px;
     }
 }
 

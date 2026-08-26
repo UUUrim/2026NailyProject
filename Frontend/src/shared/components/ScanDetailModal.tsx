@@ -255,6 +255,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <h3 className="mypage-x__scanx-season">{toneLabel}</h3>
                   {analysis && (
                     <div className="mypage-x__scanx-chips">
+                      <span>{skinHex}</span>
                       <span>{toneLabel}</span>
                       <span>{classifySkinLevel(analysis.brightness.percent)}명도</span>
                       <span>{classifySkinLevel(analysis.saturation.percent)}채도</span>

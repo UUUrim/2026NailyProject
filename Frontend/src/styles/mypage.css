@@ -3012,7 +3012,9 @@
 
 /* 찜 탭 폴더 목록 맨 끝의 "새 폴더 만들기" 카드 — 다른 폴더 카드와 같은 모양.
    <button> 기본 UA 스타일(여백/appearance)이 남아 핑크 썸네일 위에 여백이 생기는 걸 막기 위해
-   .mypage-x__folder-card-open과 동일하게 margin/appearance까지 전부 리셋한다 */
+   .mypage-x__folder-card-open과 동일하게 margin/appearance까지 전부 리셋한다.
+   (버튼 상태·폴더명 입력 중인 <div> 상태 둘 다 이 클래스를 그대로 쓰므로, 아래
+   .mypage-x__folder-new-thumb의 여백도 두 상태 모두에 동일하게 적용된다.) */
 .mypage-x__folder-card--new {
   display: block;
   width: 100%;
@@ -3042,10 +3044,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 가장자리에 딱 맞춰 채우면 위쪽에만 미세한 여백이 남는 문제가 있어, 아예 사방에
-     동일한 여백을 두는 타일 형태로 바꿔 어느 쪽에서 봐도 대칭이 되도록 했다 */
+  /* 가장자리에 딱 맞춰 채우면 위쪽에만 여백이 없어 보이는 문제가 있어, 사방에
+     동일한 여백을 두는 타일 형태로 어느 쪽에서 봐도 대칭이 되도록 한다. */
   height: 96px;
-  margin: 0 0.7rem 0;
+  margin: 0.7rem;
   border-radius: 10px;
   background: #fdf5f8;
   color: var(--mp-pink);
@@ -3513,14 +3515,11 @@
 }
 
 .mypage-x__modal-design-details .design-result-v2__color-item,
-.mypage-x__modal-design-details .design-result-v2__texture-item,
 .mypage-x__modal-design-details .design-result-v2__charm-item {
   align-items: flex-start;
 }
 
-.mypage-x__modal-design-details .design-result-v2__color-hex,
-.mypage-x__modal-design-details .design-result-v2__texture-label,
-.mypage-x__modal-design-details .design-result-v2__charm-label {
+.mypage-x__modal-design-details .design-result-v2__color-hex {
   text-align: left;
 }
 

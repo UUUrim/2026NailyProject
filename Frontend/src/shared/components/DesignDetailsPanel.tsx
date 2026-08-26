@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { TEXTURE_INFO, CHARM_INFO } from '@/shared/constants/designPreferences'
 import type { DesignDetailItem, DesignExtractedDetails } from '@/entities/design/api'
 import '@/styles/nail-design.css'
@@ -131,32 +132,167 @@ function normalizeDetailItem(item: DesignDetailItem, index: number, keyPrefix: s
     }
 }
 
+const LIGHTBOX_ZOOM_MIN = 1
+const LIGHTBOX_ZOOM_MAX = 4
+const LIGHTBOX_WHEEL_ZOOM_SENSITIVITY = 0.0015
+
+// 텍스처·파츠 썸네일을 눌렀을 때 원본 이미지를 화면 중앙에 크게 띄우는 라이트박스.
+// document.body에 포탈로 붙여서, 이 패널이 어떤 모달(마이페이지 상세모달 등) 안에
+// 중첩되어 있어도 그 모달 경계에 잘리지 않고 항상 화면 전체를 덮는다.
+// 확대/이동은 DesignImageDetailModal의 이미지 뷰포트와 동일한 방식 - 휠로 zoom을
+// 조절하고, 확대된 상태에서만 드래그로 pan한다. transform(scale/translate)만
+// 건드리므로 레이아웃 크기는 그대로 유지되고, 넘치는 부분은 overflow:hidden으로 잘린다.
+function ImageLightbox({ imageUrl, alt, onClose }: { imageUrl: string; alt: string; onClose: () => void }) {
+    const [zoom, setZoom] = useState(1)
+    const [pan, setPan] = useState({ x: 0, y: 0 })
+    const [isDragging, setIsDragging] = useState(false)
+    const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
+    const viewportRef = useRef<HTMLDivElement | null>(null)
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') onClose()
+        }
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [onClose])
+
+    // 휠 이벤트로 페이지 스크롤이 함께 일어나지 않도록 preventDefault가 필요한데,
+    // React의 합성 이벤트는 이 리스너를 passive로 등록해 preventDefault를 무시하므로
+    // ref에 직접 네이티브 리스너를 붙인다.
+    useEffect(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+
+        const handleWheel = (event: WheelEvent) => {
+            event.preventDefault()
+            setZoom((z) => {
+                const next = Math.min(
+                    LIGHTBOX_ZOOM_MAX,
+                    Math.max(LIGHTBOX_ZOOM_MIN, Number((z - event.deltaY * LIGHTBOX_WHEEL_ZOOM_SENSITIVITY).toFixed(2))),
+                )
+                if (next === LIGHTBOX_ZOOM_MIN) setPan({ x: 0, y: 0 })
+                return next
+            })
+        }
+
+        viewport.addEventListener('wheel', handleWheel, { passive: false })
+        return () => viewport.removeEventListener('wheel', handleWheel)
+    }, [])
+
+    const handlePointerDown = (event: ReactMouseEvent<HTMLImageElement>) => {
+        if (zoom <= LIGHTBOX_ZOOM_MIN) return
+        setIsDragging(true)
+        dragStartRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y }
+    }
+
+    const handlePointerMove = (event: ReactMouseEvent<HTMLImageElement>) => {
+        if (!isDragging) return
+        const dx = event.clientX - dragStartRef.current.x
+        const dy = event.clientY - dragStartRef.current.y
+        setPan({ x: dragStartRef.current.panX + dx, y: dragStartRef.current.panY + dy })
+    }
+
+    const stopDragging = () => setIsDragging(false)
+
+    return createPortal(
+        <div className="design-result-v2__lightbox" role="dialog" aria-modal="true" aria-label={alt}>
+            <button type="button" className="design-result-v2__lightbox-backdrop" aria-label="닫기" onClick={onClose} />
+            <div
+                ref={viewportRef}
+                className={`design-result-v2__lightbox-content${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
+                onMouseUp={stopDragging}
+                onMouseLeave={stopDragging}
+            >
+                <button type="button" className="design-result-v2__lightbox-close" aria-label="닫기" onClick={onClose}>
+                    ✕
+                </button>
+                <img
+                    src={imageUrl}
+                    alt={alt}
+                    draggable={false}
+                    style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+                    onMouseDown={handlePointerDown}
+                    onMouseMove={handlePointerMove}
+                />
+            </div>
+        </div>,
+        document.body,
+    )
+}
+
+// 팔레트/텍스처와 달리 참·파츠는 이미 배경이 제거된 낱장 이미지라, 박스에 가두지
+// 않고 그 이미지 자체를 보여준다 - 로드 실패시에만 최소한의 아이콘으로 대체한다.
+function CharmImage({
+                         imageUrl,
+                         alt,
+                         fallbackIcon,
+                         onClick,
+                     }: {
+    imageUrl: string
+    alt: string
+    fallbackIcon: string
+    onClick: () => void
+}) {
+    const [broken, setBroken] = useState(false)
+
+    if (broken) {
+        return (
+            <span className="design-result-v2__charm-fallback" role="img" aria-label={alt}>
+                {fallbackIcon}
+            </span>
+        )
+    }
+
+    return (
+        <button type="button" className="design-result-v2__charm-image-button" onClick={onClick} aria-label={`${alt} 확대 보기`}>
+            <img
+                className="design-result-v2__charm-image"
+                src={imageUrl}
+                alt={alt}
+                loading="lazy"
+                onError={() => setBroken(true)}
+            />
+        </button>
+    )
+}
+
 function DetailThumb({
                          imageUrl,
                          shape,
                          background,
                          alt,
                          children,
+                         onClick,
                      }: {
     imageUrl: string | null
     shape: 'square' | 'circle'
     background?: string
     alt: string
     children?: ReactNode
+    onClick?: () => void
 }) {
     const [broken, setBroken] = useState(false)
     const showImage = !!imageUrl && !broken
+    const className = `design-result-v2__thumb design-result-v2__thumb--${shape}`
+    const style = !showImage && background ? { background } : undefined
+    const content = showImage ? (
+        <img src={imageUrl as string} alt={alt} loading="lazy" onError={() => setBroken(true)} />
+    ) : (
+        children
+    )
+
+    if (showImage && onClick) {
+        return (
+            <button type="button" className={`${className} design-result-v2__thumb--zoomable`} style={style} onClick={onClick} aria-label={`${alt} 확대 보기`}>
+                {content}
+            </button>
+        )
+    }
 
     return (
-        <div
-            className={`design-result-v2__thumb design-result-v2__thumb--${shape}`}
-            style={!showImage && background ? { background } : undefined}
-        >
-            {showImage ? (
-                <img src={imageUrl as string} alt={alt} loading="lazy" onError={() => setBroken(true)} />
-            ) : (
-                children
-            )}
+        <div className={className} style={style}>
+            {content}
         </div>
     )
 }
@@ -168,6 +304,8 @@ type Props = {
 }
 
 export function DesignDetailsPanel({ details, loading = false, swatchLoading = false }: Props) {
+    const [lightbox, setLightbox] = useState<{ url: string; alt: string } | null>(null)
+
     if (loading) {
         return (
             <section className="design-result-v2__details" aria-label="디자인 구성 요소">
@@ -196,6 +334,10 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
 
     return (
         <section className="design-result-v2__details" aria-label="디자인 구성 요소">
+            {lightbox && (
+                <ImageLightbox imageUrl={lightbox.url} alt={lightbox.alt} onClose={() => setLightbox(null)} />
+            )}
+
             {/* 컬러 팔레트 */}
             <div className="design-result-v2__detail-block">
                 <p className="design-result-v2__detail-label">컬러 팔레트</p>
@@ -232,13 +374,15 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                     <div className="design-result-v2__texture-row">
                         {swatchEntries.map(([textureKey, swatchUrl]) => {
                             const info = TEXTURE_INFO[textureKey]
+                            const alt = info?.labelKo ?? textureKey
                             return (
                                 <div className="design-result-v2__texture-item" key={textureKey}>
                                     <DetailThumb
                                         imageUrl={swatchUrl}
                                         shape="circle"
                                         background={info?.swatchStyle?.background}
-                                        alt={info?.labelKo ?? textureKey}
+                                        alt={alt}
+                                        onClick={() => setLightbox({ url: swatchUrl, alt })}
                                     >
                                         <span className="design-result-v2__thumb-icon">✧</span>
                                     </DetailThumb>
@@ -256,13 +400,15 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                             {(details?.textures ?? []).map((item, i) => {
                                 const norm = normalizeDetailItem(item, i, 'texture')
                                 const info = norm.label ? TEXTURE_INFO[norm.label] ?? TEXTURE_INFO_BY_KO[norm.label] : undefined
+                                const alt = info?.labelKo ?? norm.label ?? '텍스처'
                                 return (
                                     <div className="design-result-v2__texture-item" key={norm.key}>
                                         <DetailThumb
                                             imageUrl={norm.imageUrl}
                                             shape="circle"
                                             background={info?.swatchStyle?.background}
-                                            alt={info?.labelKo ?? norm.label ?? '텍스처'}
+                                            alt={alt}
+                                            onClick={norm.imageUrl ? () => setLightbox({ url: norm.imageUrl as string, alt }) : undefined}
                                         >
                                             <span className="design-result-v2__thumb-icon">✧</span>
                                         </DetailThumb>
@@ -283,24 +429,37 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 {normalizedCharms.length > 0 || charmSwatchEntries.length > 0 ? (
                     <div className="design-result-v2__charm-row">
                         {/* 스와치에서 온 3d_charm */}
-                        {charmSwatchEntries.map(([key, url]) => (
-                            <div className="design-result-v2__charm-item" key={key}>
-                                <DetailThumb imageUrl={url} shape="square" alt="3D 참">
-                                    <span className="design-result-v2__thumb-icon">✧</span>
-                                </DetailThumb>
-                                <span className="design-result-v2__charm-label">3D 참</span>
-                            </div>
-                        ))}
+                        {charmSwatchEntries.map(([key, url]) =>
+                            url ? (
+                                <CharmImage
+                                    key={key}
+                                    imageUrl={url}
+                                    alt="3D 참"
+                                    fallbackIcon="✧"
+                                    onClick={() => setLightbox({ url, alt: '3D 참' })}
+                                />
+                            ) : (
+                                <span className="design-result-v2__charm-fallback" key={key} role="img" aria-label="3D 참">
+                                    ✧
+                                </span>
+                            ),
+                        )}
                         {/* designPlan에서 온 파츠 */}
                         {normalizedCharms.map((item) => {
                             const info = item.label ? CHARM_INFO[item.label] ?? CHARM_INFO_BY_KO[item.label] : undefined
-                            return (
-                                <div className="design-result-v2__charm-item" key={item.key}>
-                                    <DetailThumb imageUrl={item.imageUrl} shape="square" alt={info?.labelKo ?? item.label ?? '네일 파츠'}>
-                                        <span className="design-result-v2__thumb-icon">{info?.icon ?? '✧'}</span>
-                                    </DetailThumb>
-                                    <span className="design-result-v2__charm-label">{info?.labelKo ?? item.label}</span>
-                                </div>
+                            const alt = info?.labelKo ?? item.label ?? '네일 파츠'
+                            return item.imageUrl ? (
+                                <CharmImage
+                                    key={item.key}
+                                    imageUrl={item.imageUrl}
+                                    alt={alt}
+                                    fallbackIcon={info?.icon ?? '✧'}
+                                    onClick={() => setLightbox({ url: item.imageUrl as string, alt })}
+                                />
+                            ) : (
+                                <span className="design-result-v2__charm-fallback" key={item.key} role="img" aria-label={alt}>
+                                    {info?.icon ?? '✧'}
+                                </span>
                             )
                         })}
                     </div>
