@@ -23,7 +23,7 @@ const STEPS = [
   },
   {
     number: '04',
-    title: '3D 미리보기',
+    title: 'AR 미리보기',
     description: '내 손 위에 디자인을 입혀 실제 착용 느낌을 확인해요.',
     accent: '#ebf9f1',
   },
@@ -42,7 +42,7 @@ export function ProcessGuidePage() {
           이렇게 만들어져요
         </h1>
         <p className="process-v2__lead">
-          손 스캔부터 3D 미리보기까지, 네일리와 함께하는 4단계 제작 과정이에요.
+          손 스캔부터 AR 미리보기까지, 네일리와 함께하는 4단계 제작 과정이에요.
         </p>
       </section>
 

@@ -15,6 +15,7 @@ import {
 import { FavoriteFolderModal } from '@/shared/components/FavoriteFolderModal'
 import { DesignDetailsPanel } from '@/shared/components/DesignDetailsPanel'
 import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
+import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { NailArTryOnModal } from '@/features/mypage/components/NailArTryOnModal'
 import { ApiError } from '@/shared/utils/apiClient'
 import { downloadImage } from '@/shared/utils/downloadImage'
@@ -41,17 +42,27 @@ type Props = {
   onShareChange?: (designId: number, shared: boolean) => void
   /** 삭제된 뒤 알려준다 (모달은 이후 자동으로 닫힘) */
   onDeleted?: (designId: number) => void
-  /** 채팅 이력에서 다른 이미지로 옮겨갈 때, 그 이미지가 이미 찜되어 있는지 알고 싶으면 넘겨준다 */
-  checkLiked?: (designId: number, imageUrl: string) => boolean
   /** 삭제 버튼을 보여줄지 (기본 true) — 마이페이지처럼 내 디자인을 관리하는 화면이 아니면 false로 끈다 */
   showDelete?: boolean
   /** "채팅 이력 보기" 토글을 보여줄지 (기본 true) */
   showChatHistoryToggle?: boolean
   /** "이미지 상세보기" 토글을 보여줄지 (기본 true) */
   showDesignDetailsToggle?: boolean
+
+  /** 찜하기 버튼 + 찜 폴더명 배지를 보여줄지 (기본 true) */
+  showLike?: boolean
+  /** 공유 상태 배지 + 공유하기 버튼을 보여줄지 (기본 true) */
+  showShare?: boolean
+  /** AR로 미리보기 버튼을 보여줄지 (기본 true) */
+  showAr?: boolean
+  /** 이미지 다운로드 버튼을 보여줄지 (기본 true) */
+  showDownload?: boolean
+  /** 다른 모달(예: 채팅 이력 보기) 위에 한 겹 더 겹쳐 떠야 할 때 z-index를 한 단계 더 올린다 */
+  stackedAboveModal?: boolean
 }
 
-const Icon = {
+// 이미지 위에 겹쳐 보이는 찜/폴더 UI를 다른 화면(디자인 결과 화면 등)에서도 그대로 재사용하기 위해 export
+export const Icon = {
   heart: (
     <svg viewBox="0 0 24 24" fill="none">
       <path
@@ -91,10 +102,14 @@ export function DesignImageDetailModal({
   onLikeChange,
   onShareChange,
   onDeleted,
-  checkLiked,
   showDelete = true,
   showChatHistoryToggle = true,
   showDesignDetailsToggle = true,
+  showLike = true,
+  showShare = true,
+  showAr = true,
+  showDownload = true,
+  stackedAboveModal = false,
 }: Props) {
   const [viewDesignId, setViewDesignId] = useState<number | null>(null)
   const [viewImageUrl, setViewImageUrl] = useState('')
@@ -111,6 +126,8 @@ export function DesignImageDetailModal({
   const [isBusy, setIsBusy] = useState(false)
   const [showDesignDetails, setShowDesignDetails] = useState(false)
   const [arTryOnImageUrl, setArTryOnImageUrl] = useState<string | null>(null)
+  const [shape, setShape] = useState<string | null>(null)
+  const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
   const [likeModalTarget, setLikeModalTarget] = useState<LikeModalTarget | null>(null)
 
   // 채팅 이력 보기 (모달 안에서 이미지 영역을 채팅 재연으로 토글)
@@ -119,6 +136,8 @@ export function DesignImageDetailModal({
   const [isChatHistoryLoading, setIsChatHistoryLoading] = useState(false)
   const [chatHistoryError, setChatHistoryError] = useState<string | null>(null)
   const [chatDesignId, setChatDesignId] = useState<number | null>(null)
+  // 채팅 이력 안의 이미지를 클릭했을 때 위에 띄우는, 확대/이동+다운로드만 가능한 축소판 상세모달
+  const [chatHistoryZoomImage, setChatHistoryZoomImage] = useState<string | null>(null)
 
   // 이미지 확대/축소/이동
   const [zoom, setZoom] = useState(1)
@@ -147,6 +166,8 @@ export function DesignImageDetailModal({
       setOwner(undefined)
       setShared(false)
       setDetails(null)
+      setShape(null)
+      setNailTipCropUrls(null)
       return
     }
 
@@ -159,6 +180,9 @@ export function DesignImageDetailModal({
     setOwner(undefined)
     setShared(false)
     setDetails(null)
+    setShape(null)
+    setNailTipCropUrls(null)
+
 
     if (image.designId == null) return
     let cancelled = false
@@ -170,6 +194,8 @@ export function DesignImageDetailModal({
         setOwner(detail.owner)
         setDetails(detail.details ?? null)
         setCreatedAt((prev) => detail.createdAt || prev)
+        setShape(detail.shape ?? null)
+        setNailTipCropUrls(detail.nailTipCropUrls ?? null)
       })
       .catch(() => {
         /* 상세 실패해도 이미지는 볼 수 있게 유지 */
@@ -313,7 +339,12 @@ export function DesignImageDetailModal({
   const folderLabel = viewFolder?.name ?? '기본'
 
   return (
-    <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="디자인 상세">
+    <div
+      className={`mypage-x__modal${stackedAboveModal ? ' mypage-x__modal--stacked-2' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="디자인 상세"
+    >
       <button type="button" className="mypage-x__modal-backdrop" aria-label="닫기" onClick={onClose} />
       <div className="mypage-x__modal-panel mypage-x__modal-panel--lg mypage-x__modal-panel--image">
         <button type="button" className="mypage-x__modal-close mypage-x__modal-close--plain" onClick={onClose} aria-label="닫기">
@@ -336,37 +367,35 @@ export function DesignImageDetailModal({
             onMouseMove={handleImagePointerMove}
           />
 
-          <div className="mypage-x__modal-image-tools">
-            <button
-              type="button"
-              className={`mypage-x__modal-heart${viewLiked ? ' is-liked' : ''}`}
-              onClick={() => void handleToggleLike()}
-              disabled={isBusy || viewDesignId == null}
-              aria-label={viewLiked ? '찜 해제' : '찜하기'}
-            >
-              {Icon.heart}
-            </button>
-            {viewLiked && viewDesignId != null && (
+          {showLike && (
+            <div className="mypage-x__modal-image-tools">
               <button
                 type="button"
-                className="mypage-x__modal-folder-pill"
-                onClick={openMoveFolderModal}
-                title="저장 위치 변경"
-                aria-label={`저장 위치 변경 (현재: ${folderLabel})`}
+                className={`mypage-x__modal-heart${viewLiked ? ' is-liked' : ''}`}
+                onClick={() => void handleToggleLike()}
+                disabled={isBusy || viewDesignId == null}
+                aria-label={viewLiked ? '찜 해제' : '찜하기'}
               >
-                <span className="mypage-x__modal-folder-pill-text">{folderLabel}</span>
-                <span className="mypage-x__modal-folder-pill-icon" aria-hidden="true">
-                  {Icon.chevronDown}
-                </span>
+                {Icon.heart}
               </button>
-            )}
-          </div>
-
-          {canManage && (
-            <span className={`mypage-x__modal-share-corner mypage-x__share-badge${shared ? ' is-on' : ''}`}>
-              {shared ? '둘러보기에 공유 중' : '비공개'}
-            </span>
+              {viewLiked && viewDesignId != null && (
+                <button
+                  type="button"
+                  className="mypage-x__modal-folder-pill"
+                  onClick={openMoveFolderModal}
+                  title="저장 위치 변경"
+                  aria-label={`저장 위치 변경 (현재: ${folderLabel})`}
+                >
+                  <span className="mypage-x__modal-folder-pill-text">{folderLabel}</span>
+                  <span className="mypage-x__modal-folder-pill-icon" aria-hidden="true">
+                    {Icon.chevronDown}
+                  </span>
+                </button>
+              )}
+            </div>
           )}
+
+          {showShare && canManage && <ShareStatusBadge shared={shared} className="mypage-x__modal-share-corner" />}
 
           <div className="mypage-x__modal-zoom-controls">
             <span className="mypage-x__modal-zoom-value">{Math.round(zoom * 100)}%</span>
@@ -413,11 +442,13 @@ export function DesignImageDetailModal({
               <span>이미지 삭제</span>
             </button>
           )}
-          <button type="button" className="mypage-x__modal-action--ghost" onClick={() => void downloadImage(viewImageUrl, `naily-design-${Date.now()}.png`)}>
-            {ModalActionIcons.download}
-            <span>이미지 다운로드</span>
-          </button>
-          {viewDesignId != null && (
+          {showDownload && (
+            <button type="button" className="mypage-x__modal-action--ghost" onClick={() => void downloadImage(viewImageUrl, `naily-design-${Date.now()}.png`)}>
+              {ModalActionIcons.download}
+              <span>이미지 다운로드</span>
+            </button>
+          )}
+          {showShare && viewDesignId != null && (
             <button
               type="button"
               className={`mypage-x__modal-action--ghost${shared ? ' is-active' : ''}`}
@@ -478,16 +509,7 @@ export function DesignImageDetailModal({
                                 src={url}
                                 alt={`생성된 네일 디자인 ${k + 1}`}
                                 style={{ cursor: 'zoom-in' }}
-                                onClick={() => {
-                                  setZoom(1)
-                                  setPan({ x: 0, y: 0 })
-                                  const newDesignId = msg.designId ?? viewDesignId
-                                  setViewImageUrl(url)
-                                  setViewDesignId(newDesignId ?? null)
-                                  setViewLiked(newDesignId != null ? Boolean(checkLiked?.(newDesignId, url)) : false)
-                                  setViewFolder(null)
-                                  setShowChatHistory(false)
-                                }}
+                                onClick={() => setChatHistoryZoomImage(url)}
                               />
                             </div>
                           ))}
@@ -510,7 +532,28 @@ export function DesignImageDetailModal({
         initialFolderId={likeModalTarget?.currentFolderId ?? null}
       />
 
-      {arTryOnImageUrl && <NailArTryOnModal imageUrl={arTryOnImageUrl} onClose={() => setArTryOnImageUrl(null)} />}
+      {arTryOnImageUrl && (
+        <NailArTryOnModal
+          imageUrl={arTryOnImageUrl}
+          shape={shape}
+          nailTipCropUrls={nailTipCropUrls}
+          onClose={() => setArTryOnImageUrl(null)}
+        />
+      )}
+
+      {chatHistoryZoomImage && (
+        <DesignImageDetailModal
+          image={{ designId: null, imageUrl: chatHistoryZoomImage, liked: false, folder: null }}
+          onClose={() => setChatHistoryZoomImage(null)}
+          showDelete={false}
+          showChatHistoryToggle={false}
+          showDesignDetailsToggle={false}
+          showLike={false}
+          showShare={false}
+          showAr={false}
+          stackedAboveModal
+        />
+      )}
     </div>
   )
 }

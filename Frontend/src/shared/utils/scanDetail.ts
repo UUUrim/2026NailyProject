@@ -1,5 +1,5 @@
 import type { ScanHistoryItem, ScanResultResponse } from '@/entities/scan/api'
-import { PERSONAL_COLOR_SWATCHES } from '@/shared/constants/designPreferences'
+import { generateSkinTonePalette } from '@/shared/utils/skinTone'
 
 /** 한 번의 촬영에서 나온 왼손/오른손 스캔 기록을 하나로 묶은 단위 */
 export type ScanSession = {
@@ -8,8 +8,10 @@ export type ScanSession = {
   leftScanId: number | null
   rightScanId: number | null
   skinToneHex: string | null
-  seasonCode: string | null
-  seasonNameKo: string | null
+  tone: string | null
+  brightness: number | null
+  saturation: number | null
+  recommendedColors: string[]
   shape: string | null
   // AI가 분석 직후 추천한 쉐입 — shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서,
   // "추천" 배지/문구 표시는 반드시 이 필드를 기준으로 해야 한다
@@ -32,8 +34,10 @@ export type FingerStat = {
 export type ScanDetail = {
   scannedAt: string
   skinToneHex: string | null
-  seasonCode: string | null
-  seasonNameKo: string | null
+  tone: string | null
+  brightness: number | null
+  saturation: number | null
+  recommendedColors: string[]
   shapeId: string | null
   avgLength: number
   avgWidth: number
@@ -57,17 +61,16 @@ export function avgNullable(a: number | null | undefined, b: number | null | und
   return Number(((a + b) / 2).toFixed(2))
 }
 
-/** 퍼스널컬러 팔레트의 대표색(두 번째 스와치, 없으면 첫 색) */
-export function representativePersonalColor(seasonCode: string | null | undefined): string {
-  const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : undefined
-  if (!palette?.length) return '#de869f'
-  return palette[1] ?? palette[0]
+/** 피부톤 hex 기준 어울리는 팔레트의 대표색(두 번째 스와치, 없으면 첫 색) */
+export function representativePersonalColor(skinToneHex: string | null | undefined): string {
+  if (!skinToneHex) return '#de869f'
+  const palette = generateSkinTonePalette(skinToneHex)
+  return palette[1] ?? palette[0] ?? '#de869f'
 }
 
-export function pickPalettePreview(seasonCode: string | null | undefined, count = 5): string[] {
-  const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : undefined
-  if (!palette?.length) return []
-  return palette.slice(0, count)
+export function pickPalettePreview(skinToneHex: string | null | undefined, count = 5): string[] {
+  if (!skinToneHex) return []
+  return generateSkinTonePalette(skinToneHex).slice(0, count)
 }
 
 export function formatMetricCurve(value: number | null | undefined): string {
@@ -126,8 +129,10 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
     skinToneHex: left?.skinToneHex || right?.skinToneHex || null,
-    seasonCode: left?.seasonCode || right?.seasonCode || null,
-    seasonNameKo: left?.seasonNameKo || right?.seasonNameKo || null,
+    tone: left?.tone || right?.tone || null,
+    brightness: left?.brightness ?? right?.brightness ?? null,
+    saturation: left?.saturation ?? right?.saturation ?? null,
+    recommendedColors: (left?.recommendedColors?.length ? left.recommendedColors : right?.recommendedColors) ?? [],
     // "추천" 쉐입 표시이므로 출력 신청 시 덮어써지는 shape가 아니라 recommendedShape를 써야 한다
     shapeId: left?.recommendedShape || right?.recommendedShape || null,
     avgLength,
@@ -236,14 +241,16 @@ export function isCompletedScanStatus(status: string | null | undefined): boolea
 }
 
 /**
- * 세션에 실제 분석 결과값(퍼스널 컬러 / 추천 쉐입 / 길이·너비·곡률)이 전부 채워져 있는지 확인한다.
+ * 세션에 실제 분석 결과값(추천 쉐입 / 길이·너비·곡률)이 전부 채워져 있는지 확인한다.
  * status 문자열만으로는 "완료"라고 나와도 실제 값은 비어 있는 경우가 있어서, 손 분석 결과 페이지에
  * 실제로 표시되는 값 자체를 기준으로 "분석 완료"를 판단한다.
+ * tone(피부톤)은 여기 기준에 넣지 않는다 — 손가락 측정이 실패해 평균값(fallback)으로 채워지면
+ * 피부 LAB 데이터 자체가 없어 tone이 null로 남는 경우가 있는데, 그것 때문에 실측 길이/너비/곡률까지
+ * 있는 세션이 이력에서 통째로 안 보이면 안 된다.
  * (마이페이지 손 분석 이력, 재스캔 안내, 네일팁 출력 페이지에서 공용으로 사용)
  */
 export function isFullyAnalyzedSession(session: ScanSession): boolean {
   return (
-      session.seasonCode != null &&
       session.shape != null &&
       session.avgLengthMm != null &&
       session.avgWidthMm != null &&
@@ -287,8 +294,10 @@ export function buildScanSessions(scans: ScanHistoryItem[]): ScanSession[] {
       leftScanId: left.scanId,
       rightScanId: right.scanId,
       skinToneHex: left.skinToneHex ?? right.skinToneHex ?? null,
-      seasonCode: left.seasonCode ?? right.seasonCode ?? null,
-      seasonNameKo: left.seasonNameKo ?? right.seasonNameKo ?? null,
+      tone: left.tone ?? right.tone ?? null,
+      brightness: left.brightness ?? right.brightness ?? null,
+      saturation: left.saturation ?? right.saturation ?? null,
+      recommendedColors: (left.recommendedColors?.length ? left.recommendedColors : right.recommendedColors) ?? [],
       shape: left.shape ?? right.shape ?? null,
       recommendedShape: left.recommendedShape ?? right.recommendedShape ?? null,
       status: pickAnalysisStatus(left.status, right.status),

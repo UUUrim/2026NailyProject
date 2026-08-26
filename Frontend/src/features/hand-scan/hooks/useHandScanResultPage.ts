@@ -4,7 +4,7 @@ import { getNailShape } from '@/shared/constants/nailShapes'
 import { getScanResult, type ScanResultResponse } from '@/entities/scan/api'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
-import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
@@ -241,8 +241,17 @@ export function useHandScanResultPage() {
     }
 
     const recommended = result?.recommendedShape ? getNailShape(result.recommendedShape) : null
-    const skinToneAnalysis = result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null
-    const skinTonePalette = result?.skinToneHex ? generateSkinTonePalette(result.skinToneHex, 24) : []
+    // scan/skin_color.py가 10손가락 LAB 평균으로 계산해 API에 내려주는 실제 진단값을 우선 쓰고,
+    // (구버전 스캔 등) 값이 없을 때만 대표 피부색 hex 하나로 만든 대체 추정치를 쓴다.
+    const skinToneAnalysis =
+        skinToneAnalysisFromMetrics(result?.tone ?? null, result?.brightness ?? null, result?.saturation ?? null) ??
+        (result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null)
+    const skinTonePalette =
+        result?.recommendedColors && result.recommendedColors.length > 0
+            ? result.recommendedColors
+            : result?.skinToneHex
+                ? generateSkinTonePalette(result.skinToneHex, 30)
+                : []
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락
     const apiFingers = [...(leftResult?.fingers ?? []), ...(rightResult?.fingers ?? [])]

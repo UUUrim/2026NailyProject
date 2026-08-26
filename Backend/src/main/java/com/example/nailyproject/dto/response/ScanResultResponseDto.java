@@ -27,8 +27,9 @@ public class ScanResultResponseDto {
     private String recommendedShape;
     private String skinToneHex;
     private List<String> recommendedColors;
-    private String seasonCode;
-    private String seasonNameKo;
+    private String tone;
+    private Double brightness;
+    private Double saturation;
     private String overallSize;
 
     // 손가락별 결과
@@ -71,15 +72,17 @@ public class ScanResultResponseDto {
                 .recommendedShape(handScan.getRecommendedShape())
                 .skinToneHex(handScan.getSkinToneHex())
                 .recommendedColors(parseRecommendedColors(handScan.getRecommendedColors(), objectMapper))
-                .seasonCode(handScan.getSeasonCode())
-                .seasonNameKo(handScan.getSeasonNameKo())
+                .tone(handScan.getTone())
+                .brightness(handScan.getBrightness())
+                .saturation(handScan.getSaturation())
                 .overallSize(handScan.getOverallSize())
                 .scannedAt(handScan.getScannedAt())
                 .fingers(fingers)
                 .build();
     }
 
-    private static List<String> parseRecommendedColors(String raw, ObjectMapper objectMapper) {
+    // ScanHistoryItemDto(마이페이지 목록 조회)도 동일한 JSON 문자열 필드를 파싱해야 해서 공개해 둔다.
+    public static List<String> parseRecommendedColors(String raw, ObjectMapper objectMapper) {
         if (raw == null || raw.isBlank()) {
             return Collections.emptyList();
         }

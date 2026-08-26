@@ -5,7 +5,7 @@ import { CameraSetupPreview } from '@/features/hand-scan/components/CameraSetupP
 import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { PillButton } from '@/shared/components/PillButton'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
-import { analyzeSkinTone } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { formatMetricCurve } from '@/shared/utils/scanDetail'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import {
@@ -28,7 +28,6 @@ export function HandScanPageContent() {
   const {
     navigate,
     SCAN_SERVER_URL,
-    PHONE_CAM_URL,
     isFullscreen,
     cameraError,
     isUploading,
@@ -90,11 +89,6 @@ export function HandScanPageContent() {
                         className="hand-scan-fs__video"
                         alt="사이드뷰 스캔 피드"
                     />
-                ) : null}
-                {sideCameraIdx === -2 ? (
-                    <p className="hand-scan-fs__phone-hint">
-                      폰 브라우저에서 {PHONE_CAM_URL}/phone/side 를 열어 카메라를 연결하세요
-                    </p>
                 ) : null}
                 <div className="hand-scan-fs__feed-select-wrap">
                   <label className="hand-scan-fs__feed-select-label">
@@ -185,7 +179,10 @@ export function HandScanPageContent() {
     const session = latestCompletedSession
     const dateLabel = formatScanDateLabel(session.scannedAt)
     const skinHex = session.skinToneHex
-    const toneLabel = skinHex ? analyzeSkinTone(skinHex).tone.label.replace(/\s+/g, '') : '미분석'
+    const toneLabel = (
+      skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+      (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
+    )?.replace(/\s+/g, '') ?? '미분석'
     const shapeLabel = session.recommendedShape
         ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null

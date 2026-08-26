@@ -26,7 +26,6 @@ type Props = {
   // ── 이미지 상세 모달 ──
   detailImage: DesignImageDetailInput | null
   closeDetailImage: () => void
-  likedKeySet: Set<string>
   handleDetailLikeChange: (designId: number, imageUrl: string, saved: SavedDesignResponse | null) => void
   handleDetailShareChange: (designId: number, shared: boolean) => void
   handleDetailDeleted: (designId: number) => void
@@ -57,7 +56,6 @@ type Props = {
 export function MyPageModals({
   detailImage,
   closeDetailImage,
-  likedKeySet,
   handleDetailLikeChange,
   handleDetailShareChange,
   handleDetailDeleted,
@@ -82,7 +80,6 @@ export function MyPageModals({
         <DesignImageDetailModal
             image={detailImage}
             onClose={closeDetailImage}
-            checkLiked={(designId, imageUrl) => likedKeySet.has(`${designId}-${imageUrl}`)}
             onLikeChange={handleDetailLikeChange}
             onShareChange={handleDetailShareChange}
             onDeleted={handleDetailDeleted}

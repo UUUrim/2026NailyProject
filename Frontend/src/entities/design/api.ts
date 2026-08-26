@@ -43,6 +43,7 @@ export interface DesignGenerateResponse {
     generatedPrompt: string
     imageUrls: string[] // 1장
     details?: DesignExtractedDetails
+    keywords?: string[]
 }
 
 export interface DesignImageResponse {
@@ -103,6 +104,11 @@ export interface DesignDetailResponse {
     owner: boolean
     details?: DesignExtractedDetails
     imageUrls?: string[]
+    /** 네일팁 쉐입(round/oval/almond/square/stiletto/ballerina) — 없으면 null */
+    shape?: string | null
+    /** detect 서버가 생성 시점에 뽑아낸 손가락별(엄지~새끼) 매트 이미지 5장의 URL —
+     *  실패했거나 옛날 디자인이면 null. AR 미리보기가 있으면 이걸로 손톱팁을 그대로 쓴다. */
+    nailTipCropUrls?: string[] | null
 }
 
 // ─── 디자인 생성 ──────────────────────────────────────────────────────────────

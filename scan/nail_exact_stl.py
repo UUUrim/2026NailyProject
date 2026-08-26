@@ -78,7 +78,11 @@ SHAPES = ("round", "oval", "almond", "square", "stiletto", "ballerina")
 # has a well-defined cross-section.
 TIP_HEIGHT_FACTOR = {
     "round":     0.50,  # semi-ellipse (tip_h = 0.5·W) → perfect semi-circle, short and wide
-    "oval":      0.65,  # semi-ellipse (tip_h = 0.65·W) → taller ellipse, more elongated than round
+    "oval":      0.80,  # semi-ellipse (tip_h = 0.8·W) → sides taper in for most of the
+                         # nail's length, not just near the tip; per "round and oval.png"
+                         # reference, oval's curvature clearly starts much closer to the
+                         # cuticle than round's, giving a visibly narrower/taller dome
+                         # (round's short straight sides stay untouched)
     "almond":    0.85,  # elongated ellipse — tapered sides, fully rounded tip
     "square":    0.45,  # flat tip, but with a subtle width taper leading into it (see taper_mm)
     "stiletto":  1.50,  # linear taper to a sharp point (longer, more dramatic)
@@ -88,8 +92,33 @@ TIP_HEIGHT_FACTOR = {
 # Shapes whose tip is a flat face (need an explicit cap triangle strip).
 FLAT_TIP_SHAPES = {"square", "ballerina"}
 
-# Shapes worn long — default tip extension 7 mm instead of 3 mm.
+# Shapes worn long — default tip extension mm instead of the base 3 mm.
 LONG_SHAPES = {"almond", "stiletto", "ballerina"}
+TIP_EXTENSION_DEFAULT_MM = {
+    "round": 5.0, "oval": 5.0, "square": 5.0,
+    "almond": 7.0, "stiletto": 7.0, "ballerina": 7.0,
+}
+
+# Default top-edge fillet reach (--edge-round) in mm, per shape. This is a
+# Z-direction (thickness) bevel of the top surface near its border — NOT
+# what "round the corner" means for ballerina (that's the plan-view
+# CORNER_ROUND_DEFAULT_MM below). Ballerina is deliberately absent here
+# (defaults to 0 / off) so its tip stays a true flat plate in cross-section;
+# only square keeps this thickness-direction bevel by default.
+EDGE_ROUND_DEFAULT_MM = {
+    "almond": 1.0, "stiletto": 1.0, "square": 1.0,
+}
+
+# Default plan-view (XY) corner fillet radius (--corner-round) in mm, per
+# shape — rounds off the sharp vertex where the taper meets the flat tip.
+# Ballerina's value is tuned to a small, crisp radius matching a reference
+# photo of a real coffin/ballerina tip (a tight corner, not a long curve).
+CORNER_ROUND_DEFAULT_MM = {"square": 1.5, "ballerina": 1.3}
+
+# Ballerina only: short local ease-in radius (--shoulder-round) where the
+# straight body meets the taper's start — just enough to avoid a visible
+# kink there; the taper itself stays a literal straight line past it.
+SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0}
 
 # 폭 보정(fit margin): 측정한 평평한 폭을 C-curve로 구부리면 실제 손가락을
 # 감싸는 현(chord) 폭이 측정값보다 작아져서, 프린트한 손톱이 실제보다 작게
@@ -102,7 +131,104 @@ WIDTH_FIT_MARGIN_MM = 1.5
 # Nail shape: analytic cross-section width at each Y
 # ─────────────────────────────────────────────────────────────
 
-def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0, taper_mm=0.0):
+# Ballerina taper: a quarter-ellipse, not a literal straight line. An
+# earlier version used a constant-slope straight taper to match a reference
+# photo, but real-shape review ("ballerina edit.png" — red lines marked over
+# an OpenSCAD render showing the taper reads as a visible straight diagonal)
+# called for the whole silhouette to feel continuously curved instead, the
+# way round/oval/almond's tip already does. So the taper now reuses that
+# same sqrt(1-t'^2) ellipse family: half_w(t') = (W/2)*sqrt(1-t'^2), tangent
+# (zero-slope) matched to the straight body at t'=0, but t' is capped below
+# 1 (BALLERINA_TAPER_T_END) so the curve stops at the flat tip's width
+# instead of tapering all the way to a point — the corner where the curve
+# meets the flat tip face still gets rounded off by corner_round_mm, same
+# as before.
+BALLERINA_TIP_WIDTH_FRAC = 0.55   # tip width as a fraction of full width W
+BALLERINA_TAPER_T_END = float(np.sqrt(max(1.0 - BALLERINA_TIP_WIDTH_FRAC ** 2, 0.0)))
+
+# Where the taper begins, measured in mm above the cuticle line (y=0) — NOT
+# relative to the natural nail length or the extension. Fixed per user
+# feedback: the shoulder should sit a constant 4mm up from the cuticle-end
+# points on both sides, regardless of how long the nail/extension is.
+BALLERINA_SHOULDER_START_MM = 4.0
+
+
+def _ballerina_half_width(t, W):
+    """Quarter-ellipse taper width at normalised tip position t (0=shoulder, full
+    width; 1=flat tip). See BALLERINA_TAPER_T_END above."""
+    tp = BALLERINA_TAPER_T_END * t
+    return W / 2.0 * float(np.sqrt(max(1.0 - tp * tp, 0.0)))
+
+
+def _ballerina_shoulder_blend(y_val, W, tip_h, y_side_top, r):
+    """
+    Cubic-Hermite blend of the ballerina's right-boundary x(y) across the
+    corner where the straight body (dx/dy=0) meets the start of the curved
+    (quarter-ellipse) taper, over y in [y_side_top-r, y_side_top+r]. Matches
+    the taper's own local value and slope at y_hi so the curve is seamless
+    from the shoulder onward. Returns (x_left, x_right).
+    """
+    y_lo, y_hi = y_side_top - r, y_side_top + r
+    t_hi  = (y_hi - y_side_top) / tip_h if tip_h > 0 else 1.0
+    tp_hi = BALLERINA_TAPER_T_END * t_hi
+    half_w_hi = _ballerina_half_width(t_hi, W)
+    x_hi = W / 2.0 + half_w_hi
+    x_lo = W
+    # d(half_w)/dy at y_hi, via chain rule through t' then t then y.
+    if half_w_hi > 1e-9 and tip_h > 0:
+        taper_slope = -tp_hi * (W / 2.0) / half_w_hi * (BALLERINA_TAPER_T_END / tip_h)
+    else:
+        taper_slope = 0.0
+    u = (y_val - y_lo) / (y_hi - y_lo) if y_hi > y_lo else 1.0
+    u = min(max(u, 0.0), 1.0)
+    h = y_hi - y_lo
+    H00 = 2 * u ** 3 - 3 * u ** 2 + 1
+    H01 = -2 * u ** 3 + 3 * u ** 2
+    H11 = u ** 3 - u ** 2
+    x_right = x_lo * H00 + x_hi * H01 + h * taper_slope * H11   # H10 term drops: slope_lo=0
+    return W - x_right, x_right
+
+
+def _cuticle_corner_blend(y_val, W, cuticle_depth, r):
+    """
+    Cubic-Hermite blend of the right-boundary x(y) across the corner where
+    the straight body (dx/dy=0, at y=+r) meets the top of the cuticle arch
+    (its own value/slope, at y=-r), over y in [-r, r]. Without this, the
+    arch's tangent generally does NOT match the straight side's (the arch
+    is curving inward already right where it meets the vertical wall),
+    leaving a sharp corner at y=0 on both edges — this softens it by
+    letting the width narrow in a little right at the corner, same idea as
+    every other corner treatment in this file. Shape-independent: applies
+    to every silhouette's cuticle-line corners, not just one shape.
+    Returns (x_left, x_right).
+    """
+    W2  = W / 2.0
+    y_c = (W2 * W2 - cuticle_depth * cuticle_depth) / (2.0 * cuticle_depth)
+    R_c = cuticle_depth + y_c
+    y_lo, y_hi = -r, r
+    half_w_lo = float(np.sqrt(max(R_c ** 2 - (y_lo - y_c) ** 2, 0.0)))
+    slope_lo  = (y_c - y_lo) / half_w_lo if half_w_lo > 1e-9 else 0.0
+    x_lo, x_hi = W2 + half_w_lo, W
+    # Fritsch–Carlson clamp: an unclamped Hermite can overshoot past x_hi
+    # when slope_lo is large relative to the secant (arc bottoms out fast
+    # as r approaches cuticle_depth) — cap it at 3x the secant slope, the
+    # standard bound that guarantees the blend stays within [x_lo, x_hi]
+    # (no bulge past the nail's nominal full width).
+    secant = (x_hi - x_lo) / (y_hi - y_lo) if y_hi > y_lo else 0.0
+    if secant > 0:
+        slope_lo = min(max(slope_lo, 0.0), 3.0 * secant)
+    u = (y_val - y_lo) / (y_hi - y_lo) if y_hi > y_lo else 1.0
+    u = min(max(u, 0.0), 1.0)
+    h = y_hi - y_lo
+    H00 = 2 * u ** 3 - 3 * u ** 2 + 1
+    H10 = u ** 3 - 2 * u ** 2 + u
+    H01 = -2 * u ** 3 + 3 * u ** 2
+    x_right = x_lo * H00 + h * slope_lo * H10 + x_hi * H01   # H11 term drops: slope_hi=0
+    return W - x_right, x_right
+
+
+def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
+             taper_mm=0.0, cuticle_r=0.0, shoulder_r=0.0):
     """
     Return (x_left, x_right) for the nail footprint at height y_val.
 
@@ -110,8 +236,14 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0, 
       y in [-cuticle_depth, 0]        : circular-arc cuticle arch
       y in [0,  L_total - tip_h]      : straight sides, full width W
       y in [L_total-tip_h, L_total]   : tip region — shape-dependent
+
+    Regardless of region/shape, y in [-cuticle_r, cuticle_r] is overridden
+    by _cuticle_corner_blend when cuticle_r>0 — see there.
     """
     y_side_top = L_total - tip_h
+
+    if cuticle_r > 0 and -cuticle_r <= y_val <= cuticle_r:
+        return _cuticle_corner_blend(y_val, W, cuticle_depth, cuticle_r)
 
     if y_val >= y_side_top:
         # ── Tip region ────────────────────────────────────────
@@ -155,9 +287,25 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0, 
             half_w = W / 2 * (1.0 - t) ** 0.65
 
         elif shape == "ballerina":
-            # Linear taper from full width to ~40 % of W at the flat top.
-            # w(t) = W·(1 − 0.6·t)  →  0.4·W at t=1
-            half_w = W / 2 * (1.0 - 0.6 * t)
+            # Quarter-ellipse taper (see BALLERINA_TAPER_T_END above) — the
+            # sides curve continuously from the shoulder into the flat tip
+            # instead of running as a visible straight diagonal. Two local
+            # touch-ups: a Hermite ease-in where the body meets the taper
+            # start (shoulder_r), matched to the curve's own value/slope,
+            # and a quarter-circle inset at the flat tip's two corners
+            # (tip_r) where the curve is cut off by the flat tip face.
+            if shoulder_r > 0 and y_val < (y_side_top + shoulder_r):
+                return _ballerina_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r)
+            half_w = _ballerina_half_width(t, W)
+            xl, xr = W / 2 - half_w, W / 2 + half_w
+            if tip_r > 0 and y_val >= (L_total - tip_r):
+                # Tip corner: quarter-circle inset — rounds off the two
+                # points where the taper meets the flat tip edge, leaving
+                # the tip's centre truly flat.
+                d_y   = y_val - (L_total - tip_r)          # 0 → tip_r
+                inset = tip_r - float(np.sqrt(max(tip_r ** 2 - d_y ** 2, 0.0)))
+                xl, xr = xl + inset, xr - inset
+            return xl, xr
 
         else:
             # Fallback: round
@@ -167,6 +315,9 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0, 
 
     elif y_val >= 0.0:
         # Straight sides
+        if shape == "ballerina" and shoulder_r > 0 and y_val >= (y_side_top - shoulder_r):
+            # Lower half of the shoulder ease-in (see _ballerina_shoulder_blend).
+            return _ballerina_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r)
         return 0.0, float(W)
 
     elif y_val >= -cuticle_depth:
@@ -211,7 +362,7 @@ def generate_stl(params, output_path):
     arc_r     = float(params["arc_radius_mm"])
     THICK     = float(params.get("thickness_mm", 0.6))
     EXACT     = bool(params.get("exact"))
-    CUT_DEPTH = float(params.get("cuticle_depth_mm", 1.5))
+    CUT_DEPTH = float(params.get("cuticle_depth_mm", 2.7))
     # Extra dome height (mm) at the cuticle end, blending to 0 at the free
     # edge — makes the inner cavity rounder where the finger flesh is rounder.
     # Forced to 0 in exact mode (validation replica must stay true).
@@ -238,12 +389,19 @@ def generate_stl(params, output_path):
         # but ruler ground truth showed 0.91 is wrong (true ~0.64–0.86), which
         # made prints ~4 mm too short.  corrected_length_mm is now only a
         # fallback when no measured length exists.
-        L     = float(params.get("length_mm")
-                      or params.get("corrected_length_mm") or 0.0)
-        # Shape-specific default extensions: stiletto/coffin get 7 mm,
+        # Measured length already spans cuticle line to tip, i.e. it covers
+        # the straight body PLUS the cuticle arch dip. Deliberately NOT
+        # subtracting CUT_DEPTH here (unlike --exact mode): the arch is drawn
+        # on top of the full measured length as extra room, so the printed
+        # nail's natural-nail total (arch + body, before tip extension) ends
+        # up CUT_DEPTH longer than the measured value. Compared side-by-side
+        # in OpenSCAD against the subtracted version and confirmed preferred.
+        L     = max(float(params.get("length_mm")
+                      or params.get("corrected_length_mm") or 0.0), 1.0)
+        # Shape-specific default extensions (see TIP_EXTENSION_DEFAULT_MM);
         # all other shapes default to 3 mm.  An explicit --tip-extension
         # value always wins (passed as a non-None entry in params).
-        _ext_default = 7.0 if _shape_tmp in LONG_SHAPES else 3.0
+        _ext_default = TIP_EXTENSION_DEFAULT_MM.get(_shape_tmp, 3.0)
         L_ext = float(params.get("tip_extension_mm") or _ext_default)
     x_cen     = W / 2.0
 
@@ -251,13 +409,24 @@ def generate_stl(params, output_path):
     EDGE_R  = float(params.get("edge_round_mm", 0.0))
     L_total = L + L_ext
 
-    # Square's plan-view (XY) tip corners: rounded off by CORNER_R mm so the
-    # free-edge corners don't scratch skin (a quarter-circle inset, see the
-    # "square" branch of x_extent()). 0 = sharp 90° corners.
+    # Square/ballerina plan-view (XY) tip corners: rounded off by CORNER_R mm
+    # so the free-edge corners don't scratch skin (a quarter-circle inset,
+    # see the "square"/"ballerina" branches of x_extent()). 0 = sharp corners.
     CORNER_R = float(params.get("corner_round_mm", 0.0) or 0.0)
+    # Ballerina only: short local ease-in radius where the body meets the
+    # taper's start (see _ballerina_shoulder_blend) — independent of
+    # CORNER_R, which only controls the tip-end corners.
+    SHOULDER_R = float(params.get("shoulder_round_mm", 0.0) or 0.0)
     # Square's subtle width taper leading into the tip (see x_extent()) —
     # total mm the plate narrows by, split evenly across both sides.
     TAPER_MM = float(params.get("taper_mm", 0.0) or 0.0)
+    # Cuticle-line corner blend — applies to EVERY shape, not just one:
+    # softens the corner where the straight body meets the top of the
+    # cuticle arch (see _cuticle_corner_blend). Clamped well inside the
+    # arch depth and the natural nail length so it can't misbehave on a
+    # very short or very shallow-arch nail.
+    CUTICLE_R = float(params.get("cuticle_round_mm", 0.0) or 0.0)
+    CUTICLE_R = min(CUTICLE_R, CUT_DEPTH * 0.9, W * 0.4, L * 0.4)
 
     # Stiletto: taper covers the extension plus the top 30 % of the natural nail,
     # so the sides start narrowing before the free edge — matches the smooth
@@ -268,8 +437,19 @@ def generate_stl(params, output_path):
     elif shape == "coffin":
         tip_h = L_ext
     elif shape == "ballerina":
-        # Straight sides from cuticle to midpoint, taper from midpoint to tip.
-        tip_h = L_total * 0.5
+        # Full-width straight sides only up to BALLERINA_SHOULDER_START_MM
+        # above the cuticle line (y=0) — the curved taper begins there and
+        # runs the rest of the way to the flat tip, regardless of how that
+        # point relates to the natural nail length (L) vs the extension.
+        tip_h = max(L_total - BALLERINA_SHOULDER_START_MM, 1.0)
+        # Clamp the plan-view corner fillet so it can't outgrow the taper
+        # region or eat past the flat tip's own half-width (which would
+        # cross the two corners into each other).
+        CORNER_R = min(CORNER_R, tip_h,
+                        W * BALLERINA_TIP_WIDTH_FRAC / 2.0 * 0.9)
+        # Shoulder ease-in: keep it short relative to the taper region and
+        # well clear of the tip's own corner rounding.
+        SHOULDER_R = min(SHOULDER_R, tip_h * 0.4, max(tip_h - CORNER_R, 0.0) * 0.4)
     elif shape == "square":
         # The taper+corner-round region must stay entirely within the
         # extension (L_ext) — the real measured nail (length L) has to be
@@ -291,7 +471,8 @@ def generate_stl(params, output_path):
     grid_y = np.zeros((ny, nx))
     for i, y in enumerate(ys):
         xl, xr = x_extent(y, W, L_total, tip_h, CUT_DEPTH, shape,
-                          tip_r=CORNER_R, taper_mm=TAPER_MM)
+                          tip_r=CORNER_R, taper_mm=TAPER_MM, cuticle_r=CUTICLE_R,
+                          shoulder_r=SHOULDER_R)
         grid_x[i] = xl + np.linspace(0, 1, nx) * (xr - xl)
         grid_y[i] = y
 
@@ -327,73 +508,80 @@ def generate_stl(params, output_path):
     z_top = z_bot + THICK                          # (ny, nx)  uniform shell
 
     # ── Top perimeter edge rounding ───────────────────────────
-    # Applies a quarter-circle fillet where the top surface meets the side
-    # walls, eliminating the sharp 90° corner.  Only in the body/tip region
+    # Applies a fillet where the top surface meets the side walls / tip
+    # face, eliminating the sharp corner.  Only in the body/tip region
     # (y ≥ 0) — the cuticle arch is left untouched per design intent.
+    #
+    # The fillet's vertical drop can never exceed the shell thickness
+    # (otherwise the top surface would cross the bottom surface), but its
+    # *horizontal* reach is not bound by that — so a thin shell (0.6-0.85mm)
+    # can still carry a wide, gently-rounded, unmistakably blunt edge by
+    # using an ellipse instead of a circle: r_h (horizontal reach, from
+    # --edge-round) can be much larger than r_v (vertical depth, capped
+    # by thickness).  r_h == r_v reduces to the original quarter-circle.
     if EDGE_R > 0:
-        r = min(EDGE_R, THICK * 0.95)
+        r_h = EDGE_R
+        r_v = min(EDGE_R, THICK * 0.95)
+
+        def _ellipse_dz(d, rh=r_h, rv=r_v):
+            t = np.clip((rh - d) / rh, 0.0, 1.0)   # 1 at the edge, 0 at d=rh
+            return rv * (1.0 - np.sqrt(np.maximum(1.0 - t * t, 0.0)))
 
         # Lateral fillet: distance from left / right edge of each row's footprint
         x_left  = grid_x[:, 0:1]                        # (ny, 1)
         x_right = grid_x[:, -1:]                         # (ny, 1)
         d_lat   = np.minimum(grid_x - x_left,
                              x_right - grid_x)           # (ny, nx)
-        dz_lat  = np.where(d_lat < r,
-                           r - np.sqrt(np.maximum(r**2 - (r - d_lat)**2, 0.0)),
-                           0.0)
+        dz_lat  = _ellipse_dz(d_lat)
         # Non-flat shapes: lateral fillet along the body, skip cuticle arch.
-        # Flat-tip shapes (square, ballerina): apply a *spherical* corner
-        # fillet ONLY at the two tip corners (where side wall + tip cap +
-        # top surface all meet) — NOT the full edge line.
+        # Flat-tip shapes (square, ballerina): full-width tip-edge fillet
+        # across the entire front face — the free edge is a flat face that
+        # can catch on skin, so it needs to be rounded along its whole
+        # width, not just at the two corners.
         if shape not in FLAT_TIP_SHAPES:
-            dz_lat = np.where(grid_y >= 0.0, dz_lat, 0.0)
+            # Ease the fillet in from 0 at y=0 (the cuticle-arch seam, which
+            # stays sharp/unfilleted by design) up to full depth over
+            # CUTICLE_R mm, instead of snapping straight to full bevel depth
+            # in a single row. A hard cutoff here (dz_lat jumping from 0 to
+            # ~min(edge_round, thickness*0.95) mm right at y=0) is visible as
+            # a pop in the top surface for shapes with a non-zero edge-round
+            # default (almond, stiletto) — smoothstep removes the seam while
+            # leaving both endpoints (value AND slope) matched: 0 at y=0,
+            # full strength at y=CUTICLE_R.
+            ease_dist = max(CUTICLE_R, 1e-6)
+            ease  = np.clip(grid_y / ease_dist, 0.0, 1.0)
+            ease  = ease * ease * (3.0 - 2.0 * ease)      # smoothstep
+            dz_lat = np.where(grid_y >= 0.0, dz_lat * ease, 0.0)
             z_top  = np.maximum(z_top - dz_lat, z_bot)
-        elif shape == "square":
-            # Square: full-width tip-edge fillet across the entire front face.
-            # This gives the "bent A4 paper, edges smoothed" look:
+        else:
+            # Square/ballerina: full-width tip-edge fillet across the entire
+            # front face. This gives the "bent A4 paper, edges smoothed" look:
             # the C-curve dome transitions smoothly into the vertical front face
             # along the whole width, not just at the two corners.
             d_tip_arr = np.maximum(L_total - grid_y, 0.0)
             in_body   = grid_y >= 0.0
-            # Quarter-circle fillet where top surface meets front face (full width)
-            dz_tip = np.where(
-                (d_tip_arr < r) & in_body,
-                r - np.sqrt(np.maximum(r**2 - (r - d_tip_arr)**2, 0.0)),
-                0.0
-            )
-            # Spherical upgrade at the two top corners (side + tip both active)
-            in_corner = (d_lat < r) & (d_tip_arr < r) & in_body
-            under_c   = r**2 - (r - d_lat)**2 - (r - d_tip_arr)**2
+            dz_tip = np.where((d_tip_arr < r_h) & in_body, _ellipse_dz(d_tip_arr), 0.0)
+
+            # Ellipsoid upgrade at the two top corners (side + tip both active)
+            t_lat     = np.clip((r_h - d_lat) / r_h, 0.0, 1.0)
+            t_tip     = np.clip((r_h - d_tip_arr) / r_h, 0.0, 1.0)
+            in_corner = (d_lat < r_h) & (d_tip_arr < r_h) & in_body
+            under_c   = 1.0 - t_lat ** 2 - t_tip ** 2
             dz_corner = np.where(
                 in_corner,
                 np.where(under_c >= 0.0,
-                         r - np.sqrt(np.maximum(under_c, 0.0)),
-                         r),
+                         r_v * (1.0 - np.sqrt(np.maximum(under_c, 0.0))),
+                         r_v),
                 0.0
             )
             # At each point take whichever fillet is deeper
             z_top = np.maximum(z_top - np.maximum(dz_tip, dz_corner), z_bot)
-        else:
-            # Other flat-tip shapes (ballerina): spherical corner only
-            d_tip_arr  = np.maximum(L_total - grid_y, 0.0)
-            in_corner  = (d_lat < r) & (d_tip_arr < r)
-            under_c    = r**2 - (r - d_lat)**2 - (r - d_tip_arr)**2
-            dz_corner  = np.where(
-                in_corner,
-                np.where(under_c >= 0.0,
-                         r - np.sqrt(np.maximum(under_c, 0.0)),
-                         r),
-                0.0
-            )
-            z_top = np.maximum(z_top - dz_corner, z_bot)
 
         # Tip fillet — pointed shapes only (almond, stiletto):
         # domes the apex so it tapers smoothly rather than ending as a ridge.
         if shape not in ("round", "oval") and shape not in FLAT_TIP_SHAPES:
             d_tip  = np.maximum(L_total - grid_y, 0.0)  # (ny, nx)
-            dz_tip = np.where(d_tip < r,
-                              r - np.sqrt(np.maximum(r**2 - (r - d_tip)**2, 0.0)),
-                              0.0)
+            dz_tip = np.where(d_tip < r_h, _ellipse_dz(d_tip), 0.0)
             z_top  = np.maximum(z_top - dz_tip, z_bot)
 
     # ── 3-D point arrays ──────────────────────────────────────
@@ -507,17 +695,25 @@ def main():
     p.add_argument("--output",         default="nail_stl",
                    help="Output directory (default: nail_stl)")
     p.add_argument("--tip-extension",  type=float, default=None,
-                   help="Extra mm beyond nail tip (default: 7mm for stiletto/"
-                        "coffin, 3mm for all other shapes)")
-    p.add_argument("--cuticle-depth",  type=float, default=1.5,
+                   help="Extra mm beyond nail tip (default: 7mm for almond/"
+                        "stiletto, 12mm for ballerina, 3mm for all other shapes)")
+    p.add_argument("--cuticle-depth",  type=float, default=2.7,
                    help="Depth of cuticle arch below cuticle line in mm "
-                        "(default 1.5 — increase for deeper arch)")
+                        "(default 2.7 — increase for deeper arch; also "
+                        "sets the ceiling for --cuticle-round)")
     p.add_argument("--cuticle-curve",  type=float, default=0.0,
                    help="Extra inner-dome height in mm at the cuticle end, "
                         "blending to the measured C-curve at the free edge "
                         "(default 0 — OFF, uses the plain measured C-curve; "
                         "set >0 to re-enable the cuticle-side rounding). "
                         "Ignored in --exact mode")
+    p.add_argument("--cuticle-round",  type=float, default=2.35,
+                   help="Plan-view (XY) blend radius (mm) for the corner "
+                        "where the straight body meets the top of the "
+                        "cuticle arch — applies to EVERY shape (default "
+                        "2.35; 0 = sharp corner, matching the arch's raw "
+                        "tangent exactly). Capped at ~90%% of "
+                        "--cuticle-depth — raise that too for more room")
     p.add_argument("--thickness",      type=float, default=0.6,
                    help="Uniform shell thickness in mm (default 0.6)")
     p.add_argument("--exact",          action="store_true",
@@ -527,15 +723,25 @@ def main():
                    help="Tip shape: round | oval | almond | square | "
                         "stiletto | ballerina  (default: round)")
     p.add_argument("--edge-round",     type=float, default=None,
-                   help="Fillet radius (mm) for the top perimeter edge — "
-                        "rounds the sharp junction between top surface and "
-                        "side walls (default: 1.0 for almond/ballerina/"
-                        "square/stiletto, 0 for round/oval)")
+                   help="Fillet horizontal reach (mm) for the top perimeter "
+                        "edge — rounds the sharp junction between top "
+                        "surface and side walls/tip face. Vertical depth is "
+                        "always capped at ~95%% of shell thickness, so this "
+                        "controls how wide/gentle the curve looks, not just "
+                        "how deep (default: 1.0 for almond/square/stiletto, "
+                        "0 for round/oval/ballerina)")
     p.add_argument("--corner-round",   type=float, default=None,
-                   help="Plan-view (XY) fillet radius (mm) for the square "
-                        "shape's two tip corners — rounds off the sharp 90° "
-                        "corners so they don't scratch skin (default: 1.5 "
-                        "for square, ignored by other shapes; 0 = sharp)")
+                   help="Plan-view (XY) fillet radius (mm) for the square/"
+                        "ballerina shape's two tip corners — rounds off the "
+                        "sharp corner where the taper meets the flat tip so "
+                        "it doesn't scratch skin (default: 1.5 for square, "
+                        "1.3 for ballerina, ignored by other shapes; 0 = sharp)")
+    p.add_argument("--shoulder-round", type=float, default=None,
+                   help="Ballerina only: short local ease-in radius (mm) "
+                        "where the straight body meets the start of the "
+                        "taper — the taper itself stays a literal straight "
+                        "line past this short zone (default: 2.0 for "
+                        "ballerina, ignored otherwise; 0 = sharp corner)")
     p.add_argument("--taper",          type=float, default=None,
                    help="Total mm the square shape's plate narrows by "
                         "(split evenly across both sides) leading into the "
@@ -554,16 +760,19 @@ def main():
     if not nails:
         sys.exit("ERROR: No matching nails in JSON")
 
-    ext_default = 7.0 if args.shape in LONG_SHAPES else 3.0
+    ext_default = TIP_EXTENSION_DEFAULT_MM.get(args.shape, 3.0)
     display_ext = args.tip_extension if args.tip_extension is not None else ext_default
     if args.exact:
         display_ext = 0.0
 
-    _edge_round_default = 1.0 if args.shape in {"almond", "ballerina", "square", "stiletto"} else 0.0
+    _edge_round_default = EDGE_ROUND_DEFAULT_MM.get(args.shape, 0.0)
     edge_round = args.edge_round if args.edge_round is not None else _edge_round_default
 
-    _corner_round_default = 1.5 if args.shape == "square" else 0.0
+    _corner_round_default = CORNER_ROUND_DEFAULT_MM.get(args.shape, 0.0)
     corner_round = args.corner_round if args.corner_round is not None else _corner_round_default
+
+    _shoulder_round_default = SHOULDER_ROUND_DEFAULT_MM.get(args.shape, 0.0)
+    shoulder_round = args.shoulder_round if args.shoulder_round is not None else _shoulder_round_default
 
     _taper_default = 1.0 if args.shape == "square" else 0.0
     taper = args.taper if args.taper is not None else _taper_default
@@ -572,8 +781,10 @@ def main():
     print(f"  Exact-Fit Nail STL  v15  |  shape: {args.shape}")
     _cc = 0.0 if args.exact else args.cuticle_curve
     print(f"  Tip +{display_ext}mm  CuticleArch {args.cuticle_depth}mm  "
+          f"CuticleRound {args.cuticle_round}mm  "
           f"Thick {args.thickness}mm  EdgeRound {edge_round}mm  "
-          f"CornerRound {corner_round}mm  Taper {taper}mm  CuticleCurve +{_cc}mm")
+          f"CornerRound {corner_round}mm  ShoulderRound {shoulder_round}mm  "
+          f"Taper {taper}mm  CuticleCurve +{_cc}mm")
     print(f"{'='*55}")
 
     for nail in nails:
@@ -591,10 +802,12 @@ def main():
             "tip_extension_mm":    args.tip_extension,
             "cuticle_depth_mm":    args.cuticle_depth,
             "cuticle_curve_mm":    args.cuticle_curve,
+            "cuticle_round_mm":    args.cuticle_round,
             "thickness_mm":        args.thickness,
             "shape":               args.shape,
             "edge_round_mm":       edge_round,
             "corner_round_mm":     corner_round,
+            "shoulder_round_mm":   shoulder_round,
             "taper_mm":            taper,
             "exact":               args.exact,
         }

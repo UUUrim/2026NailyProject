@@ -58,8 +58,9 @@ export type FingerStat = { label: string; hand: 'L' | 'R'; partLabel: string; le
 
 export type ScanDetail = {
   scannedAt: string
-  seasonCode: string | null
-  seasonNameKo: string | null
+  tone: string | null
+  brightness: number | null
+  saturation: number | null
   shapeId: string | null
   avgLength: number
   avgWidth: number
@@ -125,8 +126,9 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
 
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
-    seasonCode: left?.seasonCode || right?.seasonCode || null,
-    seasonNameKo: left?.seasonNameKo || right?.seasonNameKo || null,
+    tone: left?.tone || right?.tone || null,
+    brightness: left?.brightness ?? right?.brightness ?? null,
+    saturation: left?.saturation ?? right?.saturation ?? null,
     shapeId: left?.shape || right?.shape || null,
     avgLength,
     avgWidth,

@@ -89,6 +89,12 @@ STABLE_N       = MEDIAN_N
 
 DISPLAY_H = 820         # window height; the full-res frame is what gets saved
 
+# The guide line used to sit exactly on the ArUco marker's bottom edge
+# (offset 0). Moved GUIDE_LINE_OFFSET_MM further from the fingertip (i.e.
+# toward the marker/hand, larger cuticle_y) since the marker's own edge was
+# landing short of where the real cuticle usually is.
+GUIDE_LINE_OFFSET_MM = 5.0
+
 
 # ─────────────────────────────────────────────────────────────
 # Per-thread stdout muting
@@ -242,27 +248,43 @@ def draw_width_marker(overlay, data, mpp):
     return overlay
 
 
-def guide_line_row(corners, x):
+def guide_line_row(corners, x, offset_px=0.0):
     """Row (y, sub-pixel) of the line through the marker's BOTTOM edge,
     evaluated at column x — extends that edge (rather than a fixed offset)
     so the guide line follows the marker's own tilt if the camera isn't
-    perfectly square to the mat.
+    perfectly square to the mat. *offset_px* then shifts that whole line
+    further from the fingertip (positive = toward the hand / larger y) —
+    see GUIDE_LINE_OFFSET_MM for why: the marker's raw edge alone was
+    landing short of where the real cuticle usually is.
+
+    The bottom two corners are picked by actual pixel position (largest y),
+    not by a fixed cv2.aruco TL,TR,BR,BL index assumption: that ordering is
+    relative to the marker's OWN rotation, which shifts with how the marker
+    is physically mounted. On one rig corners[3]/corners[2] really were the
+    bottom two and this worked; on another (same code, marker mounted at a
+    different rotation) they turned out to be two corners on the same short
+    edge, nearly stacked vertically — extrapolating that near-vertical
+    "edge" out to a finger 300+px away sent the guide row thousands of
+    pixels off-screen, which fed a garbage cuticle_y into every measurement
+    (length_mm computed as 900+ instead of ~15) while leaving the on-screen
+    guide line invisible, since it was drawn far outside the visible frame.
     """
-    bl, br = corners[3], corners[2]   # cv2.aruco order: TL,TR,BR,BL
+    order = sorted(range(4), key=lambda i: corners[i][1], reverse=True)
+    bl, br = sorted((corners[order[0]], corners[order[1]]), key=lambda p: p[0])
     if abs(br[0] - bl[0]) < 1e-6:
-        return float(bl[1])
+        return float(bl[1]) + offset_px
     slope = (br[1] - bl[1]) / (br[0] - bl[0])
-    return float(bl[1] + slope * (x - bl[0]))
+    return float(bl[1] + slope * (x - bl[0])) + offset_px
 
 
-def draw_guide_line(img, corners):
+def draw_guide_line(img, corners, offset_px=0.0):
     """Dashed guide line (parallel to the marker's bottom edge) the operator
     aligns their cuticle to — see measure_top's guide_y. Display only; drawn
     on the overlay copy, never on the saved raw frame.
     """
     h, w = img.shape[:2]
-    y0 = int(round(guide_line_row(corners, 0)))
-    y1 = int(round(guide_line_row(corners, w)))
+    y0 = int(round(guide_line_row(corners, 0, offset_px)))
+    y1 = int(round(guide_line_row(corners, w, offset_px)))
     color = (255, 255, 0)   # BGR cyan/"sky blue" — distinct from other overlay colours
     n = 40
     for i in range(0, n, 2):
@@ -286,7 +308,9 @@ def measure_frame(frame, finger, aruco_size_mm):
             mpp, corners, marker_id = nm.detect_aruco(frame, aruco_size_mm)
             finger_mask, _, bbox    = nm.segment_finger(frame, corners)
             fbx, fby, fbw, fbh      = bbox
-            guide_y = int(round(guide_line_row(corners, fbx + fbw // 2)))
+            guide_offset_px = GUIDE_LINE_OFFSET_MM / mpp
+            guide_y = int(round(guide_line_row(corners, fbx + fbw // 2,
+                                               guide_offset_px)))
             data = nm.measure_top(frame, mpp, finger_mask, bbox,
                                   aruco_corners=corners, finger=finger,
                                   guide_y=guide_y)
@@ -317,7 +341,7 @@ def measure_frame(frame, finger, aruco_size_mm):
 
             overlay = draw_guide_line(draw_width_marker(
                 nm.draw_annotated(frame, data, corners, finger), data, mpp),
-                corners)
+                corners, guide_offset_px)
 
         return {"ok": True, "frame": frame, "data": data,
                 "corners": corners, "overlay": overlay, "t": time.time()}
@@ -423,91 +447,23 @@ def compose(result, live_frame, history, finger, n_measured):
     cv2.rectangle(view, (w - pw - 10, 10), (w - 10, 10 + ph), (200, 200, 200), 2)
     put(view, "LIVE", (w - pw - 4, 30), (200, 200, 200), 0.5, 1)
 
+    # No status text block any more (top-left/bottom-left) - only the
+    # coloured border (red = no reading, orange = collecting, green =
+    # stable) plus whatever draw_annotated/draw_width_marker/draw_guide_line
+    # already drew directly near the nail in result["overlay"]. All the
+    # per-frame diagnostics (cuticle-unverified, fold coverage/lighting
+    # meter, stability detail, keyboard hints) still get logged to the
+    # console/CSV (see _log_row) for anyone who needs them - just not
+    # burned into the operator-facing frame any more.
     if not have:
-        msg = "Measuring..." if result is None else f"NO READING: {result['err']}"
         cv2.rectangle(view, (0, 0), (w - 1, h - 1), (0, 0, 255), 8)
-        put(view, msg, (14, 40), (0, 80, 255), 0.8)
-        put(view, "Place finger + ArUco marker in view   |   Q: quit",
-            (14, h - 20), (200, 200, 0), 0.6)
         return view
 
     d = result["data"]
     is_stable, dw, dl = stability(history)
-    age = time.time() - result["t"]
 
     border = (0, 220, 0) if is_stable else (0, 200, 255)
     cv2.rectangle(view, (0, 0), (w - 1, h - 1), border, 8)
-
-    # W/L is shown as a bare number, not as wl_ratio_check's ok/length_suspect
-    # verdict: that verdict compares against a 0.91 prior, while ruler-validated
-    # nails here measure 0.64-0.86, so it flags correct measurements as suspect
-    # on essentially every real nail. An alarm that is always on would just
-    # teach the operator to ignore this bar.
-    wl = d.get("wl_ratio_check", {}).get("measured_wl", "?")
-    rows = [
-        (f"{finger.upper()}   W {d['width_mm']}mm   L {d['length_mm']}mm"
-         f"   (corrected L {d['corrected_length_mm']}mm)", (255, 255, 255)),
-        (f"C-curve {d['c_curve_mm']}mm   R {d['arc_radius_mm']}mm"
-         f"   skin {d['skin_tone_hex']}   W/L {wl}", (255, 255, 255)),
-    ]
-
-    # cuticle_y landing exactly on the bare 0.91 W/L prior means neither the
-    # colour nor the brightness-gradient detector found independent evidence
-    # for it (see measure_top's cuticle_unverified) — on the 2026-08-15 set
-    # this was wrong for one finger (middle, undershot by 5.5mm) and right by
-    # coincidence for another (ring), and nothing in the pipeline's own
-    # signals can tell those two cases apart. The operator looking at the
-    # photo can, so surface it instead of silently trusting either outcome.
-    if d.get("_cuticle_unverified"):
-        hint = (" - compare the dashed cyan 'alt?' line if one is shown"
-                if d.get("_cuticle_y_alt") is not None else "")
-        rows.append((f"CUTICLE UNVERIFIED - no independent evidence found; "
-                     f"check the orange line against the real cuticle{hint}",
-                     (0, 80, 255)))
-
-    # Fold coverage: what fraction of the nail's rows the lateral-groove scan
-    # found an edge on. Reported as a LIGHTING meter only — it responds strongly
-    # to how the light rakes across the folds, and it is highly repeatable per
-    # finger (index 27/31%, middle 45/47%, ring 78/73% across two runs of the
-    # same hand). It is NOT a confidence estimate on the width, and used to be
-    # captioned as one: on the 2026-08-12 set the best width came from the
-    # LOWEST non-zero coverage (index, 31%, +0.24mm) and a much worse one from
-    # the highest (ring, 73%, -1.56mm). The verdict wording was removed rather
-    # than retuned, because no threshold on this number predicts accuracy.
-    found, span = d.get("_lateral_rows"), d.get("_lateral_span")
-    if found is not None and span:
-        cov  = 100.0 * found / span
-        col  = (255, 255, 255)
-        clip = d.get("_clip_pct")
-        extra = ""
-        if clip is not None:
-            extra = f"   |   lit side blown out {clip:.0f}%"
-            if clip >= 20:
-                extra += " - DIM THE LIGHT (reference clips 0%)"
-                col = (0, 80, 255)
-        src = d.get("width_source", "")
-        if src and src != "lateral_folds":
-            extra += f"   |   width from {src} - FOLDS NOT FOUND"
-            col = (0, 80, 255)
-        rows.append((f"fold coverage {cov:.0f}%  ({found} of {span} rows) "
-                     f"[lighting meter]{extra}", col))
-
-    if is_stable:
-        rows.append((f"STABLE  (dW {dw:.2f}  dL {dl:.2f} over last {MEDIAN_N})"
-                     f"  - capturing median", (0, 255, 0)))
-    else:
-        detail = f"dW {dw:.2f}  dL {dl:.2f}" if dw is not None else "warming up"
-        rows.append((f"HOLD STILL  ({detail}) - do not roll; "
-                     f"{len(history)}/{MEDIAN_N} readings collected",
-                     (0, 200, 255)))
-
-    for i, (txt, col) in enumerate(rows):
-        put(view, txt, (14, 34 + i * 30), col)
-
-    put(view, f"frame age {age:.1f}s   accepted so far: {n_measured}",
-        (14, h - 48), (180, 180, 180), 0.55, 1)
-    put(view, "ENTER/SPACE: accept THIS measurement   |   R: reset   |   Q: quit",
-        (14, h - 18), (0, 220, 255), 0.62)
     return view
 
 
@@ -949,10 +905,12 @@ def main():
             # Width marker included, so reviewing the JPEG later shows exactly
             # what was approved on screen — the green outline alone is ~28%
             # narrower than the span width_mm reports.
+            _mpp = data.get("_mpp")
+            _guide_offset_px = (GUIDE_LINE_OFFSET_MM / _mpp) if _mpp else 0.0
             vis   = draw_guide_line(draw_width_marker(
                 nm.draw_annotated(accepted["frame"], data,
                                   accepted["corners"], finger),
-                data, data.get("_mpp")), accepted["corners"])
+                data, _mpp), accepted["corners"], _guide_offset_px)
             scale = 900 / vis.shape[0]
             ann_path = os.path.join(output_dir, f"{finger}_annotated.jpg")
             cv2.imwrite(ann_path,

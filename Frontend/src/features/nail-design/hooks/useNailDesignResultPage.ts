@@ -8,7 +8,9 @@ import {
   unshareDesign,
   getDesignDetail,
   getDesignSwatches,
+  getLikedDesigns,
   type DesignExtractedDetails,
+  type SavedDesignResponse,
 } from '@/entities/design/api'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
@@ -39,7 +41,7 @@ export type GenerationContext = {
   keywords: string[]
   referenceImageUrl: string | null
   handSummary: {
-    seasonNameKo: string
+    toneLabel: string
     shapeLabel: string
     avgLength: number
     avgWidth: number
@@ -94,7 +96,6 @@ export function useNailDesignResultPage() {
   const [nailParts, setNailParts] = useState<DesignExtractedDetails['nailParts'] | null>(null)
   const colorPollCountRef = useRef(0)
   const colorPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
   const [liked, setLiked] = useState(false)
   const [likedFolder, setLikedFolder] = useState<{ folderId: number; name: string } | null>(null)
   const [isLiking, setIsLiking] = useState(false)
@@ -102,6 +103,9 @@ export function useNailDesignResultPage() {
   const [userName, setUserName] = useState('')
   const [shared, setShared] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
+  const [shape, setShape] = useState<string | null>(null)
+  const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
+
 
   // ★ 스와치 폴링
   useEffect(() => {
@@ -176,13 +180,30 @@ export function useNailDesignResultPage() {
     if (designId != null) {
       void getDesignDetail(designId)
           .then((detail) => {
-            if (!cancelled) setShared(Boolean(detail.shared))
+            if (cancelled) return
+            setShared(Boolean(detail.shared))
+            setShape(detail.shape ?? null)
+            setNailTipCropUrls(detail.nailTipCropUrls ?? null)
+          })
+          .catch(() => {})
+
+      // getDesignDetail 응답엔 찜 여부가 안 들어있어서(공유 여부만 있음), 이미 찜한 디자인을
+      // 다시 들어와서 볼 때 하트/폴더명이 항상 초기 상태(false/null)로 보이는 문제가 있었다.
+      // 내 찜 목록을 따로 조회해서 이 디자인이 있는지 확인해 초기 상태를 맞춰준다.
+      void getLikedDesigns()
+          .then((likedDesigns) => {
+            if (cancelled) return
+            const match = likedDesigns.find((d) => d.designId === designId && d.imageUrl === image)
+            if (match) {
+              setLiked(true)
+              setLikedFolder(match.folder)
+            }
           })
           .catch(() => {})
     }
 
     return () => { cancelled = true }
-  }, [hasRealResult, designId])
+  }, [hasRealResult, designId, image])
 
 
   // ★ nailParts 별도 폴링 (swatches 폴링과 동일한 패턴)
@@ -252,7 +273,15 @@ export function useNailDesignResultPage() {
     setLikedFolder(saved.folder)
   }
 
-  // details에 폴링으로 받은 swatches + colorPalette 주입
+  // 이미지 상세모달(DesignImageDetailModal)이 자체적으로 좋아요/공유 API를 호출한 뒤
+  // 그 결과만 이 페이지 상태에 반영할 때 쓰는 순수 상태 동기화 함수 (API 재호출 없음)
+  const applyLikeChange = (saved: SavedDesignResponse | null) => {
+    setLiked(Boolean(saved))
+    setLikedFolder(saved?.folder ?? null)
+  }
+  const applyShareChange = (nextShared: boolean) => setShared(nextShared)
+
+  // details에 폴링으로 받은 swatches + colorPalette + nailParts 주입
   const detailsWithSwatches: DesignExtractedDetails | null = initialDetails
       ? {
         ...initialDetails,
@@ -276,9 +305,13 @@ export function useNailDesignResultPage() {
     userName,
     shared,
     shareBusy,
+    shape,
+    nailTipCropUrls,
     detailsWithSwatches,
     handleToggleShare,
     handleToggleLike,
     confirmLikeWithFolder,
+    applyLikeChange,
+    applyShareChange,
   }
 }

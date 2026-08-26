@@ -2,16 +2,14 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 import { createPortal } from 'react-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
-import { getNailShape } from '@/shared/constants/nailShapes'
+import { DesignImageDetailModal } from '@/features/mypage/components/DesignImageDetailModal'
 import { parseDateFlexible, type ScanSession } from '@/shared/utils/scanDetail'
 import {
     PREFERENCE_OPTIONS,
     PREFERENCE_OPTION_INFO,
-    SEASON_ROWS,
     SHAPE_PREVIEW_IMAGES,
     type PreferenceKey,
 } from '@/shared/constants/designPreferences'
-import { NailPreview3D } from '@/features/nail-design/components/NailPreview3D'
 import { useNailDesignChatPage, QMARK_TOKEN, MENU_OPTIONS } from '@/features/nail-design/hooks/useNailDesignChatPage'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
@@ -118,103 +116,14 @@ function QuestionMarkIcon({ className, size = 16 }: { className?: string; size?:
         </svg>
     )
 }
-function SeasonDropdown({
-                            value,
-                            onChange,
-                            disabled,
-                        }: {
-    value: string
-    onChange: (code: string) => void
-    disabled?: boolean
-}) {
-    const [open, setOpen] = useState(false)
-    const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null)
-    const wrapRef = useRef<HTMLDivElement | null>(null)
-    const triggerRef = useRef<HTMLButtonElement | null>(null)
-    const menuRef = useRef<HTMLDivElement | null>(null)
-
-    useEffect(() => {
-        const handleOutsideClick = (e: MouseEvent) => {
-            const target = e.target as Node
-            if (wrapRef.current?.contains(target)) return
-            if (menuRef.current?.contains(target)) return
-            setOpen(false)
-        }
-        document.addEventListener('mousedown', handleOutsideClick)
-        return () => document.removeEventListener('mousedown', handleOutsideClick)
-    }, [])
-
-    const current = SEASON_ROWS.find((row) => row.code === value)
-
-    const toggleOpen = (e: ReactMouseEvent) => {
-        e.stopPropagation()
-        if (disabled) return
-        const rect = triggerRef.current?.getBoundingClientRect()
-        if (rect) {
-            setMenuPos({ top: rect.bottom + 6, left: rect.right })
-        }
-        setOpen((prev) => !prev)
-    }
-
-    return (
-        <div className="design-chat__season-dropdown" ref={wrapRef}>
-            <button
-                ref={triggerRef}
-                type="button"
-                className="design-chat__season-dropdown-trigger"
-                onClick={toggleOpen}
-                disabled={disabled}
-            >
-                <span>{current?.nameKo ?? '퍼스널컬러'}</span>
-                <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    aria-hidden="true"
-                    className={`design-chat__season-dropdown-chevron${open ? ' is-open' : ''}`}
-                >
-                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-            </button>
-
-            {open && menuPos &&
-                createPortal(
-                    <div
-                        ref={menuRef}
-                        className="design-chat__season-dropdown-menu"
-                        style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, transform: 'translateX(-100%)' }}
-                    >
-                        <div className="design-chat__season-dropdown-menu-scroll">
-                            {SEASON_ROWS.map((row) => (
-                                <button
-                                    key={row.code}
-                                    type="button"
-                                    className={`design-chat__season-dropdown-option${row.code === value ? ' is-active' : ''}`}
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        onChange(row.code)
-                                        setOpen(false)
-                                    }}
-                                >
-                                    {row.nameKo}
-                                </button>
-                            ))}
-                        </div>
-                    </div>,
-                    document.body,
-                )}
-        </div>
-    )
-}
 // 사이드바 헤더의 "분석 결과 선택" 드롭다운 — 손 분석 이력(양손 다 촬영된 세션)을
 // 대표 피부색 스와치 + 날짜 + 헥스값으로 보여주고 고를 수 있게 한다.
 function SessionDropdown({
-                              sessions,
-                              selectedKey,
-                              currentDateLabel,
-                              onSelect,
-                          }: {
+                             sessions,
+                             selectedKey,
+                             currentDateLabel,
+                             onSelect,
+                         }: {
     sessions: ScanSession[]
     selectedKey: string | null
     currentDateLabel: string
@@ -345,7 +254,6 @@ export function NailDesignChatPageContent() {
         isAwaitingGenerateConfirm,
         selectedInQuickReply,
         preferenceStepIndex,
-        lastDesign,
         selectedPhotoFile,
         selectedPhotoPreviewUrl,
         photoInputRef,
@@ -366,13 +274,7 @@ export function NailDesignChatPageContent() {
         freeformShapePickerOpen,
         showAnalysisPanel,
         setShowAnalysisPanel,
-        preview3DImage,
-        setPreview3DImage,
         zoomedImage,
-        imageZoom,
-        imagePan,
-        isImageDragging,
-        zoomedImageViewportRef,
         leftAnalysis,
         rightAnalysis,
         scanSessions,
@@ -380,9 +282,7 @@ export function NailDesignChatPageContent() {
         messagesRef,
         chatContainerRef,
         textareaRef,
-        manualSeasonCode,
-        setManualSeasonCode,
-        detectedSeasonCode,
+        scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
         isMultiConfirmVisible,
@@ -407,9 +307,6 @@ export function NailDesignChatPageContent() {
         toggleOptionTooltip,
         openZoomedImage,
         closeZoomedImage,
-        handleZoomedImagePointerDown,
-        handleZoomedImagePointerMove,
-        stopZoomedImageDragging,
         adjustTextareaHeight,
     } = useNailDesignChatPage()
 
@@ -638,26 +535,9 @@ export function NailDesignChatPageContent() {
                                                         src={url}
                                                         alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'}
                                                         onClick={() => openZoomedImage(url)}
+                                                        onLoad={scrollMessagesToBottom}
                                                         style={{ cursor: 'zoom-in' }}
                                                     />
-                                                    {bubble.isDesignResult && (
-                                                        <button
-                                                            type="button"
-                                                            className="design-chat__bubble-3d-badge"
-                                                            onClick={() => setPreview3DImage(url)}
-                                                        >
-                                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                                <path
-                                                                    d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"
-                                                                    stroke="currentColor"
-                                                                    strokeWidth="1.6"
-                                                                    strokeLinejoin="round"
-                                                                />
-                                                                <path d="M12 12v9M12 12L4 7.5M12 12l8-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                                                            </svg>
-                                                            3D
-                                                        </button>
-                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -721,12 +601,6 @@ export function NailDesignChatPageContent() {
                                     <p className="design-chat__quickreply-question">{activeQuickReply.question}</p>
                                 </button>
 
-                                {(activeQuickReply.id === 'pref-color' ||
-                                        (activeQuickReply.id.startsWith('freeform-actions') && freeformColorPickerOpen)) &&
-                                    !hasScanColorPalette && (
-                                        <SeasonDropdown value={manualSeasonCode} onChange={setManualSeasonCode} disabled={isSending} />
-                                    )}
-
                                 <button
                                     type="button"
                                     className="design-chat__quickreply-chevron-btn"
@@ -754,9 +628,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                detectedSeasonCode && (
-                                                    <p className="design-chat__color-picker-label">내 퍼스널컬러 팔레트</p>
-                                                )
+                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
                                             )}
 
                                             <div className="design-chat__color-main">
@@ -862,9 +734,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                detectedSeasonCode && (
-                                                    <p className="design-chat__color-picker-label">내 퍼스널컬러 팔레트</p>
-                                                )
+                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
                                             )}
 
                                             <div className="design-chat__color-main">
@@ -1212,7 +1082,7 @@ export function NailDesignChatPageContent() {
                                             type="button"
                                             className="design-chat__quickreply-confirm"
                                             onClick={handlePhotoConfirm}
-                                            disabled={isSending}
+                                            disabled={isSending || !selectedPhotoPreviewUrl}
                                         >
                                             🎨 이 사진으로 생성하기
                                         </button>
@@ -1283,99 +1153,47 @@ export function NailDesignChatPageContent() {
                 </div>
             </div>
 
-            {preview3DImage && lastDesign && (
-                <div className="design-3d-modal" role="dialog" aria-modal="true">
-                    <button
-                        type="button"
-                        className="design-3d-modal__backdrop"
-                        aria-label="닫기"
-                        onClick={() => setPreview3DImage(null)}
-                    />
-                    <div className="design-3d-modal__panel">
-                        <header className="design-3d-modal__header">
-                            <h2>3D 미리보기</h2>
-                            <button type="button" onClick={() => setPreview3DImage(null)} aria-label="닫기">
-                                ×
-                            </button>
-                        </header>
-                        <p className="design-3d-modal__desc">
-                            {getNailShape(lastDesign.shapeId)?.labelKo ?? lastDesign.shapeId} 쉐입에 디자인을 입힌 모습이에요.
-                        </p>
-                        <NailPreview3D textureUrl={preview3DImage} shapeId={lastDesign.shapeId} />
-                    </div>
-                </div>
+            {zoomedImage && (
+                <DesignImageDetailModal
+                    image={{ designId: null, imageUrl: zoomedImage, liked: false, folder: null }}
+                    onClose={closeZoomedImage}
+                    showDelete={false}
+                    showChatHistoryToggle={false}
+                    showDesignDetailsToggle={false}
+                    showLike={false}
+                    showShare={false}
+                    showAr={false}
+                />
             )}
 
-    {zoomedImage && (
-        <div className="mypage-x__modal" role="dialog" aria-modal="true">
-            <button
-                type="button"
-                className="mypage-x__modal-backdrop"
-                aria-label="닫기"
-                onClick={closeZoomedImage}
-            />
-            <div className="mypage-x__modal-panel design-chat__image-zoom-panel">
-                <button
-                    type="button"
-                    className="mypage-x__modal-close"
-                    onClick={closeZoomedImage}
-                    aria-label="닫기"
-                >
-                    ✕
-                </button>
-
-                <div
-                    ref={zoomedImageViewportRef}
-                    className={`mypage-x__modal-image-viewport design-chat__image-zoom-viewport${imageZoom > 1 ? ' is-zoomed' : ''}${isImageDragging ? ' is-dragging' : ''}`}
-                    onMouseUp={stopZoomedImageDragging}
-                    onMouseLeave={stopZoomedImageDragging}
-                >
-                    <img
-                        src={zoomedImage}
-                        alt="확대된 이미지"
-                        className="mypage-x__modal-image"
-                        draggable={false}
-                        style={{ transform: `translate(${imagePan.x}px, ${imagePan.y}px) scale(${imageZoom})` }}
-                        onMouseDown={handleZoomedImagePointerDown}
-                        onMouseMove={handleZoomedImagePointerMove}
-                    />
-
-                    <div className="mypage-x__modal-zoom-controls">
-                        <span className="mypage-x__modal-zoom-value">{Math.round(imageZoom * 100)}%</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )}
-
-    {tooltipAnchor &&
-        createPortal(
-            <div
-                className="design-chat__option-tooltip"
-                style={{ top: tooltipAnchor.top - 8, left: tooltipAnchor.left }}
-                role="tooltip"
-            >
-                {tooltipAnchor.info.image && !tooltipImgError ? (
-                    <img
-                        src={tooltipAnchor.info.image}
-                        alt=""
-                        className="design-chat__option-tooltip-img"
-                        onError={() => setTooltipImgError(true)}
-                    />
-                ) : (
-                    <div className="design-chat__option-tooltip-img design-chat__option-tooltip-img--placeholder" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
-                            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-                            <path d="m6.5 15 3.5-4 3 3 3.5-4.5 4 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                            <circle cx="8.5" cy="9" r="1.3" fill="currentColor" />
-                        </svg>
-                    </div>
+            {tooltipAnchor &&
+                createPortal(
+                    <div
+                        className="design-chat__option-tooltip"
+                        style={{ top: tooltipAnchor.top - 8, left: tooltipAnchor.left }}
+                        role="tooltip"
+                    >
+                        {tooltipAnchor.info.image && !tooltipImgError ? (
+                            <img
+                                src={tooltipAnchor.info.image}
+                                alt=""
+                                className="design-chat__option-tooltip-img"
+                                onError={() => setTooltipImgError(true)}
+                            />
+                        ) : (
+                            <div className="design-chat__option-tooltip-img design-chat__option-tooltip-img--placeholder" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
+                                    <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                                    <path d="m6.5 15 3.5-4 3 3 3.5-4.5 4 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                    <circle cx="8.5" cy="9" r="1.3" fill="currentColor" />
+                                </svg>
+                            </div>
+                        )}
+                        <strong className="design-chat__option-tooltip-title">{tooltipAnchor.label}</strong>
+                        <span className="design-chat__option-tooltip-desc">{tooltipAnchor.info.desc}</span>
+                    </div>,
+                    document.body,
                 )}
-                <strong className="design-chat__option-tooltip-title">{tooltipAnchor.label}</strong>
-                <span className="design-chat__option-tooltip-desc">{tooltipAnchor.info.desc}</span>
-            </div>,
-            document.body,
-        )}
         </AppShell>
     )
 }

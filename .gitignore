@@ -95,6 +95,7 @@ scan/SCAN_PIPELINE.md
 scan/out_*/
 scan/out_live
 scan/out_live/*
+scan/out_5f_20mm/
 scan/test/
 scan/sh_images/
 scan/ys_images/
@@ -120,5 +121,17 @@ printer/profiles/combined_settings.json
 printer/profiles/process_fixed.json
 
 
+
+results/
+photos/
+test_captures/
+venv/
+**/__pycache__/
+scan/_phone_check/
+*.bak
+*.bak_*
+
 photos/
 results/
+
+

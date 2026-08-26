@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Naily 사이드뷰 카메라</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #000; color: #eee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  #video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  #status {
+    margin: 14px; padding: 8px 14px;
+    background: rgba(0,0,0,0.55);
+    border-radius: 10px;
+    font-size: 15px;
+    align-self: flex-start;
+  }
+  #status.connected { color: #7CFF7C; }
+  #status.warn { color: #FFD54A; }
+  #status.err { color: #FF6B6B; }
+  #flash {
+    position: absolute; inset: 0;
+    background: #fff; opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease-out;
+  }
+  #flash.on { opacity: 0.85; }
+  #bottom {
+    margin: 18px; display: flex; justify-content: center;
+    pointer-events: auto;
+  }
+  #manualBtn {
+    padding: 14px 28px; font-size: 16px; font-weight: 600;
+    border: none; border-radius: 999px;
+    background: rgba(255,255,255,0.14);
+    color: #fff; backdrop-filter: blur(6px);
+  }
+  #manualBtn:active { background: rgba(255,255,255,0.3); }
+  #startScreen {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px; text-align: center; padding: 24px;
+  }
+  #startBtn {
+    padding: 16px 32px; font-size: 18px; font-weight: 700;
+    border: none; border-radius: 999px;
+    background: #4ADE80; color: #06240f;
+  }
+</style>
+</head>
+<body>
+  <video id="video" playsinline autoplay muted></video>
+  <div id="flash"></div>
+  <div id="overlay">
+    <div id="status">연결 대기 중...</div>
+    <div id="bottom">
+      <button id="manualBtn">지금 촬영</button>
+    </div>
+  </div>
+  <div id="startScreen">
+    <p>사이드뷰(옆모습) 카메라로 사용합니다.<br/>후면 카메라 권한을 허용해주세요.</p>
+    <button id="startBtn">카메라 시작</button>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  const video       = document.getElementById("video");
+  const statusEl    = document.getElementById("status");
+  const flashEl     = document.getElementById("flash");
+  const manualBtn   = document.getElementById("manualBtn");
+  const startScreen = document.getElementById("startScreen");
+  const startBtn    = document.getElementById("startBtn");
+
+  const PREVIEW_MS      = 1000;   // preview upload interval
+  const POLL_MS         = 400;    // capture-request poll interval
+  const PREVIEW_MAX_W   = 960;    // preview width sent to desktop (~1fps, so this is cheap)
+
+  let stream        = null;
+  let track         = null;
+  let imageCapture   = null;
+  let previewTimer   = null;
+  let pollTimer      = null;
+  let busy           = false;     // true while a full-res capture is in flight
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = cls || "";
+  }
+
+  function flash() {
+    flashEl.classList.add("on");
+    setTimeout(() => flashEl.classList.remove("on"), 150);
+  }
+
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
+    } catch (e) {
+      setStatus("카메라 권한이 필요합니다: " + e.message, "err");
+      return;
+    }
+
+    video.srcObject = stream;
+    track = stream.getVideoTracks()[0];
+
+    if (window.ImageCapture) {
+      try { imageCapture = new ImageCapture(track); }
+      catch (e) { imageCapture = null; }
+    }
+
+    startScreen.style.display = "none";
+    setStatus("프리뷰 전송 중...", "connected");
+    previewTimer = setInterval(sendPreview, PREVIEW_MS);
+    pollTimer    = setInterval(pollCapture, POLL_MS);
+  }
+
+  function previewCanvas() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const scale = Math.min(1, PREVIEW_MAX_W / vw);
+    const c = document.createElement("canvas");
+    c.width  = Math.round(vw * scale);
+    c.height = Math.round(vh * scale);
+    const ctx = c.getContext("2d");
+    ctx.drawImage(video, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function sendPreview() {
+    if (busy) return;
+    const c = previewCanvas();
+    if (!c) return;
+    c.toBlob((blob) => {
+      if (!blob) return;
+      fetch("/phone/side/frame", { method: "POST", body: blob })
+        .then(() => setStatus("연결됨 - 라이브 프리뷰 전송 중", "connected"))
+        .catch(() => setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err"));
+    }, "image/jpeg", 0.85);
+  }
+
+  async function pollCapture() {
+    if (busy) return;
+    let wanted = false;
+    try {
+      const r = await fetch("/phone/side/status", { cache: "no-store" });
+      const j = await r.json();
+      wanted = !!j.capture;
+    } catch (e) {
+      setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err");
+      return;
+    }
+    if (wanted) await takeAndUploadPhoto();
+  }
+
+  async function takeAndUploadPhoto() {
+    busy = true;
+    setStatus("고화질 촬영 중...", "warn");
+    flash();
+    try {
+      let blob = null;
+      if (imageCapture) {
+        try { blob = await imageCapture.takePhoto(); }
+        catch (e) { blob = null; }
+      }
+      if (!blob) {
+        // Fallback for browsers without ImageCapture (e.g. iOS Safari):
+        // snapshot the live video frame at its native resolution.
+        const vw = video.videoWidth, vh = video.videoHeight;
+        const c = document.createElement("canvas");
+        c.width = vw; c.height = vh;
+        c.getContext("2d").drawImage(video, 0, 0, vw, vh);
+        blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.92));
+      }
+      await fetch("/phone/side/photo", { method: "POST", body: blob });
+      setStatus("촬영 완료 - 전송됨", "connected");
+    } catch (e) {
+      setStatus("촬영 실패: " + e.message, "err");
+    } finally {
+      busy = false;
+    }
+  }
+
+  manualBtn.addEventListener("click", () => { if (!busy) takeAndUploadPhoto(); });
+  startBtn.addEventListener("click", startCamera);
+
+  // iOS Safari requires a user gesture before camera access even shows the
+  // permission prompt reliably, so camera start waits for the button tap
+  // rather than firing on page load.
+})();
+</script>
+</body>
+</html>

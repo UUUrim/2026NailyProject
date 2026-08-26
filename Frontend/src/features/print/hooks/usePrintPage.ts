@@ -159,7 +159,6 @@ export function usePrintPage() {
                 scanId: selectedSession.leftScanId ?? selectedSession.rightScanId ?? null,
                 leftScanId: selectedSession.leftScanId,
                 rightScanId: selectedSession.rightScanId,
-                seasonCode: selectedSession.seasonCode ?? null,
             },
         })
     }

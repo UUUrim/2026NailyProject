@@ -5,6 +5,7 @@ import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
 import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
+import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.ScanImg;
 import com.example.nailyproject.entity.User;
@@ -59,8 +60,10 @@ public class UserHistoryController {
                             .shape(scan.getShape())
                             .recommendedShape(scan.getRecommendedShape())
                             .skinToneHex(scan.getSkinToneHex())
-                            .seasonCode(scan.getSeasonCode())
-                            .seasonNameKo(scan.getSeasonNameKo())
+                            .recommendedColors(ScanResultResponseDto.parseRecommendedColors(scan.getRecommendedColors(), objectMapper))
+                            .tone(scan.getTone())
+                            .brightness(scan.getBrightness())
+                            .saturation(scan.getSaturation())
                             .avgLengthMm(averages.lengthMm())
                             .avgWidthMm(averages.widthMm())
                             .avgCurve(averages.curve())

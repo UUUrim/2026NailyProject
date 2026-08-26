@@ -1,13 +1,25 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { drawNailOverlays } from '@/features/mypage/utils/nailArRenderer'
 import { getHandLandmarker } from '@/features/mypage/utils/handLandmarker'
+import { resetLandmarkSmoothing, smoothLandmarks } from '@/features/mypage/utils/landmarkSmoothing'
 import { prepareNailDesignAsset, type NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
+import { isKnownNailShape, loadShapeTemplate } from '@/features/mypage/utils/nailMeshAsset'
+import { NailArScene } from '@/features/mypage/utils/nailArScene'
+import '@/styles/mypage.css'
 import '@/styles/nail-ar-tryon.css'
 
 type NailArTryOnModalProps = {
   imageUrl: string
+  /** round/oval/almond/square/stiletto/ballerina 중 하나면 실측 3D 쉐입 템플릿을
+   *  쓰고, 그 외(null/미확인 쉐입/템플릿 로드 실패)는 2D 방식으로 폴백한다. */
+  shape: string | null
+  /** detect 서버가 생성 시점에 뽑아낸 손가락별 매트 이미지 5장(있으면). 있으면
+   *  로컬 세그멘테이션 대신 이걸 그대로 쓴다 - prepareNailDesignAsset() 참고. */
+  nailTipCropUrls?: string[] | null
   onClose: () => void
 }
+
+type RenderMode = '2d' | '3d'
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message
@@ -25,25 +37,51 @@ async function waitForVideoElement(videoRef: RefObject<HTMLVideoElement | null>)
   throw new Error('카메라 화면을 초기화할 수 없습니다.')
 }
 
-export function NailArTryOnModal({ imageUrl, onClose }: NailArTryOnModalProps) {
+export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: NailArTryOnModalProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const meshCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const assetRef = useRef<NailDesignAsset | null>(null)
+  const sceneRef = useRef<NailArScene | null>(null)
+  const modeRef = useRef<RenderMode>('2d')
   const rafRef = useRef<number | null>(null)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('AR 미리보기를 준비하고 있어요...')
+  const [mode, setMode] = useState<RenderMode>('2d')
 
   useEffect(() => {
     let cancelled = false
 
     const start = async () => {
       try {
+        resetLandmarkSmoothing()
         setMessage('네일 디자인을 불러오는 중...')
-        const asset = await prepareNailDesignAsset(imageUrl)
+        const asset = await prepareNailDesignAsset(imageUrl, nailTipCropUrls)
         if (cancelled) return
         assetRef.current = asset
+
+        // 실측 3D 쉐입 템플릿을 쓸 수 있으면 3D로, 아니면(쉐입 불명/로드 실패) 기존
+        // 2D 방식으로 조용히 폴백한다 - 카메라/HandLandmarker는 두 경로가 공유한다.
+        let resolvedMode: RenderMode = '2d'
+        if (isKnownNailShape(shape) && meshCanvasRef.current) {
+          try {
+            const template = await loadShapeTemplate(shape)
+            if (cancelled) return
+            const scene = new NailArScene(meshCanvasRef.current)
+            scene.setTemplate(template)
+            scene.setFingerTextures(asset)
+            sceneRef.current = scene
+            resolvedMode = '3d'
+          } catch (e) {
+            resolvedMode = '2d'
+            // eslint-disable-next-line no-console
+            console.error('3D 쉐입 템플릿 로드 실패, 2D로 폴백:', e)
+          }
+        }
+        modeRef.current = resolvedMode
+        setMode(resolvedMode)
 
         setMessage('AR 엔진을 준비하는 중...')
         await getHandLandmarker()
@@ -96,8 +134,11 @@ export function NailArTryOnModal({ imageUrl, onClose }: NailArTryOnModalProps) {
       }
       streamRef.current?.getTracks().forEach((track) => track.stop())
       streamRef.current = null
+      sceneRef.current?.dispose()
+      sceneRef.current = null
+      resetLandmarkSmoothing()
     }
-  }, [imageUrl])
+  }, [imageUrl, shape, nailTipCropUrls])
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -143,8 +184,14 @@ export function NailArTryOnModal({ imageUrl, onClose }: NailArTryOnModalProps) {
       try {
         const landmarker = await getHandLandmarker()
         const results = landmarker.detectForVideo(video, performance.now())
-        for (const landmarks of results.landmarks) {
-          drawNailOverlays(ctx, landmarks, asset, width, height, true)
+        const smoothedHands = smoothLandmarks(results.landmarks)
+        if (modeRef.current === '3d' && sceneRef.current) {
+          sceneRef.current.updateFromLandmarks(smoothedHands, width, height, true)
+          sceneRef.current.render()
+        } else {
+          for (const landmarks of smoothedHands) {
+            drawNailOverlays(ctx, landmarks, asset, width, height, true)
+          }
         }
       } catch {
         // ignore frame-level detection errors
@@ -175,7 +222,12 @@ export function NailArTryOnModal({ imageUrl, onClose }: NailArTryOnModalProps) {
             <h2 className="nail-ar-tryon__title">AR 네일 미리보기</h2>
             <p className="nail-ar-tryon__subtitle">{message}</p>
           </div>
-          <button type="button" className="nail-ar-tryon__close" onClick={onClose} aria-label="닫기">
+          <button
+            type="button"
+            className="mypage-x__modal-close mypage-x__modal-close--plain nail-ar-tryon__close"
+            onClick={onClose}
+            aria-label="닫기"
+          >
             ✕
           </button>
         </div>
@@ -188,6 +240,10 @@ export function NailArTryOnModal({ imageUrl, onClose }: NailArTryOnModalProps) {
           <canvas
             ref={canvasRef}
             className={`nail-ar-tryon__canvas${status === 'ready' ? ' is-visible' : ''}`}
+          />
+          <canvas
+            ref={meshCanvasRef}
+            className={`nail-ar-tryon__mesh-canvas${status === 'ready' && mode === '3d' ? ' is-visible' : ''}`}
           />
         </div>
 

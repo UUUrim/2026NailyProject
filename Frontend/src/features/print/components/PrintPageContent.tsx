@@ -6,7 +6,7 @@ import { PillButton } from '@/shared/components/PillButton'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
 import { getNailShape, NAIL_SHAPES } from '@/shared/constants/nailShapes'
 import { formatMetricCurve } from '@/shared/utils/scanDetail'
-import { analyzeSkinTone } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { usePrintPage } from '@/features/print/hooks/usePrintPage'
 import '@/styles/hand-scan-result.css'
 import '@/styles/print.css'
@@ -118,7 +118,10 @@ export function PrintPageContent() {
                         {pagedSessions.map((session) => {
                             const isSelected = session.key === selectedKey
                             const skinHex = session.skinToneHex
-                            const toneLabel = skinHex ? analyzeSkinTone(skinHex).tone.label.replace(/\s+/g, '') : '미분석'
+                            const toneLabel = (
+                                skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+                                (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
+                            )?.replace(/\s+/g, '') ?? '미분석'
                             const shapeLabel = session.recommendedShape
                                 ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
                                 : null

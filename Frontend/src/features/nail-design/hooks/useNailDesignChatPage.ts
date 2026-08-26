@@ -5,12 +5,11 @@ import { getMyProfile } from '@/entities/user/api'
 import { getMyScans, getScanResult, type ScanResultResponse } from '@/entities/scan/api'
 import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
-import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
     sendChatMessage,
-    savePreferences,
     refineKeywords,
 } from '@/features/nail-design/api/chat'
 import { generateDesign, generateDesignFromImage, confirmDesign, type DesignExtractedDetails } from '@/entities/design/api'
@@ -19,8 +18,6 @@ import {
     INITIAL_PREFERENCES,
     PREFERENCE_OPTIONS,
     PREFERENCE_SECTION_LABELS,
-    PERSONAL_COLOR_SWATCHES,
-    SEASON_ROWS,
     type NailDesignPreferences,
     type PreferenceKey,
     type PreferenceOptionInfo,
@@ -28,6 +25,11 @@ import {
 import { ApiError } from '@/shared/utils/apiClient'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import { registerChatSessionGuard, confirmLeaveChatIfNeeded, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
+
+// Backend가 유효한 피부 LAB 데이터를 못 뽑았을 때 내려주는 기본 피부색(scan/skin_color.py 기준)과
+// 동일한 값 — 스캔 정보가 아예 없을 때 컬러 피커의 기본 팔레트로 사용한다.
+const DEFAULT_SKIN_HEX = '#C8A882'
+
 
 // ── 타입 ──────────────────────────────────────────────────────────────────
 
@@ -65,7 +67,7 @@ type GenerationContext = {
     keywords: string[] // 선택지/자유입력 대화에서 뽑은 키워드 (scan-auto·photo는 비움)
     referenceImageUrl: string | null // 사진 기반 생성일 때, 사용자가 업로드한 참고 사진
     handSummary: {
-        seasonNameKo: string
+        toneLabel: string
         shapeLabel: string
         avgLength: number
         avgWidth: number
@@ -111,7 +113,6 @@ type ChatSessionSnapshot = {
     generationSource: GenerationSource
     selectedPhotoFile: File | null
     selectedPhotoPreviewUrl: string | null
-    manualSeasonCode: string
     inputValue: string
     showAnalysisPanel: boolean
     isQuickReplyCollapsed: boolean
@@ -367,69 +368,12 @@ export function useNailDesignChatPage() {
     const [freeformShapePickerOpen, setFreeformShapePickerOpen] = useState(false)
 
     const [showAnalysisPanel, setShowAnalysisPanel] = useState(chatSessionSnapshot?.showAnalysisPanel ?? false)
-    const [preview3DImage, setPreview3DImage] = useState<string | null>(null)
+
+    // 확대/이동은 공용 DesignImageDetailModal이 담당하므로, 여기서는 어떤 이미지를 확대해서 보여줄지만 들고 있는다.
     const [zoomedImage, setZoomedImage] = useState<string | null>(null)
+    const openZoomedImage = (url: string) => setZoomedImage(url)
+    const closeZoomedImage = () => setZoomedImage(null)
 
-    // ── 확대 이미지 확대/축소/이동 (MyPage의 디테일 이미지 확대 방식과 동일) ──────
-    const [imageZoom, setImageZoom] = useState(1)
-    const [imagePan, setImagePan] = useState({ x: 0, y: 0 })
-    const [isImageDragging, setIsImageDragging] = useState(false)
-    const imageDragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
-    const zoomedImageViewportRef = useRef<HTMLDivElement | null>(null)
-
-    const IMAGE_ZOOM_MIN = 1
-    const IMAGE_ZOOM_MAX = 4
-    const IMAGE_WHEEL_ZOOM_SENSITIVITY = 0.0015
-
-    const openZoomedImage = (url: string) => {
-        setImageZoom(1)
-        setImagePan({ x: 0, y: 0 })
-        setZoomedImage(url)
-    }
-
-    const closeZoomedImage = () => {
-        setZoomedImage(null)
-        setImageZoom(1)
-        setImagePan({ x: 0, y: 0 })
-    }
-
-    useEffect(() => {
-        const viewport = zoomedImageViewportRef.current
-        if (!viewport || !zoomedImage) return
-
-        const onWheel = (e: WheelEvent) => {
-            e.preventDefault()
-            setImageZoom((z) => {
-                const next = Math.min(
-                    IMAGE_ZOOM_MAX,
-                    Math.max(IMAGE_ZOOM_MIN, Number((z - e.deltaY * IMAGE_WHEEL_ZOOM_SENSITIVITY).toFixed(2))),
-                )
-                if (next === IMAGE_ZOOM_MIN) setImagePan({ x: 0, y: 0 })
-                return next
-            })
-        }
-
-        viewport.addEventListener('wheel', onWheel, { passive: false })
-        return () => viewport.removeEventListener('wheel', onWheel)
-    }, [zoomedImage])
-
-    const handleZoomedImagePointerDown = (e: ReactMouseEvent<HTMLImageElement>) => {
-        if (imageZoom <= IMAGE_ZOOM_MIN) return
-        setIsImageDragging(true)
-        imageDragStartRef.current.x = e.clientX
-        imageDragStartRef.current.y = e.clientY
-        imageDragStartRef.current.panX = imagePan.x
-        imageDragStartRef.current.panY = imagePan.y
-    }
-
-    const handleZoomedImagePointerMove = (e: ReactMouseEvent<HTMLImageElement>) => {
-        if (!isImageDragging) return
-        const dx = e.clientX - imageDragStartRef.current.x
-        const dy = e.clientY - imageDragStartRef.current.y
-        setImagePan({ x: imageDragStartRef.current.panX + dx, y: imageDragStartRef.current.panY + dy })
-    }
-
-    const stopZoomedImageDragging = () => setIsImageDragging(false)
     const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.leftAnalysis ?? null)
     const [rightAnalysis, setRightAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.rightAnalysis ?? null)
     // 헤더로 단독 진입했을 때 드롭다운으로 고를 수 있는 과거 분석 결과 목록(양손 다 촬영된 세션만)
@@ -631,7 +575,6 @@ export function useNailDesignChatPage() {
             generationSource,
             selectedPhotoFile,
             selectedPhotoPreviewUrl,
-            manualSeasonCode,
             inputValue,
             showAnalysisPanel,
             isQuickReplyCollapsed,
@@ -702,15 +645,23 @@ export function useNailDesignChatPage() {
     }
 
     const buildScanAutoIntro = (): { text: string; colorSwatches: string[] } => {
-        const seasonCode = leftAnalysis?.seasonCode || rightAnalysis?.seasonCode || null
-        const seasonNameKo =
-            leftAnalysis?.seasonNameKo || rightAnalysis?.seasonNameKo || SEASON_ROWS.find((r) => r.code === seasonCode)?.nameKo
+        const skinToneHex = leftAnalysis?.skinToneHex || rightAnalysis?.skinToneHex || null
+        const tone = leftAnalysis?.tone || rightAnalysis?.tone || null
+        const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
+        const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
+        const toneLabel =
+            skinToneAnalysisFromMetrics(tone, brightness, saturation)?.tone.label ??
+            (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
         const shapeId = leftAnalysis?.shape || rightAnalysis?.shape || null
         const shapeLabel = shapeId ? getNailShape(shapeId)?.labelKo ?? shapeId : null
-        const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : null
-        const colorSwatches = palette ? palette.slice(0, 6) : []
+        const recommendedColors = leftAnalysis?.recommendedColors?.length
+            ? leftAnalysis.recommendedColors
+            : rightAnalysis?.recommendedColors ?? []
+        const colorSwatches = recommendedColors.length > 0
+            ? pickSpreadColors(recommendedColors, 6)
+            : skinToneHex ? pickSpreadColors(generateSkinTonePalette(skinToneHex, 24), 6) : []
 
-        const seasonPart = seasonNameKo ? `${seasonNameKo} 퍼스널컬러` : '내 퍼스널컬러'
+        const seasonPart = toneLabel ? `${toneLabel} 피부톤` : '내 피부톤'
         const shapePart = shapeLabel ? `${shapeLabel} 쉐입` : '추천 쉐입'
 
         return {
@@ -739,24 +690,24 @@ export function useNailDesignChatPage() {
             const context: GenerationContext =
                 source === 'scan-auto'
                     ? {
-                        source,
-                        keywords: data.keywords ?? [], //슬롯 키워드
-                        referenceImageUrl: null,
-                        handSummary: analysisSummary
-                            ? {
-                                seasonNameKo: analysisSummary.seasonNameKo,
-                                shapeLabel: analysisSummary.shapeLabel,
-                                avgLength: analysisSummary.avgLength,
-                                avgWidth: analysisSummary.avgWidth,
-                                avgCurve: analysisSummary.avgCurve,
-                            }
-                            : null,
-                        revisionKeywords,
-                    }
+                          source,
+                          keywords: [],
+                          referenceImageUrl: null,
+                          handSummary: analysisSummary
+                              ? {
+                                    toneLabel: analysisSummary.toneLabel,
+                                    shapeLabel: analysisSummary.shapeLabel,
+                                    avgLength: analysisSummary.avgLength,
+                                    avgWidth: analysisSummary.avgWidth,
+                                    avgCurve: analysisSummary.avgCurve,
+                                }
+                              : null,
+                          revisionKeywords,
+                      }
                     : source === 'freeform'
-                        ? {
+                      ? {
                             source,
-                            keywords: data.keywords ?? buildFreeformKeywords(freeformLogRef.current),  //슬롯 우선, 없으면 폴백
+                            keywords: buildFreeformKeywords(freeformLogRef.current),
                             referenceImageUrl: null,
                             handSummary: null,
                             revisionKeywords,
@@ -836,7 +787,7 @@ export function useNailDesignChatPage() {
                     keywords: data.keywords ?? [],
                     referenceImageUrl: selectedPhotoPreviewUrl,
                     handSummary: null,
-                    revisionKeywords: data.keywords ?? [],
+                    revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
                 },
             })
             pushAssistantImages('짜잔! 이런 디자인은 어떠세요?', data.imageUrls)
@@ -1070,6 +1021,7 @@ export function useNailDesignChatPage() {
             if (!lastDesign) return
             // fire-and-forget — 결과 화면에서 폴링으로 채움
             confirmDesign(lastDesign.designId).catch((err) => {
+                // 확정 API가 실패해도 결과 화면 이동 자체는 막지 않되, 콘솔에는 남긴다
                 console.error('디자인 확정(confirm) 실패:', err)
             })
             navigate('/design/result', {
@@ -1140,9 +1092,16 @@ export function useNailDesignChatPage() {
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────
     const handlePhotoFileChange = (file: File | null) => {
         if (!file) return
-        if (selectedPhotoPreviewUrl) URL.revokeObjectURL(selectedPhotoPreviewUrl)
         setSelectedPhotoFile(file)
-        setSelectedPhotoPreviewUrl(URL.createObjectURL(file))
+        setSelectedPhotoPreviewUrl(null)
+        // blob: URL은 이 페이지를 벗어났다가(뒤로가기 등) 다시 돌아왔을 때 무효화되어 이미지가
+        // 안 보이는 문제가 있다. 히스토리를 넘나들어도 항상 그대로 보이는 data: URL로 미리보기를
+        // 만들어서 디자인 결과 화면의 "참고 사진"에도 안전하게 재사용한다.
+        const reader = new FileReader()
+        reader.onload = () => {
+            if (typeof reader.result === 'string') setSelectedPhotoPreviewUrl(reader.result)
+        }
+        reader.readAsDataURL(file)
     }
 
     const handlePhotoConfirm = () => {
@@ -1419,14 +1378,20 @@ export function useNailDesignChatPage() {
         const avgWidth = Number(avg(details.map((d) => d.widthMm)).toFixed(1))
         const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(2))
 
-        // 시즌/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
+        // 톤/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
         // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는
         // 반드시 recommendedShape를 써야 한다 (ScanResultResponse 타입 주석 참고)
-        const seasonNameKo = leftAnalysis?.seasonNameKo ?? rightAnalysis?.seasonNameKo ?? null
-        const seasonCode = leftAnalysis?.seasonCode ?? rightAnalysis?.seasonCode ?? null
+        const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
+        const tone = leftAnalysis?.tone ?? rightAnalysis?.tone ?? null
+        const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
+        const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
+        const backendSkinToneAnalysis = skinToneAnalysisFromMetrics(tone, brightness, saturation)
+        const toneLabel = backendSkinToneAnalysis?.tone.label ?? (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
+        const recommendedColors = leftAnalysis?.recommendedColors?.length
+            ? leftAnalysis.recommendedColors
+            : rightAnalysis?.recommendedColors ?? []
         const shapeId = leftAnalysis?.recommendedShape ?? rightAnalysis?.recommendedShape ?? null
         const shapeInfo = shapeId ? getNailShape(shapeId) : undefined
-        const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
 
         // 손 분석 결과 화면과 동일한 기준값으로 막대 위치·비교 문구를 계산한다
         const lengthPct = percentileAgainstBaseline(avgLength, NAIL_BASELINE.length)
@@ -1434,8 +1399,7 @@ export function useNailDesignChatPage() {
         const curvePct = percentileAgainstBaseline(avgCurve, NAIL_BASELINE.cCurve)
 
         return {
-            seasonNameKo: seasonNameKo || '분석 중',
-            seasonCode,
+            toneLabel: toneLabel || '분석 중',
             shapeId,
             shapeLabel: shapeInfo ? shapeInfo.labelKo : shapeId || '분석 중',
             shapeImage: shapeInfo?.image ?? null,
@@ -1449,25 +1413,22 @@ export function useNailDesignChatPage() {
             widthCompareLabel: labelByPercentile(widthPct, '좁은 편', '넓은 편', '평균과 비슷함'),
             curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
             skinToneHex,
-            skinToneAnalysis: skinToneHex ? analyzeSkinTone(skinToneHex) : null,
-            skinTonePalette: skinToneHex ? generateSkinTonePalette(skinToneHex, 24) : [],
+            skinToneAnalysis: backendSkinToneAnalysis ?? (skinToneHex ? analyzeSkinTone(skinToneHex) : null),
+            skinTonePalette:
+                recommendedColors.length > 0
+                    ? recommendedColors
+                    : skinToneHex
+                        ? generateSkinTonePalette(skinToneHex, 30)
+                        : [],
         }
     }, [leftAnalysis, rightAnalysis])
 
-    const [manualSeasonCode, setManualSeasonCode] = useState<string>(chatSessionSnapshot?.manualSeasonCode ?? 'spring_light')
-
-    const detectedSeasonCode = leftAnalysis?.seasonCode || rightAnalysis?.seasonCode || null
-    const activeSeasonCode = detectedSeasonCode || manualSeasonCode
-
-    const personalPalette = useMemo(() => {
-        return PERSONAL_COLOR_SWATCHES[activeSeasonCode] ?? PERSONAL_COLOR_SWATCHES.spring_light
-    }, [activeSeasonCode])
-
     // 컬러 선택 단계에서 실제로 보여줄 팔레트 — 스캔 정보(대표 피부색)가 있으면 거기서 뽑은
-    // "나와 어울리는 컬러" 24색을, 없으면 퍼스널컬러(직접 고르거나 자동 감지된 계절)별 팔레트를 쓴다.
+    // "나와 어울리는 컬러" 24색을, 없으면(스캔 전) 기본 피부색 기준 팔레트를 쓴다.
     const scanColorPalette = analysisSummary?.skinTonePalette ?? []
     const hasScanColorPalette = scanColorPalette.length > 0
-    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : personalPalette
+    const defaultColorPalette = useMemo(() => generateSkinTonePalette(DEFAULT_SKIN_HEX, 24), [])
+    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : defaultColorPalette
 
     const isMultiConfirmVisible = useMemo(
         () => !!activeQuickReply?.multi && selectedInQuickReply.length > 0,
@@ -1507,13 +1468,7 @@ export function useNailDesignChatPage() {
         freeformShapePickerOpen,
         showAnalysisPanel,
         setShowAnalysisPanel,
-        preview3DImage,
-        setPreview3DImage,
         zoomedImage,
-        imageZoom,
-        imagePan,
-        isImageDragging,
-        zoomedImageViewportRef,
         leftAnalysis,
         rightAnalysis,
         scanSessions,
@@ -1521,9 +1476,7 @@ export function useNailDesignChatPage() {
         messagesRef,
         chatContainerRef,
         textareaRef,
-        manualSeasonCode,
-        setManualSeasonCode,
-        detectedSeasonCode,
+        scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
         isMultiConfirmVisible,
@@ -1548,9 +1501,6 @@ export function useNailDesignChatPage() {
         toggleOptionTooltip,
         openZoomedImage,
         closeZoomedImage,
-        handleZoomedImagePointerDown,
-        handleZoomedImagePointerMove,
-        stopZoomedImageDragging,
         adjustTextareaHeight,
     }
 }
