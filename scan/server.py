@@ -37,6 +37,8 @@ import requests
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from skin_color import recommend_nail_colors, lab_to_rgb_hex
+
 BASE         = os.path.dirname(os.path.abspath(__file__))
 BUCKET       = "naily-scans"
 FINGER_ORDER = ["thumb", "index", "middle", "ring", "pinky"]
@@ -368,14 +370,61 @@ def run_measure_only(userid: str, session: str, hand: str):
         print(f"  [{finger}] 측정 완료")
 
 
+# ── 손가락 1개 즉시 분석 (크기/C-curve + 피부 LAB) ──────────────
+def _analyze_finger(userid: str, session: str, hand: str, finger: str):
+    """
+    이 손가락의 top(+side) 촬영이 끝나는 즉시 백그라운드 스레드에서 실행.
+    capture_all_fingers가 이 스레드를 기다리지 않고 바로 다음 손가락
+    촬영으로 넘어가므로, 촬영과 분석이 병렬로 겹쳐 돌아간다 — 카메라가
+    분석 때문에 멈추지 않는다는 게 이 함수를 쓰는 이유.
+    """
+    photos_root  = os.path.join(BASE, "photos",  userid, session, hand)
+    results_root = os.path.join(BASE, "results", userid, session, hand)
+    top_path     = os.path.join(photos_root, f"{finger}_top.jpg")
+    side_path    = os.path.join(photos_root, f"{finger}_side.jpg")
+    finger_out   = os.path.join(results_root, finger)
+    os.makedirs(finger_out, exist_ok=True)
+
+    if not os.path.isfile(top_path):
+        print(f"  [{finger}] 탑뷰 사진 없음 → 분석 스킵")
+        _push_event({"type": "finger_measured", "finger": finger.upper(), "ok": False})
+        return
+
+    cmd = [
+        sys.executable,
+        os.path.join(BASE, "nail_measurer.py"),
+        "--top",        top_path,
+        "--finger",     finger,
+        "--aruco-size", str(ARUCO_SIZE_MM),
+        "--output",     finger_out,
+    ]
+    if os.path.isfile(side_path):
+        cmd += ["--ccurve-top", side_path]
+
+    result = subprocess.run(cmd, cwd=BASE, capture_output=True, text=True)
+    ok = result.returncode == 0
+    if not ok:
+        print(f"  [{finger}] 측정 실패: {result.stderr[-300:]}")
+    else:
+        print(f"  [{finger}] 측정 완료 (백그라운드)")
+    _push_event({"type": "finger_measured", "finger": finger.upper(), "ok": ok})
+
+
 # ── 결과를 S3에 업로드 ────────────────────────────────────────
 def upload_results_to_s3(userid: str, session: str, hand: str):
     """
-    annotated 이미지 + 측정 JSON을 S3에 업로드.
+    annotated 이미지 + 측정 JSON + 취합 결과(scan_result.json)를 S3에 업로드.
     STL은 나중에 run_stl_and_callback에서 별도 업로드.
     """
     results_root = os.path.join(BASE, "results", userid, session, hand)
     s3_prefix    = f"results/{userid}/{session}/{hand}"
+
+    # 손 전체 취합 결과 (skinToneHex/tone/brightness/saturation/recommendedColors
+    # 등 콜백으로 보내는 것과 동일한 내용) — run_measure_and_callback이 콜백
+    # 보내기 전에 미리 파일로 저장해둔다.
+    result_json_path = os.path.join(results_root, "scan_result.json")
+    if os.path.isfile(result_json_path):
+        _upload_file(result_json_path, f"{s3_prefix}/scan_result.json")
 
     for finger in FINGER_ORDER:
         finger_dir = os.path.join(results_root, finger)
@@ -403,11 +452,11 @@ def safe_float(val, default=0.0):
 # ── 콜백 데이터 빌드 ─────────────────────────────────────────
 def build_callback_data(userid: str, session: str, hand: str) -> dict:
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    photos_root  = os.path.join(BASE, "photos",  userid, session, hand)
     s3_prefix    = f"results/{userid}/{session}/{hand}"
 
     fingers_data = []
     skin_tones   = []
+    skin_metrics = []
     sizes        = []
 
     for finger in FINGER_ORDER:
@@ -436,6 +485,17 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
                 skin_tones.append(skin_tone)
             sizes.append(nail_size)
 
+            # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
+            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다.
+            if finger_data.get("skin_L") is not None:
+                skin_metrics.append({
+                    "L":         finger_data["skin_L"],
+                    "a":         finger_data["skin_a"],
+                    "b":         finger_data["skin_b"],
+                    "warmness":  finger_data["skin_warmness"],
+                    "saturation": finger_data["skin_saturation"],
+                })
+
             # S3에 올라간 annotated 이미지 URL
             annotated_s3_key = f"{s3_prefix}/{finger}/{finger}_annotated.jpg"
             annotated_url    = _s3_url(annotated_s3_key)
@@ -460,31 +520,40 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     skin_tone_hex      = skin_tones[0] if skin_tones else "#C8A882"
     overall_size       = max(set(sizes), key=sizes.count) if sizes else "average"
     recommended_colors = []
-    season_code        = None
-    season_name_ko     = None
+    tone               = None
+    brightness         = None
+    saturation         = None
 
-    # 퍼스널컬러 진단
-    from personal_color import diagnose_personal_color
-    for finger in ("index", "middle", "ring", "thumb"):
-        photo_path = os.path.join(photos_root, f"{finger}_top.jpg")
-        diagnosis  = diagnose_personal_color(photo_path)
-        if diagnosis and "error" not in diagnosis:
-            skin_tone_hex      = diagnosis["skinToneHex"]
-            recommended_colors = diagnosis["recommendedColors"]
-            season_code        = diagnosis["seasonCode"]
-            season_name_ko     = diagnosis["seasonNameKo"]
-            print(f"  [PersonalColor] {finger}: {diagnosis['seasonNameKo']}")
-            break
-        if diagnosis and "error" in diagnosis:
-            print(f"  [PersonalColor] {finger}: {diagnosis['error']}")
+    # 유효한 손가락들의 LAB 평균으로 피부색/웜쿨/명도/채도/추천컬러 30개를
+    # 한 번에 계산한다 (손가락 1개짜리 사진보다 평균이 더 안정적).
+    if skin_metrics:
+        avg_L    = sum(m["L"] for m in skin_metrics) / len(skin_metrics)
+        avg_a    = sum(m["a"] for m in skin_metrics) / len(skin_metrics)
+        avg_b    = sum(m["b"] for m in skin_metrics) / len(skin_metrics)
+        avg_warm = sum(m["warmness"] for m in skin_metrics) / len(skin_metrics)
+        avg_sat  = sum(m["saturation"] for m in skin_metrics) / len(skin_metrics)
+
+        skin_tone_hex = lab_to_rgb_hex(avg_L, avg_a, avg_b)
+        brightness    = round(avg_L / 100.0, 3)
+        saturation    = round(avg_sat, 3)
+
+        result = recommend_nail_colors(avg_L, avg_a, avg_b, avg_warm, avg_sat)
+        recommended_colors = [c["hex"] for c in result["best"]]
+        tone = result["skin_summary"]["tone"]
+        print(f"  [SkinColor] tone={tone} brightness={brightness} "
+              f"saturation={saturation} colors={len(recommended_colors)}개 "
+              f"({len(skin_metrics)}손가락 평균)")
+    else:
+        print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
     return {
         "shape":             "round",
         "skinToneHex":       skin_tone_hex,
         "overallSize":       overall_size,
         "recommendedColors": recommended_colors,
-        "seasonCode":        season_code,
-        "seasonNameKo":      season_name_ko,
+        "tone":              tone,
+        "brightness":        brightness,
+        "saturation":        saturation,
         "fingers":           fingers_data,
     }
 
@@ -495,14 +564,27 @@ def run_measure_and_callback(userid: str, session: str, hand: str, callback_url:
         print(f"\n[Pipeline] 촬영 시작: {userid}/{session}/{hand}")
         capture_all_fingers(userid, session, hand)
 
-        print(f"[Pipeline] 측정 시작")
-        run_measure_only(userid, session, hand)
+        # 각 손가락 측정은 이미 촬영 도중 백그라운드로 시작됐다.
+        # 마지막 한두 손가락 것만 아직 안 끝났을 수 있으므로 여기서 마저 기다린다.
+        print(f"[Pipeline] 백그라운드 측정 마무리 대기 ({len(_S.pending_analysis)}개)")
+        for t in _S.pending_analysis:
+            t.join()
+
+        print(f"[Pipeline] 결과 취합 (크기/C-curve/피부색/추천 30색)")
+        callback_data = build_callback_data(userid, session, hand)
+
+        # 취합 결과를 scan_result.json으로 저장 — upload_results_to_s3가
+        # 이 파일도 함께 S3에 올린다. 콜백 payload와 완전히 동일한 내용.
+        results_root      = os.path.join(BASE, "results", userid, session, hand)
+        os.makedirs(results_root, exist_ok=True)
+        result_json_path  = os.path.join(results_root, "scan_result.json")
+        with open(result_json_path, "w", encoding="utf-8") as f:
+            json.dump(callback_data, f, ensure_ascii=False, indent=2)
 
         print(f"[Pipeline] 결과 S3 업로드")
         upload_results_to_s3(userid, session, hand)
 
         print(f"[Pipeline] 콜백 전송: {callback_url}")
-        callback_data = build_callback_data(userid, session, hand)
         response = requests.post(callback_url, json=callback_data)
         print(f"[Pipeline] 콜백 응답: {response.status_code}")
 
@@ -633,6 +715,10 @@ class _StreamState:
         self.active: bool = False
         self.current_finger: str | None = None
         self.done_fingers: list = []
+        # 손가락별 측정/컬러 분석이 백그라운드에서 도는 스레드들.
+        # 캡처 루프는 이걸 기다리지 않고 바로 다음 손가락으로 넘어가고,
+        # 콜백을 보내기 직전에만 전부 join해서 기다린다.
+        self.pending_analysis: list = []
 
 _S = _StreamState()
 
@@ -838,6 +924,7 @@ def capture_all_fingers(userid: str, session: str, hand: str) -> str:  # noqa: F
 
     _S.active = True
     _S.done_fingers = []
+    _S.pending_analysis = []
 
     try:
         for finger in FINGER_ORDER:
@@ -852,6 +939,17 @@ def capture_all_fingers(userid: str, session: str, hand: str) -> str:  # noqa: F
 
             if cap_side:
                 _capture_side_stream(cap_side, finger, side_path)
+
+            # 이 손가락 사진은 다 찍혔으니 측정+피부색 분석을 백그라운드로
+            # 바로 시작한다. join하지 않고 다음 손가락 촬영으로 즉시 진행 —
+            # 분석이 끝나길 기다리느라 카메라가 멈추는 일이 없게 하는 지점.
+            t = threading.Thread(
+                target=_analyze_finger,
+                args=(userid, session, hand, finger),
+                daemon=True,
+            )
+            t.start()
+            _S.pending_analysis.append(t)
 
             _S.done_fingers.append(finger)
             idx = FINGER_ORDER.index(finger)

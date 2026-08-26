@@ -10,7 +10,6 @@ import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/s
 import {
     createChatSession,
     sendChatMessage,
-    savePreferences,
     refineKeywords,
 } from '@/features/nail-design/api/chat'
 import { generateDesign, generateDesignFromImage, confirmDesign, type DesignExtractedDetails } from '@/entities/design/api'
@@ -19,15 +18,17 @@ import {
     INITIAL_PREFERENCES,
     PREFERENCE_OPTIONS,
     PREFERENCE_SECTION_LABELS,
-    PERSONAL_COLOR_SWATCHES,
-    SEASON_ROWS,
     type NailDesignPreferences,
     type PreferenceKey,
     type PreferenceOptionInfo,
 } from '@/shared/constants/designPreferences'
+
+// Backend가 유효한 피부 LAB 데이터를 못 뽑았을 때 내려주는 기본 피부색(scan/skin_color.py 기준)과
+// 동일한 값 — 스캔 정보가 아예 없을 때 컬러 피커의 기본 팔레트로 사용한다.
+const DEFAULT_SKIN_HEX = '#C8A882'
 import { ApiError } from '@/shared/utils/apiClient'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
-import { registerChatSessionGuard, confirmLeaveChatIfNeeded, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
+import { registerChatSessionGuard, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
 
 // ── 타입 ──────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ type GenerationContext = {
     keywords: string[] // 선택지/자유입력 대화에서 뽑은 키워드 (scan-auto·photo는 비움)
     referenceImageUrl: string | null // 사진 기반 생성일 때, 사용자가 업로드한 참고 사진
     handSummary: {
-        seasonNameKo: string
+        toneLabel: string
         shapeLabel: string
         avgLength: number
         avgWidth: number
@@ -111,7 +112,6 @@ type ChatSessionSnapshot = {
     generationSource: GenerationSource
     selectedPhotoFile: File | null
     selectedPhotoPreviewUrl: string | null
-    manualSeasonCode: string
     inputValue: string
     showAnalysisPanel: boolean
     isQuickReplyCollapsed: boolean
@@ -573,7 +573,6 @@ export function useNailDesignChatPage() {
             generationSource,
             selectedPhotoFile,
             selectedPhotoPreviewUrl,
-            manualSeasonCode,
             inputValue,
             showAnalysisPanel,
             isQuickReplyCollapsed,
@@ -644,15 +643,13 @@ export function useNailDesignChatPage() {
     }
 
     const buildScanAutoIntro = (): { text: string; colorSwatches: string[] } => {
-        const seasonCode = leftAnalysis?.seasonCode || rightAnalysis?.seasonCode || null
-        const seasonNameKo =
-            leftAnalysis?.seasonNameKo || rightAnalysis?.seasonNameKo || SEASON_ROWS.find((r) => r.code === seasonCode)?.nameKo
+        const skinToneHex = leftAnalysis?.skinToneHex || rightAnalysis?.skinToneHex || null
+        const toneLabel = skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null
         const shapeId = leftAnalysis?.shape || rightAnalysis?.shape || null
         const shapeLabel = shapeId ? getNailShape(shapeId)?.labelKo ?? shapeId : null
-        const palette = seasonCode ? PERSONAL_COLOR_SWATCHES[seasonCode] : null
-        const colorSwatches = palette ? palette.slice(0, 6) : []
+        const colorSwatches = skinToneHex ? generateSkinTonePalette(skinToneHex, 24).slice(0, 6) : []
 
-        const seasonPart = seasonNameKo ? `${seasonNameKo} 퍼스널컬러` : '내 퍼스널컬러'
+        const seasonPart = toneLabel ? `${toneLabel} 피부톤` : '내 피부톤'
         const shapePart = shapeLabel ? `${shapeLabel} 쉐입` : '추천 쉐입'
 
         return {
@@ -686,7 +683,7 @@ export function useNailDesignChatPage() {
                           referenceImageUrl: null,
                           handSummary: analysisSummary
                               ? {
-                                    seasonNameKo: analysisSummary.seasonNameKo,
+                                    toneLabel: analysisSummary.toneLabel,
                                     shapeLabel: analysisSummary.shapeLabel,
                                     avgLength: analysisSummary.avgLength,
                                     avgWidth: analysisSummary.avgWidth,
@@ -1368,14 +1365,13 @@ export function useNailDesignChatPage() {
         const avgWidth = Number(avg(details.map((d) => d.widthMm)).toFixed(1))
         const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(2))
 
-        // 시즌/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
+        // 톤/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
         // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는
         // 반드시 recommendedShape를 써야 한다 (ScanResultResponse 타입 주석 참고)
-        const seasonNameKo = leftAnalysis?.seasonNameKo ?? rightAnalysis?.seasonNameKo ?? null
-        const seasonCode = leftAnalysis?.seasonCode ?? rightAnalysis?.seasonCode ?? null
+        const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
+        const toneLabel = skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null
         const shapeId = leftAnalysis?.recommendedShape ?? rightAnalysis?.recommendedShape ?? null
         const shapeInfo = shapeId ? getNailShape(shapeId) : undefined
-        const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
 
         // 손 분석 결과 화면과 동일한 기준값으로 막대 위치·비교 문구를 계산한다
         const lengthPct = percentileAgainstBaseline(avgLength, NAIL_BASELINE.length)
@@ -1383,8 +1379,7 @@ export function useNailDesignChatPage() {
         const curvePct = percentileAgainstBaseline(avgCurve, NAIL_BASELINE.cCurve)
 
         return {
-            seasonNameKo: seasonNameKo || '분석 중',
-            seasonCode,
+            toneLabel: toneLabel || '분석 중',
             shapeId,
             shapeLabel: shapeInfo ? shapeInfo.labelKo : shapeId || '분석 중',
             shapeImage: shapeInfo?.image ?? null,
@@ -1403,20 +1398,12 @@ export function useNailDesignChatPage() {
         }
     }, [leftAnalysis, rightAnalysis])
 
-    const [manualSeasonCode, setManualSeasonCode] = useState<string>(chatSessionSnapshot?.manualSeasonCode ?? 'spring_light')
-
-    const detectedSeasonCode = leftAnalysis?.seasonCode || rightAnalysis?.seasonCode || null
-    const activeSeasonCode = detectedSeasonCode || manualSeasonCode
-
-    const personalPalette = useMemo(() => {
-        return PERSONAL_COLOR_SWATCHES[activeSeasonCode] ?? PERSONAL_COLOR_SWATCHES.spring_light
-    }, [activeSeasonCode])
-
     // 컬러 선택 단계에서 실제로 보여줄 팔레트 — 스캔 정보(대표 피부색)가 있으면 거기서 뽑은
-    // "나와 어울리는 컬러" 24색을, 없으면 퍼스널컬러(직접 고르거나 자동 감지된 계절)별 팔레트를 쓴다.
+    // "나와 어울리는 컬러" 24색을, 없으면(스캔 전) 기본 피부색 기준 팔레트를 쓴다.
     const scanColorPalette = analysisSummary?.skinTonePalette ?? []
     const hasScanColorPalette = scanColorPalette.length > 0
-    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : personalPalette
+    const defaultColorPalette = useMemo(() => generateSkinTonePalette(DEFAULT_SKIN_HEX, 24), [])
+    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : defaultColorPalette
 
     const isMultiConfirmVisible = useMemo(
         () => !!activeQuickReply?.multi && selectedInQuickReply.length > 0,

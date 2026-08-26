@@ -14,7 +14,7 @@ import '@/styles/hand-scan-result.css'
 // 주소창에 /preview/scan-result 를 직접 입력해서 들어가야 볼 수 있다 (다른 화면에서 링크 없음).
 // ══════════════════════════════════════════════════════════════════════
 
-const MOCK_SEASON_CODE = 'spring_light'
+const MOCK_SKIN_HEX = '#F3D2B8'
 
 function MetricCard({
     title,
@@ -77,7 +77,7 @@ function SkinToneSlider({
 export function HandScanResultPagePreviewContent() {
     const [showFingerModal, setShowFingerModal] = useState(false)
 
-    const analysis = buildHandScanAnalysis(MOCK_SEASON_CODE)
+    const analysis = buildHandScanAnalysis(MOCK_SKIN_HEX)
     const recommended = getNailShape(analysis.recommendedShape)
     const skinToneAnalysis = analyzeSkinTone(analysis.skinToneHex)
     const skinTonePalette = generateSkinTonePalette(analysis.skinToneHex, 30)

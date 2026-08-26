@@ -478,6 +478,7 @@ function findVerticalSplitLines(width: number, backgroundMask: Uint8Array, bound
 
 function splitByProjection(
   width: number,
+  _height: number,
   data: Uint8ClampedArray,
   backgroundMask: Uint8Array,
   bounds: ContentBounds,
@@ -521,6 +522,7 @@ function splitByProjection(
 function splitRowIntoFive(
   sourceCanvas: HTMLCanvasElement,
   width: number,
+  _height: number,
   data: Uint8ClampedArray | null,
   backgroundMask: Uint8Array | null,
   bounds: ContentBounds,

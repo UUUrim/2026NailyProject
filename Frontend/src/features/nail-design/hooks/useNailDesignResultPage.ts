@@ -41,7 +41,7 @@ export type GenerationContext = {
   keywords: string[]
   referenceImageUrl: string | null
   handSummary: {
-    seasonNameKo: string
+    toneLabel: string
     shapeLabel: string
     avgLength: number
     avgWidth: number

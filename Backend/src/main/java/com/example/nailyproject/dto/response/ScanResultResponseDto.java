@@ -27,8 +27,9 @@ public class ScanResultResponseDto {
     private String recommendedShape;
     private String skinToneHex;
     private List<String> recommendedColors;
-    private String seasonCode;
-    private String seasonNameKo;
+    private String tone;
+    private Double brightness;
+    private Double saturation;
     private String overallSize;
 
     // 손가락별 결과
@@ -71,8 +72,9 @@ public class ScanResultResponseDto {
                 .recommendedShape(handScan.getRecommendedShape())
                 .skinToneHex(handScan.getSkinToneHex())
                 .recommendedColors(parseRecommendedColors(handScan.getRecommendedColors(), objectMapper))
-                .seasonCode(handScan.getSeasonCode())
-                .seasonNameKo(handScan.getSeasonNameKo())
+                .tone(handScan.getTone())
+                .brightness(handScan.getBrightness())
+                .saturation(handScan.getSaturation())
                 .overallSize(handScan.getOverallSize())
                 .scannedAt(handScan.getScannedAt())
                 .fingers(fingers)

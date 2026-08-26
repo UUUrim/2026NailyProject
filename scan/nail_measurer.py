@@ -75,6 +75,13 @@ try:
 except ImportError:
     _ENDON_AVAILABLE = False
 
+# ── Skin LAB metrics (brightness/saturation/warmness for color recommendation) ──
+try:
+    from skin_color import analyze_skin as _analyze_skin
+    _SKIN_COLOR_AVAILABLE = True
+except ImportError:
+    _SKIN_COLOR_AVAILABLE = False
+
 
 # ─────────────────────────────────────────────────────────────
 # Constants
@@ -154,13 +161,15 @@ def detect_aruco(image: np.ndarray, aruco_size_mm: float):
         det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
         corners, ids, _ = det.detectMarkers(gray)
         if ids is not None and len(ids) > 0:
-            c     = corners[0][0]
-            sides = [np.linalg.norm(c[i] - c[(i+1) % 4]) for i in range(4)]
-            avg   = float(np.mean(sides))
-            mpp   = aruco_size_mm / avg
-            print(f"  [ArUco] dict={name}  id={int(ids[0][0])}  "
+            c        = corners[0][0]
+            sides    = [np.linalg.norm(c[i] - c[(i+1) % 4]) for i in range(4)]
+            avg      = float(np.mean(sides))
+            mpp      = aruco_size_mm / avg
+            # ids is (N,1) on OpenCV 4.x but (N,) on 5.x — np.ravel handles both.
+            marker_id = int(np.ravel(ids)[0])
+            print(f"  [ArUco] dict={name}  id={marker_id}  "
                   f"avg_side={avg:.1f}px  →  {mpp:.5f} mm/px")
-            return mpp, c, int(ids[0][0])
+            return mpp, c, marker_id
     raise RuntimeError(
         "ArUco marker not detected.\n"
         "  → Ensure marker is fully visible, sharp, and well-lit.\n"
@@ -414,6 +423,14 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
 
 # ─────────────────────────────────────────────────────────────
 # 4. C-curve from nail fold brightness (top photo only)
+#
+# Reinstated as a FALLBACK: the real measurement is the side/phone end-on
+# photo (see measure_finger's ccurve_path), and overrides this whenever it
+# succeeds. This rough brightness-based guess only fills in when that
+# fails - e.g. the side-view finger-localisation being fooled by a bright
+# reflective object elsewhere in frame (seen on a real capture where 4 of 5
+# fingers got no side-view reading) - so a finger doesn't end up with no
+# c-curve value at all just because one photo had a stray reflection in it.
 # ─────────────────────────────────────────────────────────────
 
 def estimate_ccurve_from_nailfold(image: np.ndarray,
@@ -500,7 +517,6 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
         "thickness_mm":  thick,
         "_ccurve_debug": scan_debug,
     }
-
 
 # ─────────────────────────────────────────────────────────────
 # 4b. Nail axis refinement (correct off-centre nails)
@@ -1345,7 +1361,7 @@ def measure_top(image: np.ndarray, mpp: float,
     cut_idx   = min(cuticle_y - tip_y, len(widths)-1)
     length_px = float(cuticle_y - tip_y)
 
-    # ── C-curve from nail fold ────────────────────────────────
+    # ── C-curve from nail fold (fallback - see measure_finger's override) ──
     cc_data = estimate_ccurve_from_nailfold(
         image, finger_mask,
         tip_y, cuticle_y,
@@ -1588,6 +1604,10 @@ def measure_top(image: np.ndarray, mpp: float,
     else:
         hex_color = "#FFFFFF"
 
+    # LAB skin metrics for color recommendation (same skin_mask as above,
+    # so it shares the nail-plate/polish exclusion the hex sample already has).
+    skin_lab = _analyze_skin(image, skin_mask) if _SKIN_COLOR_AVAILABLE else None
+
     # Prefer the MEASURED fold-to-fold width (side-lit photos).  The nail is
     # widest near the free edge and narrows toward the cuticle, so report the
     # widest measured row — that is the dimension a tip has to cover.
@@ -1611,6 +1631,15 @@ def measure_top(image: np.ndarray, mpp: float,
         "width_source":    "lateral_folds" if lateral else "constant_half",
         "length_mm":       l_mm,
         "skin_tone_hex":   hex_color,
+        "skin_L":          skin_lab["L"] if skin_lab else None,
+        "skin_a":          skin_lab["a"] if skin_lab else None,
+        "skin_b":          skin_lab["b"] if skin_lab else None,
+        "skin_C":          skin_lab["C"] if skin_lab else None,
+        "skin_warmness":   skin_lab["warmness"] if skin_lab else None,
+        "skin_brightness": skin_lab["brightness"] if skin_lab else None,
+        "skin_saturation": skin_lab["saturation"] if skin_lab else None,
+        "skin_contrast":   skin_lab["contrast"] if skin_lab else None,
+        "skin_undertone":  skin_lab["undertone"] if skin_lab else None,
         "mpp_mm_per_px":   round(float(mpp), 6),
         "nail_polygon_px": smooth.tolist(),
         **cc_data,
@@ -1701,24 +1730,14 @@ def draw_annotated(image, data, aruco_corners, finger):
         cv2.putText(vis, "alt?", (xr + 6, cuticle_y_alt + 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
 
-    # C-curve scan lines
-    length_px = cuticle_y - tip_y
-    scan_colors = [(255,100,0),(0,255,100),(255,0,255)]
-    for frac, col in zip([0.30, 0.50, 0.70], scan_colors):
-        row = int(tip_y + length_px * frac)
-        cv2.line(vis,
-                 (tip_x-int(nail_half), row),
-                 (tip_x+int(nail_half), row),
-                 col, 1)
-
-    # Labels
+    # Labels. No C-curve/arc-radius row here any more - c-curve is measured
+    # from the side/phone end-on photo now, not from this top-view shot, so
+    # this frame has nothing real to show for it.
     lx = tip_x + int(nail_half) + 20
     for txt, dy, col in [
         (f"W:    {data['width_mm']}mm",              40,  color),
         (f"L:    {data['length_mm']}mm",             100, color),
-        (f"C:    {data['c_curve_mm']}mm",            160, color),
-        (f"R:    {data['arc_radius_mm']}mm",         220, color),
-        (f"Skin: {data['skin_tone_hex']}",           280, (0,200,255)),
+        (f"Skin: {data['skin_tone_hex']}",           160, (0,200,255)),
     ]:
         cv2.putText(vis, txt, (lx, tip_y+dy),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,0), 5)
@@ -1735,6 +1754,61 @@ def save_annotated(image, data, aruco_corners, finger, save_path):
     print(f"  [Saved] {save_path}")
 
 
+# 측정 실패(ArUco/손톱 인식 실패 등)했을 때 파이프라인 전체가 죽지 않도록 쓰는 대체값.
+# width_mm/length_mm은 STANDARD_NAILS(Yeo et al. 2017, 한국 성인 여성 평균)를 그대로 쓰고,
+# c_curve_mm은 이 기본값을 쓴 뒤, arc_radius_mm은 meta.notes에 적힌 것과 같은 공식
+# (R = w²/(8h) + h/2)으로 그 값들에서 역산한다 — 임의의 숫자가 아니라 대체된 width/c_curve와
+# 항상 기하학적으로 일치하게. ArUco/손톱 인식 전체가 실패했을 때와, 폰(사이드/end-on) C-curve
+# 측정만 실패했을 때(top 인식은 성공, width/length는 그대로 살림) 둘 다 이 값을 쓴다.
+_FALLBACK_C_CURVE_MM       = 1.0
+_FALLBACK_C_CURVE_MM_ENDON = 1.0
+
+def _fallback_measurement(finger: str) -> dict:
+    std = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])
+    width_mm  = std["width_mm"]
+    length_mm = std["length_mm"]
+    c_curve_mm = _FALLBACK_C_CURVE_MM
+    arc_radius_mm = round((width_mm ** 2) / (8 * c_curve_mm) + c_curve_mm / 2, 2)
+    return {
+        "width_mm":        width_mm,
+        "width_source":    "fallback_average",
+        "length_mm":       length_mm,
+        "skin_tone_hex":   "#C8A882",  # scan/skin_color.py의 기본값과 동일
+        "skin_L": None, "skin_a": None, "skin_b": None, "skin_C": None,
+        "skin_warmness": None, "skin_brightness": None,
+        "skin_saturation": None, "skin_contrast": None, "skin_undertone": None,
+        "mpp_mm_per_px":   None,
+        "nail_polygon_px": [],
+        "c_curve_mm":      c_curve_mm,
+        "arc_radius_mm":   arc_radius_mm,
+        "thickness_mm":    0.6,  # STL 기본 두께(다른 곳 주석과 동일)
+        "_ccurve_method":  "fallback average (measurement failed)",
+        "_is_fallback":    True,
+    }
+
+
+def _save_fallback_annotated(image, finger: str, save_path: str):
+    """실측 실패로 대체값을 쓴 손가락임을 표시하는 안내용 이미지를 저장한다
+    (draw_annotated는 실제 인식 결과(폴리곤/좌표)가 있어야 그릴 수 있어서 못 씀)."""
+    if image is not None:
+        h, w = image.shape[:2]
+        scale = 900 / h
+        vis = cv2.resize(image, (int(w * scale), 900))
+    else:
+        vis = np.zeros((900, 1200, 3), np.uint8)
+
+    band_h = 70
+    band_y = vis.shape[0] // 2 - band_h // 2
+    overlay = vis.copy()
+    cv2.rectangle(overlay, (0, band_y), (vis.shape[1], band_y + band_h), (0, 0, 0), -1)
+    cv2.addWeighted(overlay, 0.6, vis, 0.4, 0, vis)
+    text = f"{finger.upper()}: measurement failed - using average fallback"
+    cv2.putText(vis, text, (20, band_y + 45),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 165, 255), 2)
+    cv2.imwrite(save_path, vis)
+    print(f"  [Saved] {save_path} (fallback placeholder)")
+
+
 # ─────────────────────────────────────────────────────────────
 # 8. Single finger pipeline
 # ─────────────────────────────────────────────────────────────
@@ -1745,9 +1819,14 @@ def measure_finger(top_path: str, finger: str,
                    ccurve_table_edge: bool = True) -> dict:
     """
     ccurve_path : optional path to an end-on (tip-facing) photo.
-        When provided, C-curve is measured directly from that image
-        using the nail width as scale reference (no ArUco needed).
-        When omitted, the brightness-drop fallback is used instead.
+        When provided and it measures successfully, C-curve is taken from
+        that image using the nail width as scale reference (no ArUco
+        needed) - this is the trustworthy reading. When omitted, or when
+        it's provided but measurement fails (e.g. the side-view finger
+        localisation gets fooled by a bright reflective object elsewhere
+        in frame), the brightness-drop fallback from the top-view photo is
+        used instead so the finger still gets SOME c-curve reading rather
+        than none.
     ccurve_table_edge : the end-on photo is a finger draped over a table/mat
         edge (arm resting on the desk behind it) rather than isolated
         against a plain background — the current capture standard. Set
@@ -1757,60 +1836,84 @@ def measure_finger(top_path: str, finger: str,
     print(f"  Measuring: {finger.upper()}")
     print(f"{'='*55}")
 
-    top_img = cv2.imread(top_path)
-    if top_img is None:
-        sys.exit(f"ERROR: Cannot open '{top_path}'")
-
     os.makedirs(output_dir, exist_ok=True)
+    annotated_path = os.path.join(output_dir, f"{finger}_annotated.jpg")
+    top_img = cv2.imread(top_path)
 
-    print(f"\n[1/3] ArUco + finger segmentation …")
-    mpp, aruco_corners, marker_id = detect_aruco(top_img, aruco_size_mm)
-    finger_mask, _, bbox          = segment_finger(top_img, aruco_corners)
+    # 이 손가락의 측정 파이프라인(ArUco 인식부터 저장까지) 전체를 하나로 감싼다 - 어느
+    # 단계에서 실패하든(사진 자체가 이상해서 ArUco/손톱 인식이 안 되거나, W/L 보정이나
+    # 오버레이 저장에서 예외가 나거나) 이 손가락의 nail_measurements.json/profile.json이
+    # 아예 안 생기고 넘어가면, 서버가 이 손가락을 건너뛰면서 SSE finger_done도 안 나가
+    # 촬영 진행이 그 자리에서 멈춘다. 그래서 예외를 던지는 대신 평균값(Yeo et al. 2017)으로
+    # 대체해서 항상 완전한 결과를 반환한다.
+    try:
+        if top_img is None:
+            raise RuntimeError(f"Cannot open '{top_path}'")
 
-    print(f"\n[2/3] Nail measurement + C-curve …")
-    data = measure_top(top_img, mpp, finger_mask, bbox,
-                       aruco_corners=aruco_corners, finger=finger)
+        print(f"\n[1/3] ArUco + finger segmentation …")
+        mpp, aruco_corners, marker_id = detect_aruco(top_img, aruco_size_mm)
+        finger_mask, _, bbox          = segment_finger(top_img, aruco_corners)
 
-    # ── Override C-curve with end-on measurement if photo is provided ──
-    use_endon = (ccurve_path and os.path.isfile(ccurve_path)
-                 and _ENDON_AVAILABLE)
-    if use_endon:
-        print(f"\n  [C-curve] end-on photo: {ccurve_path}")
-        debug_path = os.path.join(output_dir, f"{finger}_ccurve_debug.jpg")
-        try:
-            cc = _endOn_ccurve(ccurve_path,
-                               width_mm=data["width_mm"],
-                               debug_out=debug_path,
-                               table_edge=ccurve_table_edge)
-            data["c_curve_mm"]    = cc["c_curve_mm"]
-            data["arc_radius_mm"] = cc["arc_radius_mm"]
-            data["_ccurve_method"] = "end-on photo"
-            print(f"  [C-curve] OK end-on  "
-                  f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
-                  f"(debug -> {debug_path})")
-        except Exception as e:
-            print(f"  [C-curve] WARN end-on failed ({e}), "
-                  f"keeping brightness fallback")
-            data["_ccurve_method"] = "brightness fallback (end-on error)"
-    else:
-        data["_ccurve_method"] = "brightness fallback"
-        if ccurve_path and not os.path.isfile(ccurve_path):
-            print(f"  [C-curve] WARN ccurve photo not found: {ccurve_path}")
+        print(f"\n[2/3] Nail measurement + C-curve …")
+        data = measure_top(top_img, mpp, finger_mask, bbox,
+                           aruco_corners=aruco_corners, finger=finger)
 
-    print(f"  width={data['width_mm']}mm  "
-          f"length={data['length_mm']}mm  "
-          f"c-curve={data['c_curve_mm']}mm  "
-          f"skin={data['skin_tone_hex']}")
+        # ── Override C-curve with end-on measurement if photo is provided ──
+        use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
+        if use_endon:
+            print(f"\n  [C-curve] end-on photo: {ccurve_path}")
+            debug_path = os.path.join(output_dir, f"{finger}_ccurve_debug.jpg")
+            try:
+                cc = _endOn_ccurve(ccurve_path,
+                                   width_mm=data["width_mm"],
+                                   debug_out=debug_path,
+                                   table_edge=ccurve_table_edge)
+                data["c_curve_mm"]    = cc["c_curve_mm"]
+                data["arc_radius_mm"] = cc["arc_radius_mm"]
+                data["_ccurve_method"] = "end-on photo"
+                print(f"  [C-curve] OK end-on  "
+                      f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
+                      f"(debug -> {debug_path})")
+            except Exception as e:
+                print(f"  [C-curve] WARN end-on(폰) 측정 실패 ({e}), "
+                      f"c_curve=1mm 기본값으로 대체")
+                data["c_curve_mm"]    = _FALLBACK_C_CURVE_MM_ENDON
+                data["arc_radius_mm"] = round(
+                    (data["width_mm"] ** 2) / (8 * _FALLBACK_C_CURVE_MM_ENDON)
+                    + _FALLBACK_C_CURVE_MM_ENDON / 2, 2,
+                )
+                data["_ccurve_method"] = "fallback 1mm (end-on/phone measurement failed)"
+        else:
+            data["_ccurve_method"] = "brightness fallback"
+            if ccurve_path and not os.path.isfile(ccurve_path):
+                print(f"  [C-curve] WARN ccurve photo not found: {ccurve_path}")
 
-    print(f"\n[3/3] W/L correction + save …")
-    wl = apply_wl_correction(finger, data["width_mm"], data["length_mm"])
-    data.update(wl)
-    data["aspect_ratio"] = round(
-        data["width_mm"] / data["length_mm"], 3
-    ) if data["length_mm"] else 0.0
+        c_curve_str = f"{data['c_curve_mm']}mm" if data['c_curve_mm'] is not None else "N/A"
+        print(f"  width={data['width_mm']}mm  "
+              f"length={data['length_mm']}mm  "
+              f"c-curve={c_curve_str}  "
+              f"skin={data['skin_tone_hex']}")
 
-    save_annotated(top_img, data, aruco_corners, finger,
-                   os.path.join(output_dir, f"{finger}_annotated.jpg"))
+        print(f"\n[3/3] W/L correction + save …")
+        wl = apply_wl_correction(finger, data["width_mm"], data["length_mm"])
+        data.update(wl)
+        data["aspect_ratio"] = round(
+            data["width_mm"] / data["length_mm"], 3
+        ) if data["length_mm"] else 0.0
+
+        save_annotated(top_img, data, aruco_corners, finger, annotated_path)
+        is_fallback = False
+    except Exception as e:
+        print(f"  [WARN] {finger} 측정 실패 ({e!r}) → 평균값(Yeo et al. 2017)으로 대체합니다.")
+        data = _fallback_measurement(finger)
+        wl = apply_wl_correction(finger, data["width_mm"], data["length_mm"])
+        data.update(wl)
+        data["aspect_ratio"] = round(
+            data["width_mm"] / data["length_mm"], 3
+        ) if data["length_mm"] else 0.0
+        # draw_annotated는 실제 폴리곤/좌표(_tip_x 등)가 있어야 그릴 수 있어서 대체값에는 못 씀
+        _save_fallback_annotated(top_img, finger, annotated_path)
+        is_fallback = True
 
     print(f"\n  ┌─ {finger.upper()} ──────────────────────────────────")
     print(f"  │  Width           : {data['width_mm']} mm")
@@ -1819,7 +1922,9 @@ def measure_finger(top_path: str, finger: str,
     print(f"  │  C-curve         : {data['c_curve_mm']} mm  "
           f"[{data.get('_ccurve_method', '?')}]")
     print(f"  │  Arc radius      : {data['arc_radius_mm']} mm")
-    print(f"  │  Thickness (est) : {data['thickness_mm']} mm")
+    _thick = data.get('thickness_mm')
+    print(f"  │  Thickness       : "
+          f"{f'{_thick} mm' if _thick is not None else 'not measured (STL uses 0.6mm default)'}")
     print(f"  │  Skin tone       : {data['skin_tone_hex']}")
     print(f"  │  W/L flag        : {data['wl_ratio_check']['flag']}")
     print(f"  └────────────────────────────────────────────")
@@ -1854,12 +1959,12 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
         "meta": {
             "aruco_physical_size_mm": aruco_size_mm,
             "nails_detected":         len(clean),
-            "measurement_method":     "single top photo + nail fold brightness",
+            "measurement_method":     "top photo (width/length) + side/phone end-on photo (c-curve, brightness fallback if unavailable)",
             "notes": {
                 "width_mm":            "75th pct of stable row-scan nail plate width",
                 "length_mm":           "Tip to cuticle via Sobel edge detection",
                 "corrected_length_mm": "width / Jung et al. (2015) W/L ratio",
-                "c_curve_mm":          "Estimated from nail fold brightness drop at 30/50/70% of nail",
+                "c_curve_mm":          "Side/phone end-on photo when available, else brightness-drop estimate from the top photo",
                 "arc_radius_mm":       "R = w²/(8h) + h/2",
                 "skin_tone_hex":       "Median BGR of skin ring around nail",
             },
@@ -1870,7 +1975,7 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
             r["finger"]: {
                 "bounding_box_mm": {
                     "x": r["width_mm"],
-                    "y": r["thickness_mm"],
+                    "y": r.get("thickness_mm", 0.6),
                     "z": r["length_mm"],
                 },
                 "curvature": {
@@ -1952,7 +2057,7 @@ def build_profile(results: list) -> dict:
             "finger":           finger,
             "width_mm":         w,
             "length_mm":        l,
-            "c_curve_mm":       r["c_curve_mm"],
+            "c_curve_mm":       r.get("c_curve_mm"),
             "arc_radius_mm":    r.get("arc_radius_mm"),
             "c_curve_method":   r.get("_ccurve_method", "?"),
             "width_vs_avg_mm":  round(w - std["width_mm"], 2),
@@ -1969,7 +2074,11 @@ def build_profile(results: list) -> dict:
     n = len(fingers)
     avg_width_mm   = round(sum(f["width_mm"] for f in fingers) / n, 2)
     avg_length_mm  = round(sum(f["length_mm"] for f in fingers) / n, 2)
-    avg_c_curve_mm = round(sum(f["c_curve_mm"] for f in fingers) / n, 2)
+    # c_curve_mm is only ever set from a side/phone end-on photo now - None
+    # for any finger that didn't get one, so average over just the fingers
+    # that have a real reading rather than crashing sum() on a None.
+    c_curve_vals   = [f["c_curve_mm"] for f in fingers if f["c_curve_mm"] is not None]
+    avg_c_curve_mm = round(sum(c_curve_vals) / len(c_curve_vals), 2) if c_curve_vals else None
 
     width_size  = _majority([f["width_size"]  for f in fingers])
     length_size = _majority([f["length_size"] for f in fingers])
@@ -1978,8 +2087,8 @@ def build_profile(results: list) -> dict:
     length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
     width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
     summary_text = (
-        f"손톱 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요. "
-        f"평균 C-curve는 {avg_c_curve_mm}mm입니다."
+        f"손톱 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
+        + (f" 평균 C-curve는 {avg_c_curve_mm}mm입니다." if avg_c_curve_mm is not None else "")
     )
 
     summary = {

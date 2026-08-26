@@ -124,8 +124,14 @@ printer/profiles/process_fixed.json
 
 results/
 photos/
+test_captures/
 venv/
 **/__pycache__/
 scan/_phone_check/
 *.bak
 *.bak_*
+
+photos/
+results/
+
+

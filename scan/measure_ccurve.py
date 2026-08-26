@@ -32,6 +32,17 @@ import argparse, json, os, sys
 import cv2
 import numpy as np
 
+# Run as a subprocess on Windows, stdout's default encoding is the system
+# codepage (cp949 on Korean Windows) regardless of what the parent captures
+# with - a print() containing a character outside that codepage (e.g. an
+# em-dash) raises UnicodeEncodeError and kills the process mid-measurement,
+# silently turning a real reading into "no c-curve" for that finger. Force
+# UTF-8 so a stray character degrades to a replacement glyph instead of a
+# crash.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     """Threshold separating background b* (border median) from the finger.
@@ -95,6 +106,68 @@ def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
     return edge_row
 
 
+def _locate_finger_by_edge_variance(img: np.ndarray, edge_row: int,
+                                    band_h: int = 350, x_margin: int = 60,
+                                    below_margin: int = 30):
+    """Find the finger's tight bounding crop, anchored on the table edge.
+
+    Replaces the old approach of hunting for "warm" (high a*) pixels across
+    the whole frame to guess where the finger is - that heuristic falls
+    apart under this rig's lighting, because near-black regions have almost
+    random a*/b* (JPEG compression noise), so "warm" pixels turn out to be
+    scattered across the entire row rather than sitting where the finger
+    actually is (confirmed on real rig photos - a "warm" anchor pick landed
+    on plain background texture, nowhere near the finger).
+
+    The backdrop above the table isn't tonally uniform across the frame
+    either (a lit wall on one side can be brighter than the finger itself),
+    so no single global L*/a*/b* threshold reliably separates "finger" from
+    "background" everywhere. But within one column, the backdrop right
+    above the table is close to flat top-to-bottom wherever the finger
+    ISN'T, while a column that crosses the finger silhouette has a sharp
+    brightness transition (wall -> finger surface) partway down - i.e. its
+    local variance is much higher. Column-by-column L* variance over a band
+    above the (reliably-detected) table edge therefore picks out the
+    finger's x-range regardless of how the backdrop's overall brightness
+    varies across the frame - verified against hand-marked ground-truth
+    nail corners on a real rig photo.
+
+    Returns (crop, x0, y0) - crop is the sub-image and (x0, y0) its offset
+    in the original image - or None if no finger-width variance spike is
+    found (e.g. nothing in frame, or a reflection/seam elsewhere in the
+    shot out-variances the finger - known to still happen under severe
+    backlight).
+    """
+    H, W = img.shape[:2]
+    y0 = max(0, edge_row - band_h)
+    lab_band = cv2.cvtColor(img[y0:edge_row, :], cv2.COLOR_BGR2Lab)
+    col_std = lab_band[:, :, 0].astype(np.float32).std(axis=0)
+    bg_floor = float(np.median(col_std))
+    thr = max(bg_floor * 2.0, bg_floor + 15.0)
+    hot = col_std > thr
+
+    # Largest contiguous run of "finger" columns - rejects narrow noise
+    # spikes elsewhere in the row (other fingers/objects caught in frame).
+    runs, start = [], None
+    for i, v in enumerate(hot):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            runs.append((start, i))
+            start = None
+    if start is not None:
+        runs.append((start, len(hot)))
+    if not runs:
+        return None
+    fx0, fx1 = max(runs, key=lambda r: r[1] - r[0])
+    if fx1 - fx0 < 20:
+        return None
+
+    cx0, cx1 = max(0, fx0 - x_margin), min(W, fx1 + x_margin)
+    cy0, cy1 = y0, min(H, edge_row + below_margin)
+    return img[cy0:cy1, cx0:cx1], cx0, cy0
+
+
 def _fit_circle_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
     """Kåsa circle fit with iterative outlier rejection.
 
@@ -118,55 +191,85 @@ def _fit_circle_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
     return cx, cy, r, keep
 
 
+def _compute_tilt_angle(mask: np.ndarray) -> float:
+    """Angle (degrees) the finger is rolled from upright in this end-on
+    crop; positive = tilted right, negative = left.
+
+    Different people rest the fingertip in the rig at a slight roll, which
+    rotates the whole nail/pulp cross-section in the frame. Everything
+    downstream (the per-column top-boundary trace, and picking hook tips as
+    the extreme-x band pixels) implicitly assumes the nail's width axis is
+    horizontal - tilted, it silently grabs the wrong "leftmost/rightmost"
+    point instead of the true corners, shrinking and skewing the chord (and
+    therefore the mm/px scale and everything derived from it).
+
+    Compares the centroid of the mask's upper half (toward the nail) to its
+    lower half (toward the table) - the same two-slice technique
+    hand_measurer.py's _compute_finger_angle uses to de-rotate the
+    equivalent top-view tilt, adapted to this view's "up" direction.
+    """
+    ys, xs = np.where(mask > 0)
+    if len(xs) < 100:
+        return 0.0
+    y_min, y_max = int(ys.min()), int(ys.max())
+    if y_max - y_min < 20:
+        return 0.0
+    y_mid = (y_min + y_max) // 2
+    upper, lower = ys <= y_mid, ys > y_mid
+    if upper.sum() < 30 or lower.sum() < 30:
+        return 0.0
+    cx_u, cy_u = float(np.mean(xs[upper])), float(np.mean(ys[upper]))
+    cx_l, cy_l = float(np.mean(xs[lower])), float(np.mean(ys[lower]))
+    dx, dy = cx_u - cx_l, cy_u - cy_l   # dy negative: upper sits above lower
+    return float(np.degrees(np.arctan2(dx, -dy)))
+
+
+def _rotate_image(img: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Rotate *img* by *angle_deg* around its centre, expanding the canvas
+    so nothing gets clipped. Nearest-neighbour for single-channel masks (so
+    edges stay binary), linear for BGR images.
+    """
+    h, w = img.shape[:2]
+    cx, cy = w / 2.0, h / 2.0
+    M = cv2.getRotationMatrix2D((cx, cy), angle_deg, 1.0)
+    cos_a, sin_a = abs(M[0, 0]), abs(M[0, 1])
+    new_w = int(h * sin_a + w * cos_a)
+    new_h = int(h * cos_a + w * sin_a)
+    M[0, 2] += (new_w - w) / 2
+    M[1, 2] += (new_h - h) / 2
+    flags = cv2.INTER_NEAREST if img.ndim == 2 else cv2.INTER_LINEAR
+    return cv2.warpAffine(img, M, (new_w, new_h), flags=flags)
+
+
 def measure_ccurve(image_path: str, width_mm: float,
                    debug_out: str = None,
                    thickness_mm: float = 0.85,
                    table_edge: bool = False,
-                   edge_margin_px: int = 220) -> dict:
+                   edge_margin_px: int = 350) -> dict:
 
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot open: {image_path}")
 
+    located = False
     if table_edge:
         edge_row = _find_table_edge(img)
         if edge_row is None:
             print("  [Edge] no flat table-edge mat found at the bottom — "
-                  "skipping crop.")
+                  "falling back to whole-frame background split.")
         else:
-            crop_top = max(0, edge_row - edge_margin_px)
-            print(f"  [Edge] table edge at row {edge_row}  →  cropping to "
-                  f"[{crop_top}:] ({edge_margin_px}px margin above it)")
-            img = img[crop_top:, :]
-
-            # Other fingers/knuckles caught in the margin above are still
-            # fused to the target nail in one connected skin blob. The
-            # target is whichever part dips lowest below the table edge —
-            # anchor there and trim to just that finger's local width
-            # before the main pipeline (which can't tell fingers apart)
-            # ever sees the rest of the hand.
-            lab0 = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
-            warm0 = (lab0[:, :, 1].astype(np.float32) - 128) > 5
-            ys, xs = np.nonzero(warm0)
-            if len(ys):
-                ay = int(ys.max())
-                ax = int(np.median(xs[ys > ay - 5]))
-                # A single-row scan for the blob's local width is too
-                # fragile (shadows/antialiasing can pinch it to ~0px).
-                # Instead size the window from the known nail width and a
-                # nominal scale for this rig — generous enough to hold the
-                # whole nail, tight enough to exclude the next finger over.
-                # The real scale is computed precisely afterwards from the
-                # fitted chord.
-                nominal_mm_per_px = 0.048
-                half_w = int(0.9 * width_mm / nominal_mm_per_px)
-                x0 = max(0, ax - half_w)
-                x1 = min(img.shape[1], ax + half_w)
-                y0 = max(0, ay - int(1.8 * width_mm / nominal_mm_per_px))
-                y1 = min(img.shape[0], ay + 15)
-                print(f"  [Edge] anchor=({ax},{ay})  →  tight crop "
-                      f"x[{x0}:{x1}] y[{y0}:{y1}]")
-                img = img[y0:y1, x0:x1]
+            print(f"  [Edge] table edge at row {edge_row}")
+            found = _locate_finger_by_edge_variance(
+                img, edge_row, band_h=edge_margin_px)
+            if found is None:
+                print("  [Edge] no finger-width variance spike found above "
+                      "the edge — falling back to whole-frame background split.")
+            else:
+                img, crop_x0, crop_y0 = found
+                located = True
+                print(f"  [Edge] finger localised → crop "
+                      f"{img.shape[1]}×{img.shape[0]} at offset "
+                      f"({crop_x0},{crop_y0})")
 
     H, W_img = img.shape[:2]
     scale_factor = max(H, W_img) / 2000.0          # for adaptive kernel sizes
@@ -176,17 +279,27 @@ def measure_ccurve(image_path: str, width_mm: float,
     A = lab[:, :, 1].astype(np.float32) - 128
     B = lab[:, :, 2].astype(np.float32) - 128
 
-    # ── 1. Background split on b* (adaptive) ─────────────────
-    bw = max(20, int(0.02 * max(H, W_img)))
-    border = np.zeros((H, W_img), bool)
-    border[:bw, :] = border[-bw:, :] = True
-    border[:, :bw] = border[:, -bw:] = True
-    thr_b, bg_b = _adaptive_bg_split(B, border)
-    print(f"  [BG] border b*={bg_b:.1f}  →  finger threshold b*>{thr_b:.1f}")
-
-    mask = (B > thr_b).astype(np.uint8) * 255
     ks = max(5, int(9 * scale_factor) | 1)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
+
+    if located:
+        # Already a tight, finger-only crop (see
+        # _locate_finger_by_edge_variance's docstring for why) - a plain
+        # Otsu split on L* cleanly separates the finger from the table/
+        # backdrop here, without the whole-frame colour-histogram machinery
+        # below (which is what breaks under this rig's uneven lighting).
+        L8 = lab[:, :, 0].astype(np.uint8)
+        _, mask = cv2.threshold(L8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    else:
+        # ── 1. Background split on b* (adaptive) ─────────────────
+        bw = max(20, int(0.02 * max(H, W_img)))
+        border = np.zeros((H, W_img), bool)
+        border[:bw, :] = border[-bw:, :] = True
+        border[:, :bw] = border[:, -bw:] = True
+        thr_b, bg_b = _adaptive_bg_split(B, border)
+        print(f"  [BG] border b*={bg_b:.1f}  →  finger threshold b*>{thr_b:.1f}")
+        mask = (B > thr_b).astype(np.uint8) * 255
+
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k, iterations=3)
 
@@ -198,10 +311,14 @@ def measure_ccurve(image_path: str, width_mm: float,
         raise RuntimeError("No finger-sized warm region found — "
                            "check that the fingertip is in frame.")
 
-    if table_edge:
-        # The target nail is whichever warm blob hangs deepest into the mat
-        # below the table edge — other fingers/knuckles caught in the crop
-        # stay above it, even if they're more "central" in the frame.
+    if located:
+        # Crop is already tight around just the finger - take the largest
+        # blob, no need to guess which one is "the" finger among several.
+        finger_cnt = max(big, key=cv2.contourArea)
+    elif table_edge:
+        # Whole-frame fallback: the target nail is whichever warm blob
+        # hangs deepest into the mat below the table edge — other fingers/
+        # knuckles caught in the crop stay above it, even if more "central".
         finger_cnt = max(big, key=lambda c: cv2.boundingRect(c)[1] + cv2.boundingRect(c)[3])
     else:
         def centrality(c):
@@ -212,6 +329,24 @@ def measure_ccurve(image_path: str, width_mm: float,
     cv2.drawContours(fmask, [finger_cnt], -1, 255, -1)
     fx, fy, fw, fh = cv2.boundingRect(finger_cnt)
     print(f"  [Finger] bbox x={fx} y={fy} w={fw} h={fh}")
+
+    # ── 2b. De-rotate: correct for the finger being rolled left/right ────
+    # See _compute_tilt_angle's docstring for why this matters. Straighten
+    # the crop now, before any of the angle-sensitive steps below, so
+    # everything downstream (nail/pulp split, band, per-column trace,
+    # circle fit, hook-tip pick) just runs on an already-corrected frame
+    # without needing to know tilt ever happened.
+    tilt_deg = _compute_tilt_angle(fmask)
+    if abs(tilt_deg) > 1.5:
+        print(f"  [Tilt] finger rolled {tilt_deg:+.1f}°  →  de-rotating crop")
+        img = _rotate_image(img, tilt_deg)
+        fmask = _rotate_image(fmask, tilt_deg)
+        H, W_img = img.shape[:2]
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab)
+        A = lab[:, :, 1].astype(np.float32) - 128
+        B = lab[:, :, 2].astype(np.float32) - 128
+        fx, fy, fw, fh = cv2.boundingRect(fmask)
+        print(f"  [Tilt] new bbox x={fx} y={fy} w={fw} h={fh}")
 
     # ── 3. Nail vs pulp: Otsu on a* inside the finger ────────
     vals = A[fmask > 0]
@@ -245,17 +380,24 @@ def measure_ccurve(image_path: str, width_mm: float,
     rough_scale = width_mm / float(ncols[-1] - ncols[0])
     thick_px = thickness_mm / rough_scale
     rad = max(5, int(1.6 * thick_px)) | 1
-    kd = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (rad, rad))
+    # Vertical-only reach, not a circular dilation: this is meant to grow
+    # UP from the pulp into the nail's dome, one column at a time. An
+    # isotropic (circular) kernel grows sideways just as readily, which
+    # bleeds into the lateral nail-fold skin next to the pulp's own
+    # left/right edges (that skin often shares the nail's neutral a* tone).
+    # Verified against hand-marked ground-truth nail corners: switching to
+    # a 3px-wide vertical kernel measurably tightened the corner pick
+    # without changing anything else about how the band is built.
+    kd = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, rad))
     band = cv2.bitwise_and(cv2.dilate(pulp_mask, kd), nail_bin)
 
-    # The isotropic dilation above is meant to reach a little way UP from
-    # the pulp into the nail's dome, but it just as happily reaches
-    # SIDEWAYS from the pulp's leftmost/rightmost corners — straight into
-    # the lateral nail-fold skin, which often shares the nail's a* tone.
-    # That flattens the fitted arc (wider chord than the real nail, biased
-    # toward the flatter skin at the edges). Cap the lateral reach to the
-    # pulp's own width plus one nail-thickness of slack, since the nail
-    # can't be meaningfully wider than the finger flesh directly under it.
+    # Even with vertical-only dilation, pulp_mask's own left/right extent
+    # can already reach past the true nail corner (the pulp genuinely is
+    # redder there too - it's the lateral nail-fold skin, not a dilation
+    # artifact). Cap the lateral reach to the pulp's own width plus one
+    # nail-thickness of slack, since the nail can't be meaningfully wider
+    # than the finger flesh directly under it. This does NOT fully close
+    # the gap - see dev notes below - but bounds the worst case.
     pbx, pby, pbw, pbh = cv2.boundingRect(pulp_cnt)
     lat_pad = max(3, int(thick_px))
     band[:, :max(0, pbx - lat_pad)] = 0
@@ -272,6 +414,20 @@ def measure_ccurve(image_path: str, width_mm: float,
           f"bbox={cv2.boundingRect(band_cnt)}")
 
     # ── 5. Circle fit to band top boundary, hook-tip chord ───
+    # KNOWN REMAINING LIMITATION (as of the ground-truth check below): on
+    # at least one real rig photo with hand-marked true nail corners, the
+    # hook tip on one side still landed ~20px past the true corner even
+    # after the fixes above. Isolated the cause: at that column, the pulp/
+    # nail boundary is a genuinely smooth, continuous curve - the fitted
+    # circle's residual there was tiny (well inside the inlier band), so no
+    # geometric test (tighter residual threshold, dilation shape) can tell
+    # "true corner" from "lateral fold" from shape alone. The only signal
+    # that looked promising was a local dip in L* (a shadowed groove) right
+    # at the true corner - untested against more photos, so not wired in
+    # yet. If this needs to improve further, that's the next thing to try,
+    # with a few more hand-marked ground-truth photos to confirm the dip is
+    # reliably there and not a one-photo coincidence.
+    #
     # The dilated pulp mask rounds off at its own corners, and nail_bin can
     # pick up the shadowed lateral side of the finger there — together they
     # let the "topmost band pixel" trace climb up the SIDE of the finger
@@ -452,9 +608,14 @@ def main():
                    help="Photo is finger draped over a table/mat edge "
                         "(arm resting on the desk behind it) — crop out "
                         "everything above the mat edge before measuring")
-    p.add_argument("--edge-margin-px", type=int, default=220,
-                   help="Pixels to keep above the detected table edge "
-                        "(default 220)")
+    p.add_argument("--edge-margin-px", type=int, default=350,
+                   help="How tall a band above the detected table edge to "
+                        "scan when localising the finger (default 350). "
+                        "Needs enough height that the band's top is mostly "
+                        "background, not finger, or the Otsu split below "
+                        "loses its background reference and picks the "
+                        "wrong split point - confirmed failing at 220, "
+                        "clean at 300-400 on real rig photos.")
     args = p.parse_args()
 
     print(f"\nC-curve measurement: {args.image}")

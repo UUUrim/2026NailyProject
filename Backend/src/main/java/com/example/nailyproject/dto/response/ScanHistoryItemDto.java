@@ -13,8 +13,9 @@ public class ScanHistoryItemDto {
     private String shape;
     private String recommendedShape;
     private String skinToneHex;
-    private String seasonCode;
-    private String seasonNameKo;
+    private String tone;
+    private Double brightness;
+    private Double saturation;
     private Double avgLengthMm;
     private Double avgWidthMm;
     private Double avgCurve;
