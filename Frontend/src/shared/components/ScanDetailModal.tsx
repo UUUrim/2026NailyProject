@@ -255,6 +255,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <h3 className="mypage-x__scanx-season">{toneLabel}</h3>
                   {analysis && (
                     <div className="mypage-x__scanx-chips">
+                      <span>{skinHex}</span>
                       <span>{toneLabel}</span>
                       <span>{classifySkinLevel(analysis.brightness.percent)}명도</span>
                       <span>{classifySkinLevel(analysis.saturation.percent)}채도</span>
@@ -366,7 +367,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <div className="mypage-x__scanx-meter" aria-hidden="true">
                     <i style={{ width: `${curvePct}%` }} />
                   </div>
-                  <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
+                  <span className="mypage-x__scanx-metric-hint">C-curve</span>
                 </article>
               </div>
             </section>

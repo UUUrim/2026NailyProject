@@ -94,7 +94,7 @@ export function HandScanPageContent() {
                 <line x1="12" y1="10.5" x2="12" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 <circle cx="12" cy="17.2" r="1" fill="currentColor" />
               </svg>
-              {HAND_LABELS[currentHand]} {FINGER_LABELS[currentFinger]}를 탑뷰 박스에 넣고 ArUco 마커와 함께 찍어주세요
+              {HAND_LABELS[currentHand]} {FINGER_LABELS[currentFinger]}를 넣어주세요
               <svg className="hand-scan-fs__prompt-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
                 <path d="M12 4.5l9 15.5H3l9-15.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
                 <line x1="12" y1="10.5" x2="12" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

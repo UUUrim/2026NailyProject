@@ -1,9 +1,15 @@
+import { useState } from 'react'
 import { PageHeader } from '@/features/mypage/components/PageHeader'
 import { FavBlockToolbar } from '@/features/mypage/components/FavBlockToolbar'
 import { ImageGrid } from '@/features/mypage/components/ImageGrid'
 import { Pagination } from '@/features/mypage/components/Pagination'
 import { useMyPageContext } from '../context'
 import { Icon } from '../shared'
+
+// 폴더 그리드 한 페이지에 보여줄 실제 폴더 개수. "새 폴더 만들기" 타일은 페이지네이션
+// 대상이 아니라 매 페이지 끝에 항상 고정으로 붙는 액션 타일이라, 페이지당 보이는
+// 전체 타일 수는 이 값 + 1(새 폴더 만들기)이 된다.
+const FOLDERS_PER_PAGE = 7
 
 export function FavoritesTab() {
   const {
@@ -44,6 +50,23 @@ export function FavoritesTab() {
     isBusy,
     navigate,
   } = useMyPageContext()
+
+  const [folderPage, setFolderPage] = useState(1)
+  // 폴더 목록을 정렬 기준을 바꿔서 다시 보면 위치가 다 바뀌므로, 이전 페이지 번호를
+  // 그대로 들고 있으면 엉뚱한 폴더들을 보게 된다 - 정렬이 바뀌는 바로 그 렌더에서
+  // 1페이지로 되돌린다 (useEffect로 하면 한 프레임 늦게 반영되어 잠깐 깜빡인다).
+  const [prevFolderSortOrder, setPrevFolderSortOrder] = useState(folderSortOrder)
+  if (folderSortOrder !== prevFolderSortOrder) {
+    setPrevFolderSortOrder(folderSortOrder)
+    setFolderPage(1)
+  }
+
+  const folderTotalPages = Math.max(1, Math.ceil(sortedFolders.length / FOLDERS_PER_PAGE))
+  const currentFolderPage = Math.min(folderPage, folderTotalPages)
+  const folderSlice = sortedFolders.slice(
+      (currentFolderPage - 1) * FOLDERS_PER_PAGE,
+      currentFolderPage * FOLDERS_PER_PAGE,
+  )
 
   return (
       <section className="mypage-x__panel">
@@ -119,7 +142,7 @@ export function FavoritesTab() {
                       onChangeFolderSort={setFolderSortOrder}
                   />
                   <div className="mypage-x__folder-strip">
-                    {sortedFolders.map((folder) => {
+                    {folderSlice.map((folder) => {
                       const thumbs = folder.recentImageUrls ?? []
                       return (
                           <div key={folder.folderId} className="mypage-x__folder-card">
@@ -212,6 +235,7 @@ export function FavoritesTab() {
                         </button>
                     )}
                   </div>
+                  <Pagination currentPage={currentFolderPage} totalPages={folderTotalPages} onPageChange={setFolderPage} />
                 </div>
 
                 <div className="mypage-x__fav-block">
