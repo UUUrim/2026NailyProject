@@ -244,7 +244,7 @@ export function useHandScanResultPage() {
     // scan/skin_color.py가 10손가락 LAB 평균으로 계산해 API에 내려주는 실제 진단값을 우선 쓰고,
     // (구버전 스캔 등) 값이 없을 때만 대표 피부색 hex 하나로 만든 대체 추정치를 쓴다.
     const skinToneAnalysis =
-        skinToneAnalysisFromMetrics(result?.tone ?? null, result?.brightness ?? null, result?.saturation ?? null) ??
+        skinToneAnalysisFromMetrics(result?.tone ?? null, result?.warmness ?? null, result?.brightness ?? null, result?.saturation ?? null) ??
         (result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null)
     const skinTonePalette =
         result?.recommendedColors && result.recommendedColors.length > 0

@@ -181,8 +181,8 @@ public class NailDesignService {
 
     private String fetchAndUploadNailTipCrops(Long userId, String imageBase64) {
         try {
-            Map<String, List<String>> parts = nailDetectionService.detectParts(imageBase64, List.of("nail tip"));
-            List<String> crops = parts.get("nail tip");
+            Map<String, List<String>> parts = nailDetectionService.detectParts(imageBase64, List.of("nail tips"));
+            List<String> crops = parts.get("nail tips");
             if (crops == null || crops.size() != 5) return null;
 
             List<String> urls = new ArrayList<>();

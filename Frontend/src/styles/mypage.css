@@ -18,7 +18,8 @@
 }
 
 .mypage-x-page {
-  max-width: 1240px;
+  --mp-page-max: 1240px;
+  max-width: var(--mp-page-max);
   margin: 0 auto;
   padding-bottom: 3rem;
 }
@@ -33,17 +34,46 @@
 /* ── 사이드바 ── */
 
 .mypage-x__sidebar {
-  position: sticky;
-  top: 5.5rem;
+  /* 스크롤과 무관하게 화면에 완전히 고정. 그리드의 첫 트랙(268px)은 고정폭이라
+     사이드바를 흐름에서 빼도 그대로 자리를 잡아 두고, left는 가운데 정렬된
+     .mypage-x-page(최대 var(--mp-page-max)) 콘텐츠 영역의 좌측 안쪽에 맞춘다.
+     top = 고정 헤더 높이(6.75rem) + 페이지 상단 패딩(2rem) → 오른쪽 콘텐츠 영역의
+     상단과 정확히 맞고, sticky 헤더에 가려지지 않는다. */
+  position: fixed;
+  top: 8.75rem;
+  left: max(1.5rem, calc((100vw - var(--sbw, 0px) - var(--mp-page-max, 1240px)) / 2 + 1.5rem));
+  width: 268px;
+  max-height: calc(100svh - 8.75rem - 1.5rem);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  overflow-y: auto;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(12px);
   border: 1px solid var(--mp-border);
   border-radius: var(--mp-radius-lg);
   padding: 1.35rem 1.1rem;
   box-shadow: var(--mp-shadow);
+  /* 창이 작아 사이드바가 넘칠 때: 채팅/분석 패널과 동일한 네일리 핑크 커스텀 스크롤바 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+}
+
+.mypage-x__sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mypage-x__sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mypage-x__sidebar::-webkit-scrollbar-thumb {
+  background-color: rgba(222, 134, 159, 0.5);
+  border-radius: 999px;
+}
+
+.mypage-x__sidebar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(222, 134, 159, 0.8);
 }
 
 .mypage-x__sidebar-profile {
@@ -220,6 +250,9 @@
 
 .mypage-x__main {
   min-width: 0;
+  /* 사이드바가 position:fixed라 그리드 흐름에서 빠지므로, 메인을 두 번째 트랙(1fr)에
+     명시적으로 고정한다. 안 그러면 유일한 그리드 항목이 되어 268px 트랙으로 들어간다. */
+  grid-column: 2;
 }
 
 .mypage-x__panel {
@@ -4169,8 +4202,16 @@
     gap: 1.25rem;
   }
 
+  .mypage-x__main {
+    grid-column: auto;
+  }
+
   .mypage-x__sidebar {
     position: static;
+    left: auto;
+    width: auto;
+    max-height: none;
+    overflow-y: visible;
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;

@@ -180,7 +180,7 @@ export function HandScanPageContent() {
     const dateLabel = formatScanDateLabel(session.scannedAt)
     const skinHex = session.skinToneHex
     const toneLabel = (
-      skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+      skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
       (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
     )?.replace(/\s+/g, '') ?? '미분석'
     const shapeLabel = session.recommendedShape

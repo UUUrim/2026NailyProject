@@ -4,6 +4,9 @@
     --naily-pink-light: #fdf5f8;
     --naily-text: #1a1a1a;
     --naily-max-width: 1120px;
+    /* 세로 스크롤바 폭. position:fixed 요소가 100vw(스크롤바 포함) 대신
+       실제 콘텐츠 폭에 맞춰 정렬할 때 뺀다. 스크롤바가 없으면 0. */
+    --sbw: calc(100vw - 100%);
 
     min-height: 100svh;
     display: flex;

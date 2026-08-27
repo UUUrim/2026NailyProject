@@ -31,14 +31,17 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         : null
     const skinHex = session.skinToneHex
     const toneLabel = (
-        skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+        skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
         (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
     )?.replace(/\s+/g, '') ?? '미분석'
+    // 추천 컬러 팔레트를 6열×5행(색상군 6개 × 밝기 5단계)으로 봤을 때 맨 윗줄 6색 —
+    // 즉 색상군마다 가장 밝은 톤 하나씩. 30색 배열에서 균등 간격(0,5,10,15,20,25)으로
+    // 뽑으면 그 맨 윗줄과 일치한다.
     const palettePreview =
         session.recommendedColors.length > 0
-            ? pickSpreadColors(session.recommendedColors, 5)
+            ? pickSpreadColors(session.recommendedColors, 6)
             : skinHex
-                ? pickSpreadColors(generateSkinTonePalette(skinHex, 30), 5)
+                ? pickSpreadColors(generateSkinTonePalette(skinHex, 30), 6)
                 : []
     const metricsLine = [
         `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,

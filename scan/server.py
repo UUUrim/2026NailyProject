@@ -521,6 +521,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     overall_size       = max(set(sizes), key=sizes.count) if sizes else "average"
     recommended_colors = []
     tone               = None
+    warmness           = None  # 웜/쿨 연속 스칼라 (LAB b - a*0.5). tone(범주)의 원본 값
     brightness         = None
     saturation         = None
 
@@ -536,11 +537,12 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
         skin_tone_hex = lab_to_rgb_hex(avg_L, avg_a, avg_b)
         brightness    = round(avg_L / 100.0, 3)
         saturation    = round(avg_sat, 3)
+        warmness      = round(avg_warm, 2)
 
         result = recommend_nail_colors(avg_L, avg_a, avg_b, avg_warm, avg_sat)
         recommended_colors = [c["hex"] for c in result["best"]]
         tone = result["skin_summary"]["tone"]
-        print(f"  [SkinColor] tone={tone} brightness={brightness} "
+        print(f"  [SkinColor] tone={tone} warmness={warmness} brightness={brightness} "
               f"saturation={saturation} colors={len(recommended_colors)}개 "
               f"({len(skin_metrics)}손가락 평균)")
     else:
@@ -552,6 +554,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
         "overallSize":       overall_size,
         "recommendedColors": recommended_colors,
         "tone":              tone,
+        "warmness":          warmness,
         "brightness":        brightness,
         "saturation":        saturation,
         "fingers":           fingers_data,
