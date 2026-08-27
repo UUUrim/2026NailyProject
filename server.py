@@ -47,6 +47,7 @@ import sys
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 # Windows console's default stdout encoding is the system codepage (cp949 on
 # Korean Windows), which can't encode every character this file and its
@@ -57,6 +58,16 @@ from collections import deque
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8", errors="replace")
+
+# uvicorn logs every request ("GET /phone/side/status HTTP/1.1" 200 OK) at
+# INFO level through this logger - with the phone side-camera preview
+# polling /phone/side/status ~1x/second, that drowns out the print()
+# diagnostics this file actually cares about (measurement stages, S3
+# uploads, errors). Runs at import time, so it's in effect before uvicorn
+# starts serving regardless of how it's launched (CLI or programmatically) -
+# doesn't touch print() or logging.error/warning calls, which still show.
+import logging
+logging.getLogger("uvicorn.access").disabled = True
 
 import boto3
 import cv2
@@ -149,13 +160,30 @@ def _load_env():
 _load_env()
 
 
+_s3_client_singleton = None
+_s3_client_lock = threading.Lock()
+
 def _s3_client():
-    return boto3.client(
-        "s3",
-        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-        region_name=os.environ.get("AWS_DEFAULT_REGION", "ap-northeast-2"),
-    )
+    """Cached boto3 client, built once and reused.
+
+    Result-page latency was traced back to _upload_results calling this
+    once per file (up to 15 times per hand) - constructing a fresh
+    boto3.client() each time is not free (credential setup, connection
+    pool init), so that was 15 redundant client builds stacked on top of
+    the actual uploads. boto3 clients are safe to share across threads for
+    making calls concurrently, so one client works for the whole process.
+    """
+    global _s3_client_singleton
+    if _s3_client_singleton is None:
+        with _s3_client_lock:
+            if _s3_client_singleton is None:
+                _s3_client_singleton = boto3.client(
+                    "s3",
+                    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+                    region_name=os.environ.get("AWS_DEFAULT_REGION", "ap-northeast-2"),
+                )
+    return _s3_client_singleton
 
 
 def _s3_url(key: str) -> str:
@@ -519,7 +547,13 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
     # unsmoothed `result` — this only decides what gets drawn on screen.
     last_ok_result = None
     last_ok_t = 0.0
-    HOLD_LAST_OK_SEC = 1.2
+    # 1.2s was long enough to smooth flicker but also long enough that
+    # pulling the finger out left a stale "ghost" overlay on screen for
+    # over a second, which read as lag - shortened so it still absorbs a
+    # single bad frame (measurement noise, ~0.3-0.8s apart per
+    # nail_live.py's own docs) without holding on to a genuinely-removed
+    # finger for long.
+    HOLD_LAST_OK_SEC = 0.5
     _S.top_capture_busy.set()
     try:
         while True:
@@ -803,14 +837,28 @@ def _run_measure_only(userid: str, session: str, hand: str):
 
 
 def _upload_results(userid: str, session: str, hand: str):
+    """Upload all 5 fingers' results (up to 15 files) to S3 in parallel.
+
+    This used to be a plain sequential loop - up to 15 blocking round trips
+    back to back, one file at a time. These are independent uploads to
+    different S3 keys, so there's no ordering requirement between them;
+    running them concurrently turns ~15x(one upload's latency) into
+    ~1x(one upload's latency), which was the single biggest contributor to
+    how long the result screen sat waiting after the last finger.
+    """
     results_root = os.path.join(BASE, "results", userid, session, hand)
     s3_prefix    = f"results/{userid}/{session}/{hand}"
+    jobs = []
     for finger in FINGER_ORDER:
         finger_dir = os.path.join(results_root, finger)
         for fname in [f"{finger}_annotated.jpg", "nail_measurements.json", "profile.json"]:
             lp = os.path.join(finger_dir, fname)
             if os.path.isfile(lp):
-                _upload_file(lp, f"{s3_prefix}/{finger}/{fname}")
+                jobs.append((lp, f"{s3_prefix}/{finger}/{fname}"))
+    if not jobs:
+        return
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        list(pool.map(lambda job: _upload_file(*job), jobs))
 
 
 def _build_callback_data(userid: str, session: str, hand: str) -> dict:

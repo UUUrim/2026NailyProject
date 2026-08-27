@@ -289,6 +289,7 @@
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 2px 1fr;
+    align-items: center;
     min-height: 0;
     max-height: calc(100svh - var(--hand-scan-fs-reserved));
 }
@@ -297,20 +298,28 @@
     position: relative;
     overflow: hidden;
     background: #111;
+    width: 100%;
+    /* Matches the top camera's real output shape once the server crops
+       the ArUco marker off its left edge (native 1920x1080, ~436px of
+       marker + margin trimmed -> ~1484x1080, ~11:8). Both panes share
+       this ratio so their rendered heights land exactly the same;
+       object-fit on .hand-scan-fs__video decides how each feed's own
+       (differently-shaped) source content fills that shared box.
+       Approximate, not exact - retune if the rig's camera or marker
+       placement changes enough to visibly mismatch. */
+    aspect-ratio: 11 / 8;
+    max-height: 100%;
 }
 
 .hand-scan-fs__video {
     width: 100%;
     height: 100%;
     display: block;
-    /* cover, not contain: the two feeds have very different native aspect
-       ratios (top view ~16:9 webcam vs. side view a portrait phone frame),
-       but both .hand-scan-fs__feed boxes are the same size (equal grid
-       cells) - covering fills that shared box completely instead of
-       letterboxing, so both panes render as the same rectangle. For the
-       portrait phone feed specifically this crops off its top/bottom
-       (centered) rather than its sides, which is what we want: the phone
-       image's edges aren't meaningful, only the centered nail is. */
+    /* cover: the box above is already sized to the top feed's real
+       content ratio, so this barely crops the top view (just enough to
+       absorb the approximation) while fully cropping the side feed's
+       portrait phone frame down to a centered band matching the top
+       view's height - exactly what both feeds needed. */
     object-fit: cover;
     object-position: center;
     background: #000;

@@ -223,7 +223,7 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
         rh = min(H - y, rh + 2 * padding)
         L[y:y+rh, x:x+rw] = 0
 
-    _, skin_L = cv2.threshold(L, 130, 255, cv2.THRESH_BINARY)
+    _, skin_L = cv2.threshold(L, 120, 255, cv2.THRESH_BINARY)
     skin_A    = (A > 131).astype(np.uint8) * 255   # a* > 3: warm/reddish tone
     skin      = cv2.bitwise_and(skin_L, skin_A)
     kL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_large, ks_large))
@@ -964,7 +964,7 @@ def measure_top(image: np.ndarray, mpp: float,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
                 finger: str = None,
-                guide_y: int = None, guide_tol_mm: float = 5.0) -> dict:
+                guide_y: int = None, guide_tol_mm: float = 3.0) -> dict:
     """
     nail_plate_mask : optional uint8 binary mask (255=nail plate).
         When provided, width is measured from the nail plate boundary instead
@@ -1825,6 +1825,13 @@ def save_annotated(image, data, aruco_corners, finger, save_path):
 _FALLBACK_C_CURVE_MM       = 1.0
 _FALLBACK_C_CURVE_MM_ENDON = 1.0
 
+# An end-on (side/phone) c-curve reading at or above this is treated as
+# suspect and replaced with the top-view's own brightness-drop estimate
+# instead (see measure_finger) - real nail c-curve sagittas rarely reach
+# this high, and box-rig lighting/geometry issues have produced readings
+# in this range on nails that were really ~1-2mm.
+_ENDON_C_CURVE_SUSPECT_MM = 3.0
+
 def _fallback_measurement(finger: str) -> dict:
     std = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])
     width_mm  = std["width_mm"]
@@ -1920,6 +1927,12 @@ def measure_finger(top_path: str, finger: str,
         data = measure_top(top_img, mpp, finger_mask, bbox,
                            aruco_corners=aruco_corners, finger=finger)
 
+        # Top view's own brightness-drop estimate - kept aside so a
+        # too-high end-on reading below has something trustworthy to fall
+        # back to instead of just the flat 1mm default.
+        top_c_curve_mm    = data["c_curve_mm"]
+        top_arc_radius_mm = data["arc_radius_mm"]
+
         # ── Override C-curve with end-on measurement if photo is provided ──
         use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
         if use_endon:
@@ -1932,12 +1945,29 @@ def measure_finger(top_path: str, finger: str,
                                    table_edge=ccurve_table_edge,
                                    top_crop_frac=CCURVE_TOP_CROP_FRAC,
                                    bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC)
-                data["c_curve_mm"]    = cc["c_curve_mm"]
-                data["arc_radius_mm"] = cc["arc_radius_mm"]
-                data["_ccurve_method"] = "end-on photo"
-                print(f"  [C-curve] OK end-on  "
-                      f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
-                      f"(debug -> {debug_path})")
+                if cc["c_curve_mm"] >= _ENDON_C_CURVE_SUSPECT_MM and top_c_curve_mm is not None:
+                    # End-on readings this high are implausible (see
+                    # measure_ccurve.py history - box-rig lighting/geometry
+                    # issues have produced readings around 4-4.5mm on nails
+                    # that were really ~1-2mm). The top-view brightness
+                    # estimate isn't as precise, but it's a same-photo
+                    # sanity source rather than the flat fallback constant.
+                    data["c_curve_mm"]    = top_c_curve_mm
+                    data["arc_radius_mm"] = top_arc_radius_mm
+                    data["_ccurve_method"] = (
+                        f"top-view brightness fallback "
+                        f"(end-on reading {cc['c_curve_mm']}mm >= "
+                        f"{_ENDON_C_CURVE_SUSPECT_MM}mm, treated as suspect)")
+                    print(f"  [C-curve] end-on {cc['c_curve_mm']}mm looks too high "
+                          f"(>= {_ENDON_C_CURVE_SUSPECT_MM}mm) → using top-view "
+                          f"estimate {top_c_curve_mm}mm instead")
+                else:
+                    data["c_curve_mm"]    = cc["c_curve_mm"]
+                    data["arc_radius_mm"] = cc["arc_radius_mm"]
+                    data["_ccurve_method"] = "end-on photo"
+                    print(f"  [C-curve] OK end-on  "
+                          f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
+                          f"(debug -> {debug_path})")
             except Exception as e:
                 print(f"  [C-curve] WARN end-on(폰) 측정 실패 ({e}), "
                       f"c_curve=1mm 기본값으로 대체")
