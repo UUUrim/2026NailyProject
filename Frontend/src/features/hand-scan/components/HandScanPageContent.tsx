@@ -31,7 +31,6 @@ export function HandScanPageContent() {
     isFullscreen,
     cameraError,
     isUploading,
-    topCameraIdx,
     sideCameraIdx,
     currentStepIndex,
     uploadedSteps,
@@ -46,7 +45,6 @@ export function HandScanPageContent() {
     handleCloseFullscreen,
     handleOpenFullscreen,
     handleCaptureFinger,
-    handleCameraChange,
   } = useHandScanPage()
 
   // ── 풀스크린 오버레이 ─────────────────────────────────────────
@@ -61,22 +59,6 @@ export function HandScanPageContent() {
                     className="hand-scan-fs__video"
                     alt="탑뷰 스캔 피드"
                 />
-                <div className="hand-scan-fs__feed-select-wrap">
-                  <label className="hand-scan-fs__feed-select-label">
-                    <span className="hand-scan-fs__feed-select-name">카메라 1</span>
-                    <div className="hand-scan-fs__feed-select-inner">
-                      <select
-                          className="hand-scan-fs__feed-select"
-                          value={topCameraIdx}
-                          onChange={(e) => void handleCameraChange(Number(e.target.value), sideCameraIdx)}
-                      >
-                        <option value={0}>인덱스 0</option>
-                        <option value={1}>인덱스 1</option>
-                        <option value={2}>인덱스 2</option>
-                      </select>
-                    </div>
-                  </label>
-                </div>
               </div>
 
               <div className="hand-scan-fs__divider" aria-hidden="true" />
@@ -90,24 +72,6 @@ export function HandScanPageContent() {
                         alt="사이드뷰 스캔 피드"
                     />
                 ) : null}
-                <div className="hand-scan-fs__feed-select-wrap">
-                  <label className="hand-scan-fs__feed-select-label">
-                    <span className="hand-scan-fs__feed-select-name">카메라 2</span>
-                    <div className="hand-scan-fs__feed-select-inner">
-                      <select
-                          className="hand-scan-fs__feed-select"
-                          value={sideCameraIdx}
-                          onChange={(e) => void handleCameraChange(topCameraIdx, Number(e.target.value))}
-                      >
-                        <option value={-1}>사용 안 함</option>
-                        <option value={-2}>폰(원격)</option>
-                        <option value={0}>인덱스 0</option>
-                        <option value={1}>인덱스 1</option>
-                        <option value={2}>인덱스 2</option>
-                      </select>
-                    </div>
-                  </label>
-                </div>
               </div>
             </div>
 

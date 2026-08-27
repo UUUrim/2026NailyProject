@@ -75,6 +75,19 @@ try:
 except ImportError:
     _ENDON_AVAILABLE = False
 
+# End-on (side-view) C-curve photos are shot inside the capture box, whose
+# ceiling (bright strip light + blue alignment LEDs) and near-camera mat
+# both land in frame above/below the finger. Neither is background in the
+# sense the measurement below assumes, and letting them in was confirmed to
+# make the finger-localisation step grab the whole frame instead of just
+# the fingertip (bbox 3000x4000 instead of ~300x300), producing wildly
+# inconsistent c-curve readings across fingers. Cropping these fixed bands
+# off before measuring isolates the fingertip cleanly - verified against
+# all 5 left-hand fingers of session 1/31. Top-view photos don't go through
+# this crop; the same ceiling/mat framing issue doesn't apply there.
+CCURVE_TOP_CROP_FRAC    = 0.30
+CCURVE_BOTTOM_CROP_FRAC = 0.12
+
 # ── Skin LAB metrics (brightness/saturation/warmness for color recommendation) ──
 try:
     from skin_color import analyze_skin as _analyze_skin
@@ -210,7 +223,7 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
         rh = min(H - y, rh + 2 * padding)
         L[y:y+rh, x:x+rw] = 0
 
-    _, skin_L = cv2.threshold(L, 130, 255, cv2.THRESH_BINARY)
+    _, skin_L = cv2.threshold(L, 120, 255, cv2.THRESH_BINARY)
     skin_A    = (A > 131).astype(np.uint8) * 255   # a* > 3: warm/reddish tone
     skin      = cv2.bitwise_and(skin_L, skin_A)
     kL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_large, ks_large))
@@ -951,7 +964,7 @@ def measure_top(image: np.ndarray, mpp: float,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
                 finger: str = None,
-                guide_y: int = None, guide_tol_mm: float = 5.0) -> dict:
+                guide_y: int = None, guide_tol_mm: float = 3.0) -> dict:
     """
     nail_plate_mask : optional uint8 binary mask (255=nail plate).
         When provided, width is measured from the nail plate boundary instead
@@ -1682,6 +1695,55 @@ def apply_wl_correction(finger: str, width_mm: float, length_mm: float) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+# 6b. Nail shape recommendation
+# ─────────────────────────────────────────────────────────────
+
+NAIL_SHAPES = ("round", "oval", "square", "almond", "ballerina", "stiletto")
+
+
+def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
+    """Recommend a nail shape from this hand's measured width/length proportions.
+
+    wl_checks: the wl_ratio_check dicts (see apply_wl_correction) for this
+    hand's fingers. Each carries wl_diff (this finger's measured W/L ratio
+    minus the Jung et al. 2015 population baseline for that specific
+    finger) and wl_std_dev (that finger's population SD). Averaging
+    wl_diff/wl_std_dev across fingers gives a single z-score for how wide
+    or narrow this hand's nail beds are relative to the population norm:
+    positive = wider/shorter than average, negative = narrower/longer than
+    average - the same axis nail techs use to pick a shape (a wide/short
+    bed gets rounded/tapered to look longer; a bed that's already narrow/
+    long has room to taper into something more dramatic).
+
+    overall_size (this hand's mode nail_size classification, already
+    computed elsewhere from the same population norms - see
+    _size_category) gates the two most dramatic shapes: ballerina and
+    stiletto both need real absolute nail length to taper into, not just
+    narrow proportions on an otherwise short nail, so a narrow-but-short
+    bed gets almond instead.
+
+    This is a heuristic, not a clinically validated recommendation -
+    thresholds were picked to match common nail-tech shape guidance, not
+    fit to outcome data (none exists yet).
+    """
+    zs = [c["wl_diff"] / c["wl_std_dev"]
+          for c in wl_checks if c.get("wl_std_dev")]
+    if not zs:
+        return "round"
+    z = sum(zs) / len(zs)
+
+    if z >= 1.25:
+        return "round"
+    if z >= 0.5:
+        return "oval"
+    if z >= -0.5:
+        return "square"
+    if overall_size in ("larger", "much_larger"):
+        return "stiletto" if z < -1.25 else "ballerina"
+    return "almond"
+
+
+# ─────────────────────────────────────────────────────────────
 # 7. Visualisation
 # ─────────────────────────────────────────────────────────────
 
@@ -1762,6 +1824,13 @@ def save_annotated(image, data, aruco_corners, finger, save_path):
 # 측정만 실패했을 때(top 인식은 성공, width/length는 그대로 살림) 둘 다 이 값을 쓴다.
 _FALLBACK_C_CURVE_MM       = 1.0
 _FALLBACK_C_CURVE_MM_ENDON = 1.0
+
+# An end-on (side/phone) c-curve reading at or above this is treated as
+# suspect and replaced with the top-view's own brightness-drop estimate
+# instead (see measure_finger) - real nail c-curve sagittas rarely reach
+# this high, and box-rig lighting/geometry issues have produced readings
+# in this range on nails that were really ~1-2mm.
+_ENDON_C_CURVE_SUSPECT_MM = 3.0
 
 def _fallback_measurement(finger: str) -> dict:
     std = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])
@@ -1858,6 +1927,12 @@ def measure_finger(top_path: str, finger: str,
         data = measure_top(top_img, mpp, finger_mask, bbox,
                            aruco_corners=aruco_corners, finger=finger)
 
+        # Top view's own brightness-drop estimate - kept aside so a
+        # too-high end-on reading below has something trustworthy to fall
+        # back to instead of just the flat 1mm default.
+        top_c_curve_mm    = data["c_curve_mm"]
+        top_arc_radius_mm = data["arc_radius_mm"]
+
         # ── Override C-curve with end-on measurement if photo is provided ──
         use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
         if use_endon:
@@ -1867,13 +1942,32 @@ def measure_finger(top_path: str, finger: str,
                 cc = _endOn_ccurve(ccurve_path,
                                    width_mm=data["width_mm"],
                                    debug_out=debug_path,
-                                   table_edge=ccurve_table_edge)
-                data["c_curve_mm"]    = cc["c_curve_mm"]
-                data["arc_radius_mm"] = cc["arc_radius_mm"]
-                data["_ccurve_method"] = "end-on photo"
-                print(f"  [C-curve] OK end-on  "
-                      f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
-                      f"(debug -> {debug_path})")
+                                   table_edge=ccurve_table_edge,
+                                   top_crop_frac=CCURVE_TOP_CROP_FRAC,
+                                   bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC)
+                if cc["c_curve_mm"] >= _ENDON_C_CURVE_SUSPECT_MM and top_c_curve_mm is not None:
+                    # End-on readings this high are implausible (see
+                    # measure_ccurve.py history - box-rig lighting/geometry
+                    # issues have produced readings around 4-4.5mm on nails
+                    # that were really ~1-2mm). The top-view brightness
+                    # estimate isn't as precise, but it's a same-photo
+                    # sanity source rather than the flat fallback constant.
+                    data["c_curve_mm"]    = top_c_curve_mm
+                    data["arc_radius_mm"] = top_arc_radius_mm
+                    data["_ccurve_method"] = (
+                        f"top-view brightness fallback "
+                        f"(end-on reading {cc['c_curve_mm']}mm >= "
+                        f"{_ENDON_C_CURVE_SUSPECT_MM}mm, treated as suspect)")
+                    print(f"  [C-curve] end-on {cc['c_curve_mm']}mm looks too high "
+                          f"(>= {_ENDON_C_CURVE_SUSPECT_MM}mm) → using top-view "
+                          f"estimate {top_c_curve_mm}mm instead")
+                else:
+                    data["c_curve_mm"]    = cc["c_curve_mm"]
+                    data["arc_radius_mm"] = cc["arc_radius_mm"]
+                    data["_ccurve_method"] = "end-on photo"
+                    print(f"  [C-curve] OK end-on  "
+                          f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
+                          f"(debug -> {debug_path})")
             except Exception as e:
                 print(f"  [C-curve] WARN end-on(폰) 측정 실패 ({e}), "
                       f"c_curve=1mm 기본값으로 대체")

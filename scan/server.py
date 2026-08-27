@@ -38,6 +38,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from skin_color import recommend_nail_colors, lab_to_rgb_hex
+from nail_measurer import recommend_nail_shape
 
 BASE         = os.path.dirname(os.path.abspath(__file__))
 BUCKET       = "naily-scans"
@@ -47,11 +48,15 @@ FINGER_ORDER = ["thumb", "index", "middle", "ring", "pinky"]
 CAMERA_TOP        = 0       # 탑뷰 카메라 인덱스
 CAMERA_SIDE       = 1       # 측면뷰(end-on C-curve) 카메라 인덱스 (-1: 없음)
 ARUCO_SIZE_MM     = 20.0    # ArUco 마커 실물 크기 (mm)
-CROP_BOTTOM_PX    = 270     # 탑뷰 하단 crop 픽셀 (스캔 박스 입구 제거)
+CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
 STABLE_FRAMES     = 20      # ArUco 안정 판정 프레임 수
 STABLE_PX_THRESH  = 20      # 안정 판정 픽셀 임계값
 COUNTDOWN_SEC     = 3       # 자동 촬영 카운트다운 (초)
 SKIN_FRACTION_MIN = 0.04    # 손가락 감지 최소 피부 비율
+# 탑뷰 웹 스트림에서 ArUco 마커를 가리기 위한 왼쪽 crop 설정 (측정용 저장
+# 사진에는 영향 없음 — _capture_top_stream 참고).
+MARKER_HIDE_MARGIN_PX      = 40    # 마커 오른쪽 끝에서 추가로 더 잘라낼 여백
+MARKER_HIDE_MIN_VISIBLE_PX = 200   # 잘라내고도 최소한 이만큼은 화면에 남긴다
 # ─────────────────────────────────────────────────────────────
 
 app = FastAPI()
@@ -91,9 +96,41 @@ def _upload_file(local_path: str, s3_key: str):
 
 
 # ── 카메라 유틸 ──────────────────────────────────────────────
-def _make_aruco_detector():
-    d = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-    return aruco.ArucoDetector(d, aruco.DetectorParameters())
+# nail_measurer.py의 오프라인 detect_aruco()가 실제로 인식하는 딕셔너리
+# 전부와 맞춰야 한다 — 라이브 스트림에서 4x4_50 하나만 쓰던 이전 코드는
+# 이 리그에 실제로 붙어있는 마커(6x6_50)를 한 번도 인식하지 못했다.
+# 그 결과 화면의 "마커: ✓/✗" 표시, 자동 촬영(안정화→카운트다운) 게이트가
+# 전부 조용히 죽어있었고, 지금 추가하는 마커-가림 crop도 똑같이 동작하지
+# 않았을 것 — 그래서 여기서 같이 고친다.
+ARUCO_DICTS = {
+    "4x4_50":  aruco.DICT_4X4_50,
+    "4x4_100": aruco.DICT_4X4_100,
+    "5x5_50":  aruco.DICT_5X5_50,
+    "5x5_100": aruco.DICT_5X5_100,
+    "6x6_50":  aruco.DICT_6X6_50,
+    "6x6_100": aruco.DICT_6X6_100,
+}
+
+def _make_aruco_detectors():
+    """One ArucoDetector per dictionary in ARUCO_DICTS."""
+    return [aruco.ArucoDetector(aruco.getPredefinedDictionary(did),
+                                aruco.DetectorParameters())
+            for did in ARUCO_DICTS.values()]
+
+
+def _detect_markers_multi(detectors: list, gray: np.ndarray, prefer_idx: int = 0):
+    """Try *detectors* starting at prefer_idx (whichever dict matched last
+    frame) so the common case costs one detectMarkers() call, falling back
+    to scanning the rest only when that one misses (e.g. the very first
+    frame, or a dropped detection). Returns (corners, ids, matched_idx) —
+    matched_idx is None when nothing matched this frame.
+    """
+    order = [prefer_idx] + [i for i in range(len(detectors)) if i != prefer_idx]
+    for i in order:
+        corners, ids, _ = detectors[i].detectMarkers(gray)
+        if ids is not None and len(ids) > 0:
+            return corners, ids, i
+    return None, None, None
 
 def _detect_finger(frame: np.ndarray):
     """HSV로 피부색 감지. (finger_present, skin_fraction) 반환."""
@@ -458,6 +495,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     skin_tones   = []
     skin_metrics = []
     sizes        = []
+    wl_checks    = []
 
     for finger in FINGER_ORDER:
         finger_dir        = os.path.join(results_root, finger)
@@ -484,6 +522,8 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
             if skin_tone:
                 skin_tones.append(skin_tone)
             sizes.append(nail_size)
+            if finger_data.get("wl_ratio_check"):
+                wl_checks.append(finger_data["wl_ratio_check"])
 
             # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
             # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다.
@@ -548,8 +588,12 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     else:
         print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
+    recommended_shape = recommend_nail_shape(wl_checks, overall_size)
+    print(f"  [Shape] recommended={recommended_shape}  "
+          f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
+
     return {
-        "shape":             "round",
+        "shape":             recommended_shape,
         "skinToneHex":       skin_tone_hex,
         "overallSize":       overall_size,
         "recommendedColors": recommended_colors,
@@ -746,17 +790,29 @@ def _push_event(payload: dict):
 
 # ── 탑뷰 헤드리스 캡처 (GUI 없이, 프레임을 스트림 큐에 넣음) ─
 def _capture_top_stream(cap: cv2.VideoCapture,
-                        detector, finger: str, save_path: str) -> bool:
+                        detectors: list, finger: str, save_path: str) -> bool:
     """
     GUI 없이 탑뷰 캡처.
     - 처리된 프레임(오버레이 포함)을 _S.top_frame 큐에 실시간 push
     - 안정 상태 → 자동 카운트다운 → 촬영
     - /capture/force 로 수동 촬영 가능
     Returns: True(저장 성공) / False(취소)
+
+    측정용 사진(save_path)은 ArUco 마커가 그대로 찍힌 원본 프레임(frame)을
+    저장한다 — 스케일 계산에 마커가 필요하기 때문. 반면 웹으로 스트리밍하는
+    화면(disp)은 마커가 있는 왼쪽 구간을 잘라내고 내보낸다 — 사용자가 우리
+    마커 디자인을 보지 못하게 하기 위해서다. 두 프레임은 여기서부터 서로
+    다른 배열이라 한쪽을 바꿔도 다른 쪽에 영향이 없다.
     """
     recent = deque(maxlen=STABLE_FRAMES)
     countdown_start = None
     _S.force_capture.clear()
+
+    # 마커를 가리기 위해 왼쪽에서 잘라낼 폭(px). 마커가 처음 잡힐 때부터
+    # 그 오른쪽 끝 + 여백으로 갱신되고, 이후 마커가 잠깐 안 잡히는 프레임에도
+    # (조명/각도 흔들림 등) 화면이 매 프레임 깜빡이지 않도록 마지막 값을 유지한다.
+    marker_hide_x = 0
+    dict_idx = 0   # 마지막으로 성공한 딕셔너리 — 다음 프레임에 그것부터 시도
 
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (웹에서 확인)")
@@ -770,9 +826,17 @@ def _capture_top_stream(cap: cv2.VideoCapture,
 
         # ── ArUco + 손가락 감지
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        corners, ids, _ = detector.detectMarkers(gray)
+        corners, ids, matched_idx = _detect_markers_multi(detectors, gray, dict_idx)
         detected = ids is not None and len(ids) > 0
+        if matched_idx is not None:
+            dict_idx = matched_idx
         finger_ok, frac = _detect_finger(frame)
+
+        if detected:
+            marker_right_px = int(round(float(corners[0][0][:, 0].max())))
+            marker_hide_x = min(
+                max(marker_hide_x, marker_right_px + MARKER_HIDE_MARGIN_PX),
+                w - MARKER_HIDE_MIN_VISIBLE_PX)
 
         # ── 안정성 추적
         if detected and finger_ok:
@@ -803,23 +867,22 @@ def _capture_top_stream(cap: cv2.VideoCapture,
             remaining = COUNTDOWN_SEC - elapsed
             countdown_val = max(1, int(remaining) + 1)
 
-        # ── 오버레이 그리기
-        disp = frame.copy()
-        if detected:
-            aruco.drawDetectedMarkers(disp, corners, ids)
+        # ── 오버레이 그리기 (마커가 찍힌 왼쪽 구간을 잘라낸 화면 위에)
+        disp = frame[:, marker_hide_x:].copy()
+        dh, dw = disp.shape[:2]
 
         if countdown_val is not None:
             color = (0, 255, 0)
-            cv2.rectangle(disp, (0, 0), (w-1, h-1), color, 12)
+            cv2.rectangle(disp, (0, 0), (dw-1, dh-1), color, 12)
             cv2.putText(disp, str(countdown_val),
-                        (w // 2 - 60, h // 2 + 80),
+                        (dw // 2 - 60, dh // 2 + 80),
                         cv2.FONT_HERSHEY_SIMPLEX, 10, color, 20, cv2.LINE_AA)
             cv2.putText(disp, "가만히! 자동 촬영 중...",
                         (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
         else:
             color = (0, 255, 0) if (detected and finger_ok) else \
                     (0, 165, 255) if detected else (0, 0, 255)
-            cv2.rectangle(disp, (0, 0), (w-1, h-1), color, 8)
+            cv2.rectangle(disp, (0, 0), (dw-1, dh-1), color, 8)
             label = (f"{finger.upper()}  |  "
                      f"마커: {'✓' if detected else '✗'}  |  "
                      f"손가락: {'✓' if finger_ok else '✗'}  |  "
@@ -829,16 +892,16 @@ def _capture_top_stream(cap: cv2.VideoCapture,
             # 안정화 진행 바
             if detected and finger_ok and len(recent) > 0:
                 ratio = min(len(recent) / STABLE_FRAMES, 1.0)
-                bar_w = int((w - 20) * ratio)
-                cv2.rectangle(disp, (10, h - 25), (10 + bar_w, h - 10), color, -1)
-                cv2.rectangle(disp, (10, h - 25), (w - 10, h - 10), (150, 150, 150), 1)
+                bar_w = int((dw - 20) * ratio)
+                cv2.rectangle(disp, (10, dh - 25), (10 + bar_w, dh - 10), color, -1)
+                cv2.rectangle(disp, (10, dh - 25), (dw - 10, dh - 10), (150, 150, 150), 1)
 
-        # crop 가이드선
+        # crop 가이드선 (하단 crop — 현재 CROP_BOTTOM_PX=0이라 꺼져 있음)
         if CROP_BOTTOM_PX > 0:
-            cv2.line(disp, (0, h - CROP_BOTTOM_PX), (w, h - CROP_BOTTOM_PX),
+            cv2.line(disp, (0, dh - CROP_BOTTOM_PX), (dw, dh - CROP_BOTTOM_PX),
                      (255, 255, 0), 2)
             cv2.putText(disp, "crop line",
-                        (8, h - CROP_BOTTOM_PX - 6),
+                        (8, dh - CROP_BOTTOM_PX - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
         _push_frame(_S.top_frame, disp)
@@ -923,7 +986,7 @@ def capture_all_fingers(userid: str, session: str, hand: str) -> str:  # noqa: F
         else:
             print(f"[Capture] 사이드뷰 카메라 없음 → brightness fallback")
 
-    detector = _make_aruco_detector()
+    detectors = _make_aruco_detectors()
 
     _S.active = True
     _S.done_fingers = []
@@ -935,7 +998,7 @@ def capture_all_fingers(userid: str, session: str, hand: str) -> str:  # noqa: F
             top_path  = os.path.join(local_dir, f"{finger}_top.jpg")
             side_path = os.path.join(local_dir, f"{finger}_side.jpg")
 
-            ok = _capture_top_stream(cap_top, detector, finger, top_path)
+            ok = _capture_top_stream(cap_top, detectors, finger, top_path)
             if not ok:
                 print(f"  [{finger}] 탑뷰 건너뜀")
                 continue
