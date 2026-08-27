@@ -84,6 +84,7 @@ from merge_fingers   import merge_hand, merge_both_hands          # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 from skin_color import recommend_nail_colors, lab_to_rgb_hex      # scan/
+from nail_measurer import recommend_nail_shape                    # scan/
 
 # 탑뷰 라이브 프리뷰 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정 화면을
 # 웹 스트림에도 그대로 재사용한다. 매 프레임 nail_measurer로 실측정을 돌리되,
@@ -820,6 +821,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     skin_tones   = []
     skin_metrics = []
     sizes        = []
+    wl_checks    = []
 
     for finger in FINGER_ORDER:
         finger_dir        = os.path.join(results_root, finger)
@@ -836,6 +838,8 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             summary   = prof.get("summary") or {}
             nail_size = summary.get("nail_size", "average")
             skin_tone = fd.get("skin_tone_hex", "")
+            if fd.get("wl_ratio_check"):
+                wl_checks.append(fd["wl_ratio_check"])
             if skin_tone: skin_tones.append(skin_tone)
             sizes.append(nail_size)
 
@@ -883,6 +887,10 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     recommended_colors = []
     tone = brightness = saturation = None
 
+    recommended_shape = recommend_nail_shape(wl_checks, overall_size)
+    print(f"  [Shape] recommended={recommended_shape}  "
+          f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
+
     # 유효한 손가락들의 LAB 평균으로 피부색/웜쿨/명도/채도/추천컬러 30개를
     # 한 번에 계산한다 (scan/server.py의 build_callback_data와 동일한 방식).
     if skin_metrics:
@@ -920,7 +928,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
                 pass
 
     return {
-        "shape":             "round",
+        "shape":             recommended_shape,
         "skinToneHex":       skin_tone_hex,
         "overallSize":       overall_size,
         "summaryText":       summary_text,

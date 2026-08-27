@@ -1695,6 +1695,55 @@ def apply_wl_correction(finger: str, width_mm: float, length_mm: float) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
+# 6b. Nail shape recommendation
+# ─────────────────────────────────────────────────────────────
+
+NAIL_SHAPES = ("round", "oval", "square", "almond", "ballerina", "stiletto")
+
+
+def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
+    """Recommend a nail shape from this hand's measured width/length proportions.
+
+    wl_checks: the wl_ratio_check dicts (see apply_wl_correction) for this
+    hand's fingers. Each carries wl_diff (this finger's measured W/L ratio
+    minus the Jung et al. 2015 population baseline for that specific
+    finger) and wl_std_dev (that finger's population SD). Averaging
+    wl_diff/wl_std_dev across fingers gives a single z-score for how wide
+    or narrow this hand's nail beds are relative to the population norm:
+    positive = wider/shorter than average, negative = narrower/longer than
+    average - the same axis nail techs use to pick a shape (a wide/short
+    bed gets rounded/tapered to look longer; a bed that's already narrow/
+    long has room to taper into something more dramatic).
+
+    overall_size (this hand's mode nail_size classification, already
+    computed elsewhere from the same population norms - see
+    _size_category) gates the two most dramatic shapes: ballerina and
+    stiletto both need real absolute nail length to taper into, not just
+    narrow proportions on an otherwise short nail, so a narrow-but-short
+    bed gets almond instead.
+
+    This is a heuristic, not a clinically validated recommendation -
+    thresholds were picked to match common nail-tech shape guidance, not
+    fit to outcome data (none exists yet).
+    """
+    zs = [c["wl_diff"] / c["wl_std_dev"]
+          for c in wl_checks if c.get("wl_std_dev")]
+    if not zs:
+        return "round"
+    z = sum(zs) / len(zs)
+
+    if z >= 1.25:
+        return "round"
+    if z >= 0.5:
+        return "oval"
+    if z >= -0.5:
+        return "square"
+    if overall_size in ("larger", "much_larger"):
+        return "stiletto" if z < -1.25 else "ballerina"
+    return "almond"
+
+
+# ─────────────────────────────────────────────────────────────
 # 7. Visualisation
 # ─────────────────────────────────────────────────────────────
 

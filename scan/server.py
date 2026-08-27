@@ -38,6 +38,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from skin_color import recommend_nail_colors, lab_to_rgb_hex
+from nail_measurer import recommend_nail_shape
 
 BASE         = os.path.dirname(os.path.abspath(__file__))
 BUCKET       = "naily-scans"
@@ -494,6 +495,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     skin_tones   = []
     skin_metrics = []
     sizes        = []
+    wl_checks    = []
 
     for finger in FINGER_ORDER:
         finger_dir        = os.path.join(results_root, finger)
@@ -520,6 +522,8 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
             if skin_tone:
                 skin_tones.append(skin_tone)
             sizes.append(nail_size)
+            if finger_data.get("wl_ratio_check"):
+                wl_checks.append(finger_data["wl_ratio_check"])
 
             # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
             # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다.
@@ -582,8 +586,12 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     else:
         print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
+    recommended_shape = recommend_nail_shape(wl_checks, overall_size)
+    print(f"  [Shape] recommended={recommended_shape}  "
+          f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
+
     return {
-        "shape":             "round",
+        "shape":             recommended_shape,
         "skinToneHex":       skin_tone_hex,
         "overallSize":       overall_size,
         "recommendedColors": recommended_colors,
