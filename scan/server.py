@@ -38,6 +38,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from skin_color import recommend_nail_colors, lab_to_rgb_hex
+from nail_measurer import recommend_nail_shape
 
 BASE         = os.path.dirname(os.path.abspath(__file__))
 BUCKET       = "naily-scans"
@@ -494,6 +495,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     skin_tones   = []
     skin_metrics = []
     sizes        = []
+    wl_checks    = []
 
     for finger in FINGER_ORDER:
         finger_dir        = os.path.join(results_root, finger)
@@ -520,6 +522,8 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
             if skin_tone:
                 skin_tones.append(skin_tone)
             sizes.append(nail_size)
+            if finger_data.get("wl_ratio_check"):
+                wl_checks.append(finger_data["wl_ratio_check"])
 
             # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
             # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다.
@@ -557,6 +561,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     overall_size       = max(set(sizes), key=sizes.count) if sizes else "average"
     recommended_colors = []
     tone               = None
+    warmness           = None  # 웜/쿨 연속 스칼라 (LAB b - a*0.5). tone(범주)의 원본 값
     brightness         = None
     saturation         = None
 
@@ -572,22 +577,28 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
         skin_tone_hex = lab_to_rgb_hex(avg_L, avg_a, avg_b)
         brightness    = round(avg_L / 100.0, 3)
         saturation    = round(avg_sat, 3)
+        warmness      = round(avg_warm, 2)
 
         result = recommend_nail_colors(avg_L, avg_a, avg_b, avg_warm, avg_sat)
         recommended_colors = [c["hex"] for c in result["best"]]
         tone = result["skin_summary"]["tone"]
-        print(f"  [SkinColor] tone={tone} brightness={brightness} "
+        print(f"  [SkinColor] tone={tone} warmness={warmness} brightness={brightness} "
               f"saturation={saturation} colors={len(recommended_colors)}개 "
               f"({len(skin_metrics)}손가락 평균)")
     else:
         print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
+    recommended_shape = recommend_nail_shape(wl_checks, overall_size)
+    print(f"  [Shape] recommended={recommended_shape}  "
+          f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
+
     return {
-        "shape":             "round",
+        "shape":             recommended_shape,
         "skinToneHex":       skin_tone_hex,
         "overallSize":       overall_size,
         "recommendedColors": recommended_colors,
         "tone":              tone,
+        "warmness":          warmness,
         "brightness":        brightness,
         "saturation":        saturation,
         "fingers":           fingers_data,

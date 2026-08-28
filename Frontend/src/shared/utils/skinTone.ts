@@ -81,10 +81,15 @@ export function pickSpreadColors<T>(items: T[], count: number): T[] {
   return Array.from({ length: count }, (_, i) => items[Math.floor(i * step)])
 }
 
+/** 낮음 → 높음 축의 3단계. 톤은 쿨→뉴트럴→웜에 대응한다. */
+export type SkinLevel = '저' | '중' | '고'
+
 export type SkinToneMetric = {
   /** 슬라이더에서 손잡이가 위치할 값 (0~100) */
   percent: number
   label: string
+  /** label과 완전히 같은 실측 임계값으로 나눈 저/중/고 (칩 등 압축 표기용) */
+  level: SkinLevel
 }
 
 export type SkinToneAnalysis = {
@@ -93,40 +98,60 @@ export type SkinToneAnalysis = {
   saturation: SkinToneMetric
 }
 
-/** 명도/채도 막대 값(0~100)을 고/중/저 3단계 구간으로 나눈다 (67% 이상 고, 33% 이상 중, 그 아래 저) */
-export function classifySkinLevel(percent: number): '고' | '중' | '저' {
-  if (percent >= 67) return '고'
-  if (percent >= 33) return '중'
-  return '저'
-}
-
 function clampPercent(value: number, min: number, max: number): number {
   return Math.round(Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)))
 }
 
+// scan/skin_color.py의 tone 범주 경계값(warmness 스칼라 기준). 이 두 값 사이가 neutral 구간.
+const WARMNESS_WARM_CUTOFF = 13.45
+const WARMNESS_COOL_CUTOFF = 12.39
+
+/**
+ * 백엔드 warmness 스칼라(LAB b - a*0.5)를 0~100 슬라이더 위치로 변환한다.
+ * neutral 구간 중앙 -> 50%, cool 경계 -> 33%, warm 경계 -> 67%로 맞추고(=라벨과 위치가
+ * 서로 어긋나지 않게) 그 바깥은 같은 기울기로 이어지며 0~100에서 잘린다.
+ */
+function warmnessToTonePercent(warmness: number): number {
+  const mid = (WARMNESS_WARM_CUTOFF + WARMNESS_COOL_CUTOFF) / 2
+  const halfBand = (WARMNESS_WARM_CUTOFF - WARMNESS_COOL_CUTOFF) / 2
+  return Math.round(Math.min(100, Math.max(0, 50 + ((warmness - mid) / halfBand) * 17)))
+}
+
 /**
  * scan/skin_color.py(recommend_nail_colors)가 10손가락 LAB 평균으로 계산해서
- * API로 내려주는 실제 진단값(tone/brightness/saturation)을 슬라이더 형태로 변환한다.
+ * API로 내려주는 실제 진단값(tone/warmness/brightness/saturation)을 슬라이더 형태로 변환한다.
  * analyzeSkinTone()은 이 값이 없는(구버전 스캔 등) 경우에만 쓰는 대체 추정치다.
  */
 export function skinToneAnalysisFromMetrics(
-    tone: string | null,
-    brightness: number | null,
-    saturation: number | null,
+  tone: string | null,
+  warmness: number | null,
+  brightness: number | null,
+  saturation: number | null,
 ): SkinToneAnalysis | null {
   if (tone == null || brightness == null || saturation == null) return null
 
-  const toneLabel = tone === 'warm' ? '웜톤' : tone === 'cool' ? '쿨톤' : '뉴트럴 톤'
-  const toneScore = tone === 'warm' ? 80 : tone === 'cool' ? 20 : 50
+  // 백엔드가 'warm'/'WARM'/' Warm ' 등 대소문자·공백이 섞여 내려줘도 웜/쿨로 인식되도록
+  // 정규화한다 — 정확 일치만 보던 이전 코드는 이런 값을 전부 '뉴트럴톤'으로 떨어뜨렸다.
+  const normalizedTone = tone.trim().toLowerCase()
+  const toneLabel = normalizedTone === 'warm' ? '웜톤' : normalizedTone === 'cool' ? '쿨톤' : '뉴트럴톤'
+  const toneLevel: SkinLevel = normalizedTone === 'warm' ? '고' : normalizedTone === 'cool' ? '저' : '중'
+  // 바 위치는 연속 스칼라(warmness)가 있으면 그 실측값으로 잡고, 없으면(구버전 스캔) 범주별
+  // 고정 위치로 폴백한다.
+  const toneScore =
+    warmness != null
+      ? warmnessToTonePercent(warmness)
+      : normalizedTone === 'warm' ? 80 : normalizedTone === 'cool' ? 20 : 50
 
   const brightnessLabel = brightness > 0.65 ? '밝은 편' : brightness < 0.55 ? '어두운 편' : '보통 밝기'
+  const brightnessLevel: SkinLevel = brightness > 0.65 ? '고' : brightness < 0.55 ? '저' : '중'
   // skin_color.py: saturation = chroma / 40.0 — 기존 chroma 기준(20/12)을 같은 스케일로 환산
   const saturationLabel = saturation > 0.5 ? '혈색이 있는 편' : saturation < 0.3 ? '혈색이 적은 편' : '보통'
+  const saturationLevel: SkinLevel = saturation > 0.5 ? '고' : saturation < 0.3 ? '저' : '중'
 
   return {
-    tone: { percent: toneScore, label: toneLabel },
-    brightness: { percent: Math.round(Math.min(100, Math.max(0, brightness * 100))), label: brightnessLabel },
-    saturation: { percent: Math.round(Math.min(100, Math.max(0, saturation * 100))), label: saturationLabel },
+    tone: { percent: toneScore, label: toneLabel, level: toneLevel },
+    brightness: { percent: Math.round(Math.min(100, Math.max(0, brightness * 100))), label: brightnessLabel, level: brightnessLevel },
+    saturation: { percent: Math.round(Math.min(100, Math.max(0, saturation * 100))), label: saturationLabel, level: saturationLevel },
   }
 }
 
@@ -137,17 +162,20 @@ export function analyzeSkinTone(hex: string): SkinToneAnalysis {
 
   // 웜/쿨 축: b*(황색기)에서 a*(적색기)를 절반만큼 뺀 값이 클수록 웜(황금빛), 작을수록 쿨(핑크빛)
   const warmScore = bLab - a * 0.5
-  const toneLabel = warmScore > 8 ? '웜톤' : warmScore < 5 ? '쿨톤' : '뉴트럴 톤'
+  const toneLabel = warmScore > 8 ? '웜톤' : warmScore < 5 ? '쿨톤' : '뉴트럴톤'
+  const toneLevel: SkinLevel = warmScore > 8 ? '고' : warmScore < 5 ? '저' : '중'
 
   const brightnessLabel = L > 65 ? '밝은 편' : L < 55 ? '어두운 편' : '보통 밝기'
+  const brightnessLevel: SkinLevel = L > 65 ? '고' : L < 55 ? '저' : '중'
 
   const chroma = Math.sqrt(a * a + bLab * bLab)
   const saturationLabel = chroma > 20 ? '혈색이 있는 편' : chroma < 12 ? '혈색이 적은 편' : '보통'
+  const saturationLevel: SkinLevel = chroma > 20 ? '고' : chroma < 12 ? '저' : '중'
 
   return {
-    tone: { percent: clampPercent(warmScore, -10, 30), label: toneLabel },
-    brightness: { percent: clampPercent(L, 20, 95), label: brightnessLabel },
-    saturation: { percent: clampPercent(chroma, 8, 32), label: saturationLabel },
+    tone: { percent: clampPercent(warmScore, -10, 30), label: toneLabel, level: toneLevel },
+    brightness: { percent: clampPercent(L, 20, 95), label: brightnessLabel, level: brightnessLevel },
+    saturation: { percent: clampPercent(chroma, 8, 32), label: saturationLabel, level: saturationLevel },
   }
 }
 

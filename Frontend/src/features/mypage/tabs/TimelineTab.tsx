@@ -235,7 +235,7 @@ export function TimelineTab() {
                     <span>{dayTotalCount}건</span>
                   </div>
                   {dayEvents.length === 0 ? (
-                      <p className="mypage-x__day-overview-empty">이 날에는 아직 활동이 없어요.</p>
+                      <p className="mypage-x__day-overview-empty">이날에는 아직 활동이 없어요.</p>
                   ) : (
                       <div className="mypage-x__day-rail-list" role="list">
                         {dayEvents.map((event) => {
@@ -278,7 +278,7 @@ export function TimelineTab() {
                       {Icon.hand} 손 촬영 · 분석 <span>{timelineScansOldest.length}건</span>
                     </p>
                     {timelineScansOldest.length === 0 ? (
-                        <p className="mypage-x__day-section-empty">이 날의 손 분석 기록이 없어요.</p>
+                        <p className="mypage-x__day-section-empty">이날의 손 분석 기록이 없어요.</p>
                     ) : (
                         <div className="mypage-x__scan-list">
                           {timelineScansOldest.map((session) => (
@@ -302,7 +302,7 @@ export function TimelineTab() {
                       {Icon.print} 네일팁 출력 <span>{timelinePrintsOldest.length}건</span>
                     </p>
                     {timelinePrintsOldest.length === 0 ? (
-                        <p className="mypage-x__day-section-empty">이 날의 네일팁 출력 기록이 없어요.</p>
+                        <p className="mypage-x__day-section-empty">이날의 네일팁 출력 기록이 없어요.</p>
                     ) : (
                         <div className="mypage-x__print-list">
                           {timelinePrintsOldest.map((order) => (
@@ -326,7 +326,7 @@ export function TimelineTab() {
                       {Icon.design} 디자인 생성 <span>{timelineDesignsOldest.length}건</span>
                     </p>
                     {timelineDesignsOldest.length === 0 ? (
-                        <p className="mypage-x__day-section-empty">이 날의 디자인 생성 기록이 없어요.</p>
+                        <p className="mypage-x__day-section-empty">이날의 디자인 생성 기록이 없어요.</p>
                     ) : (
                         <ImageGrid
                             items={timelineDesignsOldest}

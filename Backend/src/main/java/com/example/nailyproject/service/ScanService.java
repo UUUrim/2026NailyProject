@@ -145,6 +145,7 @@ public class ScanService {
                 resultDto.getSkinToneHex(),
                 recommendedColorsJson,
                 resultDto.getTone(),
+                resultDto.getWarmness(),
                 resultDto.getBrightness(),
                 resultDto.getSaturation(),
                 resultDto.getOverallSize()

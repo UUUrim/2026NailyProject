@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getScanResult } from '@/entities/scan/api'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
-import { analyzeSkinTone, classifySkinLevel, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import {
   buildScanDetail,
   dateKeyOf,
@@ -181,7 +181,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
         // scan/skin_color.py가 10손가락 LAB 평균으로 계산해 API에 내려주는 실제 진단값을 우선 쓰고,
         // (구버전 스캔 등) 값이 없을 때만 대표 피부색 hex 하나로 만든 대체 추정치를 쓴다.
         const analysis =
-          skinToneAnalysisFromMetrics(detail.tone, detail.brightness, detail.saturation) ??
+          skinToneAnalysisFromMetrics(detail.tone, detail.warmness, detail.brightness, detail.saturation) ??
           (detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null)
         const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
         const palette =
@@ -257,8 +257,8 @@ export function ScanDetailModal({ session, onClose }: Props) {
                     <div className="mypage-x__scanx-chips">
                       <span>{skinHex}</span>
                       <span>{toneLabel}</span>
-                      <span>{classifySkinLevel(analysis.brightness.percent)}명도</span>
-                      <span>{classifySkinLevel(analysis.saturation.percent)}채도</span>
+                      <span>{analysis.brightness.level}명도</span>
+                      <span>{analysis.saturation.level}채도</span>
                     </div>
                   )}
                 </div>

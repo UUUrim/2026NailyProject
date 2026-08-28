@@ -628,7 +628,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
+                                                <p className="design-chat__color-picker-label">이달의 컬러</p>
                                             )}
 
                                             <div className="design-chat__color-main">
@@ -734,7 +734,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
+                                                <p className="design-chat__color-picker-label">이달의 컬러</p>
                                             )}
 
                                             <div className="design-chat__color-main">

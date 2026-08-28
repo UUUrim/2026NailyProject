@@ -38,6 +38,9 @@ export type MyPageContextValue = {
   totalFavoriteCount: number
 
   // ── 프로필: 닉네임 변경 ──
+  // 소셜 로그인(google/naver) 계정 여부 — true면 비밀번호 변경 UI를 숨기고
+  // 닉네임 변경 시 현재 비밀번호 확인 단계를 건너뛴다.
+  isSocialLogin: boolean
   isEditingNickname: boolean
   nicknameStage: 'password' | 'nickname' | 'done'
   nicknamePassword: string

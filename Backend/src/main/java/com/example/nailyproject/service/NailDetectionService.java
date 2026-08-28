@@ -90,11 +90,17 @@ public class NailDetectionService {
         Map<String, Object> body = new HashMap<>();
         body.put("image_base64", imageBase64);
         body.put("parts", parts);
-        body.put("threshold", 0.4);
+        body.put("threshold", 0.1);
         // extractColorsPerNail()과 동일한 값 - SAM 마스크가 손톱 큐티클 쪽처럼
         // 손톱 본연의 색과 배경색이 거의 같은 지점에서 경계를 살짝 넓게 잡는 걸
         // 안쪽으로 침식시켜 보정한다 (detect 서버가 이 필드를 지원해야 반영됨).
         body.put("mask_shrink", 6);
+        // "nail tips" 프롬프트는 GroundingDINO 박스가 색칠된 부분에만 쏠려서 큐티클 쪽
+        // 안 칠해진 판이 박스 밖으로 빠지는 경우가 흔한데, 그러면 SAM이 그 영역을 애초에
+        // 볼 수 없어 mask_shrink 같은 사후 보정으로는 되살릴 수 없다 - SAM에 넘기기 전
+        // 박스 자체를 자기 크기의 12%만큼 사방으로 넓혀서 "손톱 전체"를 볼 여유를 준다
+        // (detect 서버가 이 필드를 지원해야 반영됨).
+        body.put("box_expand_ratio", 0.12);
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
         ResponseEntity<String> response = restTemplate.postForEntity(

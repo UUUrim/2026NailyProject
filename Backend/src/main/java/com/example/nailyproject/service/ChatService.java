@@ -126,6 +126,7 @@ public class ChatService {
                      - reply에서 "모든 준비가 완료되었습니다", "다 됐어요" 같은 완료를 암시하는
                         문구를 쓴다면, 반드시 isComplete를 true로 설정하세요. reply의 내용과
                         isComplete 값이 서로 모순되면 안 됩니다.
+                     - motif를 물어볼 때는 optionColors를 비워두세요 — 색상은 color 카테고리에서만 별도로 물어봅니다.
             \s
                      [현재까지 파악된 선호/비선호 상태]
                      %s
@@ -223,9 +224,9 @@ public class ChatService {
                         || scan.getStatus() == HandScan.ScanStatus.COMPLETED)
                 .map(scan -> {
                     StringBuilder hint = new StringBuilder();
-                    if (scan.getShape() != null && !scan.getShape().isBlank()) {
+                    if (scan.getRecommendedShape() != null && !scan.getRecommendedShape().isBlank()) {
                         hint.append("[스캔 기반 추천 쉐입] 이 사용자의 손 스캔 분석 결과 추천 쉐입은 \"")
-                                .append(scan.getShape())
+                                .append(scan.getRecommendedShape())
                                 .append("\"입니다. shape를 물어볼 때는 이 값을 options의 첫 번째 항목으로 반드시 포함하고, ")
                                 .append("그 라벨 끝에 \"(스캔 결과 추천)\"이라고 표시하세요. ")
                                 .append("예: \"almond\"가 추천값이면 options에 \"아몬드 (스캔 결과 추천)\"처럼 만드세요. ")

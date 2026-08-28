@@ -9,6 +9,7 @@ export type ScanSession = {
   rightScanId: number | null
   skinToneHex: string | null
   tone: string | null
+  warmness: number | null
   brightness: number | null
   saturation: number | null
   recommendedColors: string[]
@@ -35,6 +36,7 @@ export type ScanDetail = {
   scannedAt: string
   skinToneHex: string | null
   tone: string | null
+  warmness: number | null
   brightness: number | null
   saturation: number | null
   recommendedColors: string[]
@@ -130,6 +132,7 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
     skinToneHex: left?.skinToneHex || right?.skinToneHex || null,
     tone: left?.tone || right?.tone || null,
+    warmness: left?.warmness ?? right?.warmness ?? null,
     brightness: left?.brightness ?? right?.brightness ?? null,
     saturation: left?.saturation ?? right?.saturation ?? null,
     recommendedColors: (left?.recommendedColors?.length ? left.recommendedColors : right?.recommendedColors) ?? [],
@@ -295,6 +298,7 @@ export function buildScanSessions(scans: ScanHistoryItem[]): ScanSession[] {
       rightScanId: right.scanId,
       skinToneHex: left.skinToneHex ?? right.skinToneHex ?? null,
       tone: left.tone ?? right.tone ?? null,
+      warmness: left.warmness ?? right.warmness ?? null,
       brightness: left.brightness ?? right.brightness ?? null,
       saturation: left.saturation ?? right.saturation ?? null,
       recommendedColors: (left.recommendedColors?.length ? left.recommendedColors : right.recommendedColors) ?? [],

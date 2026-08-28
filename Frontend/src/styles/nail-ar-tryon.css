@@ -111,6 +111,21 @@
   opacity: 1;
 }
 
+/* AR 모달에서는 카메라 선택 알약 버튼을 가운데가 아닌 왼쪽 상단에 두고,
+   '카메라' 라벨 문구는 숨겨 버튼만 노출한다 (hand-scan 공용 스타일은 그대로). */
+.nail-ar-tryon__stage .hand-scan-fs__feed-select-wrap {
+  left: 16px;
+  transform: none;
+}
+
+.nail-ar-tryon__stage .hand-scan-fs__feed-select-label {
+  align-items: flex-start;
+}
+
+.nail-ar-tryon__stage .hand-scan-fs__feed-select-name {
+  display: none;
+}
+
 .nail-ar-tryon__loading,
 .nail-ar-tryon__error {
   position: absolute;

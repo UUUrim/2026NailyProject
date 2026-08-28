@@ -226,8 +226,8 @@ public class NailDesignService {
         String finalShape;
         if (!shapeLiked.isEmpty()) {
             finalShape = shapeLiked.get(0);
-        } else if (handScan.getShape() != null && !handScan.getShape().isBlank()) {
-            finalShape = handScan.getShape();
+        } else if (handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
+            finalShape = handScan.getRecommendedShape();
         } else {
             finalShape = "round";
         }
@@ -739,7 +739,11 @@ public class NailDesignService {
                     .orElse(null);
         }
 
-        JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType, previousPlanJson);
+        List<String> seasonLikedForTrend = getLiked(slots, "season");
+        String userSeasonForTrend = seasonLikedForTrend.stream()
+                .filter(s -> !"none".equals(s))
+                .findFirst().orElse(null);
+        JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType, previousPlanJson, userSeasonForTrend);
 
         if (session != null) {
             backfillSlotsFromPlan(slots, plan);
@@ -897,8 +901,8 @@ public class NailDesignService {
             return;
         }
 
-        if (getLiked(slots, "shape").isEmpty() && handScan.getShape() != null && !handScan.getShape().isBlank()) {
-            addLiked(slots, "shape", handScan.getShape());
+        if (getLiked(slots, "shape").isEmpty() && handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
+            addLiked(slots, "shape", handScan.getRecommendedShape());
         }
 
         if (getLiked(slots, "color").isEmpty() && handScan.getRecommendedColors() != null) {
@@ -1005,6 +1009,8 @@ public class NailDesignService {
 
     private String buildCombinedPromptFromPlan(JsonNode plan, List<String> noPhrases, Map<String, List<String>> fingerDislikesMap) {
         String shape = toPromptText(plan.path("shape").asText("round"));
+        // ballerina → coffin (프롬프트에서만)
+        if ("ballerina".equalsIgnoreCase(shape)) shape = "coffin";
         String mood = plan.path("mood").asText("");
         String season = plan.path("season").asText("");
         String overallColor = plan.path("color").asText("");
@@ -1211,17 +1217,19 @@ public class NailDesignService {
 
     private List<String> extractPartNamesFromPlan(JsonNode plan) {
         List<String> parts = new ArrayList<>();
+
         for (String fingerName : List.of("thumb", "index", "middle", "ring", "pinky")) {
             JsonNode finger = plan.get(fingerName);
             if (finger == null) continue;
 
-            // ★ parts_detect만 사용, 없으면 스킵
-            JsonNode detectList = finger.get("parts_detect");
-            if (detectList != null && detectList.isArray() && detectList.size() > 0) {
-                detectList.forEach(p -> {
-                    String part = p.asText().trim();
-                    if (!part.isBlank() && !"none".equalsIgnoreCase(part) && !parts.contains(part)) {
-                        parts.add(part + " on nail tip");
+            JsonNode partsList = finger.path("parts");
+            if (partsList.isArray()) {
+                partsList.forEach(p -> {
+                    String raw = p.asText().trim();
+                    if (!raw.toLowerCase().contains("3d")) return;
+                    String part = simplifyPartName(raw);
+                    if (!part.isBlank() && !parts.contains(part)) {
+                        parts.add(part);
                     }
                 });
             }
@@ -1237,7 +1245,8 @@ public class NailDesignService {
 
         // 형용사/수식어 제거
         simplified = simplified
-                .replaceAll("(?i)\\b(large|small|tiny|oversized|3D|iridescent|metallic|crystal|glossy|matte|clear|embedded|holographic|internal|fine|soft|smooth|subtle|shaped|single|double)\\b", "")
+                .replaceAll("(?i)\\b(large|small|tiny|oversized|3D|iridescent|metallic|crystal|glossy|matte|clear|embedded|holographic|internal|fine|soft|smooth|subtle|shaped|single|double|sculpted|multifaceted|icy|chrome|silver|gold)\\b", "")
+                .replaceAll("(?i)\\b(charm|chrome|accent|detail|finish|texture|pattern|effect|art|coat|base|tip|stud|cluster|bead|rhinestone|gem|stone|crystal|sphere|orb|line)\\b", "")
                 .replaceAll("(?i)\\b(with|and|of|from|at|in|the|a|an)\\b", " ")
                 .replaceAll("(?i)-shaped", "")
                 .replaceAll("-", " ")
@@ -1250,7 +1259,7 @@ public class NailDesignService {
         for (String w : words) {
             if (!unique.contains(w)) unique.add(w);
         }
-        simplified = String.join(" ", unique.subList(0, Math.min(1, unique.size())));
+        simplified = String.join(" ", unique.subList(0, Math.min(2, unique.size())));
 
         return simplified + " on nail tip";
     }

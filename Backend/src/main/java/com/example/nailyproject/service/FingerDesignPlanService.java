@@ -248,7 +248,7 @@ public class FingerDesignPlanService {
      * 참고 이미지 없이 플랜 생성
      */
     public JsonNode generatePlan(String confirmedInputSummary) {
-        return generatePlan(confirmedInputSummary, null, null, null);
+        return generatePlan(confirmedInputSummary, null, null, null, null);
     }
 
     /**
@@ -257,7 +257,11 @@ public class FingerDesignPlanService {
      * @param imageMimeType 예: "image/jpeg", "image/png"
      */
     public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType) {
-        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, null);
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, null, null);
+    }
+
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson) {
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, previousPlanJson, null);
     }
 
     /**
@@ -266,7 +270,7 @@ public class FingerDesignPlanService {
      * 이걸 안 넘기면(=previousPlanJson이 null) 매번 완전히 새로 창작하듯 플랜을 만들어서,
      * "새끼손가락에 파츠 하나만 추가해줘" 같은 사소한 수정에도 5개 손가락이 전부 바뀌어버렸다.
      */
-    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson) {
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson, String userSeason) {
 
         String editModeSection = "";
         if (previousPlanJson != null && !previousPlanJson.isBlank()) {
@@ -298,7 +302,7 @@ public class FingerDesignPlanService {
                     """.formatted(previousPlanJson);
         }
 
-        String trendHint = styleTrendService.buildTrendHint();
+        String trendHint = styleTrendService.buildTrendHint(userSeason);
         String systemPrompt = String.format(SYSTEM_PROMPT, trendHint, editModeSection, confirmedInputSummary);
 
         List<Map<String, Object>> parts = new ArrayList<>();

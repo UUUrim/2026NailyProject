@@ -89,18 +89,24 @@ STABLE_N       = MEDIAN_N
 
 DISPLAY_H = 820         # window height; the full-res frame is what gets saved
 
-# The guide line sits exactly on the ArUco marker's bottom edge (offset 0)
-# for every finger except thumb/pinky. Those two need it moved further from
-# the fingertip (toward the marker/hand, larger cuticle_y) because the real
-# cuticle on a thumb/pinky lands measurably past the marker's own edge —
-# the other three fingers don't have that gap.
-GUIDE_LINE_OFFSET_DEFAULT_MM     = 0.0
-GUIDE_LINE_OFFSET_THUMB_PINKY_MM = 7.0
+# Per-finger offset from the ArUco marker's bottom edge, tuned by testing
+# each finger against where its real cuticle actually lands (larger =
+# further from the fingertip, toward the marker/hand). Index/middle need
+# none - the marker's own edge already lines up with their cuticle.
+GUIDE_LINE_OFFSET_DEFAULT_MM = 0.0
+GUIDE_LINE_OFFSET_THUMB_MM   = 10.0
+GUIDE_LINE_OFFSET_RING_MM    = 6.0
+GUIDE_LINE_OFFSET_PINKY_MM   = 14.0
+
+_GUIDE_LINE_OFFSET_MM = {
+    "thumb": GUIDE_LINE_OFFSET_THUMB_MM,
+    "ring":  GUIDE_LINE_OFFSET_RING_MM,
+    "pinky": GUIDE_LINE_OFFSET_PINKY_MM,
+}
 
 
 def guide_line_offset_mm(finger: str) -> float:
-    return (GUIDE_LINE_OFFSET_THUMB_PINKY_MM if finger in ("thumb", "pinky")
-            else GUIDE_LINE_OFFSET_DEFAULT_MM)
+    return _GUIDE_LINE_OFFSET_MM.get(finger, GUIDE_LINE_OFFSET_DEFAULT_MM)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -330,7 +336,10 @@ def detect_marker_only(frame, aruco_size_mm):
         return None
 
 
-def measure_frame(frame, finger, aruco_size_mm):
+GUIDE_Y_SMOOTHING = 0.7  # weight kept from the previous frame's guide_y (EMA)
+
+
+def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None):
     """Run the full measurement on one frame.
 
     Returns a result dict. Never raises: a failed frame (no marker, no finger)
@@ -341,6 +350,20 @@ def measure_frame(frame, finger, aruco_size_mm):
     stream's per-second console log) can tell "no marker", "marker but no
     finger", and "both found but the measurement itself came out unusable"
     apart, instead of one opaque failure for all three.
+
+    prev_guide_y : the previous frame's (smoothed) guide row, if the caller
+    is tracking one (see MeasureWorker). guide_y is recomputed from live
+    ArUco corners + the current finger bbox every single frame, and both of
+    those jitter a few pixels frame to frame from ordinary detection noise
+    - with no temporal smoothing that jitter showed up as the on-screen
+    guide line visibly jumping around even while measurement kept
+    succeeding (unlike the flicker fix for ok/fail flapping, this is noise
+    within otherwise-successful frames). An EMA against the previous
+    frame's value damps that out while still tracking a real, sustained
+    change (e.g. a different finger placed) within a few frames. Affects
+    the actual cuticle_y fed into measure_top too, not just the drawn line
+    - the two must never diverge, or the line would stop showing what's
+    actually being measured.
     """
     result = {"ok": False, "marker_ok": False, "finger_ok": False,
               "t": time.time()}
@@ -365,8 +388,11 @@ def measure_frame(frame, finger, aruco_size_mm):
         with quiet():
             fbx, fby, fbw, fbh = bbox
             guide_offset_px = guide_line_offset_mm(finger) / mpp
-            guide_y = int(round(guide_line_row(corners, fbx + fbw // 2,
-                                               guide_offset_px)))
+            guide_y_raw = guide_line_row(corners, fbx + fbw // 2, guide_offset_px)
+            guide_y = (int(round(GUIDE_Y_SMOOTHING * prev_guide_y +
+                                 (1 - GUIDE_Y_SMOOTHING) * guide_y_raw))
+                       if prev_guide_y is not None else int(round(guide_y_raw)))
+            result["guide_y"] = guide_y
             data = nm.measure_top(frame, mpp, finger_mask, bbox,
                                   aruco_corners=corners, finger=finger,
                                   guide_y=guide_y)
@@ -431,13 +457,17 @@ class MeasureWorker(threading.Thread):
         self._stop.set()
 
     def run(self):
+        prev_guide_y = None   # carries the EMA across frames - see measure_frame
         while not self._stop.is_set():
             with self._lock:
                 frame, self._pending = self._pending, None
             if frame is None:
                 time.sleep(0.01)
                 continue
-            result = measure_frame(frame, self.finger, self.aruco_size)
+            result = measure_frame(frame, self.finger, self.aruco_size,
+                                   prev_guide_y=prev_guide_y)
+            if result.get("guide_y") is not None:
+                prev_guide_y = result["guide_y"]
             with self._lock:
                 self._result = result
 

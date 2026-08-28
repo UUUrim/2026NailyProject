@@ -43,29 +43,49 @@ public class StyleTrendService {
 
         String season = (userSeason != null && !userSeason.isBlank())
                 ? userSeason : getCurrentSeason();
+
         List<MotifEntry> topMotifs = getTopMotifsBySeason(season, 10);
         if (topMotifs.isEmpty()) return "";
 
         StringBuilder sb = new StringBuilder();
         sb.append("[이번 시즌 트렌드 참고 팔레트 - ").append(season).append("]\n");
-        sb.append("이미지 스타일과 어울린다면 아래 모티프를 우선적으로 활용하세요.\n");
+        sb.append("이미지 스타일과 어울린다면 아래 모티프/무드/컬러를 우선적으로 활용하세요.\n\n");
+
+        // 상위 5개 모티프 + 연관 무드/색상
+        sb.append("추천 모티프:\n");
+        JsonNode motifs = styleData.path("associations").path("motifs");
 
         for (int i = 0; i < Math.min(5, topMotifs.size()); i++) {
-            sb.append("- ").append(topMotifs.get(i).name()).append("\n");
-        }
+            String motifName = topMotifs.get(i).name();
+            sb.append("- ").append(motifName);
 
-        if (topMotifs.size() > 5) {
-            sb.append("선택 사용 (나머지):\n");
-            for (int i = 5; i < topMotifs.size(); i++) {
-                sb.append("- ").append(topMotifs.get(i).name()).append("\n");
+            JsonNode motifNode = motifs.path(motifName);
+
+            // 연관 무드 top 2
+            List<String> topMoods = new ArrayList<>();
+            for (JsonNode m : motifNode.path("moods")) {
+                if (topMoods.size() >= 2) break;
+                topMoods.add(m.path("value").asText());
             }
+            if (!topMoods.isEmpty()) {
+                sb.append(" (무드: ").append(String.join(", ", topMoods)).append(")");
+            }
+
+            // 연관 색상 top 2
+            List<String> topColors = new ArrayList<>();
+            for (JsonNode c : motifNode.path("colors")) {
+                if (topColors.size() >= 2) break;
+                topColors.add(c.path("value").asText());
+            }
+            if (!topColors.isEmpty()) {
+                sb.append(" (컬러: ").append(String.join(", ", topColors)).append(")");
+            }
+
+            sb.append("\n");
         }
 
         sb.append("\n");
-        String result = sb.toString();
-        System.out.println("[TrendHint] season=" + season + " / 상위 모티프: " +
-                topMotifs.stream().limit(5).map(MotifEntry::name).collect(Collectors.joining(", ")));
-        return result;
+        return sb.toString();
     }
 
     private String getCurrentSeason() {

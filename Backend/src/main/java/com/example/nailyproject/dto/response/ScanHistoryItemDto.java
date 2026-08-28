@@ -17,6 +17,7 @@ public class ScanHistoryItemDto {
     private String skinToneHex;
     private List<String> recommendedColors;
     private String tone;
+    private Double warmness;
     private Double brightness;
     private Double saturation;
     private Double avgLengthMm;

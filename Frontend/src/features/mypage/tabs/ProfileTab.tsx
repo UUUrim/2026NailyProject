@@ -5,6 +5,7 @@ import { useMyPageContext } from '../context'
 export function ProfileTab() {
   const {
     profile,
+    isSocialLogin,
     totalScanCount,
     totalPrintCount,
     totalDesignCount,
@@ -67,9 +68,12 @@ export function ProfileTab() {
                   <button type="button" className="mypage-x__edit-btn" onClick={handleStartEditNickname}>
                     닉네임 변경
                   </button>
-                  <button type="button" className="mypage-x__edit-btn" onClick={handleStartEditPassword}>
-                    비밀번호 변경
-                  </button>
+                  {/* 소셜 로그인 계정은 자체 비밀번호가 없어 비밀번호 변경을 노출하지 않는다 */}
+                  {!isSocialLogin && (
+                      <button type="button" className="mypage-x__edit-btn" onClick={handleStartEditPassword}>
+                        비밀번호 변경
+                      </button>
+                  )}
                 </div>
             )}
 
