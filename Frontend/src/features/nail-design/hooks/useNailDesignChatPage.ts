@@ -6,6 +6,7 @@ import { getMyScans, getScanResult, type ScanResultResponse } from '@/entities/s
 import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
 import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
@@ -704,8 +705,8 @@ export function useNailDesignChatPage() {
             ? leftAnalysis.recommendedColors
             : rightAnalysis?.recommendedColors ?? []
         const colorSwatches = recommendedColors.length > 0
-            ? pickSpreadColors(recommendedColors, 6)
-            : skinToneHex ? pickSpreadColors(generateSkinTonePalette(skinToneHex, 24), 6) : []
+            ? pickSpreadColors(sortRecommendedColors(recommendedColors), 6)
+            : skinToneHex ? pickSpreadColors(sortRecommendedColors(generateSkinTonePalette(skinToneHex, 24)), 6) : []
 
         const seasonPart = toneLabel ? `${toneLabel} 피부톤` : '내 피부톤'
         const shapePart = shapeLabel ? `${shapeLabel} 쉐입` : '추천 쉐입'
@@ -1461,20 +1462,34 @@ export function useNailDesignChatPage() {
             curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
             skinToneHex,
             skinToneAnalysis: backendSkinToneAnalysis ?? (skinToneHex ? analyzeSkinTone(skinToneHex) : null),
-            skinTonePalette:
+            skinTonePalette: sortRecommendedColors(
                 recommendedColors.length > 0
                     ? recommendedColors
                     : skinToneHex
                         ? generateSkinTonePalette(skinToneHex, 30)
-                        : [],
+                        : []
+            ),
         }
     }, [leftAnalysis, rightAnalysis])
 
     // 컬러 선택 단계에서 실제로 보여줄 팔레트 — 스캔 정보(대표 피부색)가 있으면 거기서 뽑은
     // "나와 어울리는 컬러"를, 없으면(스캔 전) 이달의 컬러 30색을 쓴다.
-    const scanColorPalette = analysisSummary?.skinTonePalette ?? []
+    const scanColorPalette = useMemo(() => analysisSummary?.skinTonePalette ?? [], [analysisSummary])
     const hasScanColorPalette = scanColorPalette.length > 0
-    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : MONTHLY_TRENDING_COLORS
+
+    // 사이드바 "추천 컬러"(.design-chat-sidebar__palette): 6열 row-major
+    const sidebarColorPalette = useMemo(
+        () => arrangeRecommendedColors(scanColorPalette, { columns: 6 }),
+        [scanColorPalette],
+    )
+    // 컬러 선택 그리드(.design-chat__color-grid): 10열 row-major
+    const colorPickerPalette = useMemo(
+        () => arrangeRecommendedColors(
+            hasScanColorPalette ? scanColorPalette : MONTHLY_TRENDING_COLORS,
+            { columns: 10 },
+        ),
+        [hasScanColorPalette, scanColorPalette],
+    )
 
     const isMultiConfirmVisible = useMemo(
         () => !!activeQuickReply?.multi && selectedInQuickReply.length > 0,
@@ -1525,6 +1540,7 @@ export function useNailDesignChatPage() {
         scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
+        sidebarColorPalette,
         isMultiConfirmVisible,
         analysisSummary,
         MOTIF_NONE_VALUE,

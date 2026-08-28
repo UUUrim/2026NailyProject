@@ -364,12 +364,9 @@
 
 .design-chat-sidebar__palette {
     display: grid;
-    /* 분석 결과 화면(.skin-tone-palette-grid)과 동일하게, generateSkinTonePalette()가
-       색상군 5개씩 연달아 만들어내는 순서를 grid-auto-flow: column으로 세로부터 채워서
-       같은 색상군이 한 열을 밝은 색(위) → 어두운 색(아래) 순으로 이루게 한다. */
-    grid-auto-flow: column;
+    /* 분석 결과 화면(.skin-tone-palette-grid)과 동일: arrangeRecommendedColors({ columns: 6 })가
+       열=색상군, 행=명도 단계로 배열을 만들고, 기본 흐름(row-major)으로 채운다. */
     grid-template-columns: repeat(6, 1fr);
-    grid-template-rows: repeat(5, 1fr);
     gap: 0.3rem;
     margin-top: 0.8rem;
 }
@@ -1238,8 +1235,9 @@
         height: calc(100dvh - 260px);
     }
 
+    /* 10열 배치(arrangeRecommendedColors)를 절반씩 접어도 색상군·명도 순서가 유지되도록 5열로 */
     .design-chat__color-grid {
-        grid-template-columns: repeat(6, 1fr);
+        grid-template-columns: repeat(5, 1fr);
     }
 }
 

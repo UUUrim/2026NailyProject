@@ -285,6 +285,7 @@ export function NailDesignChatPageContent() {
         scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
+        sidebarColorPalette,
         isMultiConfirmVisible,
         analysisSummary,
         MOTIF_NONE_VALUE,
@@ -422,11 +423,11 @@ export function NailDesignChatPageContent() {
                                         </div>
                                     )}
 
-                                    {analysisSummary.skinTonePalette.length > 0 && (
+                                    {sidebarColorPalette.length > 0 && (
                                         <div className="design-chat-sidebar__card">
                                             <span className="design-chat-sidebar__card-label">추천 컬러</span>
                                             <div className="design-chat-sidebar__palette">
-                                                {analysisSummary.skinTonePalette.map((hex, idx) => (
+                                                {sidebarColorPalette.map((hex, idx) => (
                                                     <span
                                                         key={`${hex}-${idx}`}
                                                         className="design-chat-sidebar__palette-chip"

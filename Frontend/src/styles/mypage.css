@@ -1419,11 +1419,9 @@
 
 .mypage-x__scanx-palette {
   display: grid;
-  /* generateSkinTonePalette()가 6개 색상군 × 5단계(밝은→어두운) 순서로 30색을 만든다.
-     grid-auto-flow: column으로 세로부터 채워서 색상군마다 한 열을 이루게 한다. */
-  grid-auto-flow: column;
+  /* arrangeRecommendedColors({ columns: 6 })가 열=색상군, 행=명도 단계로 배열을 만든다.
+     기본 흐름(row-major)으로 채우면 세로줄 하나가 한 색상군(위=밝음), 맨 아랫줄에 진한 색. */
   grid-template-columns: repeat(6, 34px);
-  grid-template-rows: repeat(5, 34px);
   gap: 8px;
 }
 

@@ -5,6 +5,7 @@ import { getScanResult, type ScanResultResponse } from '@/entities/scan/api'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
 import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
@@ -246,12 +247,15 @@ export function useHandScanResultPage() {
     const skinToneAnalysis =
         skinToneAnalysisFromMetrics(result?.tone ?? null, result?.warmness ?? null, result?.brightness ?? null, result?.saturation ?? null) ??
         (result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null)
-    const skinTonePalette =
+    // .skin-tone-palette-grid 는 6열 row-major 그리드 (열 = 색상군, 행 = 명도 단계, 진한 색은 맨 아랫줄)
+    const skinTonePalette = arrangeRecommendedColors(
         result?.recommendedColors && result.recommendedColors.length > 0
             ? result.recommendedColors
             : result?.skinToneHex
                 ? generateSkinTonePalette(result.skinToneHex, 30)
-                : []
+                : [],
+        { columns: 6 }
+    )
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락
     const apiFingers = [...(leftResult?.fingers ?? []), ...(rightResult?.fingers ?? [])]

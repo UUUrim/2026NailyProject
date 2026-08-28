@@ -6,6 +6,7 @@ import { NextStepButton } from '@/shared/components/NextStepButton'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { buildHandScanAnalysis } from '@/shared/utils/handScanAnalysis'
 import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
 import '@/styles/hand-scan-result.css'
 
 // ══════════════════════════════════════════════════════════════════════
@@ -80,7 +81,10 @@ export function HandScanResultPagePreviewContent() {
     const analysis = buildHandScanAnalysis(MOCK_SKIN_HEX)
     const recommended = getNailShape(analysis.recommendedShape)
     const skinToneAnalysis = analyzeSkinTone(analysis.skinToneHex)
-    const skinTonePalette = generateSkinTonePalette(analysis.skinToneHex, 30)
+    const skinTonePalette = arrangeRecommendedColors(
+        generateSkinTonePalette(analysis.skinToneHex, 30),
+        { columns: 6 },
+    )
 
     return (
         <AppShell mainClassName="scan-result-page">
