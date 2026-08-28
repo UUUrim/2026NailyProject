@@ -37,7 +37,7 @@ ORCASLICER_PATH = r"C:\Program Files\OrcaSlicer\orca-slicer.exe"
 _ORCASLICER_RESOURCES = r"C:\Program Files\OrcaSlicer\resources\profiles\BBL"
 PRINT_PROFILE_MACHINE = _ORCASLICER_RESOURCES + r"\machine\Bambu Lab A1 0.4 nozzle.json"
 _BASE_PROCESS_PROFILE = _ORCASLICER_RESOURCES + r"\process\0.12mm High Quality @BBL A1.json"
-PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Generic PLA @BBL A1.json"
+PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Translucent @BBL A1.json"
 
 # 네일팁용 서포트 오버라이드. 내장 기본 프로파일엔 이 값들이 아예 없는데, 그러면 CLI가
 # "서포트 필요성 자동 판단" 단계에서 우리 모델(작고 심하게 기울어진 형태)에 대해 비정상적으로
@@ -48,6 +48,15 @@ SUPPORT_OVERRIDES = {
     "support_threshold_angle": "30",
     "brim_type": "outer_only",
     "brim_width": "3",
+    "curr_bed_type": "Textured PEI Plate",
+}
+
+FILAMENT_OVERRIDES = {
+    "textured_plate_temp": ["75"],
+    "textured_plate_temp_initial_layer": ["75"],
+    "nozzle_temperature": ["230"],
+    "nozzle_temperature_initial_layer": ["230"],
+    "filament_retraction_length": ["0.5"],
 }
 
 
@@ -65,6 +74,17 @@ def _build_patched_process_profile(output_dir: str) -> str:
     with open(patched_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=8, ensure_ascii=False)
 
+    return patched_path
+
+def _build_patched_filament_profile(output_dir: str) -> str:
+    import json
+    with open(PRINT_PROFILE_FILAMENT, encoding="utf-8") as f:
+        data = json.load(f)
+    data.update(FILAMENT_OVERRIDES)
+    os.makedirs(output_dir, exist_ok=True)
+    patched_path = os.path.join(output_dir, "filament_patched.json")
+    with open(patched_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=8, ensure_ascii=False)
     return patched_path
 
 # 프린터 연결 정보 (Bambu Studio 앱 > 설정 > 프린터에서 확인)
@@ -100,12 +120,14 @@ def slice_3mf(input_3mf_path: str, output_dir: str) -> str:
     output_path = os.path.join(output_dir, "sliced.gcode.3mf")
 
     process_profile = _build_patched_process_profile(output_dir)
+    filament_profile = _build_patched_filament_profile(output_dir)
 
     cmd = [
         ORCASLICER_PATH,
         "--slice", "0",              # 0 = 플레이트 전체 슬라이싱
+        "--arrange", "0",
         "--load-settings", f"{PRINT_PROFILE_MACHINE};{process_profile}",
-        "--load-filaments", PRINT_PROFILE_FILAMENT,
+        "--load-filaments", filament_profile,
         "--export-3mf", output_path,
         input_3mf_path,
     ]

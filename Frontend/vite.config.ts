@@ -40,6 +40,7 @@ export default defineConfig({
       '/chats': { target: 'http://localhost:8080', changeOrigin: true },
       '/designs': { target: 'http://localhost:8080', changeOrigin: true },
       '/scans': { target: 'http://localhost:8080', changeOrigin: true },
+      '/prints': { target: 'http://localhost:8080', changeOrigin: true },
     }
   }
 })

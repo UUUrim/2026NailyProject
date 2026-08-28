@@ -303,7 +303,16 @@
     width: 100%;
     height: 100%;
     display: block;
-    object-fit: contain;
+    /* cover, not contain: the two feeds have very different native aspect
+       ratios (top view ~16:9 webcam vs. side view a portrait phone frame),
+       but both .hand-scan-fs__feed boxes are the same size (equal grid
+       cells) - covering fills that shared box completely instead of
+       letterboxing, so both panes render as the same rectangle. For the
+       portrait phone feed specifically this crops off its top/bottom
+       (centered) rather than its sides, which is what we want: the phone
+       image's edges aren't meaningful, only the centered nail is. */
+    object-fit: cover;
+    object-position: center;
     background: #000;
 }
 
@@ -491,7 +500,7 @@
     padding: 10px 20px;
     max-width: min(90vw, 420px);
     text-align: center;
-    font-size: clamp(0.95rem, 2vw, 1.1rem);
+    font-size: clamp(0.78rem, 1.6vw, 0.92rem);
     font-weight: 600;
     line-height: 1.4;
     color: #fff;
@@ -599,8 +608,8 @@
     }
 
     .hand-scan-fs__prompt {
-        font-size: 1rem;
-        padding: 12px 20px;
+        font-size: 0.85rem;
+        padding: 10px 18px;
     }
 }
 

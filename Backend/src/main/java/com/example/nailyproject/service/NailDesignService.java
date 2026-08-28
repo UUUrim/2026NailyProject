@@ -173,7 +173,8 @@ public class NailDesignService {
         try {
             Map<String, List<String>> parts = nailDetectionService.detectParts(imageBase64, List.of("nail tip"));
             List<String> crops = parts.get("nail tip");
-            if (crops == null || crops.size() != 5) return null;
+            System.out.println("[NailTipCrops] 탐지된 크롭 수: " + (crops != null ? crops.size() : "null")); // ★
+            if (crops == null || crops.isEmpty()) return null;
 
             List<String> urls = new ArrayList<>();
             for (int i = 0; i < crops.size(); i++) {
@@ -1098,6 +1099,69 @@ public class NailDesignService {
             return;
         }
 
+        // ★ nailTipCropsJson에서 개별 손톱 크롭 URL 가져오기
+        NailDesign freshDesign = nailDesignRepository.findById(nailDesign.getId()).orElse(nailDesign);
+        String nailTipCropsJson = freshDesign.getNailTipCropsJson();
+        if (nailTipCropsJson == null || nailTipCropsJson.isBlank()) {
+            System.out.println("[Parts] nailTipCropsJson 없음, 전체 이미지로 폴백");
+            // 기존 방식 (전체 이미지)
+            triggerPartsDetectionFallback(nailDesign, partNames);
+            return;
+        }
+
+        final Long designId = nailDesign.getId();
+
+        new Thread(() -> {
+            try {
+                List<String> cropUrls = objectMapper.readValue(nailTipCropsJson,
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+
+                Map<String, List<String>> allPartsUrlMap = new LinkedHashMap<>();
+
+                // ★ 각 손톱 크롭에서 파츠 탐지
+                for (String cropUrl : cropUrls) {
+                    byte[] cropBytes = s3Service.downloadImageBytes(cropUrl);
+                    String cropBase64 = Base64.getEncoder().encodeToString(cropBytes);
+
+                    Map<String, List<String>> detected = nailDetectionService.detectParts(cropBase64, partNames);
+
+                    // 결과 병합 (같은 파츠명이면 첫 번째 인스턴스만)
+                    for (Map.Entry<String, List<String>> entry : detected.entrySet()) {
+                        if (!allPartsUrlMap.containsKey(entry.getKey()) && !entry.getValue().isEmpty()) {
+                            List<String> urls = new ArrayList<>();
+                            String cropBase64Result = entry.getValue().get(0);
+                            if (cropBase64Result != null && !cropBase64Result.isBlank()) {
+                                byte[] partBytes = Base64.getDecoder().decode(cropBase64Result);
+                                String s3Key = "designs/user_" + nailDesign.getUser().getId()
+                                        + "/parts_" + entry.getKey().replace(" ", "_")
+                                        + "_" + designId + "_0.png";
+                                String url = s3Service.uploadImageBytes(partBytes, s3Key);
+                                urls.add(url);
+                            }
+                            if (!urls.isEmpty()) allPartsUrlMap.put(entry.getKey(), urls);
+                        }
+                    }
+                }
+
+                // DB 저장
+                if (!allPartsUrlMap.isEmpty()) {
+                    nailDesignRepository.findById(designId).ifPresent(d -> {
+                        try {
+                            d.updatePartsJson(objectMapper.writeValueAsString(allPartsUrlMap));
+                            nailDesignRepository.save(d);
+                            System.out.println("[Parts] 검출 완료 저장 designId=" + designId);
+                        } catch (Exception e) {
+                            System.err.println("[Parts] DB 저장 실패: " + e.getMessage());
+                        }
+                    });
+                }
+            } catch (Exception e) {
+                System.err.println("[Parts] 파츠 검출 실패 designId=" + designId + ": " + e.getMessage());
+            }
+        }, "parts-detect-" + designId).start();
+    }
+
+    private void triggerPartsDetectionFallback(NailDesign nailDesign, List<String> partNames) {
         String imageUrl = (nailDesign.getImageUrls() != null && !nailDesign.getImageUrls().isEmpty())
                 ? nailDesign.getImageUrls().get(0) : null;
         if (imageUrl == null) return;
@@ -1111,28 +1175,23 @@ public class NailDesignService {
 
                 Map<String, List<String>> detected = nailDetectionService.detectParts(imageBase64, partNames);
 
-                // S3 업로드
                 Map<String, List<String>> partsUrlMap = new LinkedHashMap<>();
                 for (Map.Entry<String, List<String>> entry : detected.entrySet()) {
-                    List<String> urls = new ArrayList<>();
-                    for (int i = 0; i < Math.min(1, entry.getValue().size()); i++) {
-                        String cropBase64 = entry.getValue().get(i);
-                        if (cropBase64 == null || cropBase64.isBlank()) continue;
-                        try {
-                            byte[] cropBytes = Base64.getDecoder().decode(cropBase64);
-                            String s3Key = "designs/user_" + nailDesign.getUser().getId()
-                                    + "/parts_" + entry.getKey().replace(" ", "_")
-                                    + "_" + designId + "_" + i + ".png";
-                            String url = s3Service.uploadImageBytes(cropBytes, s3Key);
-                            urls.add(url);
-                        } catch (Exception e) {
-                            System.err.println("[Parts] 크롭 S3 업로드 실패: " + e.getMessage());
-                        }
+                    if (entry.getValue().isEmpty()) continue;
+                    String cropBase64 = entry.getValue().get(0);
+                    if (cropBase64 == null || cropBase64.isBlank()) continue;
+                    try {
+                        byte[] cropBytes = Base64.getDecoder().decode(cropBase64);
+                        String s3Key = "designs/user_" + nailDesign.getUser().getId()
+                                + "/parts_" + entry.getKey().replace(" ", "_")
+                                + "_" + designId + "_0.png";
+                        String url = s3Service.uploadImageBytes(cropBytes, s3Key);
+                        partsUrlMap.put(entry.getKey(), List.of(url));
+                    } catch (Exception e) {
+                        System.err.println("[Parts] 크롭 S3 업로드 실패: " + e.getMessage());
                     }
-                    if (!urls.isEmpty()) partsUrlMap.put(entry.getKey(), urls);
                 }
 
-                // DB 저장
                 if (!partsUrlMap.isEmpty()) {
                     nailDesignRepository.findById(designId).ifPresent(d -> {
                         try {
@@ -1147,7 +1206,7 @@ public class NailDesignService {
             } catch (Exception e) {
                 System.err.println("[Parts] 파츠 검출 실패 designId=" + designId + ": " + e.getMessage());
             }
-        }, "parts-detect-" + designId).start();
+        }, "parts-detect-fallback-" + designId).start();
     }
 
     private List<String> extractPartNamesFromPlan(JsonNode plan) {
@@ -1156,7 +1215,7 @@ public class NailDesignService {
             JsonNode finger = plan.get(fingerName);
             if (finger == null) continue;
 
-            // ★ parts_detect 있으면 우선 사용, 없으면 parts에서 simplify
+            // ★ parts_detect만 사용, 없으면 스킵
             JsonNode detectList = finger.get("parts_detect");
             if (detectList != null && detectList.isArray() && detectList.size() > 0) {
                 detectList.forEach(p -> {
@@ -1165,16 +1224,6 @@ public class NailDesignService {
                         parts.add(part + " on nail tip");
                     }
                 });
-            } else {
-                JsonNode partsList = finger.get("parts");
-                if (partsList != null && partsList.isArray()) {
-                    partsList.forEach(p -> {
-                        String part = simplifyPartName(p.asText().trim());
-                        if (!part.isBlank() && !"none".equalsIgnoreCase(part) && !parts.contains(part)) {
-                            parts.add(part);
-                        }
-                    });
-                }
             }
         }
         return parts;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getPrinterProgress, type PrinterProgress } from '@/entities/print/api'
+import { getPrinterProgress, completePrintOrder, type PrinterProgress } from '@/entities/print/api'
 import '@/styles/print.css'
 
 const STATE_LABEL_KO: Record<string, string> = {
@@ -17,10 +17,17 @@ const STATE_LABEL_KO: Record<string, string> = {
  * 폴링해서 진행률 바 + 온도 + 남은 시간을 보여준다.
  * PrintOrder.status가 PRINTING일 때 마이페이지/출력 페이지에서 이 컴포넌트를 띄우면 된다.
  */
-export function PrinterProgressWidget() {
+
+type Props = {
+    orderId: number
+    onComplete?: () => void
+}
+
+export function PrinterProgressWidget({ orderId, onComplete }: Props) {
     const [progress, setProgress] = useState<PrinterProgress | null>(null)
     const [error, setError] = useState<string | null>(null)
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const completedRef = useRef(false)
 
     useEffect(() => {
         let cancelled = false
@@ -35,6 +42,14 @@ export function PrinterProgressWidget() {
                 }
                 setError(null)
                 setProgress(data)
+                // 완료 감지 추가
+                // poll 안에서
+                if (!completedRef.current &&
+                    (data.state === 'FINISH' || (data.percentage ?? 0) >= 100)) {
+                    completedRef.current = true
+                    await completePrintOrder(orderId)
+                    onComplete?.()
+                }
             } catch {
                 if (!cancelled) setError('프린터 상태를 가져오지 못했어요.')
             }
@@ -47,7 +62,7 @@ export function PrinterProgressWidget() {
             cancelled = true
             if (intervalRef.current) clearInterval(intervalRef.current)
         }
-    }, [])
+    }, [orderId, onComplete])
 
     if (error) {
         return (

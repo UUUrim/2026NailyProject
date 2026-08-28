@@ -97,7 +97,7 @@ analysis:
 
 printer:
   server:
-    url: ${analysis.server.url}  # 같은 주소 재사용
+    url: https://sermon-friction-unequal.ngrok-free.dev
 
 naily:
   gen-server-url: https://scalded-lard-seduce.ngrok-free.dev     # 생성 서버 (예서 컴퓨터, port 8000)

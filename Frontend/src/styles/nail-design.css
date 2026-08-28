@@ -523,6 +523,10 @@
   color: #5f4a52;
   text-align: center;
   line-height: 1.25;
+  /* 한글은 기본적으로 음절 사이 어디서든 줄바꿈될 수 있어서, "마그네틱 크롬"처럼
+     띄어쓰기가 있는 라벨이 "마그네" / "틱 크롬"처럼 단어 중간에서 잘릴 수 있다.
+     keep-all은 띄어쓰기(공백) 자리에서만 줄바꿈하도록 강제한다. */
+  word-break: keep-all;
 }
 
 .design-result-v2__thumb {
@@ -555,12 +559,120 @@
   border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-.design-result-v2__charm-item .design-result-v2__thumb {
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 12px;
+.design-result-v2__thumb--zoomable {
+  padding: 0;
+  border: none;
+  cursor: zoom-in;
+  transition: transform 0.15s ease;
+}
+
+.design-result-v2__color-item .design-result-v2__thumb--zoomable,
+.design-result-v2__texture-item .design-result-v2__thumb--zoomable {
   border: 1px solid rgba(0, 0, 0, 0.05);
-  background: #fdf5f8;
+}
+
+.design-result-v2__thumb--zoomable:hover {
+  transform: scale(1.08);
+}
+
+.design-result-v2__charm-image {
+  width: 3.4rem;
+  height: 3.4rem;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+.design-result-v2__charm-image-button {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.design-result-v2__charm-image-button:hover {
+  transform: scale(1.08);
+}
+
+.design-result-v2__charm-fallback {
+  width: 3.4rem;
+  height: 3.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  color: #de869f;
+}
+
+.design-result-v2__lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.design-result-v2__lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(26, 26, 26, 0.6);
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+}
+
+.design-result-v2__lightbox-content {
+  position: relative;
+  max-width: min(92vw, 480px);
+  max-height: 86vh;
+  display: flex;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.design-result-v2__lightbox-content img {
+  max-width: 100%;
+  max-height: 86vh;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+}
+
+.design-result-v2__lightbox-content.is-zoomed img {
+  cursor: grab;
+}
+
+.design-result-v2__lightbox-content.is-dragging img {
+  cursor: grabbing;
+}
+
+.design-result-v2__lightbox-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  color: #5f4a52;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.design-result-v2__lightbox-close:hover {
+  background: #de869f;
+  color: #fff;
 }
 
 .design-result-v2__thumb-icon {

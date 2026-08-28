@@ -37,7 +37,7 @@ public class TextureExtractService {
             and colors actually used in the design.
 
             Supported textures (use EXACTLY these keys):
-              glitter, marble, magnetic_chrome, powder, matte, 3d_charm, plain_solid
+              glitter, marble, magnetic_chrome,  mercury_chrome, powder, matte, 3d_charm, plain_solid
 
             Rules:
             - Extract only textures that genuinely appear in the prompt. Do NOT invent textures.
@@ -49,6 +49,9 @@ public class TextureExtractService {
               Set color to null if the texture has its own inherent color (e.g. magnetic_chrome).
             - If a design has gradient/ombre/french/cheek → classify as plain_solid.
             - Respond ONLY with a JSON array. No markdown, no explanation, no preamble.
+            - mercury_chrome: liquid mercury, mirror finish, chrome powder, liquid metal 표현이 있을 때
+            - magnetic_chrome: metallic chrome, chrome finish, metallic accent 등 일반 크롬 표현일 때
+            - Set color to null for mercury_chrome.
 
             Output format:
             [
@@ -75,7 +78,7 @@ public class TextureExtractService {
                 ),
                 "generationConfig", Map.of(
                         "responseMimeType", "application/json",
-                        "maxOutputTokens", 1024,
+                        "maxOutputTokens", 4096,
                         "thinkingConfig", Map.of("thinkingLevel", "LOW")
                 )
         );

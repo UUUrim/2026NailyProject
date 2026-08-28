@@ -31,7 +31,6 @@ export function HandScanPageContent() {
     isFullscreen,
     cameraError,
     isUploading,
-    topCameraIdx,
     sideCameraIdx,
     currentStepIndex,
     uploadedSteps,
@@ -46,7 +45,6 @@ export function HandScanPageContent() {
     handleCloseFullscreen,
     handleOpenFullscreen,
     handleCaptureFinger,
-    handleCameraChange,
   } = useHandScanPage()
 
   // ── 풀스크린 오버레이 ─────────────────────────────────────────
@@ -61,22 +59,6 @@ export function HandScanPageContent() {
                     className="hand-scan-fs__video"
                     alt="탑뷰 스캔 피드"
                 />
-                <div className="hand-scan-fs__feed-select-wrap">
-                  <label className="hand-scan-fs__feed-select-label">
-                    <span className="hand-scan-fs__feed-select-name">카메라 1</span>
-                    <div className="hand-scan-fs__feed-select-inner">
-                      <select
-                          className="hand-scan-fs__feed-select"
-                          value={topCameraIdx}
-                          onChange={(e) => void handleCameraChange(Number(e.target.value), sideCameraIdx)}
-                      >
-                        <option value={0}>인덱스 0</option>
-                        <option value={1}>인덱스 1</option>
-                        <option value={2}>인덱스 2</option>
-                      </select>
-                    </div>
-                  </label>
-                </div>
               </div>
 
               <div className="hand-scan-fs__divider" aria-hidden="true" />
@@ -90,24 +72,6 @@ export function HandScanPageContent() {
                         alt="사이드뷰 스캔 피드"
                     />
                 ) : null}
-                <div className="hand-scan-fs__feed-select-wrap">
-                  <label className="hand-scan-fs__feed-select-label">
-                    <span className="hand-scan-fs__feed-select-name">카메라 2</span>
-                    <div className="hand-scan-fs__feed-select-inner">
-                      <select
-                          className="hand-scan-fs__feed-select"
-                          value={sideCameraIdx}
-                          onChange={(e) => void handleCameraChange(topCameraIdx, Number(e.target.value))}
-                      >
-                        <option value={-1}>사용 안 함</option>
-                        <option value={-2}>폰(원격)</option>
-                        <option value={0}>인덱스 0</option>
-                        <option value={1}>인덱스 1</option>
-                        <option value={2}>인덱스 2</option>
-                      </select>
-                    </div>
-                  </label>
-                </div>
               </div>
             </div>
 
@@ -130,7 +94,7 @@ export function HandScanPageContent() {
                 <line x1="12" y1="10.5" x2="12" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 <circle cx="12" cy="17.2" r="1" fill="currentColor" />
               </svg>
-              {HAND_LABELS[currentHand]} {FINGER_LABELS[currentFinger]}를 탑뷰 박스에 넣고 ArUco 마커와 함께 찍어주세요
+              {HAND_LABELS[currentHand]} {FINGER_LABELS[currentFinger]}를 넣어주세요
               <svg className="hand-scan-fs__prompt-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
                 <path d="M12 4.5l9 15.5H3l9-15.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
                 <line x1="12" y1="10.5" x2="12" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

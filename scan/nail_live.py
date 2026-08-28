@@ -89,11 +89,18 @@ STABLE_N       = MEDIAN_N
 
 DISPLAY_H = 820         # window height; the full-res frame is what gets saved
 
-# The guide line used to sit exactly on the ArUco marker's bottom edge
-# (offset 0). Moved GUIDE_LINE_OFFSET_MM further from the fingertip (i.e.
-# toward the marker/hand, larger cuticle_y) since the marker's own edge was
-# landing short of where the real cuticle usually is.
-GUIDE_LINE_OFFSET_MM = 5.0
+# The guide line sits exactly on the ArUco marker's bottom edge (offset 0)
+# for every finger except thumb/pinky. Those two need it moved further from
+# the fingertip (toward the marker/hand, larger cuticle_y) because the real
+# cuticle on a thumb/pinky lands measurably past the marker's own edge —
+# the other three fingers don't have that gap.
+GUIDE_LINE_OFFSET_DEFAULT_MM     = 0.0
+GUIDE_LINE_OFFSET_THUMB_PINKY_MM = 7.0
+
+
+def guide_line_offset_mm(finger: str) -> float:
+    return (GUIDE_LINE_OFFSET_THUMB_PINKY_MM if finger in ("thumb", "pinky")
+            else GUIDE_LINE_OFFSET_DEFAULT_MM)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -249,13 +256,12 @@ def draw_width_marker(overlay, data, mpp):
 
 
 def guide_line_row(corners, x, offset_px=0.0):
-    """Row (y, sub-pixel) of the line through the marker's BOTTOM edge,
-    evaluated at column x — extends that edge (rather than a fixed offset)
-    so the guide line follows the marker's own tilt if the camera isn't
-    perfectly square to the mat. *offset_px* then shifts that whole line
-    further from the fingertip (positive = toward the hand / larger y) —
-    see GUIDE_LINE_OFFSET_MM for why: the marker's raw edge alone was
-    landing short of where the real cuticle usually is.
+    """Row (y, sub-pixel) of the marker's BOTTOM edge, evaluated at column x,
+    plus *offset_px* (positive = toward the hand / larger y — see
+    GUIDE_LINE_OFFSET_THUMB_PINKY_MM). Used once, at the finger's own centre
+    column, to pick the single y-value that both the measurement and the
+    on-screen line use — see draw_guide_line for why the line itself no
+    longer extends this as a slope across the frame.
 
     The bottom two corners are picked by actual pixel position (largest y),
     not by a fixed cv2.aruco TL,TR,BR,BL index assumption: that ordering is
@@ -268,6 +274,9 @@ def guide_line_row(corners, x, offset_px=0.0):
     pixels off-screen, which fed a garbage cuticle_y into every measurement
     (length_mm computed as 900+ instead of ~15) while leaving the on-screen
     guide line invisible, since it was drawn far outside the visible frame.
+    That same slope, even when it stayed on-screen, is what made the drawn
+    line look tilted relative to the marker whenever ArUco corner detection
+    jittered a few pixels — the line only needs one y-value, not a slope.
     """
     order = sorted(range(4), key=lambda i: corners[i][1], reverse=True)
     bl, br = sorted((corners[order[0]], corners[order[1]]), key=lambda p: p[0])
@@ -277,24 +286,48 @@ def guide_line_row(corners, x, offset_px=0.0):
     return float(bl[1] + slope * (x - bl[0])) + offset_px
 
 
-def draw_guide_line(img, corners, offset_px=0.0):
-    """Dashed guide line (parallel to the marker's bottom edge) the operator
-    aligns their cuticle to — see measure_top's guide_y. Display only; drawn
-    on the overlay copy, never on the saved raw frame.
+def draw_guide_line(img, guide_y):
+    """Dashed, perfectly horizontal guide line at row *guide_y* — the same
+    row measure_top actually used as the cuticle line — the operator aligns
+    their cuticle to. Display only; drawn on the overlay copy, never on the
+    saved raw frame.
+
+    Deliberately flat (not sloped to match the marker's on-screen tilt, as
+    an earlier version did): the marker is rarely perfectly square to the
+    camera, and a few pixels of ArUco corner jitter turns into a visibly
+    diagonal line once that slope is extended across the full frame width.
+    guide_y is still computed from the real marker edge (see guide_line_row)
+    — only the drawn line stops extending it as a slope.
     """
     h, w = img.shape[:2]
-    y0 = int(round(guide_line_row(corners, 0, offset_px)))
-    y1 = int(round(guide_line_row(corners, w, offset_px)))
+    y = int(round(guide_y))
     color = (255, 255, 0)   # BGR cyan/"sky blue" — distinct from other overlay colours
     n = 40
     for i in range(0, n, 2):
         xa, xb = int(w * i / n), int(w * (i + 1) / n)
-        ya = int(round(y0 + (y1 - y0) * i / n))
-        yb = int(round(y0 + (y1 - y0) * (i + 1) / n))
-        cv2.line(img, (xa, ya), (xb, yb), color, 2, cv2.LINE_AA)
-    label_y = min(y0, y1) - 12
-    put(img, "ALIGN CUTICLE TO LINE", (10, max(20, label_y)), color, 0.6, 2)
+        cv2.line(img, (xa, y), (xb, y), color, 2, cv2.LINE_AA)
+    put(img, "ALIGN CUTICLE TO LINE", (10, max(20, y - 12)), color, 0.6, 2)
     return img
+
+
+def detect_marker_only(frame, aruco_size_mm):
+    """ArUco corners only, independent of finger presence — or None.
+
+    measure_frame (below) also detects the marker, but bundles it into a
+    single measurement that requires a finger too and returns None on ANY
+    failure, marker included. That's fine for the actual measurement, but a
+    caller that only wants to know where the marker is on screen (e.g. to
+    crop it out of a web preview) would then see it appear to "come and go"
+    with the finger, when in practice the marker — glued to the mat — is
+    visible long before any finger is ever placed. Detecting it on its own
+    here means it's known as soon as it's in frame.
+    """
+    try:
+        with quiet():
+            _, corners, _ = nm.detect_aruco(frame, aruco_size_mm)
+        return corners
+    except Exception:
+        return None
 
 
 def measure_frame(frame, finger, aruco_size_mm):
@@ -302,13 +335,36 @@ def measure_frame(frame, finger, aruco_size_mm):
 
     Returns a result dict. Never raises: a failed frame (no marker, no finger)
     is a normal event when the user is still positioning their hand.
+
+    marker_ok / finger_ok are set as each stage clears, independent of
+    whether the frame ends up "ok" overall — so a caller (e.g. the web
+    stream's per-second console log) can tell "no marker", "marker but no
+    finger", and "both found but the measurement itself came out unusable"
+    apart, instead of one opaque failure for all three.
     """
+    result = {"ok": False, "marker_ok": False, "finger_ok": False,
+              "t": time.time()}
+
     try:
         with quiet():
             mpp, corners, marker_id = nm.detect_aruco(frame, aruco_size_mm)
-            finger_mask, _, bbox    = nm.segment_finger(frame, corners)
-            fbx, fby, fbw, fbh      = bbox
-            guide_offset_px = GUIDE_LINE_OFFSET_MM / mpp
+    except Exception as e:
+        result["err"] = str(e).split("\n")[0]
+        return result
+    result["marker_ok"] = True
+
+    try:
+        with quiet():
+            finger_mask, _, bbox = nm.segment_finger(frame, corners)
+    except Exception as e:
+        result["err"] = str(e).split("\n")[0]
+        return result
+    result["finger_ok"] = True
+
+    try:
+        with quiet():
+            fbx, fby, fbw, fbh = bbox
+            guide_offset_px = guide_line_offset_mm(finger) / mpp
             guide_y = int(round(guide_line_row(corners, fbx + fbw // 2,
                                                guide_offset_px)))
             data = nm.measure_top(frame, mpp, finger_mask, bbox,
@@ -332,8 +388,8 @@ def measure_frame(frame, finger, aruco_size_mm):
 
             bad = unusable_values(data)
             if bad:
-                return {"ok": False, "err": "UNUSABLE " + ", ".join(bad),
-                        "t": time.time()}
+                result["err"] = "UNUSABLE " + ", ".join(bad)
+                return result
 
             # Stashed for the accept path, which redraws the overlay after the
             # c-curve stage. Leading underscore keeps it out of the JSON.
@@ -341,13 +397,14 @@ def measure_frame(frame, finger, aruco_size_mm):
 
             overlay = draw_guide_line(draw_width_marker(
                 nm.draw_annotated(frame, data, corners, finger), data, mpp),
-                corners, guide_offset_px)
-
-        return {"ok": True, "frame": frame, "data": data,
-                "corners": corners, "overlay": overlay, "t": time.time()}
-
+                guide_y)
     except Exception as e:
-        return {"ok": False, "err": str(e).split("\n")[0], "t": time.time()}
+        result["err"] = str(e).split("\n")[0]
+        return result
+
+    result.update({"ok": True, "frame": frame, "data": data,
+                   "corners": corners, "overlay": overlay})
+    return result
 
 
 class MeasureWorker(threading.Thread):
@@ -428,24 +485,40 @@ def hint_bar(view, text):
     return np.vstack([view, bar])
 
 
-def compose(result, live_frame, history, finger, n_measured):
-    """Build the window image: measured overlay + live PiP + status bar."""
+def compose(result, live_frame, history, finger, n_measured,
+           crop_left_px: int = 0, show_pip: bool = True):
+    """Build the window image: measured overlay + live PiP + status bar.
+
+    crop_left_px : cuts this many columns off the left of both the main
+        image and the PiP source before anything else runs — used by the
+        web stream to keep the physical ArUco marker (glued to the mat at
+        a fixed spot, always left of the finger) out of the customer-facing
+        view. The local CLI tool leaves this at 0.
+    show_pip : the local CLI tool wants the live PiP (main image can be up
+        to a second behind); the web stream turns it off since it isn't a
+        second measurement view an operator needs, just a second copy of
+        the same marker-adjacent scene.
+    """
     have = result is not None and result.get("ok")
     base = result["overlay"] if have else live_frame
+    if crop_left_px > 0:
+        base = base[:, crop_left_px:]
 
     scale = DISPLAY_H / base.shape[0]
     view  = cv2.resize(base, (int(base.shape[1] * scale), DISPLAY_H))
     h, w  = view.shape[:2]
 
-    # Live picture-in-picture so the user can position the finger while the
-    # main image is up to a second behind.
-    pip_w = w // 4
-    pip   = cv2.resize(live_frame, (pip_w, int(live_frame.shape[0] * pip_w /
-                                               live_frame.shape[1])))
-    ph, pw = pip.shape[:2]
-    view[10:10 + ph, w - pw - 10:w - 10] = pip
-    cv2.rectangle(view, (w - pw - 10, 10), (w - 10, 10 + ph), (200, 200, 200), 2)
-    put(view, "LIVE", (w - pw - 4, 30), (200, 200, 200), 0.5, 1)
+    if show_pip:
+        # Live picture-in-picture so the user can position the finger while
+        # the main image is up to a second behind.
+        pip_src = live_frame[:, crop_left_px:] if crop_left_px > 0 else live_frame
+        pip_w   = w // 4
+        pip     = cv2.resize(pip_src, (pip_w, int(pip_src.shape[0] * pip_w /
+                                                  pip_src.shape[1])))
+        ph, pw = pip.shape[:2]
+        view[10:10 + ph, w - pw - 10:w - 10] = pip
+        cv2.rectangle(view, (w - pw - 10, 10), (w - 10, 10 + ph), (200, 200, 200), 2)
+        put(view, "LIVE", (w - pw - 4, 30), (200, 200, 200), 0.5, 1)
 
     # No status text block any more (top-left/bottom-left) - only the
     # coloured border (red = no reading, orange = collecting, green =
@@ -906,11 +979,10 @@ def main():
             # what was approved on screen — the green outline alone is ~28%
             # narrower than the span width_mm reports.
             _mpp = data.get("_mpp")
-            _guide_offset_px = (GUIDE_LINE_OFFSET_MM / _mpp) if _mpp else 0.0
             vis   = draw_guide_line(draw_width_marker(
                 nm.draw_annotated(accepted["frame"], data,
                                   accepted["corners"], finger),
-                data, _mpp), accepted["corners"], _guide_offset_px)
+                data, _mpp), data["_cuticle_y"])
             scale = 900 / vis.shape[0]
             ann_path = os.path.join(output_dir, f"{finger}_annotated.jpg")
             cv2.imwrite(ann_path,

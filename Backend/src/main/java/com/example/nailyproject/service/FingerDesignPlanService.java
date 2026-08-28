@@ -17,6 +17,7 @@ public class FingerDesignPlanService {
 
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
+    private final StyleTrendService styleTrendService;
 
     @Value("${gemini.api.key}")
     private String apiKey;
@@ -26,6 +27,7 @@ public class FingerDesignPlanService {
 
     private static final String SYSTEM_PROMPT = """
         당신은 네일 3D 디자인 플래너입니다.
+        %s
         아래 확정된 정보를 바탕으로 엄지(thumb)~소지(pinky) 5개 손가락의
         디자인을 JSON으로 생성하세요. 참고 이미지가 함께 제공되면
         그 이미지의 스타일/파츠를 최대한 반영하세요.
@@ -180,15 +182,16 @@ public class FingerDesignPlanService {
             [parts_detect 작성 규칙 - 매우 중요]
                     parts_detect는 파츠 검출 서버에 넘기는 단순 명사 리스트입니다.
                     parts와 동일한 파츠를 1~2단어 단순 영어 명사로만 표현하세요.
-                    - 형용사, 크기, 재질, 색상 설명 절대 금지
-                    - 파츠가 없으면 빈 배열 []
+                    - 형용사, 크기, 재질, 색상 설명 절대 금지, 단 파츠 종류를 구분하는 핵심 명사는 유지
+                    - 파츠가 없으면 반드시 빈 배열 []로 두세요.
                     - ribbon은 반드시 bow로 명시하세요.
                     - 예시:
                       "large 3D metallic star shaped charm" → "star"
                       "3D ribbon bow charm" → "bow"
                       "rhinestone crystal cluster" → "rhinestone"
                       "transparent bubble sphere" → "bubble"
-                      "line of small crystals" → "crystal"
+                      "line of small crystals" → "crystal line"
+                      "metallic stud accent" → "stud"
 
         [규칙]
         - motif가 필요 없는 손가락은 motif를 "none"으로 두세요.
@@ -224,6 +227,7 @@ public class FingerDesignPlanService {
         가장 잘 어울리는 색상 하나(또는 조합)를 당신이 판단해서 최상위 color에 채우세요.
         color 후보도 없다면, mood/season에 어울리는 색을 자유롭게 만들어서 사용하세요.
         %s
+        
 
         [확정된 입력 정보]
         %s
@@ -294,7 +298,8 @@ public class FingerDesignPlanService {
                     """.formatted(previousPlanJson);
         }
 
-        String systemPrompt = String.format(SYSTEM_PROMPT, editModeSection, confirmedInputSummary);
+        String trendHint = styleTrendService.buildTrendHint();
+        String systemPrompt = String.format(SYSTEM_PROMPT, trendHint, editModeSection, confirmedInputSummary);
 
         List<Map<String, Object>> parts = new ArrayList<>();
         if (imageBase64 != null && imageMimeType != null) {
@@ -304,7 +309,7 @@ public class FingerDesignPlanService {
                             "data", imageBase64
                     )
             ));
-            parts.add(Map.of("text", "이 참고 이미지를 자세히 관찰해서, 캐릭터/작품을 특정하지 말고 " +
+            parts.add(Map.of("text", "이 참고 이미지를 자세히 관찰해서, 캐릭터/작품을 특정하고 " +
                     "색감·선/셰이딩 스타일·질감·반복되는 형태 모티프·전체 분위기를 최대한 " +
                     "구체적으로 뽑아낸 뒤, 위 정보와 함께 5개 손가락 디자인을 생성해주세요."));
         } else {

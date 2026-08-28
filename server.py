@@ -90,7 +90,8 @@ from skin_color import recommend_nail_colors, lab_to_rgb_hex      # scan/
 # 자동 촬영은 없음 - 탑뷰/사이드뷰 모두 조작자가 촬영 버튼을 눌러야만 저장된다.
 from nail_live import (MeasureWorker, compose as _live_compose,     # scan/
                         median_result as _live_median_result,
-                        MEDIAN_N as _LIVE_MEDIAN_N)
+                        MEDIAN_N as _LIVE_MEDIAN_N,
+                        detect_marker_only as _live_detect_marker_only)
 
 # ─────────────────────────────────────────────────────────────
 BASE   = _THIS_DIR
@@ -108,7 +109,12 @@ os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
 CAMERA_TOP        = 0       # 탑뷰: USB 웹캠 (C920)
 CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1: 사용 안 함
 ARUCO_SIZE_MM     = 20.0
-CROP_BOTTOM_PX    = 100
+CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
+# 탑뷰 웹 스트림에서 ArUco 마커를 가리기 위한 왼쪽 crop 설정 (측정용 저장
+# 사진에는 영향 없음 — _capture_top_stream 참고). 마커는 매트에 고정된
+# 위치라 오른쪽 끝 + 여백을 한 번 잡으면 그 finger 촬영 내내 그대로 쓴다.
+MARKER_HIDE_MARGIN_PX      = 40    # 마커 오른쪽 끝에서 추가로 더 잘라낼 여백
+MARKER_HIDE_MIN_VISIBLE_PX = 200   # 잘라내고도 최소한 이만큼은 화면에 남긴다
 
 # ─────────────────────────────────────────────────────────────
 app = FastAPI(title="Naily 통합 서버")
@@ -187,11 +193,13 @@ def _get_printer():
 
 def _fetch_printer_status() -> dict:
     p = _get_printer()
+    if str(p.get_current_state()) == 'UNKNOWN':
+            time.sleep(3)  # 처음 연결 시만 대기
     return {
         "state":            str(p.get_current_state()),
         "percentage":       p.get_percentage(),
-        "currentLayer":     p.current_layer_num,
-        "totalLayer":       p.total_layer_num,
+        "currentLayer":     p.current_layer_num(),
+        "totalLayer":       p.total_layer_num(),
         "remainingTimeMin": p.get_time(),
         "nozzleTemp":       p.get_nozzle_temperature(),
         "bedTemp":          p.get_bed_temperature(),
@@ -215,6 +223,9 @@ def _slice_and_print_local(local_3mf: str, output_dir: str, callback_url: str):
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
         requests.post(callback_url, json={
             "success": True, "status": "PRINTING", "gcodePath": gcode_path})
+
+        # 완료 감지 폴링
+        _poll_until_complete(callback_url)
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
@@ -246,16 +257,50 @@ def _run_merge_both_hands(userid, left_session, right_session,
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
+def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(interval)
+        try:
+            status = _fetch_printer_status()
+            state = status.get("state", "")
+            print(f"[Poll] 프린터 상태: {state}")  # ← 로그 확인용
+            if "FINISH" in state.upper() or "IDLE" in state.upper():
+                requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                return
+        except Exception as e:
+            print(f"[Poll] 폴링 오류: {e}")
 
 def _run_slice_and_print(merged_model_url, output_dir, callback_url):
     try:
         local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
         _download_3mf_from_url(merged_model_url, local_3mf)
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
+
+        # 출력 시작 콜백
         requests.post(callback_url, json={
             "success": True, "status": "PRINTING", "gcodePath": gcode_path})
+
+        # 완료 감지 폴링
+        _poll_until_complete(callback_url)
+
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
+
+
+def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
+    """출력 완료될 때까지 폴링, 완료되면 콜백으로 COMPLETED 전송"""
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(interval)
+        try:
+            status = _fetch_printer_status()
+            state = status.get("state", "")
+            if "FINISH" in state.upper() or "IDLE" in state.upper():
+                requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                return
+        except Exception:
+            pass  # 연결 끊겨도 폴링 계속
 
 
 # ══════════════════════════════════════════════════════════════
@@ -290,6 +335,11 @@ class _StreamState:
         self.active:       bool = False
         self.current_finger: str | None = None
         self.done_fingers: list = []
+        # 탑뷰 웹 스트림에서 마커를 가리기 위한 왼쪽 crop 폭(px). 마커가
+        # 처음 잡힐 때 _capture_top_stream이 갱신하고, 그 값을 idle preview
+        # 루프(_top_camera_idle_preview_loop)도 같이 참조해서 손가락 사이
+        # 대기 화면에서도 마커가 다시 드러나지 않게 한다.
+        self.marker_hide_x: int = 0
 
 _S = _StreamState()
 
@@ -458,7 +508,21 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
         if not _S.top_capture_busy.is_set():
             ret, frame = cap.read()
             if ret:
-                _push_frame(_S.top_frame, frame)
+                # 세션 시작 직후(_capture_top_stream이 아직 첫 프레임도 못 돌린
+                # 찰나) 이 idle 루프가 먼저 프레임을 밀어넣는 경우, 마커가
+                # 아직 안 잡혀 있어(_S.marker_hide_x == 0) 그대로 노출된다 —
+                # 손가락 없이도 되는 가벼운 감지라 여기서도 똑같이 시도해서
+                # 그 틈을 없앤다. 한 번 잡히면 이후로는 아래 조건이 계속
+                # False라 추가 비용이 없다.
+                if _S.marker_hide_x == 0:
+                    marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+                    if marker_corners is not None:
+                        marker_right_px = int(round(float(marker_corners[:, 0].max())))
+                        _S.marker_hide_x = min(
+                            marker_right_px + MARKER_HIDE_MARGIN_PX,
+                            frame.shape[1] - MARKER_HIDE_MIN_VISIBLE_PX)
+                disp = frame[:, _S.marker_hide_x:] if _S.marker_hide_x > 0 else frame
+                _push_frame(_S.top_frame, disp)
         time.sleep(0.05)
 
 
@@ -484,6 +548,16 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
 
     accepted = None
     frame = None
+    _last_status_print = 0.0
+    # Web display only — smooths over single-frame measurement misses so the
+    # guide line / width-length text don't blink out every time one frame in
+    # the background MeasureWorker fails (finger blur, autofocus hunt, a
+    # frame straddling the guide window). Does NOT touch `history` or the
+    # accept-on-capture logic below, both of which still key off the real,
+    # unsmoothed `result` — this only decides what gets drawn on screen.
+    last_ok_result = None
+    last_ok_t = 0.0
+    HOLD_LAST_OK_SEC = 1.2
     _S.top_capture_busy.set()
     try:
         while True:
@@ -501,7 +575,47 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
                 else:
                     history.clear()
 
-            _push_frame(_S.top_frame, _live_compose(result, frame, history, finger, 0))
+            # measure_frame silences nail_measurer's own prints (see
+            # quiet()), so without this the operator has no way to see
+            # WHERE positioning is going wrong (marker not seen at all vs.
+            # marker fine but finger not segmented vs. both fine but the
+            # measurement itself came out unusable) — only a red border on
+            # screen. Once/sec regardless of ok/fail, so the operator can
+            # watch it flip ✗→✓ live while repositioning, without flooding
+            # the console at ~framerate.
+            now = time.time()
+            if result is not None and now - _last_status_print > 1.0:
+                _last_status_print = now
+                mk = "OK" if result.get("marker_ok") else "--"
+                fk = "OK" if result.get("finger_ok") else "--"
+                mm = "OK" if result.get("ok") else "--"
+                tail = f"  ({result['err']})" if result.get("err") else ""
+                print(f"  [{finger}] 마커:{mk}  손가락:{fk}  측정:{mm}{tail}")
+
+            # 마커 위치는 손가락 유무와 무관하게 독립적으로 추적한다 — 전체
+            # 측정(result.ok)은 손가락이 놓이기 전까지 계속 실패하므로, 거기
+            # 얹어서 갱신하면 "손가락을 넣어주세요" 안내가 떠 있는 동안 내내
+            # 마커가 가려지지 않는다 (실제로 확인된 문제). 마커는 매트에
+            # 고정돼 있어 한 번 잡히면 세션(손가락 5개) 내내 안 바뀌므로,
+            # 이미 잡힌 뒤에는 매 프레임 다시 돌릴 필요가 없다.
+            if _S.marker_hide_x == 0:
+                marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+                if marker_corners is not None:
+                    marker_right_px = int(round(float(marker_corners[:, 0].max())))
+                    _S.marker_hide_x = min(
+                        marker_right_px + MARKER_HIDE_MARGIN_PX,
+                        frame.shape[1] - MARKER_HIDE_MIN_VISIBLE_PX)
+
+            if result is not None and result.get("ok"):
+                last_ok_result, last_ok_t = result, now
+            display_result = result
+            if (result is None or not result.get("ok")) and \
+                    last_ok_result is not None and now - last_ok_t < HOLD_LAST_OK_SEC:
+                display_result = last_ok_result
+
+            _push_frame(_S.top_frame, _live_compose(
+                display_result, frame, history, finger, 0,
+                crop_left_px=_S.marker_hide_x, show_pip=False))
 
             if _S.force_capture_top.is_set():
                 _S.force_capture_top.clear()
@@ -535,6 +649,16 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
 
 
 def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
+    """
+    버그였던 부분: 예전 버전은 폰 프리뷰가 한 번도 안 온 상태(ret=False)면
+    `continue`로 바로 다음 루프로 넘어가 버려서, 그 아래에 있는
+    force_capture_side 체크 자체를 절대 못 봤다 — 즉 폰 카메라 페이지가 아직
+    안 열려있거나 연결이 끊긴 상태에서 조작자가 "지금 촬영"을 눌러도 아무
+    일도 안 일어나고, 이 스레드는 join()에서 영원히 안 풀려서 다음 손가락으로
+    절대 못 넘어갔다 (실제로 확인된 증상: 엄지 찍고 검지로 안 넘어감).
+    request_capture()/capture_full()은 프리뷰 프레임이 없어도 동작하므로,
+    프리뷰가 아직 없어도 force_capture_side 체크까지는 통과시킨다.
+    """
     _push_event({"type": "side_ready", "finger": finger.upper()})
     _S.force_capture_side.clear()
     is_phone  = isinstance(cap, PhoneCamera)
@@ -543,40 +667,45 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
     try:
         while True:
             ret, frame = cap.read()
-            if not ret:
-                if is_phone:
-                    # Preview hasn't arrived from the phone yet - keep waiting
-                    # instead of failing immediately like a real VideoCapture would.
-                    time.sleep(0.05)
-                    continue
+
+            if ret:
+                h, w = frame.shape[:2]
+                disp = frame.copy()
+                # English only: cv2.putText's Hershey fonts have no Korean glyphs, so
+                # Korean text here renders as garbled boxes on screen.
+                cv2.putText(disp,
+                            f"[SIDE] {finger.upper()}  |  press CAPTURE on the web page",
+                            (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200,200,0), 2)
+                cv2.rectangle(disp, (0,0), (w-1,h-1), (180,180,0), 4)
+                _push_frame(_S.side_frame, disp)
+            elif not is_phone:
                 return False
-            h, w = frame.shape[:2]
-            disp = frame.copy()
-            # English only: cv2.putText's Hershey fonts have no Korean glyphs, so
-            # Korean text here renders as garbled boxes on screen.
-            cv2.putText(disp,
-                        f"[SIDE] {finger.upper()}  |  press CAPTURE on the web page",
-                        (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200,200,0), 2)
-            cv2.rectangle(disp, (0,0), (w-1,h-1), (180,180,0), 4)
-            _push_frame(_S.side_frame, disp)
+            # is_phone and not ret: 아직 프리뷰가 없다 — 그래도 아래 force
+            # 체크는 계속 통과시킨다 (더 이상 여기서 continue하지 않음).
 
             if _S.force_capture_side.is_set():
                 _S.force_capture_side.clear()
                 if is_phone:
-                    cv2.putText(disp, "Capturing full-res photo - hold the phone still",
-                                (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
-                    _push_frame(_S.side_frame, disp)
+                    if ret:
+                        cv2.putText(disp, "Capturing full-res photo - hold the phone still",
+                                    (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+                        _push_frame(_S.side_frame, disp)
                     cap.request_capture()
                     full = cap.capture_full(timeout=8.0)
                     if full is None:
                         print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃) → 프리뷰 프레임으로 대체")
-                        full = frame
+                        full = frame   # 프리뷰도 한 번도 못 받았으면 여전히 None
+                    if full is None:
+                        print(f"  [{finger}] 사이드뷰 저장 실패 — 폰에서 미리보기/사진 모두 못 받음 "
+                              f"(폰 카메라 페이지가 열려있는지 확인) → 이 손가락 사이드뷰 건너뜀")
+                        return False
                     cv2.imwrite(save_path, full)
                 else:
                     cv2.imwrite(save_path, frame)
                 print(f"  [{finger}] 사이드뷰 저장: {save_path}")
                 return True
-            time.sleep(0.03)
+
+            time.sleep(0.03 if ret else 0.05)
     finally:
         _S.side_capture_busy.clear()
 

@@ -36,7 +36,19 @@ export function useMyPageData() {
   const designsQuery = useQuery({ queryKey: DESIGNS_KEY, queryFn: getMyDesigns })
   const favoritesQuery = useQuery({ queryKey: FAVORITES_KEY, queryFn: getLikedDesigns })
   const scansQuery = useMyScansQuery()
-  const printsQuery = useQuery({ queryKey: PRINTS_KEY, queryFn: getMyPrintOrders })
+  const printsQuery = useQuery({
+    queryKey: PRINTS_KEY,
+    queryFn: getMyPrintOrders,
+    refetchInterval: (query) => {
+      const prints = query.state.data ?? []
+      const hasActive = prints.some(p =>
+          p.status === 'PRINTING' ||
+          p.status === 'MERGING' ||
+          p.status === 'MERGED'
+      )
+      return hasActive ? 5000 : false
+    }
+  })
   const foldersQuery = useQuery({ queryKey: FOLDERS_KEY, queryFn: getSavedFolders })
 
   const designs = designsQuery.data ?? []

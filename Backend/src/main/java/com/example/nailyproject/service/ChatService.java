@@ -26,6 +26,7 @@ public class ChatService {
     private final ChatMessageRepository chatMessageRepository;
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
+    private final StyleTrendService styleTrendService;  // 추가
 
     @Value("${gemini.api.key}")
     private String apiKey;
@@ -209,8 +210,14 @@ public class ChatService {
                             "이어지는 reply를 주고 isComplete를 true로 유지하세요.\n\n";
         }
 
+        String userSeason = slots.containsKey("season") && !slots.get("season").getLiked().isEmpty()
+                ? slots.get("season").getLiked().stream()
+                .filter(s -> !"none".equals(s))
+                .findFirst().orElse(null)
+                : null;
+        String trendHint = styleTrendService.buildTrendHint(userSeason);
 // 스캔 기반 힌트: 컬러/쉐입만 반영 (퍼스널컬러, 추천 쉐입)
-        String scanHint = editModeHint + handScanRepository.findTopByUserOrderByScannedAtDesc(user)
+        String scanHint = editModeHint +  trendHint + handScanRepository.findTopByUserOrderByScannedAtDesc(user)
                 .filter(scan -> scan.getStatus() == HandScan.ScanStatus.MEASURED
                         || scan.getStatus() == HandScan.ScanStatus.GENERATING_STL
                         || scan.getStatus() == HandScan.ScanStatus.COMPLETED)

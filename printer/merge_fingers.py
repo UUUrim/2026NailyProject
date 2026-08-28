@@ -24,6 +24,8 @@ import argparse
 import os
 import trimesh
 import numpy as np
+import zipfile
+import re
 
 from s3_helper import download_finger_stls
 
@@ -32,11 +34,29 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 FINGER_ORDER = ["thumb", "index", "middle", "ring", "pinky"]
 
 SPACING_MM = 10.0       # 손가락 사이 간격 (mm)
-TILT_DEG = -40.0         # 음수 = 반대 방향으로 기울임
+TILT_DEG = 40.0         # 음수 = 반대 방향으로 기울임
 TILT_AXIS = [1, 0, 0]    # X축 기준 회전 (앞뒤로 기울이고 싶으면 [0,1,0]으로 변경)
 
 ROW_SPACING_MM = 40.0   # 왼손 줄과 오른손 줄 사이 Y축 간격 (손가락 두께+여유를 감안한 값)
 
+def _fix_build_section(path: str):
+    """trimesh가 비워둔 <build> 섹션에 <item> 항목을 채워
+    OrcaSlicer가 vertex에 구워진 위치를 그대로 쓰게 한다."""
+    with zipfile.ZipFile(path, 'r') as z:
+        content = z.read('3D/3dmodel.model').decode('utf-8')
+        other_files = {name: z.read(name) for name in z.namelist() if name != '3D/3dmodel.model'}
+
+    ids = re.findall(r'<object id="(\d+)"', content)
+    build_items = '\n'.join(f'    <item objectid="{oid}" />' for oid in ids)
+    new_build = f'<build>\n{build_items}\n  </build>'
+
+    content = re.sub(r'<build\s*/>', new_build, content)
+    content = re.sub(r'<build[^>]*>\s*</build>', new_build, content)
+
+    with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('3D/3dmodel.model', content.encode('utf-8'))
+        for name, data in other_files.items():
+            z.writestr(name, data)
 
 def _load_finger(path: str) -> trimesh.Trimesh:
     mesh = trimesh.load(path, force="mesh")
@@ -129,6 +149,7 @@ def merge_hand(userid: str, session: str, hand: str, shapes: dict, output_dir: s
 
     output_path = os.path.join(output_dir, "hand_merged.3mf")
     scene.export(output_path)
+    _fix_build_section(output_path)  # 추가
 
     print(f"[Merge] 완료: {output_path}")
     print(f"[Merge] 오브젝트: {list(scene.geometry.keys())}")
@@ -181,8 +202,16 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
     scene = _build_scene(left_paths, hand_label="left", y_offset=0.0, scene=scene)
     scene = _build_scene(right_paths, hand_label="right", y_offset=ROW_SPACING_MM, scene=scene)
 
+    # 음수 좌표 보정 — OrcaSlicer가 재배치하지 않도록
+    all_verts = np.vstack([g.vertices for g in scene.geometry.values()])
+    min_x, min_y = all_verts[:, 0].min(), all_verts[:, 1].min()
+    shift = [-min_x + 10, -min_y + 10, 0]
+    for geom in scene.geometry.values():
+        geom.apply_translation(shift)
+
     output_path = os.path.join(output_dir, "both_hands_merged.3mf")
     scene.export(output_path)
+    _fix_build_section(output_path)  # 추가
 
     print(f"[Merge] 완료: {output_path}")
     print(f"[Merge] 오브젝트: {list(scene.geometry.keys())}")

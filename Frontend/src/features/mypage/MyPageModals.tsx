@@ -219,8 +219,12 @@ export function MyPageModals({
                     </span>
                   </section>
 
-                  {printDetailOrder.status === 'PRINTING' && <PrinterProgressWidget />}
-
+                {printDetailOrder.status === 'PRINTING' && (
+                    <PrinterProgressWidget
+                        orderId={printDetailOrder.id}
+                        onComplete={closePrintDetail}
+                    />
+                )}
                   <section className="mypage-x__scanx-shape">
                     <div className="mypage-x__scanx-shape-copy">
                       <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>

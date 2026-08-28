@@ -75,6 +75,19 @@ try:
 except ImportError:
     _ENDON_AVAILABLE = False
 
+# End-on (side-view) C-curve photos are shot inside the capture box, whose
+# ceiling (bright strip light + blue alignment LEDs) and near-camera mat
+# both land in frame above/below the finger. Neither is background in the
+# sense the measurement below assumes, and letting them in was confirmed to
+# make the finger-localisation step grab the whole frame instead of just
+# the fingertip (bbox 3000x4000 instead of ~300x300), producing wildly
+# inconsistent c-curve readings across fingers. Cropping these fixed bands
+# off before measuring isolates the fingertip cleanly - verified against
+# all 5 left-hand fingers of session 1/31. Top-view photos don't go through
+# this crop; the same ceiling/mat framing issue doesn't apply there.
+CCURVE_TOP_CROP_FRAC    = 0.30
+CCURVE_BOTTOM_CROP_FRAC = 0.12
+
 # ── Skin LAB metrics (brightness/saturation/warmness for color recommendation) ──
 try:
     from skin_color import analyze_skin as _analyze_skin
@@ -1867,7 +1880,9 @@ def measure_finger(top_path: str, finger: str,
                 cc = _endOn_ccurve(ccurve_path,
                                    width_mm=data["width_mm"],
                                    debug_out=debug_path,
-                                   table_edge=ccurve_table_edge)
+                                   table_edge=ccurve_table_edge,
+                                   top_crop_frac=CCURVE_TOP_CROP_FRAC,
+                                   bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC)
                 data["c_curve_mm"]    = cc["c_curve_mm"]
                 data["arc_radius_mm"] = cc["arc_radius_mm"]
                 data["_ccurve_method"] = "end-on photo"

@@ -265,6 +265,9 @@ public class PrintOrderService {
             return toDto(order);
         }
 
+        // 기존 PRINTING 상태 닫기
+        printOrderRepository.completeAllPrintingByUser(user);  // 추가
+
         // 실제 PRINTING 전환은 /print-result 콜백에서 하지만, 사용자 화면엔 "요청은 갔다"는
         // 걸 바로 보여주기 위해 낙관적으로 미리 반영해둔다. 콜백이 실패로 오면 다시 FAILED로 덮어써진다.
         order.updateStatus(PrintOrder.PrintStatus.PRINTING);
@@ -288,9 +291,12 @@ public class PrintOrderService {
             return;
         }
 
-        // 지금은 "출력 시작됨"까지만 콜백으로 받는다. 실제 출력 완료(COMPLETED) 전환은
-        // 프린터 자체의 상태 폴링/웹훅이 붙기 전까지는 수동으로(또는 별도 기능으로) 처리해야 한다.
-        order.updateStatus(PrintOrder.PrintStatus.PRINTING);
+        String status = payload.path("status").asText("PRINTING");
+        if ("COMPLETED".equals(status)) {
+            order.updateStatus(PrintOrder.PrintStatus.COMPLETED);
+        } else {
+            order.updateStatus(PrintOrder.PrintStatus.PRINTING);
+        }
         printOrderRepository.save(order);
     }
 
@@ -299,6 +305,16 @@ public class PrintOrderService {
         return printOrderRepository.findAllByUserOrderByOrderedAtDesc(user).stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
+    }
+
+    public void completePrintOrder(User user, Long orderId) {
+        PrintOrder order = printOrderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 출력 주문을 찾을 수 없습니다."));
+        if (!order.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException("본인의 출력 주문만 완료 처리할 수 있습니다.");
+        }
+        order.updateStatus(PrintOrder.PrintStatus.COMPLETED);
+        printOrderRepository.save(order);
     }
 
     /**
