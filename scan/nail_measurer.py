@@ -1747,11 +1747,15 @@ def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
 # 7. Visualisation
 # ─────────────────────────────────────────────────────────────
 
-def draw_annotated(image, data, aruco_corners, finger):
+def draw_annotated(image, data, aruco_corners, finger, show_polygon=True):
     """Draw the measurement overlay and return it (full resolution).
 
     Split out of save_annotated so the live camera preview
     (nail_live.py) can render the same overlay without touching disk.
+
+    show_polygon=False skips the filled nail-outline polygon (used by
+    the live preview, which hides it from the user while keeping the
+    other overlay elements).
     """
     vis   = image.copy()
     color = NAIL_COLORS.get(finger, (200,200,200))
@@ -1759,11 +1763,12 @@ def draw_annotated(image, data, aruco_corners, finger):
     if aruco_corners is not None:
         cv2.polylines(vis, [aruco_corners.astype(int)], True, (0,255,255), 3)
 
-    smooth    = np.array(data["nail_polygon_px"], np.int32)
-    ov        = vis.copy()
-    cv2.fillPoly(ov, [smooth.reshape(-1,1,2)], color)
-    cv2.addWeighted(ov, 0.35, vis, 0.65, 0, vis)
-    cv2.polylines(vis, [smooth.reshape(-1,1,2)], True, color, 3)
+    if show_polygon:
+        smooth    = np.array(data["nail_polygon_px"], np.int32)
+        ov        = vis.copy()
+        cv2.fillPoly(ov, [smooth.reshape(-1,1,2)], color)
+        cv2.addWeighted(ov, 0.35, vis, 0.65, 0, vis)
+        cv2.polylines(vis, [smooth.reshape(-1,1,2)], True, color, 3)
 
     tip_x     = data["_tip_x"]
     tip_y     = data["_tip_y"]
