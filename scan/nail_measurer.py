@@ -1747,7 +1747,8 @@ def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
 # 7. Visualisation
 # ─────────────────────────────────────────────────────────────
 
-def draw_annotated(image, data, aruco_corners, finger, show_polygon=True):
+def draw_annotated(image, data, aruco_corners, finger, show_polygon=True,
+                    show_width_label=True, show_skin_label=True):
     """Draw the measurement overlay and return it (full resolution).
 
     Split out of save_annotated so the live camera preview
@@ -1755,7 +1756,9 @@ def draw_annotated(image, data, aruco_corners, finger, show_polygon=True):
 
     show_polygon=False skips the filled nail-outline polygon (used by
     the live preview, which hides it from the user while keeping the
-    other overlay elements).
+    other overlay elements). show_width_label/show_skin_label similarly
+    hide the "W:"/"Skin:" text rows (the magenta width bracket from
+    draw_width_marker and the "L:" row stay either way).
     """
     vis   = image.copy()
     color = NAIL_COLORS.get(finger, (200,200,200))
@@ -1801,11 +1804,12 @@ def draw_annotated(image, data, aruco_corners, finger, show_polygon=True):
     # from the side/phone end-on photo now, not from this top-view shot, so
     # this frame has nothing real to show for it.
     lx = tip_x + int(nail_half) + 20
-    for txt, dy, col in [
-        (f"W:    {data['width_mm']}mm",              40,  color),
-        (f"L:    {data['length_mm']}mm",             100, color),
-        (f"Skin: {data['skin_tone_hex']}",           160, (0,200,255)),
-    ]:
+    labels = [(f"L:    {data['length_mm']}mm", 100, color)]
+    if show_width_label:
+        labels.append((f"W:    {data['width_mm']}mm", 40, color))
+    if show_skin_label:
+        labels.append((f"Skin: {data['skin_tone_hex']}", 160, (0,200,255)))
+    for txt, dy, col in labels:
         cv2.putText(vis, txt, (lx, tip_y+dy),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,0), 5)
         cv2.putText(vis, txt, (lx, tip_y+dy),
