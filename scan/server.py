@@ -39,6 +39,7 @@ from pydantic import BaseModel
 
 from skin_color import recommend_nail_colors, lab_to_rgb_hex
 from nail_measurer import recommend_nail_shape
+from camera_stream import RobustCamera
 
 BASE         = os.path.dirname(os.path.abspath(__file__))
 BUCKET       = "naily-scans"
@@ -327,16 +328,14 @@ def capture_all_fingers(userid: str, session: str, hand: str) -> str:
     os.makedirs(local_dir, exist_ok=True)
 
     # 탑뷰 카메라 열기
-    cap_top = cv2.VideoCapture(CAMERA_TOP, cv2.CAP_DSHOW)
-    cap_top.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap_top.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    cap_top = RobustCamera(CAMERA_TOP, width=1920, height=1080)
     if not cap_top.isOpened():
         raise RuntimeError(f"탑뷰 카메라(인덱스 {CAMERA_TOP})를 열 수 없습니다.")
 
     # 측면뷰 카메라 열기 (옵션)
     cap_side = None
     if CAMERA_SIDE >= 0:
-        _c = cv2.VideoCapture(CAMERA_SIDE, cv2.CAP_DSHOW)
+        _c = RobustCamera(CAMERA_SIDE)
         if _c.isOpened():
             cap_side = _c
             print(f"[Capture] 측면뷰 카메라(인덱스 {CAMERA_SIDE}) 연결됨")
@@ -968,15 +967,13 @@ def capture_all_fingers(userid: str, session: str, hand: str) -> str:  # noqa: F
     local_dir = os.path.join(BASE, "photos", userid, session, hand)
     os.makedirs(local_dir, exist_ok=True)
 
-    cap_top = cv2.VideoCapture(CAMERA_TOP, cv2.CAP_DSHOW)
-    cap_top.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap_top.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    cap_top = RobustCamera(CAMERA_TOP, width=1920, height=1080)
     if not cap_top.isOpened():
         raise RuntimeError(f"탑뷰 카메라(인덱스 {CAMERA_TOP})를 열 수 없습니다.")
 
     cap_side = None
     if CAMERA_SIDE >= 0:
-        _c = cv2.VideoCapture(CAMERA_SIDE, cv2.CAP_DSHOW)
+        _c = RobustCamera(CAMERA_SIDE)
         if _c.isOpened():
             cap_side = _c
             print(f"[Capture] 사이드뷰 카메라(인덱스 {CAMERA_SIDE}) 연결됨")
