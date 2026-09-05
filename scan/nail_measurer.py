@@ -76,17 +76,26 @@ except ImportError:
     _ENDON_AVAILABLE = False
 
 # End-on (side-view) C-curve photos are shot inside the capture box, whose
-# ceiling (bright strip light + blue alignment LEDs) and near-camera mat
-# both land in frame above/below the finger. Neither is background in the
-# sense the measurement below assumes, and letting them in was confirmed to
-# make the finger-localisation step grab the whole frame instead of just
-# the fingertip (bbox 3000x4000 instead of ~300x300), producing wildly
-# inconsistent c-curve readings across fingers. Cropping these fixed bands
-# off before measuring isolates the fingertip cleanly - verified against
-# all 5 left-hand fingers of session 1/31. Top-view photos don't go through
-# this crop; the same ceiling/mat framing issue doesn't apply there.
-CCURVE_TOP_CROP_FRAC    = 0.30
-CCURVE_BOTTOM_CROP_FRAC = 0.12
+# ceiling (bright strip light + blue alignment LEDs), near-camera mat, ID/
+# ArUco tag glued to the mat, and a foil seam strip on the wall all land in
+# frame around the finger. None of that is background in the sense the
+# measurement below assumes, and letting it in was confirmed to make the
+# finger-localisation step grab the whole frame (or the tag, or the LED
+# ring) instead of just the fingertip, producing wildly inconsistent
+# c-curve readings across fingers - every finger of session 1/108 came out
+# unusable this way (2026-09-05).
+#
+# The rig is fixed-mounted, so the fingertip lands in almost the same place
+# on every capture - measured across 20 real captures (4 sessions x 5
+# fingers, 2026-09) at x=0.37-0.54, y=0.48-0.53 of the frame. These
+# fractions crop tightly around that region with generous margin, leaving
+# just the fingertip on a clean dark background and excluding the ceiling,
+# tag, and seam outright. Top-view photos don't go through this crop; the
+# same box-interior framing issue doesn't apply there.
+CCURVE_TOP_CROP_FRAC    = 0.38
+CCURVE_BOTTOM_CROP_FRAC = 0.35
+CCURVE_LEFT_CROP_FRAC   = 0.25
+CCURVE_RIGHT_CROP_FRAC  = 0.30
 
 # ── Skin LAB metrics (brightness/saturation/warmness for color recommendation) ──
 try:
@@ -1834,12 +1843,17 @@ def save_annotated(image, data, aruco_corners, finger, save_path):
 _FALLBACK_C_CURVE_MM       = 1.0
 _FALLBACK_C_CURVE_MM_ENDON = 1.0
 
-# An end-on (side/phone) c-curve reading at or above this is treated as
-# suspect and replaced with the top-view's own brightness-drop estimate
-# instead (see measure_finger) - real nail c-curve sagittas rarely reach
-# this high, and box-rig lighting/geometry issues have produced readings
-# in this range on nails that were really ~1-2mm.
-_ENDON_C_CURVE_SUSPECT_MM = 3.0
+# Was: an end-on (side/phone) c-curve reading at or above this was treated
+# as suspect and replaced with the top-view's own brightness-drop estimate
+# instead. Removed 2026-09-05 - the readings this caught (4-4.5mm on nails
+# that were really ~1-2mm) traced back to the end-on photo's finger
+# localisation grabbing the box rig's ceiling/mat/tag instead of the
+# fingertip (see CCURVE_*_CROP_FRAC above), not to the sagitta itself being
+# implausible. Now that the fixed crop isolates the fingertip cleanly, a
+# high reading is data, not a sign of the old failure mode - gating on it
+# was silently discarding correct end-on measurements (confirmed on session
+# 1/108: index/middle/ring all measured a legitimate 3.2-4.2mm and got
+# overwritten with the less precise top-view estimate instead).
 
 def _fallback_measurement(finger: str) -> dict:
     std = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])
@@ -1936,12 +1950,6 @@ def measure_finger(top_path: str, finger: str,
         data = measure_top(top_img, mpp, finger_mask, bbox,
                            aruco_corners=aruco_corners, finger=finger)
 
-        # Top view's own brightness-drop estimate - kept aside so a
-        # too-high end-on reading below has something trustworthy to fall
-        # back to instead of just the flat 1mm default.
-        top_c_curve_mm    = data["c_curve_mm"]
-        top_arc_radius_mm = data["arc_radius_mm"]
-
         # ── Override C-curve with end-on measurement if photo is provided ──
         use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
         if use_endon:
@@ -1953,30 +1961,15 @@ def measure_finger(top_path: str, finger: str,
                                    debug_out=debug_path,
                                    table_edge=ccurve_table_edge,
                                    top_crop_frac=CCURVE_TOP_CROP_FRAC,
-                                   bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC)
-                if cc["c_curve_mm"] >= _ENDON_C_CURVE_SUSPECT_MM and top_c_curve_mm is not None:
-                    # End-on readings this high are implausible (see
-                    # measure_ccurve.py history - box-rig lighting/geometry
-                    # issues have produced readings around 4-4.5mm on nails
-                    # that were really ~1-2mm). The top-view brightness
-                    # estimate isn't as precise, but it's a same-photo
-                    # sanity source rather than the flat fallback constant.
-                    data["c_curve_mm"]    = top_c_curve_mm
-                    data["arc_radius_mm"] = top_arc_radius_mm
-                    data["_ccurve_method"] = (
-                        f"top-view brightness fallback "
-                        f"(end-on reading {cc['c_curve_mm']}mm >= "
-                        f"{_ENDON_C_CURVE_SUSPECT_MM}mm, treated as suspect)")
-                    print(f"  [C-curve] end-on {cc['c_curve_mm']}mm looks too high "
-                          f"(>= {_ENDON_C_CURVE_SUSPECT_MM}mm) → using top-view "
-                          f"estimate {top_c_curve_mm}mm instead")
-                else:
-                    data["c_curve_mm"]    = cc["c_curve_mm"]
-                    data["arc_radius_mm"] = cc["arc_radius_mm"]
-                    data["_ccurve_method"] = "end-on photo"
-                    print(f"  [C-curve] OK end-on  "
-                          f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
-                          f"(debug -> {debug_path})")
+                                   bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC,
+                                   left_crop_frac=CCURVE_LEFT_CROP_FRAC,
+                                   right_crop_frac=CCURVE_RIGHT_CROP_FRAC)
+                data["c_curve_mm"]    = cc["c_curve_mm"]
+                data["arc_radius_mm"] = cc["arc_radius_mm"]
+                data["_ccurve_method"] = "end-on photo"
+                print(f"  [C-curve] OK end-on  "
+                      f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
+                      f"(debug -> {debug_path})")
             except Exception as e:
                 print(f"  [C-curve] WARN end-on(폰) 측정 실패 ({e}), "
                       f"c_curve=1mm 기본값으로 대체")

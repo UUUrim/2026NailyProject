@@ -394,7 +394,10 @@ def run_measure_only(userid: str, session: str, hand: str):
             "--output",     finger_out,
         ]
         if os.path.isfile(side_path):
-            cmd += ["--ccurve-top", side_path]
+            # 사이드뷰는 책상 모서리가 아니라 박스 뒷벽 구멍으로 손끝만
+            # 내민 형태(box-style rig) — table-edge 로직이 아니라
+            # box-style 크롭/분리 경로를 타야 한다.
+            cmd += ["--ccurve-top", side_path, "--ccurve-box-style"]
             print(f"  [{finger}] C-curve: end-on 사진 사용")
         else:
             print(f"  [{finger}] C-curve: brightness fallback")
@@ -435,7 +438,10 @@ def _analyze_finger(userid: str, session: str, hand: str, finger: str):
         "--output",     finger_out,
     ]
     if os.path.isfile(side_path):
-        cmd += ["--ccurve-top", side_path]
+        # 사이드뷰는 책상 모서리가 아니라 박스 뒷벽 구멍으로 손끝만
+        # 내민 형태(box-style rig) — table-edge 로직이 아니라
+        # box-style 크롭/분리 경로를 타야 한다.
+        cmd += ["--ccurve-top", side_path, "--ccurve-box-style"]
 
     result = subprocess.run(cmd, cwd=BASE, capture_output=True, text=True)
     ok = result.returncode == 0
