@@ -90,7 +90,7 @@ public class NailDetectionService {
         Map<String, Object> body = new HashMap<>();
         body.put("image_base64", imageBase64);
         body.put("parts", parts);
-        body.put("threshold", 0.1);
+        body.put("threshold", 0.35);
         // extractColorsPerNail()과 동일한 값 - SAM 마스크가 손톱 큐티클 쪽처럼
         // 손톱 본연의 색과 배경색이 거의 같은 지점에서 경계를 살짝 넓게 잡는 걸
         // 안쪽으로 침식시켜 보정한다 (detect 서버가 이 필드를 지원해야 반영됨).

@@ -90,7 +90,7 @@ public class NailImageService {
         body.put("prompt", prompt);
         body.put("mask_prompt", maskPrompt);
         body.put("steps", 30);
-        body.put("strength", 0.8);
+        body.put("strength", 0.8); //0.8 -> 0.6
         body.put("guidance_scale", 1);
         body.put("threshold", 0.35);
         body.put("mask_offset", 8);

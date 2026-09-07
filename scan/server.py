@@ -45,7 +45,7 @@ BUCKET       = "naily-scans"
 FINGER_ORDER = ["thumb", "index", "middle", "ring", "pinky"]
 
 # ── 카메라 설정 (환경에 맞게 조정) ────────────────────────────
-CAMERA_TOP        = 0       # 탑뷰 카메라 인덱스
+CAMERA_TOP        = 1     # 탑뷰 카메라 인덱스
 CAMERA_SIDE       = 1       # 측면뷰(end-on C-curve) 카메라 인덱스 (-1: 없음)
 ARUCO_SIZE_MM     = 20.0    # ArUco 마커 실물 크기 (mm)
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)

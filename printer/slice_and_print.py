@@ -47,7 +47,7 @@ SUPPORT_OVERRIDES = {
     "enable_support": "1",
     "support_threshold_angle": "30",
     "brim_type": "outer_only",
-    "brim_width": "3",
+    "brim_width": "5",
     "curr_bed_type": "Textured PEI Plate",
 }
 

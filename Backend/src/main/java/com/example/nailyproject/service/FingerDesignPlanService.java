@@ -35,11 +35,12 @@ public class FingerDesignPlanService {
         [참고 이미지 해석 규칙 - 매우 중요]
         참고 이미지에 등장인물/캐릭터가 있다면, 그 캐릭터가 어떤 작품·프랜차이즈의
         누구인지 특정해 이름을 언급하거나 작풍명을 언급하세요.(예: 오비토, 카카시 등의 캐릭터가 나오면
-         "나루토"사용) minimal 단어는 최대한 쓰지 마세요.
+         "나루토"사용) 
+         minimal 단어는 최대한 쓰지 마세요.
         아래처럼 "시각적 스타일 요소"를 최대한 세밀하게 관찰해서 motif/design_type/
         parts에 녹여내세요:
         - 화풍/장르: anime, chibi, cartoon, cel-shaded, manga style 등 (특정 작품명이 있다면 포함하세요.)
-        - 색상: 주조색, 보조색, 그라데이션 방향, 톤(파스텔/비비드/딥 등) 등 이미지에 나오는 색 사용
+        - 색상: 이미지에 나오는 색만 사용
         - 선/윤곽: 굵은 아웃라인 여부, 셀셰이딩 여부, 부드러운 선 vs 각진 선 등
         - 질감/마감: 글로시, 매트, 글리터, 펄, 크리스탈 등 표면 느낌 등
         - 형태 모티프: 이미지 속 반복되는 도형/패턴(별, 구름, 줄무늬, 물방울 등)그리고
@@ -51,7 +52,7 @@ public class FingerDesignPlanService {
         [화려한 장식 요소 - 참고 이미지가 있을 때만 적용]
         parts에는 아래 같은 입체 장식 어휘를 적극적으로 활용해서 화려함을 더하세요
         (참고 이미지 분위기에 어울리는 것만 골라서 사용하세요):
-         - 3D charm, crystal/rhinestone,foil, glitter, chrome/metallic
+         - 3D charm, crystal/rhinestone, glitter, chrome/metallic
                       accent, embossed line art 등
          - 모든 손가락에는 3D charm이나 crystal처럼 입체감 있는 포인트 장식을
                       하나 이상 포함하세요.
@@ -59,7 +60,7 @@ public class FingerDesignPlanService {
          parts에는 아래 같은 입체 장식 어휘를 적극적으로 활용해서 화려함을 더하세요
                     (참고 이미지 분위기에 어울리는 것만 골라서 사용하고, 이미지랑 안 어울리면
                     억지로 넣지 마세요):
-                    - 3D charm, crystal/rhinestone, foil, glitter, chrome/metallic accent,
+                    - 3D charm, crystal/rhinestone, glitter, chrome/metallic accent,
                       embossed line art 등
                     - 최소 1~2개 손가락에는 3D charm이나 crystal처럼 입체감 있는 포인트 장식을
                       하나 이상 포함하세요.
@@ -71,12 +72,11 @@ public class FingerDesignPlanService {
                     - 포인트 장식은 참고 이미지의 실제 모티프 형태를 반영한 "존재감 있는 큰 참"
                       하나로 만드세요. 예를 들어 이미지에 구름이 있으면 "3D fluffy cloud charm"
                       (작은 점이 아니라 손톱 폭의 1/3 정도를 차지하는 입체 구름 모양), 불꽃이
-                      있으면 "3D flame-shaped charm", 무기/도구 모티프가 있으면 그 실루엣을 딴
+                      있으면 "3D flame shaped charm", 무기/도구 모티프가 있으면 그 실루엣을 딴
                       "3D [모티프 형태] charm" 식으로, 손가락마다 다른 모티프 형태의 참을
                       하나씩 지정하세요.
-                    - 장식 문구에는 크기감을 드러내는 표현을 넣으세요 (예: "large 3D cloud-shaped
-                      charm", "oversized 3D flame charm") — "small", "tiny", "dot" 같은
-                      표현은 쓰지 마세요.
+                    - 장식 문구에는 크기감을 드러내는 표현을 넣으세요 (예: "large 3D cloud shaped
+                      charm", "oversized 3D flame charm") 
                     - crystal/rhinestone처럼 원래 작은 게 자연스러운 장식은 예외지만, 그 경우도
                       한 손가락에 하나씩 딱 박아넣기보다 모티프 라인을 따라 배치되는 느낌으로
                       묘사하세요 (예: "line of small crystals following the cloud outline").
@@ -113,11 +113,13 @@ public class FingerDesignPlanService {
         그 손가락의 base_color를 채우세요. 그 외(지정도 없고 참고 이미지도 없는 경우)
         손가락은 base_color를 빈 문자열("")로 두세요.
         
-       [참고 이미지 색상 규칙 - 매우 중요]
+        [참고 이미지 색상 규칙 - 매우 중요]
             - 이미지에서 실제로 보이는 색만 사용하세요.
             - 이미지의 배경색, 주조색을 최우선으로 반영하세요.
             - 로고/텍스트/아이콘의 색보다 전체 배경/분위기 색을 우선하세요.
             - 이미지에 없는 색을 창작하거나 추측하지 마세요.
+            - 전체 이미지의 지배적인 색조(dominant color)를 기준으로 하세요.
+              소면적의 악센트 컬러를 메인 컬러로 쓰지 마세요.
 
         [손가락별 지정 - 매우 중요]
             확정된 입력 정보에 "손가락별 지정"이 포함되어 있다면, 그 지정을 절대적으로
@@ -169,29 +171,33 @@ public class FingerDesignPlanService {
         [parts 작성 규칙]
         parts는 좌표나 크기 없이, 자유 텍스트로 된 짧은 태그들의 배열입니다.
         - 입체적으로 도드라지는 장식(리본, 보석, 진주, 스터드 등)은 "3D"를 포함해서 작성:
-          예: "3D ribbon", "3D pearl stud", "3D rhinestone"
+          예: "3D bow", "3D pearl stud", "3D rhinestone"
         - 평면적인 그림(아트)/스티커/패턴은 "art" 또는 "sticker"를 포함해서 작성:
           예: "floral art", "cat sticker", "line art"
         - 파츠가 필요 없으면 빈 배열 []로 두세요.
             [중요] 확정된 입력 정보에 "(피해야 함)"으로 표시된 값이 있다면, 그 값과 관련된
             어떤 표현도 parts에 사용하면 안 됩니다. 특히 designType이나 motif에 "3D"가
             피해야 할 값으로 표시되어 있다면, parts 태그에도 "3D"가 들어간 표현
-            (예: "3D ribbon", "3D pearl stud")을 절대 쓰지 말고, 대신 "art" 또는 "sticker"
+            (예: "3D bow", "3D pearl stud")을 절대 쓰지 말고, 대신 "art" 또는 "sticker"
             스타일로 대체하세요. 이 제약은 손가락별 지정이 있든 없든 모든 손가락에 동일하게 적용됩니다.
             
             [parts_detect 작성 규칙 - 매우 중요]
-                    parts_detect는 파츠 검출 서버에 넘기는 단순 명사 리스트입니다.
-                    parts와 동일한 파츠를 1~2단어 단순 영어 명사로만 표현하세요.
-                    - 형용사, 크기, 재질, 색상 설명 절대 금지, 단 파츠 종류를 구분하는 핵심 명사는 유지
-                    - 파츠가 없으면 반드시 빈 배열 []로 두세요.
-                    - ribbon은 반드시 bow로 명시하세요.
-                    - 예시:
-                      "large 3D metallic star shaped charm" → "star"
-                      "3D ribbon bow charm" → "bow"
-                      "rhinestone crystal cluster" → "rhinestone"
-                      "transparent bubble sphere" → "bubble"
-                      "line of small crystals" → "crystal line"
-                      "metallic stud accent" → "stud"
+                        parts_detect는 파츠 검출 서버에 넘기는 단순 명사 리스트입니다.
+                        parts 배열에서 "3D"가 포함된 파츠만 뽑으세요.
+                        "3D"가 없는 파츠(line art, glitter, rhinestone, chrome accent, foil 등)는 넣지 마세요.
+                        - 형용사, 크기, 재질, 색상 설명 절대 금지, 단 파츠 종류를 구분하는 핵심 명사는 유지
+                        - 파츠가 없거나 3D 파츠가 없으면 반드시 빈 배열 []로 두세요.
+                        - ribbon은 반드시 bow로 명시하세요.
+                        - 예시:
+                          "large 3D metallic star shaped charm" → "star"
+                          "3D ribbon bow charm" → "bow"
+                          "embossed line art" → [] (3D 아님)
+                          "glitter, chrome accent" → [] (3D 아님)
+                          "3D penguin plush charm" → "penguin charm"
+                          "3D bear charm" → "bear charm"
+                        - 캐릭터/인형 형태의 3D 파츠는 형태로 묘사하세요.
+                          예: "penguin charm", "bear charm"
+                          GroundingDINO가 캐릭터 이름보다 "charm" 형태로 더 잘 잡습니다.
 
         [규칙]
         - motif가 필요 없는 손가락은 motif를 "none"으로 두세요.
@@ -226,6 +232,7 @@ public class FingerDesignPlanService {
         확정된 입력 정보에 "color 후보"가 주어졌다면, 그 후보들 중 mood/season과
         가장 잘 어울리는 색상 하나(또는 조합)를 당신이 판단해서 최상위 color에 채우세요.
         color 후보도 없다면, mood/season에 어울리는 색을 자유롭게 만들어서 사용하세요.
+        참고 이미지가 있다면, color 후보가 없어도 이미지에서 보이는 색만 사용하고 절대 임의로 만들지 마세요.
         %s
         
 
@@ -302,9 +309,11 @@ public class FingerDesignPlanService {
                     """.formatted(previousPlanJson);
         }
 
-        String trendHint = styleTrendService.buildTrendHint(userSeason);
+        // ★ 사진 기반 생성일 때는 트렌드 힌트 제외 (이미지 색감 우선)
+        String trendHint = (imageBase64 != null && !imageBase64.isBlank())
+                ? ""
+                : styleTrendService.buildTrendHint(userSeason);
         String systemPrompt = String.format(SYSTEM_PROMPT, trendHint, editModeSection, confirmedInputSummary);
-
         List<Map<String, Object>> parts = new ArrayList<>();
         if (imageBase64 != null && imageMimeType != null) {
             parts.add(Map.of(

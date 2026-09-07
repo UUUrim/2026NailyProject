@@ -147,6 +147,16 @@ def merge_hand(userid: str, session: str, hand: str, shapes: dict, output_dir: s
     print(f"[Merge] 병합 중 (기울기 {TILT_DEG}°, 간격 {SPACING_MM}mm)...")
     scene = _build_scene(finger_paths)
 
+    # ★ 플레이트 중앙(128mm)으로 이동
+    all_verts = np.vstack([g.vertices for g in scene.geometry.values()])
+    min_x, max_x = all_verts[:, 0].min(), all_verts[:, 0].max()
+    min_y, max_y = all_verts[:, 1].min(), all_verts[:, 1].max()
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+    shift = [128 - center_x, 128 - center_y, 0]
+    for geom in scene.geometry.values():
+        geom.apply_translation(shift)
+
     output_path = os.path.join(output_dir, "hand_merged.3mf")
     scene.export(output_path)
     _fix_build_section(output_path)  # 추가
@@ -204,8 +214,11 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
 
     # 음수 좌표 보정 — OrcaSlicer가 재배치하지 않도록
     all_verts = np.vstack([g.vertices for g in scene.geometry.values()])
-    min_x, min_y = all_verts[:, 0].min(), all_verts[:, 1].min()
-    shift = [-min_x + 10, -min_y + 10, 0]
+    min_x, max_x = all_verts[:, 0].min(), all_verts[:, 0].max()
+    min_y, max_y = all_verts[:, 1].min(), all_verts[:, 1].max()
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+    shift = [128 - center_x, 128 - center_y, 0]
     for geom in scene.geometry.values():
         geom.apply_translation(shift)
 

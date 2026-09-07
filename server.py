@@ -118,7 +118,7 @@ os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
 # ── 카메라 설정 ───────────────────────────────────────────────
 # 이 데스크톱은 물리 웹캠이 C920 하나뿐이고 OpenCV에서 인덱스 0으로 잡힘
 # (인덱스 1은 존재하지 않는 장치라 VideoCapture.open이 예외를 던지고 실패함).
-CAMERA_TOP        = 0       # 탑뷰: USB 웹캠 (C920)
+CAMERA_TOP        = 2    # 탑뷰: USB 웹캠 (C920)
 CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1: 사용 안 함
 ARUCO_SIZE_MM     = 20.0
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
@@ -478,8 +478,8 @@ def _get_top_cam() -> cv2.VideoCapture:
         if cap is None or not cap.isOpened():
             raise RuntimeError(f"탑뷰 카메라(인덱스 {CAMERA_TOP})를 열 수 없습니다.")
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         _top_cam       = cap
         _top_cam_index = CAMERA_TOP
         return _top_cam
@@ -1146,7 +1146,9 @@ def analyze_stl(request: StlRequest):
 
 def _placeholder_jpeg(text: str = "") -> bytes:
     img = np.zeros((480, 640, 3), dtype=np.uint8)
-    _, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 60])
+    ret, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 60])
+    if not ret:
+        return b''
     return jpeg.tobytes()
 
 
@@ -1154,13 +1156,16 @@ def _placeholder_jpeg(text: str = "") -> bytes:
 def stream_top():
     placeholder = _placeholder_jpeg("Scan ready")
     def generate():
-        while True:
-            try:
-                frame = _S.top_frame.get(timeout=0.5)
-                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n'
-            except _q.Empty:
-                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + placeholder + b'\r\n'
+         while True:
+             try:
+                 frame = _S.top_frame.get(timeout=0.5)
+                 _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                 yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n'
+             except _q.Empty:
+                 yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + placeholder + b'\r\n'
+             except Exception:
+                 time.sleep(0.1)
+                 continue
     return StreamingResponse(generate(), media_type='multipart/x-mixed-replace; boundary=frame')
 
 
@@ -1333,9 +1338,9 @@ def get_camera_config():
     return {"top": CAMERA_TOP, "side": CAMERA_SIDE}
 
 @app.post("/camera/config")
-def set_camera_config(top: int = 0, side: int = -2):
-    """카메라 인덱스 변경. 스캔 시작 전에 호출해야 적용됨."""
+def set_camera_config(top: int = 1, side: int = -2):
     global CAMERA_TOP, CAMERA_SIDE
     CAMERA_TOP = top
     CAMERA_SIDE = side
+    # 카메라는 닫지 않음 — 다음 _get_top_cam() 호출 시 인덱스 불일치 감지해서 재오픈됨
     return {"ok": True, "top": CAMERA_TOP, "side": CAMERA_SIDE}

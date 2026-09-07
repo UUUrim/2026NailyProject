@@ -66,21 +66,42 @@ public class RefineService {
                - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             2. mask_prompt
-                           - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
-                           - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
-                           - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
-                           - 형식: "nail tip with {현재 존재하는 특징}"
-                           - 특징은 색상 또는 파츠 중 하나로만 잡으세요.
-                           - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
-                           - 10단어 이내로 작성하세요.
-                           - 좋은 예시:
-                             * "nail tip with heart charm" (현재 하트 파츠가 있을 때)
-                             * "nail tip with white base" (현재 흰색일 때)
-                             * "nail tip with glitter" (현재 글리터가 있을 때)
-                           - 나쁜 예시 (절대 금지):
-                             * 수정 후 결과물 색상 ("nail tip with aquatic blue gradient" 등)
-                             * "nail tip with previous design" (의미 없음)
-                             * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
+               - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
+               - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
+               - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
+               - mask_prompt는 수정할 대상(제거/교체할 파츠나 요소)을 묘사하세요.
+                 손톱 전체를 묘사하지 말고, 실제로 변경할 부분만 묘사하세요.
+                 예: 캐릭터 얼굴 관련 → "nail tip with character art"
+                     파츠 교체 → "nail tip with bow charm"
+                     색상 변경 → "yellow nail tip"
+               - 형식: "nail tip with {현재 존재하는 특징}"
+              
+               - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
+               - 10단어 이내로 작성하세요.
+               - 좋은 예시:
+                 * "nail tip with 3d heart charm" (현재 하트 3d 파츠가 있을 때)
+                 * "nail tip with white base" (현재 흰색일 때)
+                 * "nail tip with glitter" (현재 글리터가 있을 때)
+               - 나쁜 예시 (절대 금지):
+                 * 수정 후 결과물 색상
+                 * "nail tip with previous design" (의미 없음)
+                 * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
+                 
+            [mask_prompt 작성 규칙 - 매우 중요]
+            - 원본 이미지에서 실제로 보이는 특징만 묘사하세요. 수정 후 결과물 금지.
+            - designPlan의 base_color 이름(예: "Pumpkin Green", "Tulipan Violet")을\s
+              그대로 쓰지 말고 실제 보이는 색감으로 변환하세요.
+              예: "Pumpkin Green" → "green nail tip"
+                    "Tulipan Violet" → "purple nail tip"
+                    "Sun Baked Earth" → "brown nail tip"
+            - 최대한 짧고 단순하게: "[색상/파츠] nail tip" 형식
+            - 색상 수정 시: "[단순 색상] nail tip" 형식으로 간결하게
+              예: "brown nail tip", "dark nail tip", "light pink nail tip"
+            - 파츠 수정 시: "nail tip with [파츠]"
+              예: "nail tip with bow charm", "nail tip with star charm"
+            - 같은 파츠가 여러 손톱에 있을 때: 베이스 색도 함께
+              예: "brown nail tip with 3d bow charm"
+            - 수정 후 결과물을 묘사하지 말고, 현재 원본 이미지에 있는 것을 묘사하세요.
 
             3. slotActions (기존과 동일, 세션 슬롯 업데이트용)
                - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
@@ -216,6 +237,7 @@ public class RefineService {
                 .seed(seed)
                 .build();
         nailDesignRepository.save(newDesign);
+        nailDesignService.triggerPartsDetectionAsync(newDesign);
         session.updateGeneratedPrompt(originalPrompt); // 원본 프롬프트 유지
         designSessionRepository.save(session);
 

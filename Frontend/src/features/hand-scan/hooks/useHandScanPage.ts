@@ -83,7 +83,7 @@ export function useHandScanPage() {
   const [isUploading, setIsUploading]       = useState(false)
   // 기본값: 왼쪽(탑뷰)=USB 웹캠 인덱스 0, 오른쪽(사이드/c-curve)=폰(-2).
   // 매번 드롭다운에서 고르지 않아도 되도록 실제로 쓰는 조합을 기본값으로 둠.
-  const [topCameraIdx, setTopCameraIdx]     = useState(0)
+  const [topCameraIdx, setTopCameraIdx]     = useState(2)
   const [sideCameraIdx, setSideCameraIdx]   = useState(-2)
 
   const [currentStepIndex, setCurrentStepIndex] = useState(restored?.currentStepIndex ?? 0)

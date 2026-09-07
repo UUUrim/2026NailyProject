@@ -36,7 +36,7 @@ PROJECT_DIR   = r"C:\nail_ArUco\scan"
 PHOTOS_DIR    = os.path.join(PROJECT_DIR, "photos")
 ARUCO_SIZE    = 20        # real marker size in mm
 SHAPES        = ["round", "almond", "square", "stiletto", "ballerina"]
-CAMERA_INDEX  = 0        # None = auto-detect; or set to 0 / 1 manually
+CAMERA_INDEX  = 1        # None = auto-detect; or set to 0 / 1 manually
 
 # Auto-capture tuning
 STABLE_FRAMES   = 20      # frames marker must stay still before countdown starts (~0.7s at 30fps)

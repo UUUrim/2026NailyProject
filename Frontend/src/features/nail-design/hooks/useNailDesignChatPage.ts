@@ -831,7 +831,7 @@ export function useNailDesignChatPage() {
                 details: data.details,
                 context: {
                     source: 'photo',
-                    keywords: data.keywords ?? [],
+                    keywords: [],
                     referenceImageUrl: selectedPhotoPreviewUrl,
                     handSummary: null,
                     revisionKeywords: buildFreeformKeywords(reviseLogRef.current),

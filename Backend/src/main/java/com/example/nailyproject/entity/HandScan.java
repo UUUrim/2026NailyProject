@@ -75,6 +75,7 @@ public class HandScan {
 
     public enum ScanStatus {
         READY,           // 방 생성됨
+        PENDING,
         ANALYZING,       // 파이썬 수치 측정 중
         MEASURED,        // 수치 측정 완료
         GENERATING_STL,  // 파이썬 STL 생성 중

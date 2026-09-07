@@ -48,8 +48,19 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     username: root
-    password:   #내 로컬db 비밀번호로 설정
+    password:  seha88!! #내 로컬db 비밀번호로 설정
     driver-class-name: com.mysql.cj.jdbc.Driver
+#  datasource:
+#    url: jdbc:mysql://nailydb.cy74oskiegr8.us-east-1.rds.amazonaws.com:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+#    username: admin
+#    password: ENC(eGPb9gyXu7yqOlB2AQ8GrdugJnaGrnTy)
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      max-lifetime: 600000
+      connection-timeout: 30000
+      validation-timeout: 5000
+      connection-test-query: SELECT 1
+      keepalive-time: 60000
 #  datasource:
 #    url: jdbc:mysql://localhost:3306/naily_db?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
 #    username: root
@@ -73,7 +84,7 @@ gemini:
   api:
 #    key: ENC(f11Gu+eqSDV89d4XdLuuhSgUpmthWA1ZFzmg9oZgvPOmNwjRqrbNyVa5n0uOHLqb)
     key: ENC(r7E1eFRjogbReg0hDJoOieJu/7/QBgctrZjI5XTkZFVZYzogIGQdIHsykK2m1fCv1eNSmBWJFzTvtpaWbq1cFQ==)
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
 
 
 cloud:

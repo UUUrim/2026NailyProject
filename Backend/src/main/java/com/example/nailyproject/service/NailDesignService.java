@@ -50,6 +50,22 @@ public class NailDesignService {
     private static final String BASE_NEGATIVE_PROMPT =
             "hands, fingers, skin, blurry, low quality, watermark, text, bad anatomy, deformed, ugly, dots, polka dot, stripes, dark colors, bold colors, tweezers, tools, props, gray background, colored background";
 
+    private static final Map<String, String> TEXTURE_KEYWORD_MAP = new LinkedHashMap<>();
+    static {
+        TEXTURE_KEYWORD_MAP.put("glitter",      "glitter");
+        TEXTURE_KEYWORD_MAP.put("marble",       "marble");
+        TEXTURE_KEYWORD_MAP.put("magnetic",     "magnetic_chrome");
+        TEXTURE_KEYWORD_MAP.put("cat eye",      "magnetic_chrome");
+        TEXTURE_KEYWORD_MAP.put("mercury",      "mercury_chrome");
+        TEXTURE_KEYWORD_MAP.put("powder",       "powder");
+        TEXTURE_KEYWORD_MAP.put("aurora",       "powder");
+        TEXTURE_KEYWORD_MAP.put("matte",        "matte");
+        TEXTURE_KEYWORD_MAP.put("3d charm",     "3d_charm");
+        TEXTURE_KEYWORD_MAP.put("drawing",      "drawing");
+        TEXTURE_KEYWORD_MAP.put("doodle",       "drawing");
+        TEXTURE_KEYWORD_MAP.put("solid color",  "plain_solid");
+    }
+
     @org.springframework.beans.factory.annotation.Value("${analysis.server.url:http://localhost:8000}")
     private String analysisServerUrl;
 
@@ -813,6 +829,9 @@ public class NailDesignService {
         final Long finalDesignId = nailDesign.getId();
         final Long finalUserId = user.getId();
 
+        // ★ 최초 생성 시에도 파츠 검출 실행
+        triggerPartsDetectionAsync(nailDesign);
+
 
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
@@ -828,7 +847,7 @@ public class NailDesignService {
      * ★ buildDetails: colorPalette + designPlan 파싱 + swatchesJson 포함
      */
     public DesignGenerateResponseDto.Details buildDetails(NailDesign nailDesign) {
-        // colorPalette 파싱
+        // colorPalette 파싱 (기존 유지)
         List<String> colorPalette = new ArrayList<>();
         if (nailDesign.getColorPalette() != null && !nailDesign.getColorPalette().isBlank()) {
             try {
@@ -839,32 +858,7 @@ public class NailDesignService {
             }
         }
 
-        // designPlan에서 textures, nailParts 추출
-        LinkedHashSet<String> textures  = new LinkedHashSet<>();
-        LinkedHashSet<String> nailParts = new LinkedHashSet<>();
-        if (nailDesign.getDesignPlan() != null && !nailDesign.getDesignPlan().isBlank()) {
-            try {
-                JsonNode plan = objectMapper.readTree(nailDesign.getDesignPlan());
-                addIfMeaningful(textures, plan.path("designType").asText(""));
-                addIfMeaningful(nailParts, plan.path("motif").asText(""));
-
-                JsonNode fingers = plan.path("fingers");
-                if (fingers.isArray()) {
-                    for (JsonNode finger : fingers) {
-                        addIfMeaningful(textures, finger.path("design_type").asText(""));
-                        addIfMeaningful(nailParts, finger.path("motif").asText(""));
-                        JsonNode parts = finger.path("parts");
-                        if (parts.isArray()) {
-                            for (JsonNode part : parts) addIfMeaningful(nailParts, part.asText(""));
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("designPlan 파싱 실패: " + e.getMessage());
-            }
-        }
-
-        // ★ swatchesJson 파싱: { "glitter": "S3_URL", ... }
+        // swatchesJson 파싱 (기존 유지)
         Map<String, String> swatchMap = new LinkedHashMap<>();
         if (nailDesign.getSwatchesJson() != null && !nailDesign.getSwatchesJson().isBlank()) {
             try {
@@ -875,6 +869,15 @@ public class NailDesignService {
             }
         }
 
+        // ★ textures: confirm 후엔 swatchMap 키 사용, 그 전엔 프롬프트 키워드 폴백
+        String fullPrompt = buildFullPromptForSwatch(nailDesign);
+        LinkedHashSet<String> textures = !swatchMap.isEmpty()
+                ? new LinkedHashSet<>(swatchMap.keySet())
+                : extractTexturesFromPrompt(fullPrompt);
+
+        // ★ nailParts: 항상 최종 프롬프트에서 3D 패턴 추출
+        LinkedHashSet<String> nailParts = extractNailPartsFromPrompt(fullPrompt);
+
         return DesignGenerateResponseDto.Details.builder()
                 .colorPalette(colorPalette)
                 .textures(new ArrayList<>(textures))
@@ -882,6 +885,61 @@ public class NailDesignService {
                 .swatches(swatchMap.isEmpty() ? null : swatchMap)
                 .build();
     }
+//    public DesignGenerateResponseDto.Details buildDetails(NailDesign nailDesign) {
+//        // colorPalette 파싱
+//        List<String> colorPalette = new ArrayList<>();
+//        if (nailDesign.getColorPalette() != null && !nailDesign.getColorPalette().isBlank()) {
+//            try {
+//                colorPalette = objectMapper.readValue(nailDesign.getColorPalette(),
+//                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+//            } catch (Exception e) {
+//                System.err.println("colorPalette 파싱 실패: " + nailDesign.getColorPalette());
+//            }
+//        }
+//
+//        // designPlan에서 textures, nailParts 추출
+//        LinkedHashSet<String> textures  = new LinkedHashSet<>();
+//        LinkedHashSet<String> nailParts = new LinkedHashSet<>();
+//        if (nailDesign.getDesignPlan() != null && !nailDesign.getDesignPlan().isBlank()) {
+//            try {
+//                JsonNode plan = objectMapper.readTree(nailDesign.getDesignPlan());
+//                addIfMeaningful(textures, plan.path("designType").asText(""));
+//                addIfMeaningful(nailParts, plan.path("motif").asText(""));
+//
+//                JsonNode fingers = plan.path("fingers");
+//                if (fingers.isArray()) {
+//                    for (JsonNode finger : fingers) {
+//                        addIfMeaningful(textures, finger.path("design_type").asText(""));
+//                        addIfMeaningful(nailParts, finger.path("motif").asText(""));
+//                        JsonNode parts = finger.path("parts");
+//                        if (parts.isArray()) {
+//                            for (JsonNode part : parts) addIfMeaningful(nailParts, part.asText(""));
+//                        }
+//                    }
+//                }
+//            } catch (Exception e) {
+//                System.err.println("designPlan 파싱 실패: " + e.getMessage());
+//            }
+//        }
+//
+//        // ★ swatchesJson 파싱: { "glitter": "S3_URL", ... }
+//        Map<String, String> swatchMap = new LinkedHashMap<>();
+//        if (nailDesign.getSwatchesJson() != null && !nailDesign.getSwatchesJson().isBlank()) {
+//            try {
+//                JsonNode swatchNode = objectMapper.readTree(nailDesign.getSwatchesJson());
+//                swatchNode.fields().forEachRemaining(e -> swatchMap.put(e.getKey(), e.getValue().asText()));
+//            } catch (Exception e) {
+//                System.err.println("swatchesJson 파싱 실패: " + e.getMessage());
+//            }
+//        }
+//
+//        return DesignGenerateResponseDto.Details.builder()
+//                .colorPalette(colorPalette)
+//                .textures(new ArrayList<>(textures))
+//                .nailParts(buildNailPartsWithImages(nailDesign, nailParts))
+//                .swatches(swatchMap.isEmpty() ? null : swatchMap)
+//                .build();
+//    }
 
     private void addIfMeaningful(Set<String> target, String value) {
         if (value == null) return;
@@ -889,6 +947,35 @@ public class NailDesignService {
         if (trimmed.isEmpty()) return;
         if ("none".equalsIgnoreCase(trimmed) || "null".equalsIgnoreCase(trimmed)) return;
         target.add(trimmed);
+    }
+
+    private LinkedHashSet<String> extractTexturesFromPrompt(String prompt) {
+        LinkedHashSet<String> textures = new LinkedHashSet<>();
+        if (prompt == null || prompt.isBlank()) return textures;
+        String lower = prompt.toLowerCase();
+        TEXTURE_KEYWORD_MAP.forEach((keyword, textureKey) -> {
+            if (lower.contains(keyword)) textures.add(textureKey);
+        });
+        return textures;
+    }
+
+    private LinkedHashSet<String> extractNailPartsFromPrompt(String prompt) {
+        LinkedHashSet<String> parts = new LinkedHashSet<>();
+        if (prompt == null || prompt.isBlank()) return parts;
+
+        // "3D xxx charm" 류 패턴 추출
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)3d\\s+([a-zA-Z][a-zA-Z\\s\\-]{1,30}?)(?=\\s*(?:,|and\\s|with\\s|$))")
+                .matcher(prompt);
+        while (matcher.find()) {
+            addIfMeaningful(parts, "3D " + matcher.group(1).trim());
+        }
+
+        // 3D 없이 단독으로 쓰이는 파츠
+        for (String keyword : List.of("rhinestone", "crystal", "stud")) {
+            if (prompt.toLowerCase().contains(keyword)) addIfMeaningful(parts, keyword);
+        }
+        return parts;
     }
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
@@ -1167,6 +1254,16 @@ public class NailDesignService {
         }, "parts-detect-" + designId).start();
     }
 
+    public void triggerPartsDetectionAsync(NailDesign nailDesign) {
+        try {
+            if (nailDesign.getDesignPlan() == null) return;
+            JsonNode planNode = objectMapper.readTree(nailDesign.getDesignPlan());
+            triggerPartsDetection(nailDesign, planNode);
+        } catch (Exception e) {
+            System.err.println("[Parts] 파츠 검출 트리거 실패: " + e.getMessage());
+        }
+    }
+
     private void triggerPartsDetectionFallback(NailDesign nailDesign, List<String> partNames) {
         String imageUrl = (nailDesign.getImageUrls() != null && !nailDesign.getImageUrls().isEmpty())
                 ? nailDesign.getImageUrls().get(0) : null;
@@ -1228,7 +1325,7 @@ public class NailDesignService {
                     String raw = p.asText().trim();
                     if (!raw.toLowerCase().contains("3d")) return;
                     String part = simplifyPartName(raw);
-                    if (!part.isBlank() && !parts.contains(part)) {
+                    if (!part.isBlank() && part.length() >= 2 && !parts.contains(part)) {
                         parts.add(part);
                     }
                 });
@@ -1242,7 +1339,7 @@ public class NailDesignService {
 
         // 리본 → bow 치환
         String simplified = part.replaceAll("(?i)\\bribbon\\b", "bow");
-
+        simplified = simplified.replaceAll("(?i)\\bplush\\b", "charm");
         // 형용사/수식어 제거
         simplified = simplified
                 .replaceAll("(?i)\\b(large|small|tiny|oversized|3D|iridescent|metallic|crystal|glossy|matte|clear|embedded|holographic|internal|fine|soft|smooth|subtle|shaped|single|double|sculpted|multifaceted|icy|chrome|silver|gold)\\b", "")
@@ -1260,6 +1357,9 @@ public class NailDesignService {
             if (!unique.contains(w)) unique.add(w);
         }
         simplified = String.join(" ", unique.subList(0, Math.min(2, unique.size())));
+
+        // 모든 단어가 제거돼서 빈 문자열이 되면 detect 서버에 보내지 않음
+        if (simplified.isBlank()) return "";
 
         return simplified + " on nail tip";
     }
