@@ -37,6 +37,17 @@ export async function getDesignSwatches(
     return res.data ?? null
 }
 
+/** scan-auto 자동 생성일 때만 내려온다. 결과 화면 "내 손 분석 정보를 반영했어요"에서
+ *  추천 팔레트 중 실제 반영된 색 강조 + 반영된 무드/디자인 타입 표시에 사용. */
+export interface ScanAutoReflection {
+    recommendedColors: string[] // 추천 팔레트 전체 (hex)
+    usedColors: string[]        // 그 중 이번 디자인에 반영된 색 (hex)
+    shape?: string | null
+    mood?: string | null
+    designType?: string | null
+    motif?: string | null
+}
+
 export interface DesignGenerateResponse {
     designId: number
     status: string
@@ -44,6 +55,7 @@ export interface DesignGenerateResponse {
     imageUrls: string[] // 1장
     details?: DesignExtractedDetails
     keywords?: string[]
+    scanAutoReflection?: ScanAutoReflection | null
 }
 
 export interface DesignImageResponse {
@@ -117,6 +129,8 @@ export interface DesignDetailResponse {
 export async function generateDesign(params: {
     sessionId: number
     scanId?: number | null
+    /** 'scan-auto'면 서버가 스캔 추천 쉐입·추천 컬러 팔레트만으로 자동 생성한다. */
+    mode?: 'scan-auto'
 }): Promise<DesignGenerateResponse> {
     const res = await apiClient.post<DesignGenerateResponse>('/designs/generate-detailed', params)
     return res.data

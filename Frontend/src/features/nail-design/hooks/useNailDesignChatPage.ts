@@ -7,7 +7,7 @@ import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
     sendChatMessage,
@@ -118,6 +118,14 @@ type GenerationContext = {
         avgLength: number
         avgWidth: number
         avgCurve: number
+        // scan-auto 전용: 대표 피부색 / 쉐입 이미지 + 추천 팔레트 전체 + 그 중 실제 반영된 색 + 반영된 무드/디자인 타입
+        skinToneHex?: string | null
+        shapeImage?: string | null
+        recommendedColors?: string[]
+        usedColors?: string[]
+        reflectedMood?: string | null
+        reflectedDesignType?: string | null
+        reflectedMotif?: string | null
     } | null // 손 스캔 기반 자동 생성일 때, 참고한 손 분석 정보
     revisionKeywords: string[] // 생성 방식에 상관없이, "수정하고 싶어요" 흐름에서 추가로 요청한 내용
 }
@@ -699,7 +707,9 @@ export function useNailDesignChatPage() {
         const toneLabel =
             skinToneAnalysisFromMetrics(tone, warmness, brightness, saturation)?.tone.label ??
             (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
-        const shapeId = leftAnalysis?.shape || rightAnalysis?.shape || null
+        // "?" 패널과 동일하게 recommendedShape를 쓴다 (출력 신청 시 유저가 고른 쉐입으로
+        // 덮어써지는 mutable shape가 아니라, 스캔 분석이 처음 추천한 값).
+        const shapeId = leftAnalysis?.recommendedShape || rightAnalysis?.recommendedShape || null
         const shapeLabel = shapeId ? getNailShape(shapeId)?.labelKo ?? shapeId : null
         const recommendedColors = leftAnalysis?.recommendedColors?.length
             ? leftAnalysis.recommendedColors
@@ -712,7 +722,7 @@ export function useNailDesignChatPage() {
         const shapePart = shapeLabel ? `${shapeLabel} 쉐입` : '추천 쉐입'
 
         return {
-            text: `${userName ? `${userName}님의` : '내'} 스캔 정보를 기반으로 Naily가 디자인을 추천해요.\n${seasonPart}, ${shapePart}에 어울리는 컬러와 무드를 골라 디자인을 생성해봤어요. 어떠신가요?\n3D 화면을 통해 확인해보세요!`,
+            text: `${userName ? `${userName}님의` : '내'} 스캔 정보를 기반으로 Naily가 디자인을 추천해요.\n${seasonPart}, ${shapePart}에 어울리는 컬러와 무드를 골라 디자인을 생성해봤어요. 어떠신가요?\n아래 이미지를 통해 확인해보세요!`,
             colorSwatches,
         }
     }
@@ -729,7 +739,13 @@ export function useNailDesignChatPage() {
         pushAssistant('디자인을 생성하고 있어요… 최대 1분 정도 걸릴 수 있어요 🎨')
 
         try {
-            const data = await generateDesign({ sessionId, scanId })
+            const data = await generateDesign({
+                sessionId,
+                scanId,
+                // 스캔 자동 생성일 때만 서버에 알려서, "?" 패널에 보이는 추천 쉐입 +
+                // 추천 컬러 팔레트만으로 (원컬러 아닌) 디자인을 만들게 한다.
+                mode: source === 'scan-auto' ? 'scan-auto' : undefined,
+            })
 
             // "수정하고 싶어요" 흐름을 거쳐 재생성된 경우, 그동안 추가로 요청한 내용도 함께 담는다.
             const revisionKeywords = buildFreeformKeywords(reviseLogRef.current)
@@ -747,6 +763,16 @@ export function useNailDesignChatPage() {
                                     avgLength: analysisSummary.avgLength,
                                     avgWidth: analysisSummary.avgWidth,
                                     avgCurve: analysisSummary.avgCurve,
+                                    skinToneHex: analysisSummary.skinToneHex,
+                                    shapeImage: analysisSummary.shapeImage,
+                                    // 추천 팔레트는 "?" 패널과 동일하게 정렬해서, 실제 반영된 색을 강조 표시한다.
+                                    recommendedColors: sortRecommendedColors(
+                                        data.scanAutoReflection?.recommendedColors ?? analysisSummary.skinTonePalette,
+                                    ),
+                                    usedColors: data.scanAutoReflection?.usedColors ?? [],
+                                    reflectedMood: data.scanAutoReflection?.mood ?? null,
+                                    reflectedDesignType: data.scanAutoReflection?.designType ?? null,
+                                    reflectedMotif: data.scanAutoReflection?.motif ?? null,
                                 }
                               : null,
                           revisionKeywords,
@@ -773,7 +799,12 @@ export function useNailDesignChatPage() {
                 prompt: data.generatedPrompt,
                 preferences,
                 source,
-                shapeId: resolveShapeId(preferences),
+                // 스캔 자동 생성은 서버가 recommendedShape로 강제 고정하므로, 결과/AR 미리보기도
+                // "?" 패널과 같은 recommendedShape 기준으로 맞춘다.
+                shapeId:
+                    source === 'scan-auto' && analysisSummary?.shapeId
+                        ? (analysisSummary.shapeId as NailShapeId)
+                        : resolveShapeId(preferences),
                 details: data.details,
                 context,
             })
@@ -1412,18 +1443,20 @@ export function useNailDesignChatPage() {
             } catch {
                 measurements = {}
             }
-            // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
+            // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
+            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 일반 손톱 대체값(mm)을 쓴다.
             return {
                 lengthMm: Number(measurements.lengthMm ?? measurements.length ?? 12),
                 widthMm: Number(measurements.widthMm ?? measurements.width ?? 9),
-                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? 0.55),
+                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? FALLBACK_C_CURVE_MM),
             }
         })
 
         const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
         const avgLength = Number(avg(details.map((d) => d.lengthMm)).toFixed(1))
         const avgWidth = Number(avg(details.map((d) => d.widthMm)).toFixed(1))
-        const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(2))
+        // cCurve는 C-curve sagitta 깊이(mm). 소수 첫째 자리까지만 보여 준다.
+        const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(1))
 
         // 톤/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
         // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는

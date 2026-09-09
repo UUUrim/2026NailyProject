@@ -189,8 +189,9 @@ export function MyPageModals({
           const widthPct = printDetailScan
               ? Math.min(100, Math.max(8, (printDetailScan.avgWidth / 14) * 100))
               : 0
+          // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
           const curvePct = printDetailScan
-              ? Math.min(100, Math.max(8, printDetailScan.avgCurve * 100))
+              ? Math.min(100, Math.max(8, (printDetailScan.avgCurve / 5) * 100))
               : 0
 
           const subtitle = formatDateTimeFull(printDetailOrder.orderedAt)
@@ -292,14 +293,14 @@ export function MyPageModals({
                               <div className="mypage-x__scanx-metric-top">
                                 <div className="mypage-x__scanx-metric-copy">
                                   <p>곡률</p>
-                                  <strong>{printDetailScan.avgCurve.toFixed(2)}</strong>
+                                  <strong>{printDetailScan.avgCurve.toFixed(1)}mm</strong>
                                 </div>
                                 <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.curveIcon}</span>
                               </div>
                               <div className="mypage-x__scanx-meter" aria-hidden="true">
                                 <i style={{ width: `${curvePct}%` }} />
                               </div>
-                              <span className="mypage-x__scanx-metric-hint">C-curve (0~1)</span>
+                              <span className="mypage-x__scanx-metric-hint">C-curve 깊이</span>
                             </article>
                           </div>
                         </>

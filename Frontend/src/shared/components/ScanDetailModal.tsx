@@ -202,7 +202,8 @@ export function ScanDetailModal({ session, onClose }: Props) {
           : null
         const lengthPct = Math.min(100, Math.max(8, (detail.avgLength / 18) * 100))
         const widthPct = Math.min(100, Math.max(8, (detail.avgWidth / 14) * 100))
-        const curvePct = Math.min(100, Math.max(8, detail.avgCurve * 100))
+        // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
+        const curvePct = Math.min(100, Math.max(8, (detail.avgCurve / 5) * 100))
         const fingerList = detail.fingers.filter((f) => f.hand === fingerHand)
         // 세션 자체가 양손 스캔 페어링 결과라 leftScanId/rightScanId는 항상 둘 다 존재한다.
         // detail.fingers 유무로 탭을 판단하면, 한쪽 분석이 실패해서 손가락 데이터가 비어 있을 때
@@ -362,7 +363,10 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <div className="mypage-x__scanx-metric-top">
                     <div className="mypage-x__scanx-metric-copy">
                       <p>곡률</p>
-                      <strong>{detail.avgCurve.toFixed(2)}</strong>
+                      <strong>
+                        {detail.avgCurve.toFixed(1)}
+                        <em>mm</em>
+                      </strong>
                     </div>
                     <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
                       {Icon.curveIcon}
@@ -371,7 +375,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <div className="mypage-x__scanx-meter" aria-hidden="true">
                     <i style={{ width: `${curvePct}%` }} />
                   </div>
-                  <span className="mypage-x__scanx-metric-hint">C-curve</span>
+                  <span className="mypage-x__scanx-metric-hint">C-curve 깊이</span>
                 </article>
               </div>
             </section>
@@ -449,7 +453,10 @@ export function ScanDetailModal({ session, onClose }: Props) {
                               {f.widthMm.toFixed(1)}
                               <small>mm</small>
                             </span>
-                            <span>{f.cCurve.toFixed(2)}</span>
+                            <span>
+                              {f.cCurve.toFixed(1)}
+                              <small>mm</small>
+                            </span>
                           </div>
                         ))
                       ) : (

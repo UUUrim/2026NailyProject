@@ -1,5 +1,6 @@
 import type { ScanHistoryItem, ScanResultResponse } from '@/entities/scan/api'
 import { generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { FALLBACK_C_CURVE_MM, NAIL_BASELINE } from '@/shared/utils/nailMetrics'
 
 /** 한 번의 촬영에서 나온 왼손/오른손 스캔 기록을 하나로 묶은 단위 */
 export type ScanSession = {
@@ -96,10 +97,10 @@ function parseFingerMeasurements(measurements: string | null | undefined) {
     return {
       lengthMm: Number(m.lengthMm ?? m.length ?? 12),
       widthMm: Number(m.widthMm ?? m.width ?? 9),
-      cCurve: Number(m.cCurveMm ?? m.cCurve ?? m.curve ?? 0.55),
+      cCurve: Number(m.cCurveMm ?? m.cCurve ?? m.curve ?? FALLBACK_C_CURVE_MM),
     }
   } catch {
-    return { lengthMm: 12, widthMm: 9, cCurve: 0.55 }
+    return { lengthMm: 12, widthMm: 9, cCurve: FALLBACK_C_CURVE_MM }
   }
 }
 
@@ -122,11 +123,12 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
   const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
   const avgLength = Number(avg(fingers.map((f) => f.lengthMm)).toFixed(1))
   const avgWidth = Number(avg(fingers.map((f) => f.widthMm)).toFixed(1))
-  const avgCurve = Number(avg(fingers.map((f) => f.cCurve)).toFixed(2))
+  const avgCurve = Number(avg(fingers.map((f) => f.cCurve)).toFixed(1))
 
   const isLong = avgLength >= 12.5
   const isNarrow = avgWidth <= 10
-  const isLowCurve = avgCurve <= 0.55
+  // avgCurve는 C-curve sagitta 깊이(mm). 기준 평균(mm)보다 얕으면 "완만한 편".
+  const isLowCurve = avgCurve <= NAIL_BASELINE.cCurve.mean
 
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',

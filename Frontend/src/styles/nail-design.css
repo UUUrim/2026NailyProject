@@ -734,10 +734,60 @@
 }
 
 .design-result-v2__origin-stat-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   font-size: 0.82rem;
   font-weight: 700;
   color: #2a2a2a;
   line-height: 1.35;
+}
+
+/* 피부톤/추천쉐입 박스: 라벨은 다른 박스처럼 맨 위(왼쪽 정렬),
+   그 아래 큰 미리보기(색·쉐입) + 값 */
+.design-result-v2__origin-stat--media {
+  padding: 0.65rem 0.8rem;
+}
+
+.design-result-v2__origin-stat-media-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+/* 대표 피부색 스와치 */
+.design-result-v2__origin-stat-swatch {
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 9px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 1px 4px rgba(0, 0, 0, 0.08);
+  flex: 0 0 auto;
+}
+
+/* 쉐입 이미지 */
+.design-result-v2__origin-stat-shape {
+  width: 2.9rem;
+  height: 2.9rem;
+  padding: 0.25rem;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid rgba(222, 134, 159, 0.22);
+  border-radius: 9px;
+  flex: 0 0 auto;
+}
+
+/* scan-auto: 피부톤/추천쉐입은 2열, 추천 컬러 반영 박스는 한 줄 전체 */
+.design-result-v2__origin-hand--scan-auto {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.design-result-v2__origin-stat--palette {
+  grid-column: 1 / -1;
 }
 
 .design-result-v2__origin-photo {
@@ -809,6 +859,40 @@
   color: #c45f7e;
   font-size: 0.76rem;
   font-weight: 700;
+}
+
+/* scan-auto 결과: 추천 팔레트 + 반영된 색 강조 */
+.design-result-v2__origin-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+}
+
+.design-result-v2__origin-swatch {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 7px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  opacity: 0.4;
+  transition: opacity 0.15s ease;
+}
+
+.design-result-v2__origin-swatch.is-used {
+  opacity: 1;
+  border-color: #c45f7e;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px #e79bb2;
+}
+
+.design-result-v2__origin-stat--reflected {
+  grid-column: 1 / -1;
+}
+
+.design-result-v2__origin-stat--reflected .design-result-v2__origin-keywords {
+  margin: 0.2rem 0 0;
 }
 
 .design-result-v2__actions {

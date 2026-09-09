@@ -13,6 +13,7 @@ import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.transaction.Transactional;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -721,18 +722,31 @@ public class NailDesignService {
             handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId()).orElse(null);
         }
 
-        fillMissingFromScan(slots, handScan);
+        // 스캔 정보 기반 자동 생성: 사용자가 취향을 하나도 입력하지 않았고, 오직 채팅 "?" 패널에
+        // 표시되는 스캔 분석 결과(추천 쉐입 + 추천 컬러 팔레트)만 근거로 삼는 흐름.
+        boolean scanAuto = request.getMode() != null
+                && request.getMode().equalsIgnoreCase("scan-auto")
+                && handScan != null;
+
+        // scan-auto가 아니면 기존대로 빈 슬롯을 스캔 값으로 메운다.
+        // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
+        //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
+        if (!scanAuto) {
+            fillMissingFromScan(slots, handScan);
+        }
 
         if (session != null) {
             session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
         }
 
-        String summary = summarizeSlots(slots, handScan)
-                + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
-                + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null);
+        String summary = scanAuto
+                ? buildScanAutoConfirmedSummary(handScan)
+                : summarizeSlots(slots, handScan)
+                        + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
+                        + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null);
 
         String previousPlanJson = null;
-        if (session != null) {
+        if (session != null && !scanAuto) {
             previousPlanJson = nailDesignRepository.findTopBySessionIdOrderByGeneratedAtDesc(session.getId())
                     .map(com.example.nailyproject.entity.NailDesign::getDesignPlan)
                     .filter(p -> p != null && !p.isBlank())
@@ -743,7 +757,16 @@ public class NailDesignService {
         String userSeasonForTrend = seasonLikedForTrend.stream()
                 .filter(s -> !"none".equals(s))
                 .findFirst().orElse(null);
-        JsonNode plan = fingerDesignPlanService.generatePlan(summary, imageBase64, imageMimeType, previousPlanJson, userSeasonForTrend);
+        JsonNode plan = fingerDesignPlanService.generatePlan(
+                summary, imageBase64, imageMimeType, previousPlanJson, userSeasonForTrend, scanAuto);
+
+        // scan-auto: 쉐입은 "?" 패널에 표시된 스캔 분석 추천 쉐입으로 강제 고정한다.
+        // 플랜 생성 LLM이 다른 쉐입을 넣더라도 덮어써서, 최종 프롬프트 / AR 3D 템플릿 /
+        // 저장되는 designPlan 이 모두 패널 값과 정확히 일치하도록 한다.
+        if (scanAuto && plan != null && plan.isObject()
+                && handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
+            ((ObjectNode) plan).put("shape", handScan.getRecommendedShape());
+        }
 
         if (session != null) {
             backfillSlotsFromPlan(slots, plan);
@@ -821,7 +844,62 @@ public class NailDesignService {
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
                 .keywords(extractKeywordsFromSlots(slots, session)) //디자인결과화면 선택옵션 단어
+                .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
                 .build();
+    }
+
+    /**
+     * scan-auto 결과 화면에서 "추천 팔레트 중 어떤 색·무드·디자인 타입이 반영됐는지" 표시용 메타데이터.
+     * 사용된 색은 플랜 LLM이 고른 색 문구(top-level color + 손가락별 base_color)를 추천 팔레트의
+     * 색 이름과 대조해서 판정한다. (생성 응답 시점엔 이미지 추출 팔레트가 아직 없어서 이름 기반이 최선)
+     */
+    private DesignGenerateResponseDto.ScanAutoReflection buildScanAutoReflection(HandScan handScan, JsonNode plan) {
+        List<String> palette = new ArrayList<>();
+        if (handScan.getRecommendedColors() != null && !handScan.getRecommendedColors().isBlank()) {
+            try {
+                palette = objectMapper.readValue(handScan.getRecommendedColors(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+            } catch (JsonProcessingException ignored) {}
+        }
+
+        StringBuilder chosen = new StringBuilder(plan.path("color").asText("").toLowerCase());
+        for (String f : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            chosen.append(' ').append(plan.path(f).path("base_color").asText("").toLowerCase());
+        }
+        String chosenNorm = chosen.toString().replaceAll("[^a-z0-9]", "");
+
+        List<String> used = new ArrayList<>();
+        if (!palette.isEmpty() && !chosenNorm.isBlank()) {
+            List<String> names;
+            try {
+                names = colorNameService.resolveColorNames(palette);
+            } catch (Exception e) {
+                names = palette;
+            }
+            for (int i = 0; i < palette.size() && i < names.size(); i++) {
+                String nameNorm = names.get(i) == null ? "" : names.get(i).toLowerCase().replaceAll("[^a-z0-9]", "");
+                if (nameNorm.length() >= 3 && chosenNorm.contains(nameNorm)) {
+                    used.add(palette.get(i));
+                }
+            }
+        }
+
+        return DesignGenerateResponseDto.ScanAutoReflection.builder()
+                .recommendedColors(palette)
+                .usedColors(used)
+                .shape(cleanPlanValue(plan.path("shape").asText("")))
+                .mood(cleanPlanValue(plan.path("mood").asText("")))
+                .designType(cleanPlanValue(plan.path("designType").asText("")))
+                .motif(cleanPlanValue(plan.path("motif").asText("")))
+                .build();
+    }
+
+    /** 플랜 필드 값 정리: 공백/none/null 은 null 로. */
+    private String cleanPlanValue(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        if (t.isEmpty() || "none".equalsIgnoreCase(t) || "null".equalsIgnoreCase(t)) return null;
+        return t;
     }
 
     /**
@@ -1003,6 +1081,61 @@ public class NailDesignService {
                 }
             } catch (JsonProcessingException ignored) {}
         }
+
+        return sb.toString();
+    }
+
+    /**
+     * 스캔 정보 기반 자동 생성 전용 "확정된 입력 정보" 텍스트.
+     * 사용자가 취향을 하나도 입력하지 않았으므로, 채팅 "?" 패널에 그대로 노출되는
+     * 스캔 분석 결과(추천 쉐입 + 추천 컬러 팔레트 30색)만 근거로 넘긴다.
+     *  - 쉐입: recommendedShape 고정 (변경 금지)
+     *  - 컬러: 팔레트 전체를 후보로 주고, 그 안에서 서로 어울리는 몇 가지를 플랜 LLM이
+     *          직접 고르게 한다. 단색(원컬러) 금지, mood/designType/motif는 고른 색에 맞춰
+     *          LLM이 스스로 채우고, 5개 손가락에 디테일을 분산시켜 변화를 주도록 지시한다.
+     */
+    private String buildScanAutoConfirmedSummary(HandScan handScan) {
+        StringBuilder sb = new StringBuilder();
+
+        String recShape = (handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank())
+                ? handScan.getRecommendedShape().trim()
+                : "round";
+        sb.append("shape(스캔 분석 추천 쉐입 - 반드시 이 값을 그대로 사용하고 절대 다른 쉐입으로 바꾸지 마세요): ")
+                .append(recShape).append("\n");
+
+        List<String> palette = new ArrayList<>();
+        if (handScan.getRecommendedColors() != null && !handScan.getRecommendedColors().isBlank()) {
+            try {
+                palette = objectMapper.readValue(handScan.getRecommendedColors(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+            } catch (JsonProcessingException ignored) {}
+        }
+        if (!palette.isEmpty()) {
+            List<String> names;
+            try {
+                names = colorNameService.resolveColorNames(palette).stream().distinct().toList();
+            } catch (Exception e) {
+                names = palette;
+            }
+            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트 ").append(palette.size())
+                    .append("색 - 이 목록 안에서만 색을 고르세요): ")
+                    .append(String.join(", ", names)).append("\n");
+        }
+
+        sb.append("""
+                [스캔 정보 기반 자동 생성 - 매우 중요]
+                - 이 요청은 사용자가 mood/designType/color/motif를 하나도 입력하지 않은 자동 생성입니다.
+                - 색은 위 "color 후보" 팔레트 안에서만 고르세요. 팔레트에 없는 색을 창작하거나 추측하지 마세요.
+                - 팔레트에서 서로 조화롭게 어울리는 2~4개의 색을 직접 골라 조합하세요.
+                  단 한 가지 색으로만 칠한 단색(one-color) 디자인은 절대 만들지 마세요.
+                - 고른 색들의 분위기에 맞는 mood / designType / motif를 스스로 판단해서 채우세요.
+                  (예: 뮤트한 로즈·베이지 조합이면 elegant mood에 gradient나 french tip,
+                   맑고 비비드한 조합이면 fresh·funky mood에 color block처럼 색 조합 자체가 드러나는 스타일)
+                - 5개 손가락에 위에서 고른 색과 디테일(그라데이션 방향, 마감 차이, 라인/패턴, 포인트 장식 등)을
+                  손가락마다 다르게 분산시켜 변화를 주되, 전체적으로는 하나의 세트로 보이도록 통일감을 유지하세요.
+                - 최소 2개 이상의 손가락은 base_color를 채우고(서로 다른 색으로), 최소 1개 손가락은
+                  parts에 색·분위기와 어울리는 포인트 장식을 하나 이상 넣으세요.
+                """);
 
         return sb.toString();
     }

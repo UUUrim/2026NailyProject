@@ -264,13 +264,21 @@ public class FingerDesignPlanService {
         return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, previousPlanJson, null);
     }
 
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson, String userSeason) {
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, previousPlanJson, userSeason, false);
+    }
+
     /**
      * "수정하고 싶어요" 흐름 전용: 직전에 만들어졌던 플랜(previousPlanJson)을 같이 넘겨서,
      * 사용자가 요청한 부분만 바꾸고 나머지 손가락/필드는 이전 문구를 그대로 유지하도록 한다.
      * 이걸 안 넘기면(=previousPlanJson이 null) 매번 완전히 새로 창작하듯 플랜을 만들어서,
      * "새끼손가락에 파츠 하나만 추가해줘" 같은 사소한 수정에도 5개 손가락이 전부 바뀌어버렸다.
+     *
+     * @param scanAutoMode 스캔 정보 기반 자동 생성이면 true. 이 경우 "손가락별 지정도 참고 이미지도
+     *                     없으면 손가락 필드를 전부 비운다"(케이스 3)는 기본 규칙을 덮어쓰고,
+     *                     추천 팔레트에서 고른 색을 손가락별로 분산시켜 원컬러가 아닌 디자인을 만들게 한다.
      */
-    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson, String userSeason) {
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson, String userSeason, boolean scanAutoMode) {
 
         String editModeSection = "";
         if (previousPlanJson != null && !previousPlanJson.isBlank()) {
@@ -302,8 +310,27 @@ public class FingerDesignPlanService {
                     """.formatted(previousPlanJson);
         }
 
+        String scanAutoSection = "";
+        if (scanAutoMode) {
+            scanAutoSection = """
+                    [스캔 정보 기반 자동 생성 모드 - 위 케이스 규칙보다 우선]
+                    사용자가 취향을 하나도 입력하지 않았고, 참고 이미지도 손가락별 지정도 없습니다.
+                    하지만 이 모드에서는 "지정이 없으니 손가락 필드를 전부 비운다"(케이스 3)를 적용하지
+                    마세요. 대신 [확정된 입력 정보]의 "color 후보" 팔레트에서 서로 어울리는 2~4개의 색을
+                    직접 고른 뒤:
+                    - top-level color에는 고른 색 조합을 적고, mood/designType/motif는 그 색들의 분위기에
+                      맞춰 스스로 채우세요. 절대 단색(one-color) 디자인으로 만들지 마세요.
+                    - 5개 손가락 중 최소 2개는 서로 다른 base_color를 채우고, 나머지 손가락도
+                      design_type에 마감/그라데이션/패턴 등 서로 다른 디테일을 넣어 변화를 주세요.
+                    - 최소 1개 손가락의 parts에는 색·분위기와 어울리는 포인트 장식을 하나 이상 넣으세요.
+                    - 전체적으로는 하나의 세트로 보이도록 통일감은 유지하세요.
+                    - shape 값은 [확정된 입력 정보]에 적힌 추천 쉐입을 그대로 쓰고 절대 바꾸지 마세요.
+                    """;
+        }
+
         String trendHint = styleTrendService.buildTrendHint(userSeason);
-        String systemPrompt = String.format(SYSTEM_PROMPT, trendHint, editModeSection, confirmedInputSummary);
+        String systemPrompt = String.format(
+                SYSTEM_PROMPT, trendHint, editModeSection + scanAutoSection, confirmedInputSummary);
 
         List<Map<String, Object>> parts = new ArrayList<>();
         if (imageBase64 != null && imageMimeType != null) {

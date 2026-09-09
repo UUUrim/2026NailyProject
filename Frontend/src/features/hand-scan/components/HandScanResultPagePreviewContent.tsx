@@ -26,6 +26,8 @@ function MetricCard({
     metric: { value: number; unit: string; percentile: number; comparisonLabel: string }
     hint: string
 }) {
+    // percentile은 이미 3~97로 clamp되지만, 막대·"상위 %" 표기가 절대 범위를 벗어나지 않도록 한 번 더 방어한다.
+    const barPercent = Math.round(Math.min(100, Math.max(0, metric.percentile)))
     return (
         <article className="scan-metric-card">
             <h3>{title}</h3>
@@ -35,10 +37,10 @@ function MetricCard({
             </p>
             <p className="scan-metric-card__compare">{metric.comparisonLabel}</p>
             <div className="scan-metric-card__bar" aria-hidden="true">
-                <span style={{ width: `${metric.percentile}%` }} />
+                <span style={{ width: `${barPercent}%` }} />
             </div>
             <p className="scan-metric-card__hint">{hint}</p>
-            <p className="scan-metric-card__percentile">상위 {100 - metric.percentile}% 수준</p>
+            <p className="scan-metric-card__percentile">상위 {100 - barPercent}% 수준</p>
         </article>
     )
 }
@@ -104,7 +106,7 @@ export function HandScanResultPagePreviewContent() {
                 <div className="scan-result-metrics">
                     <MetricCard title="길이 (Length)" metric={analysis.length} hint="손톱 끝에서 베이스까지 평균 길이" />
                     <MetricCard title="너비 (Width)" metric={analysis.width} hint="손톱 최대 너비 평균" />
-                    <MetricCard title="곡률 (C-curve)" metric={analysis.cCurve} hint="손톱 측면 곡률 지수 (0~1)" />
+                    <MetricCard title="곡률 (C-curve)" metric={analysis.cCurve} hint="C-curve 깊이" />
                 </div>
             </section>
 

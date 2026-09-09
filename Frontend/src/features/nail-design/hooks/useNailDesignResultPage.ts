@@ -46,6 +46,13 @@ export type GenerationContext = {
     avgLength: number
     avgWidth: number
     avgCurve: number
+    skinToneHex?: string | null
+    shapeImage?: string | null
+    recommendedColors?: string[]
+    usedColors?: string[]
+    reflectedMood?: string | null
+    reflectedDesignType?: string | null
+    reflectedMotif?: string | null
   } | null
   revisionKeywords: string[]
 }
