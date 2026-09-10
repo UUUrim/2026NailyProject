@@ -31,6 +31,8 @@ export function HandScanPageContent() {
     isFullscreen,
     cameraError,
     isUploading,
+    stabilityRatio,
+    isStable,
     sideCameraIdx,
     currentStepIndex,
     uploadedSteps,
@@ -54,6 +56,22 @@ export function HandScanPageContent() {
             <div className="hand-scan-fs__feeds">
               {/* 탑뷰: 스캔 서버 MJPEG 스트림 (ArUco 가이드선 포함) */}
               <div className="hand-scan-fs__feed">
+                <div
+                    className={[
+                      'hand-scan-fs__gauge',
+                      isStable ? 'hand-scan-fs__gauge--ready' : '',
+                    ].filter(Boolean).join(' ')}
+                    role="progressbar"
+                    aria-label="측정 정확도"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(stabilityRatio * 100)}
+                >
+                  <div
+                      className="hand-scan-fs__gauge-fill"
+                      style={{ height: `${Math.round(stabilityRatio * 100)}%` }}
+                  />
+                </div>
                 <img
                     src={`${SCAN_SERVER_URL}/stream/top`}
                     className="hand-scan-fs__video"
@@ -120,8 +138,9 @@ export function HandScanPageContent() {
                   type="button"
                   className="hand-scan__action-btn hand-scan-fs__capture"
                   onClick={() => void handleCaptureFinger()}
+                  disabled={!isStable}
               >
-                지금 촬영
+                {isStable ? '지금 촬영' : '정확도를 채워주세요'}
               </button>
             </div>
           </div>,

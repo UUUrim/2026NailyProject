@@ -1,7 +1,7 @@
 """
 server.py — Naily 통합 서버 (스캔 + 프린터)
 --------------------------------------------
-스캔 서버(scan/server.py)와 프린터 서버(printer/server.py)를 하나로 합쳐
+스캔 서버(scan/_legacy_server.py, 미사용 레거시)와 프린터 서버(printer/server.py)를 하나로 합쳐
 ngrok 터널 하나만으로 EC2 Spring Boot와 통신한다.
 
 Usage:
@@ -19,6 +19,7 @@ Usage:
     GET  /status/events       — SSE: 손가락 촬영 진행상황
     POST /capture/force       — 수동 촬영 트리거 (웹 "지금 촬영" 버튼)
     GET  /capture/status      — 현재 촬영 세션 상태
+    GET  /capture/stability   — 탑뷰 정확도 게이지 (ratio/ready)
 
   [폰 사이드뷰 카메라] — CAMERA_SIDE = -2 일 때 물리 웹캠 대신 사용
     GET  /phone/side          — 폰 브라우저에서 여는 카메라 페이지
@@ -103,6 +104,7 @@ from nail_measurer import recommend_nail_shape                    # scan/
 from nail_live import (MeasureWorker, compose as _live_compose,     # scan/
                         median_result as _live_median_result,
                         MEDIAN_N as _LIVE_MEDIAN_N,
+                        stability as _live_stability,
                         detect_marker_only as _live_detect_marker_only)
 
 # ─────────────────────────────────────────────────────────────
@@ -330,6 +332,11 @@ class _StreamState:
         # 루프(_top_camera_idle_preview_loop)도 같이 참조해서 손가락 사이
         # 대기 화면에서도 마커가 다시 드러나지 않게 한다.
         self.marker_hide_x: int = 0
+        # 탑뷰 측정 정확도 게이지 — 프론트가 /capture/stability로 폴링해서
+        # 화면 왼쪽 게이지 바를 채운다. ratio: 0~1 (최근 측정 이력이 얼마나
+        # 찼는지), ready: 최근 MEDIAN_N개 측정의 W/L이 서로 합의된 상태
+        # (nail_live.stability와 동일한 기준) — true일 때만 촬영 버튼 활성화.
+        self.stability: dict = {"ratio": 0.0, "ready": False}
 
 _S = _StreamState()
 
@@ -533,6 +540,7 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
     # the operator's manual button, however long that takes - same as the
     # side/c-curve view.
     _S.force_capture_top.clear()
+    _S.stability = {"ratio": 0.0, "ready": False}
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (실시간 측정)")
 
@@ -570,6 +578,15 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
                     history.append(result)
                 else:
                     history.clear()
+
+            # ── 정확도 게이지 갱신: history가 찰수록 ratio가 오르고, MEDIAN_N개
+            # 읽음값의 W/L이 서로 합의(agree)하면 ready=true (초록) — nail_live.py
+            # CLI의 auto-capture 조건과 동일한 기준을 재사용한다.
+            is_stable, _dw, _dl = _live_stability(history)
+            _S.stability = {
+                "ratio": min(len(history) / _LIVE_MEDIAN_N, 1.0),
+                "ready": is_stable,
+            }
 
             # measure_frame silences nail_measurer's own prints (see
             # quiet()), so without this the operator has no way to see
@@ -892,7 +909,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             sizes.append(nail_size)
 
             # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
-            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/server.py와 동일).
+            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/_legacy_server.py와 동일).
             if fd.get("skin_L") is not None:
                 skin_metrics.append({
                     "L":          fd["skin_L"],
@@ -940,7 +957,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
           f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
 
     # 유효한 손가락들의 LAB 평균으로 피부색/웜쿨/명도/채도/추천컬러 30개를
-    # 한 번에 계산한다 (scan/server.py의 build_callback_data와 동일한 방식).
+    # 한 번에 계산한다 (scan/_legacy_server.py의 build_callback_data와 동일한 방식).
     if skin_metrics:
         avg_L    = sum(m["L"] for m in skin_metrics) / len(skin_metrics)
         avg_a    = sum(m["a"] for m in skin_metrics) / len(skin_metrics)
@@ -1165,6 +1182,12 @@ def capture_force():
 @app.get("/capture/status")
 def capture_status():
     return {"active": _S.active, "currentFinger": _S.current_finger, "doneFinger": _S.done_fingers}
+
+
+@app.get("/capture/stability")
+def capture_stability():
+    """탑뷰 정확도 게이지 조회 — 프론트가 짧은 주기로 폴링."""
+    return _S.stability
 
 
 # ── 폰 사이드뷰 카메라 ───────────────────────────────────────

@@ -760,6 +760,9 @@ class _StreamState:
         self.events: _q.Queue = _q.Queue(maxsize=200)
         # 수동 촬영 트리거
         self.force_capture: threading.Event = threading.Event()
+        # 탑뷰 안정성(정확도) 게이지 — 프론트가 폴링해서 게이지 바 채우는 데 씀.
+        # ratio: 0~1 (버퍼가 얼마나 찼는지), ready: 촬영 가능(초록) 여부.
+        self.stability: dict = {"ratio": 0.0, "ready": False}
         # 현재 상태
         self.active: bool = False
         self.current_finger: str | None = None
@@ -809,6 +812,7 @@ def _capture_top_stream(cap: cv2.VideoCapture,
     recent = deque(maxlen=STABLE_FRAMES)
     countdown_start = None
     _S.force_capture.clear()
+    _S.stability = {"ratio": 0.0, "ready": False}
 
     # 마커를 가리기 위해 왼쪽에서 잘라낼 폭(px). 마커가 처음 잡힐 때부터
     # 그 오른쪽 끝 + 여백으로 갱신되고, 이후 마커가 잠깐 안 잡히는 프레임에도
@@ -868,6 +872,13 @@ def _capture_top_stream(cap: cv2.VideoCapture,
             elapsed = time.time() - countdown_start
             remaining = COUNTDOWN_SEC - elapsed
             countdown_val = max(1, int(remaining) + 1)
+
+        # ── 안정성(정확도) 게이지 업데이트 — 프론트가 /capture/stability 로 폴링해서
+        # 화면 왼쪽 게이지 바를 채우고, ready가 true일 때만 촬영 버튼을 활성화한다.
+        _S.stability = {
+            "ratio": min(len(recent) / STABLE_FRAMES, 1.0),
+            "ready": countdown_start is not None,
+        }
 
         # ── 오버레이 그리기 (마커가 찍힌 왼쪽 구간을 잘라낸 화면 위에)
         disp = frame[:, marker_hide_x:].copy()
@@ -1099,6 +1110,12 @@ def capture_force():
     """현재 손가락 즉시 촬영 트리거 (수동 촬영 버튼)."""
     _S.force_capture.set()
     return {"ok": True, "finger": _S.current_finger}
+
+
+@app.get("/capture/stability")
+def capture_stability():
+    """탑뷰 안정성(정확도) 게이지 조회 — 프론트가 짧은 주기로 폴링."""
+    return _S.stability
 
 
 @app.get("/capture/status")
