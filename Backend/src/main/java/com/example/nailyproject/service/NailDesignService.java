@@ -973,7 +973,11 @@ public class NailDesignService {
 
         // 3D 없이 단독으로 쓰이는 파츠
         for (String keyword : List.of("rhinestone", "crystal", "stud")) {
-            if (prompt.toLowerCase().contains(keyword)) addIfMeaningful(parts, keyword);
+            if (java.util.regex.Pattern
+                    .compile("(?i)\\b" + keyword + "\\b")
+                    .matcher(prompt).find()) {
+                addIfMeaningful(parts, keyword);
+            }
         }
         return parts;
     }
@@ -1109,7 +1113,14 @@ public class NailDesignService {
         parts.add("nailart");
 
         if (!overallDesignType.isBlank()) parts.add(toPromptText(overallDesignType));
-        if (!overallColor.isBlank()) parts.add(toPromptText(overallColor) + " base color");
+        if (!overallColor.isBlank()) {
+            String colorPrompt = Arrays.stream(overallColor.split(","))
+                    .map(String::trim)
+                    .filter(c -> !c.isBlank())
+                    .map(c -> toPromptText(c) + " color") //base color말고 그냥 color로 써봄
+                    .collect(Collectors.joining(", "));
+            parts.add(colorPrompt);
+        }
         if (!overallMotif.isBlank() && !"none".equalsIgnoreCase(overallMotif)) parts.add(toPromptText(overallMotif) + " motif");
 
         boolean hasExplicitTextRequest = parts.stream().anyMatch(p -> p.contains("\""));

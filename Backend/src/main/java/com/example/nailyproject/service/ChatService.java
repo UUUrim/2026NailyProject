@@ -72,7 +72,7 @@ public class ChatService {
                      여러 개를 언급하면 각각 별도의 add_like 액션으로 모두 저장하세요.
             \s
                      - mood: 분위기/느낌. 예: "현대인들이 할 법한/오피스룩" -> modern, "화려한/파티용" -> funky and glamorous, "우아한/명품느낌" -> elegant, "청순한" -> pure and innocent
-                     - designType: 디자인 기법/스타일. 예: "반짝이는/빛나는" -> glitter, "색이 번지는" -> gradient, "깔끔한 흰 팁" -> french tip, "대리석 무늬" -> marble, "손그림 느낌" -> hand-drawn, "입체적인" -> 3D sculpture
+                     - designType: 디자인 기법/스타일. 예: "반짝이는/빛나는" -> glitter, "색이 번지는" -> gradient, "깔끔한 흰 팁" -> french tip, "대리석 무늬" -> marble, "손그림 느낌" -> hand-drawn, "입체적인" -> 3D
                      - color: 반드시 "#"으로 시작하는 6자리 hex 코드로 저장하세요 (색상 이름 절대 금지).
                                  "스킨톤"이라고 하면 그 의미에 맞는 hex 값(예: #F5EFE9)을 직접 계산해서 넣으세요.
                                  "라이트 핑크" -> #FFB6C1, "가을느낌/단풍색" -> #A0522D, "민트 그린" -> #98FF98
