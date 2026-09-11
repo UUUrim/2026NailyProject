@@ -24,6 +24,7 @@ export function NailDesignResultPageContent() {
         isLiking,
         likeModalMode,
         setLikeModalMode,
+        userName,
         shared,
         shape,
         nailTipCropUrls,
@@ -141,27 +142,80 @@ export function NailDesignResultPageContent() {
 
                             {context.handSummary && (
                                 <div className="design-result-v2__origin-block">
-                                    <h2>내 손 분석 정보를 반영했어요</h2>
-                                    <div className="design-result-v2__origin-hand">
-                                        <div className="design-result-v2__origin-stat">
+                                    <h2>{userName ? `${userName} 님의 손 분석 결과를 반영했어요.` : '내 손 분석 결과를 반영했어요.'}</h2>
+                                    <div className="design-result-v2__origin-hand design-result-v2__origin-hand--scan-auto">
+                                        <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
                                             <span className="design-result-v2__origin-stat-label">피부 톤</span>
-                                            <span className="design-result-v2__origin-stat-value">{context.handSummary.toneLabel}</span>
+                                            <div className="design-result-v2__origin-stat-media-row">
+                                                {context.handSummary.skinToneHex && (
+                                                    <span
+                                                        className="design-result-v2__origin-stat-swatch"
+                                                        style={{ backgroundColor: context.handSummary.skinToneHex }}
+                                                        aria-hidden="true"
+                                                    />
+                                                )}
+                                                <span className="design-result-v2__origin-stat-value">{context.handSummary.toneLabel}</span>
+                                            </div>
                                         </div>
-                                        <div className="design-result-v2__origin-stat">
+                                        <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
                                             <span className="design-result-v2__origin-stat-label">추천 쉐입</span>
-                                            <span className="design-result-v2__origin-stat-value">{context.handSummary.shapeLabel}</span>
+                                            <div className="design-result-v2__origin-stat-media-row">
+                                                {context.handSummary.shapeImage && (
+                                                    <img
+                                                        className="design-result-v2__origin-stat-shape"
+                                                        src={context.handSummary.shapeImage}
+                                                        alt=""
+                                                        aria-hidden="true"
+                                                    />
+                                                )}
+                                                <span className="design-result-v2__origin-stat-value">{context.handSummary.shapeLabel}</span>
+                                            </div>
                                         </div>
-                                        <div className="design-result-v2__origin-stat">
-                                            <span className="design-result-v2__origin-stat-label">손톱 측정값</span>
-                                            <span className="design-result-v2__origin-stat-value">
-                            길이 {context.handSummary.avgLength}mm · 너비 {context.handSummary.avgWidth}mm · 곡률{' '}
-                                                {context.handSummary.avgCurve}
-                          </span>
-                                        </div>
+                                        {context.handSummary.recommendedColors && context.handSummary.recommendedColors.length > 0 && (
+                                            <div className="design-result-v2__origin-stat design-result-v2__origin-stat--palette">
+                                                <span className="design-result-v2__origin-stat-label">추천 컬러 반영</span>
+                                                <div className="design-result-v2__origin-palette">
+                                                    {context.handSummary.recommendedColors.map((hex) => {
+                                                        const used = (context.handSummary?.usedColors ?? []).some(
+                                                            (u) => u.toLowerCase() === hex.toLowerCase(),
+                                                        )
+                                                        return (
+                                                            <span
+                                                                key={hex}
+                                                                className={`design-result-v2__origin-swatch${used ? ' is-used' : ''}`}
+                                                                style={{ backgroundColor: hex }}
+                                                                title={used ? `${hex} · 이 디자인에 반영됨` : hex}
+                                                            />
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {(context.handSummary.reflectedMood ||
+                                            context.handSummary.reflectedDesignType ||
+                                            context.handSummary.reflectedMotif) && (
+                                            <div className="design-result-v2__origin-stat design-result-v2__origin-stat--reflected">
+                                                <span className="design-result-v2__origin-stat-label">반영된 스타일</span>
+                                                <div className="design-result-v2__origin-keywords">
+                                                    {context.handSummary.reflectedMood && (
+                                                        <span className="design-result-v2__keyword-chip">
+                                                            무드: {context.handSummary.reflectedMood}
+                                                        </span>
+                                                    )}
+                                                    {context.handSummary.reflectedDesignType && (
+                                                        <span className="design-result-v2__keyword-chip">
+                                                            디자인: {context.handSummary.reflectedDesignType}
+                                                        </span>
+                                                    )}
+                                                    {context.handSummary.reflectedMotif && (
+                                                        <span className="design-result-v2__keyword-chip">
+                                                            모티프: {context.handSummary.reflectedMotif}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    <p className="design-result-v2__origin-desc">
-                                        손 스캔에서 분석한 퍼스널 컬러와 손톱 형태를 반영하여 디자인을 생성했어요.
-                                    </p>
                                 </div>
                             )}
 

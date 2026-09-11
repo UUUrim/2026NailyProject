@@ -128,7 +128,7 @@ export function PrintPageContent() {
                             const metricsLine = [
                                 `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
                                 `너비 ${session.avgWidthMm != null ? `${Number(session.avgWidthMm).toFixed(1).replace(/\.0$/, '')}mm` : '-'}`,
-                                `곡률 ${formatMetricCurve(session.avgCurve)}`,
+                                `곡률 ${session.avgCurve != null ? `${formatMetricCurve(session.avgCurve)}mm` : '-'}`,
                             ].join(' · ')
 
                             return (

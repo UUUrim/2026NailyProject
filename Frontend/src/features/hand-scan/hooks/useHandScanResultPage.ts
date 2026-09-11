@@ -6,7 +6,7 @@ import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import type { FingerDetail } from '@/shared/utils/handScanAnalysis'
@@ -315,12 +315,13 @@ export function useHandScanResultPage() {
                 (9 + index * 0.2)
             ),
 
-            // 실제 파이프라인이 내려주는 곡률 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
+            // 실제 파이프라인이 내려주는 곡률 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
+            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 일반 손톱 대체값(mm)을 쓴다.
             cCurve: Number(
                 measurements.cCurveMm ??
                 measurements.cCurve ??
                 measurements.curve ??
-                0.55
+                FALLBACK_C_CURVE_MM
             ),
 
             overlay: FINGER_OVERLAYS[index] ?? { x: 50, y: 50 },
@@ -332,7 +333,8 @@ export function useHandScanResultPage() {
     // 고정 기준값(NAIL_BASELINE)으로 두고 실측 평균이 그 기준과 얼마나 차이 나는지로 계산한다.
     const lengthValue = Number(average(fingerDetails.map((f) => f.lengthMm)).toFixed(1))
     const widthValue = Number(average(fingerDetails.map((f) => f.widthMm)).toFixed(1))
-    const cCurveValue = Number(average(fingerDetails.map((f) => f.cCurve)).toFixed(2))
+    // cCurve는 C-curve sagitta 깊이(mm). 소수 첫째 자리까지만 보여 준다.
+    const cCurveValue = Number(average(fingerDetails.map((f) => f.cCurve)).toFixed(1))
 
     const lengthPercentile = percentileAgainstBaseline(lengthValue, NAIL_BASELINE.length)
     const widthPercentile = percentileAgainstBaseline(widthValue, NAIL_BASELINE.width)
@@ -353,7 +355,7 @@ export function useHandScanResultPage() {
         },
         cCurve: {
             value: cCurveValue,
-            unit: '',
+            unit: 'mm',
             percentile: cCurvePercentile,
             comparisonLabel: labelByPercentile(cCurvePercentile, '완만한 편', '뚜렷한 편', '평균 범위'),
         },

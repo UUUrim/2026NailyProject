@@ -479,7 +479,7 @@ export function NailDesignChatPageContent() {
                                             <li className="design-chat-sidebar__metric-row">
                                                 <div className="design-chat-sidebar__metric-top">
                                                     <span className="design-chat-sidebar__metric-name">곡률 (C-curve)</span>
-                                                    <span className="design-chat-sidebar__metric-value">{analysisSummary.avgCurve}</span>
+                                                    <span className="design-chat-sidebar__metric-value">{analysisSummary.avgCurve}mm</span>
                                                 </div>
                                                 <span className="design-chat-sidebar__metric-bar" aria-hidden="true">
                                                     <span style={{ width: `${analysisSummary.curvePct}%` }} />

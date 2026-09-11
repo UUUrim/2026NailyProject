@@ -62,7 +62,7 @@ function FingerTooltip({
         <strong>{finger.name}</strong>
         <span>길이 {finger.lengthMm}mm</span>
         <span>너비 {finger.widthMm}mm</span>
-        <span>C-curve {finger.cCurve}</span>
+        <span>C-curve {finger.cCurve.toFixed(1)}mm</span>
       </div>,
       document.body,
   )
@@ -231,7 +231,10 @@ export function FingerDetailModal({ fingers, onClose }: FingerDetailModalProps) 
                 {finger.widthMm.toFixed(1)}
                     <small>mm</small>
               </span>
-                  <span>{finger.cCurve.toFixed(2)}</span>
+                  <span>
+                {finger.cCurve.toFixed(1)}
+                    <small>mm</small>
+              </span>
                 </div>
             ))}
           </div>

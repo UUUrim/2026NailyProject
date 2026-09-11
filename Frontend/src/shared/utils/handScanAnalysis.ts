@@ -86,11 +86,13 @@ export function buildHandScanAnalysis(skinToneHex: string): HandScanAnalysis {
   const seed = hashString(skinToneHex)
   const baseLength = 11.5 + (seed % 30) / 10
   const baseWidth = 9.2 + (seed % 20) / 10
-  const baseCurve = 0.42 + (seed % 25) / 100
+  // C-curve sagitta 깊이(mm) — 실측 파이프라인 기준 대략 1~3mm
+  const baseCurve = 1.2 + (seed % 20) / 10
 
+  // seed는 uint32라 부호 있는 >> 를 쓰면 음수 percentile이 나온다 — 부호 없는 >>> 로 시프트한다.
   const lengthPercentile = 25 + (seed % 50)
-  const widthPercentile = 20 + ((seed >> 3) % 55)
-  const curvePercentile = 30 + ((seed >> 5) % 45)
+  const widthPercentile = 20 + ((seed >>> 3) % 55)
+  const curvePercentile = 30 + ((seed >>> 5) % 45)
 
   const fingers: FingerDetail[] = FINGER_NAMES.map((name, index) => {
     const variance = (index % 3) * 0.4
@@ -99,7 +101,7 @@ export function buildHandScanAnalysis(skinToneHex: string): HandScanAnalysis {
       name,
       lengthMm: Number((baseLength + variance - index * 0.15).toFixed(1)),
       widthMm: Number((baseWidth + variance * 0.6 - index * 0.08).toFixed(1)),
-      cCurve: Number((baseCurve + variance * 0.05).toFixed(2)),
+      cCurve: Number((baseCurve + variance * 0.3).toFixed(1)),
       overlay: FINGER_OVERLAYS[index] ?? { x: 50, y: 50 },
     }
   })
@@ -125,8 +127,8 @@ export function buildHandScanAnalysis(skinToneHex: string): HandScanAnalysis {
       comparisonLabel: comparisonLabel(widthPercentile, '좁은 편', '넓은 편', '평균 범위'),
     },
     cCurve: {
-      value: baseCurve,
-      unit: '',
+      value: Number(baseCurve.toFixed(1)),
+      unit: 'mm',
       percentile: curvePercentile,
       comparisonLabel: comparisonLabel(curvePercentile, '완만한 편', '깊은 편', '평균 범위'),
     },
