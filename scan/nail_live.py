@@ -81,32 +81,22 @@ CAM_HEIGHT = 1080
 # that produced it. That keeps the saved PNG, the overlay and the stored numbers
 # perfectly consistent — re-measuring the PNG reproduces the stored width
 # exactly — instead of pairing a synthetic average with an arbitrary frame.
-MEDIAN_N       = 5      # consecutive readings the median is taken over
-STABLE_TOL_MM  = 0.3    # max width/length spread across the window to auto-fire
+MEDIAN_N       = 3      # consecutive readings the median is taken over
+STABLE_TOL_MM  = 0.5    # max width/length spread across the window to auto-fire
 
 # Kept as an alias: the display's stability line predates the median window.
 STABLE_N       = MEDIAN_N
 
 DISPLAY_H = 820         # window height; the full-res frame is what gets saved
 
-# Per-finger offset from the ArUco marker's bottom edge, tuned by testing
-# each finger against where its real cuticle actually lands (larger =
-# further from the fingertip, toward the marker/hand). Index/middle need
-# none - the marker's own edge already lines up with their cuticle.
-GUIDE_LINE_OFFSET_DEFAULT_MM = 0.0
-GUIDE_LINE_OFFSET_THUMB_MM   = 10.0
-GUIDE_LINE_OFFSET_RING_MM    = 6.0
-GUIDE_LINE_OFFSET_PINKY_MM   = 14.0
-
-_GUIDE_LINE_OFFSET_MM = {
-    "thumb": GUIDE_LINE_OFFSET_THUMB_MM,
-    "ring":  GUIDE_LINE_OFFSET_RING_MM,
-    "pinky": GUIDE_LINE_OFFSET_PINKY_MM,
-}
+# Fixed offset from the ArUco marker's bottom edge, same for every finger -
+# the guide line now sits at one constant position (marker bottom + 9mm
+# toward the hand) instead of being tuned per finger.
+GUIDE_LINE_OFFSET_MM = 9.0
 
 
 def guide_line_offset_mm(finger: str) -> float:
-    return _GUIDE_LINE_OFFSET_MM.get(finger, GUIDE_LINE_OFFSET_DEFAULT_MM)
+    return GUIDE_LINE_OFFSET_MM
 
 
 # ─────────────────────────────────────────────────────────────
@@ -264,7 +254,7 @@ def draw_width_marker(overlay, data, mpp):
 def guide_line_row(corners, x, offset_px=0.0):
     """Row (y, sub-pixel) of the marker's BOTTOM edge, evaluated at column x,
     plus *offset_px* (positive = toward the hand / larger y — see
-    GUIDE_LINE_OFFSET_THUMB_PINKY_MM). Used once, at the finger's own centre
+    GUIDE_LINE_OFFSET_MM). Used once, at the finger's own centre
     column, to pick the single y-value that both the measurement and the
     on-screen line use — see draw_guide_line for why the line itself no
     longer extends this as a slope across the frame.
