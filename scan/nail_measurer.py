@@ -156,14 +156,20 @@ def _size_category(z: float) -> str:
             return label
     return "much_larger"
 
-ARUCO_DICTS = {
-    "4x4_50":  cv2.aruco.DICT_4X4_50,
-    "4x4_100": cv2.aruco.DICT_4X4_100,
-    "5x5_50":  cv2.aruco.DICT_5X5_50,
-    "5x5_100": cv2.aruco.DICT_5X5_100,
-    "6x6_50":  cv2.aruco.DICT_6X6_50,
-    "6x6_100": cv2.aruco.DICT_6X6_100,
-}
+# This project uses exactly ONE physical marker: the 2cm x 2cm marker printed
+# from the "Online ArUco markers generator" (https://chev.me/arucogen/), ID 0.
+# That site generates markers from OpenCV's DICT_ARUCO_ORIGINAL dictionary -
+# not the 4x4/5x5/6x6 families. Trying every OpenCV dictionary and accepting
+# whichever one matched first (the old behaviour) meant the correct
+# dictionary was never even guaranteed to be tried, and small 4x4/5x5 codes
+# are known to false-positive on plain skin/background texture (low bit
+# distance) — confirmed in production: a right-thumb capture had
+# mpp_mm_per_px=1.29 (should be ~0.02-0.05), i.e. a ~15px blob was mistaken
+# for the marker, blowing up width/length/c-curve together by ~7-8x. Locking
+# to the one real dictionary AND the one real ID rejects any such spurious
+# match outright instead of silently accepting it.
+ARUCO_DICT_ID     = cv2.aruco.DICT_ARUCO_ORIGINAL
+EXPECTED_MARKER_ID = 0
 
 # Minimum groove ridge response accepted as a nail fold (see
 # detect_lateral_edges).  Kept low because the LIT side of the finger responds
@@ -178,24 +184,25 @@ LATERAL_THR = 2.5
 
 def detect_aruco(image: np.ndarray, aruco_size_mm: float):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    for name, did in ARUCO_DICTS.items():
-        d   = cv2.aruco.getPredefinedDictionary(did)
-        det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
-        corners, ids, _ = det.detectMarkers(gray)
-        if ids is not None and len(ids) > 0:
-            c        = corners[0][0]
-            sides    = [np.linalg.norm(c[i] - c[(i+1) % 4]) for i in range(4)]
-            avg      = float(np.mean(sides))
-            mpp      = aruco_size_mm / avg
-            # ids is (N,1) on OpenCV 4.x but (N,) on 5.x — np.ravel handles both.
-            marker_id = int(np.ravel(ids)[0])
-            print(f"  [ArUco] dict={name}  id={marker_id}  "
-                  f"avg_side={avg:.1f}px  →  {mpp:.5f} mm/px")
+    d   = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
+    det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
+    corners, ids, _ = det.detectMarkers(gray)
+    if ids is not None and len(ids) > 0:
+        # ids is (N,1) on OpenCV 4.x but (N,) on 5.x — np.ravel handles both.
+        for c_arr, raw_id in zip(corners, np.ravel(ids)):
+            marker_id = int(raw_id)
+            if marker_id != EXPECTED_MARKER_ID:
+                continue
+            c     = c_arr[0]
+            sides = [np.linalg.norm(c[i] - c[(i+1) % 4]) for i in range(4)]
+            avg   = float(np.mean(sides))
+            mpp   = aruco_size_mm / avg
+            print(f"  [ArUco] id={marker_id}  avg_side={avg:.1f}px  →  {mpp:.5f} mm/px")
             return mpp, c, marker_id
     raise RuntimeError(
-        "ArUco marker not detected.\n"
-        "  → Ensure marker is fully visible, sharp, and well-lit.\n"
-        "  → Generate a fresh marker: python generate_aruco.py"
+        f"ArUco marker (DICT_ARUCO_ORIGINAL, id={EXPECTED_MARKER_ID}) not detected.\n"
+        "  → Ensure the marker is fully visible, sharp, and well-lit.\n"
+        "  → This project uses only the 2cm marker from https://chev.me/arucogen/ (ID 0)."
     )
 
 
