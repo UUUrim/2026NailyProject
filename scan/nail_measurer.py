@@ -156,19 +156,26 @@ def _size_category(z: float) -> str:
             return label
     return "much_larger"
 
-# This project uses exactly ONE physical marker: the 2cm x 2cm marker printed
-# from the "Online ArUco markers generator" (https://chev.me/arucogen/), ID 0.
-# That site generates markers from OpenCV's DICT_ARUCO_ORIGINAL dictionary -
-# not the 4x4/5x5/6x6 families. Trying every OpenCV dictionary and accepting
-# whichever one matched first (the old behaviour) meant the correct
-# dictionary was never even guaranteed to be tried, and small 4x4/5x5 codes
-# are known to false-positive on plain skin/background texture (low bit
-# distance) — confirmed in production: a right-thumb capture had
-# mpp_mm_per_px=1.29 (should be ~0.02-0.05), i.e. a ~15px blob was mistaken
-# for the marker, blowing up width/length/c-curve together by ~7-8x. Locking
-# to the one real dictionary AND the one real ID rejects any such spurious
-# match outright instead of silently accepting it.
-ARUCO_DICT_ID     = cv2.aruco.DICT_ARUCO_ORIGINAL
+# This project uses exactly ONE physical marker: 2cm x 2cm, ID 0. Trying
+# every OpenCV dictionary and accepting whichever one matched first (the old
+# behaviour) meant small 4x4/5x5 codes — known to false-positive on plain
+# skin/background texture (low bit distance) — could get accepted before the
+# real dictionary was ever tried. Confirmed in production: a right-thumb
+# capture had mpp_mm_per_px=1.29 (should be ~0.05-0.1), i.e. a ~15px blob was
+# mistaken for the marker, blowing up width/length/c-curve together by
+# ~7-8x. Locking to the one real dictionary AND the one real ID rejects any
+# such spurious match outright instead of silently accepting it.
+#
+# The real dictionary was confirmed empirically, not assumed: brute-forcing
+# every cv2.aruco.DICT_* against real captured photos (photos/*/*/*/*_top.jpg)
+# found DICT_6X6_50 matching id=0 at a stable, sane pixel size (~180-230px)
+# across many different sessions and fingers — while DICT_ARUCO_ORIGINAL
+# (initially assumed from the marker's print source) never matched at all,
+# and 4x4/aruco_mip families matched small spurious blobs (~15-18px) on the
+# very same photos. If the physical marker is ever replaced, re-verify with
+# that same brute-force check rather than assuming a generator site's
+# advertised dictionary — see git history for the one-off script.
+ARUCO_DICT_ID      = cv2.aruco.DICT_6X6_50
 EXPECTED_MARKER_ID = 0
 
 # Minimum groove ridge response accepted as a nail fold (see
@@ -200,9 +207,8 @@ def detect_aruco(image: np.ndarray, aruco_size_mm: float):
             print(f"  [ArUco] id={marker_id}  avg_side={avg:.1f}px  →  {mpp:.5f} mm/px")
             return mpp, c, marker_id
     raise RuntimeError(
-        f"ArUco marker (DICT_ARUCO_ORIGINAL, id={EXPECTED_MARKER_ID}) not detected.\n"
-        "  → Ensure the marker is fully visible, sharp, and well-lit.\n"
-        "  → This project uses only the 2cm marker from https://chev.me/arucogen/ (ID 0)."
+        f"ArUco marker (DICT_6X6_50, id={EXPECTED_MARKER_ID}) not detected.\n"
+        "  → Ensure the marker is fully visible, sharp, and well-lit."
     )
 
 
