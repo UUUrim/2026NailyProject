@@ -2,7 +2,9 @@
 s3_upload.py
 ------------
 Upload photos and results to the naily-scans S3 bucket.
-Called automatically at the end of run_pipeline.py.
+upload_folder() is called from server.py's STL step; upload_session()/
+upload_all() are manual bulk-upload helpers (also used at the end of the
+legacy scan/_legacy_run_pipeline.py CLI).
 """
 
 import os

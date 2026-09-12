@@ -228,7 +228,7 @@ def _compute_tilt_angle(mask: np.ndarray) -> float:
 
     Compares the centroid of the mask's upper half (toward the nail) to its
     lower half (toward the table) - the same two-slice technique
-    hand_measurer.py's _compute_finger_angle uses to de-rotate the
+    _legacy_hand_measurer.py's _compute_finger_angle uses to de-rotate the
     equivalent top-view tilt, adapted to this view's "up" direction.
     """
     ys, xs = np.where(mask > 0)

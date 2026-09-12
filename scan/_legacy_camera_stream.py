@@ -1,6 +1,9 @@
 """
-camera_stream.py
------------------
+_legacy_camera_stream.py
+------------------------
+LEGACY — only used by scan/_legacy_server.py. The active server.py uses
+plain cv2.VideoCapture directly instead. Kept for reference only.
+
 Robust USB webcam wrapper around cv2.VideoCapture.
 
 Fixes three symptoms reported on the top/side USB rigs ("자꾸 뚝뚝 끊기거나

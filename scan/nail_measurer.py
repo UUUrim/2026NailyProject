@@ -1432,190 +1432,6 @@ def measure_top(image: np.ndarray, mpp: float,
         for _r in range(_last + 1, cuticle_y + 1):
             lateral[_r] = lateral[_last]
 
-    # ── Build nail polygon ────────────────────────────────────
-    # When a nail plate mask is available (e.g. from GrabCut), use its
-    # actual contour — this follows the true nail plate boundary including
-    # natural curvature, instead of the synthetic arc+straight construction.
-    _use_contour = False
-    if nail_plate_mask is not None:
-        # Clip mask to [tip_y, cuticle_y] — sides come from GrabCut,
-        # bottom boundary comes from gradient-based cuticle detection.
-        _nm = nail_plate_mask.copy()
-        _nm[:tip_y, :] = 0
-        _nm[cuticle_y:, :] = 0
-        _cnts, _ = cv2.findContours(
-            _nm, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        if _cnts:
-            _cnt = max(_cnts, key=cv2.contourArea)
-            if cv2.contourArea(_cnt) > 50:
-                nail_polygon = _cnt.reshape(-1, 2).astype(np.int32)
-                _use_contour = True
-
-    if not _use_contour:
-        # nail_le/nail_re span from tip_y to cuticle_y (index i → y = tip_y + i);
-        # indices 0..n_free-1 are the detected free-edge silhouette, the rest is
-        # the nail body.
-        n_pts  = cut_idx + 1
-        n_free = fy - tip_y
-
-        # ── Width & centre continuity at the free-edge / body join ──
-        # The nail does not change width where the free edge (over background)
-        # meets the body (over flesh).  So take the body half-width and centre
-        # from the free-edge silhouette JUST above the join — not an independent
-        # stable-zone measurement — which removes the step/kink there.  Rows are
-        # sampled a little above fy to avoid the bottom rows that blend into the
-        # (wider) finger-flesh boundary.
-        if n_free > 3 and free_edges:
-            j1 = n_free - 1
-            j0 = max(0, j1 - max(3, int(2.0 / mpp)))
-            join_hw = float(np.median(
-                [(nail_re[i] - nail_le[i]) / 2.0 for i in range(j0, j1 + 1)]))
-            join_cx = float(np.median(
-                [(nail_re[i] + nail_le[i]) / 2.0 for i in range(j0, j1 + 1)]))
-            body_half = int(round(max(join_hw, nail_half * 0.6)))
-        else:
-            join_cx   = float(nail_centers.get(fy, tip_x))
-            body_half = int(nail_half)
-
-        # Re-anchor the refined nail axis so it is continuous with the free-edge
-        # centre at the join (keeps the axis slope, kills the sideways step).
-        axis_shift = join_cx - float(nail_centers.get(fy, join_cx))
-
-        # ── Per-row side edges for the whole nail ──
-        left_arr, right_arr = [], []
-        for i in range(n_pts):
-            y_pos = tip_y + i
-            if i < n_free and i < len(nail_le):
-                left_arr.append(float(nail_le[i]))
-                right_arr.append(float(nail_re[i]))
-            elif y_pos in lateral:
-                # Measured fold edges — true per-row width, not a constant.
-                lx, rx = lateral[y_pos]
-                left_arr.append(lx)
-                right_arr.append(rx)
-            else:
-                if y_pos in nail_centers:
-                    cx = nail_centers[y_pos] + axis_shift
-                elif i < len(nail_le):
-                    cx = (nail_le[i] + nail_re[i]) / 2.0
-                else:
-                    cx = tip_x
-                left_arr.append(cx - body_half)
-                right_arr.append(cx + body_half)
-        left_arr  = np.array(left_arr, float)
-        right_arr = np.array(right_arr, float)
-
-        # ── Regularize into a clean, printable outline ──
-        # Raw per-row detection (background-subtracted free edge, lateral
-        # fold edges) carries pixel-level noise that traces faithfully but
-        # prints as a visibly rough/wavy wall — and it can be inconsistent
-        # frame to frame even for the same nail. A real fingernail's sides
-        # run close to straight AND parallel over the body — a constant
-        # width, on a centreline that can still be tilted (the finger is
-        # rarely dead-vertical in frame) — and its free edge is close to
-        # round for ~99% of people. So: fit a robust line to the CENTRE
-        # (not each side independently) and a single robust constant width,
-        # and rebuild the free-edge zone as a round taper anchored to that
-        # fit's width/centre at the join — instead of following every small
-        # wiggle from the raw per-row detection, and instead of letting one
-        # side's sparser/noisier detections pull the two sides out of
-        # parallel.
-        rows_all = tip_y + np.arange(n_pts)
-
-        def _robust_line(rows, vals):
-            coef = np.polyfit(rows, vals, 1)
-            resid = vals - np.polyval(coef, rows)
-            mad = np.median(np.abs(resid - np.median(resid))) + 1e-6
-            keep = np.abs(resid) < 3.5 * mad
-            if keep.sum() >= 4:
-                coef = np.polyfit(rows[keep], vals[keep], 1)
-            return coef
-
-        body_rows    = rows_all[n_free:]
-        join_row     = tip_y + n_free
-        center_slope = 0.0
-        join_half_w, join_center = float(body_half), float(join_cx)
-        if len(body_rows) >= 4:
-            center_body = (left_arr[n_free:] + right_arr[n_free:]) / 2.0
-            width_body  = right_arr[n_free:] - left_arr[n_free:]
-            c_coef = _robust_line(body_rows, center_body)
-
-            # Constant width: a single robust estimate (median, with the same
-            # outlier rejection as _robust_line) rather than a per-side fit —
-            # this also keeps one side's sparse/noisy detections (e.g. a
-            # lopsided lateral-fold read, few inliers on one side) from
-            # pulling the two sides out of parallel or skewing the width.
-            w_med  = np.median(width_body)
-            w_mad  = np.median(np.abs(width_body - w_med)) + 1e-6
-            w_keep = np.abs(width_body - w_med) < 3.5 * w_mad
-            body_width = float(np.median(width_body[w_keep])) if w_keep.sum() >= 4 else float(w_med)
-
-            center_line = np.polyval(c_coef, body_rows)
-            left_arr[n_free:]  = center_line - body_width / 2.0
-            right_arr[n_free:] = center_line + body_width / 2.0
-            center_slope = float(c_coef[0])
-            join_half_w  = body_width / 2.0
-            join_center  = float(np.polyval(c_coef, join_row))
-
-        if n_free > 2:
-            for i in range(n_free):
-                t = (n_free - i) / float(n_free)          # 1 at apex -> ~0 at join
-                half_w = join_half_w * float(np.sqrt(max(1.0 - t * t, 0.0)))
-                cx = join_center + center_slope * (rows_all[i] - join_row)
-                left_arr[i]  = cx - half_w
-                right_arr[i] = cx + half_w
-
-        left_pts  = [[int(round(left_arr[i])),  tip_y + i] for i in range(n_pts)]
-        right_pts = [[int(round(right_arr[i])), tip_y + i] for i in range(n_pts)]
-
-        # Cuticle arc — anchored to the FITTED body line's own endpoint (last
-        # row), not a separately-derived centre/width, so the arc always
-        # meets the sides exactly instead of stepping or self-crossing.
-        cuticle_cx = (left_arr[-1] + right_arr[-1]) / 2.0
-        arc_w      = (right_arr[-1] - left_arr[-1]) / 2.0
-        arc_h       = arc_w * 0.28
-        # Path order is right_pts -> cuticle_arc -> reversed(left_pts), so the
-        # arc must START at the right side (angle=0) and END at the left side
-        # (angle=pi) to hand off cleanly. cos(angle) here (not -cos) does
-        # that: ax=cx+arc_w at angle=0 (right), ax=cx-arc_w at angle=pi
-        # (left). The previous sign started at the left instead, making the
-        # outline jump across the full width before the arc curved back —
-        # a self-crossing "bowtie" at the cuticle end, independent of any
-        # noise in the traced data.
-        # Sign on the ay term: a real nail plate is LONGER at the centre and
-        # SHORTER at the sides (the cuticle line recedes toward the hand in
-        # the middle, and comes up closer to the free edge at the two
-        # corners) — so the centre needs the LARGER y (further from the
-        # tip), not smaller. +sin, not -sin.
-        cuticle_arc = []
-        for i in range(41):
-            angle = np.pi * i / 40
-            ax = cuticle_cx + arc_w * np.cos(angle)
-            ay = cuticle_y  + arc_h * np.sin(angle)
-            cuticle_arc.append([int(ax), int(ay)])
-
-        # No separate tip_arc: per-row edges already taper to a point at tip_y.
-        # Build the full outline from right side → cuticle arc → left side (reversed).
-        full_poly    = (right_pts +
-                        cuticle_arc +
-                        list(reversed(left_pts)))
-        nail_polygon = np.array(full_poly, np.int32)
-
-    # Smooth spline
-    pts = nail_polygon.astype(float)
-    try:
-        diff = np.diff(pts, axis=0)
-        keep = np.concatenate([[True], np.any(diff != 0, axis=1)])
-        pts  = pts[keep]
-        tck, _ = splprep(
-            [np.append(pts[:,0], pts[0,0]),
-             np.append(pts[:,1], pts[0,1])],
-            s=len(pts)*2.5, per=True, k=3)
-        xs, ys = splev(np.linspace(0, 1, 400), tck)
-        smooth = np.column_stack([xs, ys]).astype(np.int32)
-    except Exception:
-        smooth = pts.astype(np.int32)
-
     # ── Skin tone ─────────────────────────────────────────────
     # Sample a band of skin on the finger below the cuticle, well away
     # from the nail plate and any nail polish.
@@ -1670,7 +1486,6 @@ def measure_top(image: np.ndarray, mpp: float,
         "skin_contrast":   skin_lab["contrast"] if skin_lab else None,
         "skin_undertone":  skin_lab["undertone"] if skin_lab else None,
         "mpp_mm_per_px":   round(float(mpp), 6),
-        "nail_polygon_px": smooth.tolist(),
         **cc_data,
         "_nail_half":      nail_half,
         "_tip_x":          tip_x,
@@ -1763,58 +1578,52 @@ def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
 # 7. Visualisation
 # ─────────────────────────────────────────────────────────────
 
-def draw_annotated(image, data, aruco_corners, finger, show_polygon=True,
+def draw_annotated(image, data, aruco_corners, finger, show_shape_overlay=True,
                     show_width_label=True, show_skin_label=True):
     """Draw the measurement overlay and return it (full resolution).
 
     Split out of save_annotated so the live camera preview
     (nail_live.py) can render the same overlay without touching disk.
 
-    show_polygon=False skips the filled nail-outline polygon (used by
-    the live preview, which hides it from the user while keeping the
-    other overlay elements). show_width_label/show_skin_label similarly
-    hide the "W:"/"Skin:" text rows (the magenta width bracket from
-    draw_width_marker and the "L:" row stay either way).
+    show_shape_overlay=False skips the ArUco marker outline and the
+    cuticle-line diagnostics (used by save_annotated: the customer-facing
+    annotated.jpg only needs the L/W/Skin text, not the shape-detection
+    debug lines). show_width_label/show_skin_label similarly hide the
+    "W:"/"Skin:" text rows (the "L:" row stays either way).
     """
     vis   = image.copy()
     color = NAIL_COLORS.get(finger, (200,200,200))
-
-    if aruco_corners is not None:
-        cv2.polylines(vis, [aruco_corners.astype(int)], True, (0,255,255), 3)
-
-    if show_polygon:
-        smooth    = np.array(data["nail_polygon_px"], np.int32)
-        ov        = vis.copy()
-        cv2.fillPoly(ov, [smooth.reshape(-1,1,2)], color)
-        cv2.addWeighted(ov, 0.35, vis, 0.65, 0, vis)
-        cv2.polylines(vis, [smooth.reshape(-1,1,2)], True, color, 3)
 
     tip_x     = data["_tip_x"]
     tip_y     = data["_tip_y"]
     cuticle_y = data["_cuticle_y"]
     nail_half = data["_nail_half"]
 
-    # Cuticle line
-    cv2.line(vis,
-             (tip_x-int(nail_half), cuticle_y),
-             (tip_x+int(nail_half), cuticle_y),
-             (0,165,255), 2)
+    if show_shape_overlay:
+        if aruco_corners is not None:
+            cv2.polylines(vis, [aruco_corners.astype(int)], True, (0,255,255), 3)
 
-    # Second opinion (see detect_cuticle_by_lunula_min): drawn as a dashed
-    # cyan line whenever it's far enough from the primary line to be worth
-    # comparing. Never auto-selected — see measure_top for why neither
-    # signal's own confidence can be trusted to pick between them. The
-    # operator looking at the real photo is the tiebreaker.
-    cuticle_y_alt = data.get("_cuticle_y_alt")
-    if cuticle_y_alt is not None and abs(cuticle_y_alt - cuticle_y) > 5:
-        xl, xr = tip_x - int(nail_half), tip_x + int(nail_half)
-        for x in range(xl, xr, 14):
-            cv2.line(vis, (x, cuticle_y_alt), (min(x + 7, xr), cuticle_y_alt),
-                     (255, 255, 0), 2)
-        cv2.putText(vis, "alt?", (xr + 6, cuticle_y_alt + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4)
-        cv2.putText(vis, "alt?", (xr + 6, cuticle_y_alt + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
+        # Cuticle line
+        cv2.line(vis,
+                 (tip_x-int(nail_half), cuticle_y),
+                 (tip_x+int(nail_half), cuticle_y),
+                 (0,165,255), 2)
+
+        # Second opinion (see detect_cuticle_by_lunula_min): drawn as a dashed
+        # cyan line whenever it's far enough from the primary line to be worth
+        # comparing. Never auto-selected — see measure_top for why neither
+        # signal's own confidence can be trusted to pick between them. The
+        # operator looking at the real photo is the tiebreaker.
+        cuticle_y_alt = data.get("_cuticle_y_alt")
+        if cuticle_y_alt is not None and abs(cuticle_y_alt - cuticle_y) > 5:
+            xl, xr = tip_x - int(nail_half), tip_x + int(nail_half)
+            for x in range(xl, xr, 14):
+                cv2.line(vis, (x, cuticle_y_alt), (min(x + 7, xr), cuticle_y_alt),
+                         (255, 255, 0), 2)
+            cv2.putText(vis, "alt?", (xr + 6, cuticle_y_alt + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4)
+            cv2.putText(vis, "alt?", (xr + 6, cuticle_y_alt + 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 1)
 
     # Labels. No C-curve/arc-radius row here any more - c-curve is measured
     # from the side/phone end-on photo now, not from this top-view shot, so
@@ -1835,7 +1644,7 @@ def draw_annotated(image, data, aruco_corners, finger, show_polygon=True,
 
 
 def save_annotated(image, data, aruco_corners, finger, save_path):
-    vis   = draw_annotated(image, data, aruco_corners, finger)
+    vis   = draw_annotated(image, data, aruco_corners, finger, show_shape_overlay=False)
     scale = 900 / vis.shape[0]
     cv2.imwrite(save_path, cv2.resize(vis, (int(vis.shape[1]*scale), 900)))
     print(f"  [Saved] {save_path}")
@@ -1877,7 +1686,6 @@ def _fallback_measurement(finger: str) -> dict:
         "skin_warmness": None, "skin_brightness": None,
         "skin_saturation": None, "skin_contrast": None, "skin_undertone": None,
         "mpp_mm_per_px":   None,
-        "nail_polygon_px": [],
         "c_curve_mm":      c_curve_mm,
         "arc_radius_mm":   arc_radius_mm,
         "thickness_mm":    0.6,  # STL 기본 두께(다른 곳 주석과 동일)
@@ -1915,8 +1723,21 @@ def _save_fallback_annotated(image, finger: str, save_path: str):
 def measure_finger(top_path: str, finger: str,
                    aruco_size_mm: float, output_dir: str,
                    ccurve_path: str = None,
-                   ccurve_table_edge: bool = True) -> dict:
+                   ccurve_table_edge: bool = True,
+                   live_width_mm: float = None,
+                   live_length_mm: float = None) -> dict:
     """
+    live_width_mm / live_length_mm : optional override for the measured
+        width/length, straight from the live capture-time gauge (the
+        average of the consecutive readings that agreed within the
+        stability tolerance — see nail_live.stability). This single top
+        photo, re-measured from scratch here, is only ONE frame among
+        those that agreed; replacing the fresh single-frame reading with
+        the average of the whole agreeing window is a better estimate of
+        the true value than either one frame alone. Applied right after
+        measure_top() so every downstream step (WL correction, aspect
+        ratio, the end-on C-curve's width-based scale, the annotated
+        overlay) stays internally consistent with the overridden number.
     ccurve_path : optional path to an end-on (tip-facing) photo.
         When provided and it measures successfully, C-curve is taken from
         that image using the nail width as scale reference (no ArUco
@@ -1956,6 +1777,14 @@ def measure_finger(top_path: str, finger: str,
         print(f"\n[2/3] Nail measurement + C-curve …")
         data = measure_top(top_img, mpp, finger_mask, bbox,
                            aruco_corners=aruco_corners, finger=finger)
+
+        # ── Override W/L with the live capture-time average, if given ──
+        if live_width_mm is not None and live_length_mm is not None:
+            print(f"  [Live override] width {data['width_mm']}mm -> {live_width_mm}mm, "
+                  f"length {data['length_mm']}mm -> {live_length_mm}mm "
+                  f"(average of the agreeing live readings)")
+            data["width_mm"]  = round(float(live_width_mm), 2)
+            data["length_mm"] = round(float(live_length_mm), 2)
 
         # ── Override C-curve with end-on measurement if photo is provided ──
         use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
@@ -2085,7 +1914,6 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
                     "c_curve_sagitta_mm": r["c_curve_mm"],
                     "arc_radius_mm":      r["arc_radius_mm"],
                 },
-                "nail_polygon_px": r.get("nail_polygon_px", []),
                 "skin_tone_hex":   r.get("skin_tone_hex", "#FFFFFF"),
             }
             for r in clean
@@ -2228,6 +2056,12 @@ def main():
                         "background (box) style, not the current table-"
                         "edge style (default: table-edge)")
     p.add_argument("--aruco-size",   type=float, default=20.0)
+    p.add_argument("--live-width-mm",  type=float, default=None,
+                   help="Override width_mm with this live-capture average "
+                        "(single-finger mode only)")
+    p.add_argument("--live-length-mm", type=float, default=None,
+                   help="Override length_mm with this live-capture average "
+                        "(single-finger mode only)")
     p.add_argument("--debug", action="store_true", help="verbose detector diagnostics")
     p.add_argument("--no-lateral", action="store_true",
                    help="disable side-lit lateral fold-edge detection")
@@ -2263,7 +2097,9 @@ def main():
         r = measure_finger(args.top, args.finger,
                            args.aruco_size, args.output,
                            ccurve_path=args.ccurve_top,
-                           ccurve_table_edge=not args.ccurve_box_style)
+                           ccurve_table_edge=not args.ccurve_box_style,
+                           live_width_mm=args.live_width_mm,
+                           live_length_mm=args.live_length_mm)
         results.append(r)
 
     payload   = build_payload(results, args.aruco_size)

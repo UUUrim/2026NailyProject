@@ -39,7 +39,7 @@ from pydantic import BaseModel
 
 from skin_color import recommend_nail_colors, lab_to_rgb_hex
 from nail_measurer import recommend_nail_shape
-from camera_stream import RobustCamera
+from _legacy_camera_stream import RobustCamera
 
 BASE         = os.path.dirname(os.path.abspath(__file__))
 BUCKET       = "naily-scans"
@@ -383,7 +383,7 @@ def run_measure_only(userid: str, session: str, hand: str):
             print(f"  [{finger}] 탑뷰 사진 없음 → 건너뜀")
             continue
 
-        # nail_capture.py에서 이미 crop해서 저장했으므로 추가 crop 불필요.
+        # _legacy_nail_capture.py에서 이미 crop해서 저장했으므로 추가 crop 불필요.
         # 혹시 raw 사진이면 하단 crop (이미 저장시 crop 됐으면 그대로 사용)
         cmd = [
             sys.executable,

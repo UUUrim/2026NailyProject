@@ -3,9 +3,9 @@ nail_live.py
 ------------
 Live-camera nail measurement with human confirmation.
 
-The difference from nail_capture.py:
-    nail_capture.py  → you confirm the PHOTO, then measurement runs blind.
-    nail_live.py     → measurement runs continuously on the live feed and the
+The difference from _legacy_nail_capture.py:
+    _legacy_nail_capture.py → you confirm the PHOTO, then measurement runs blind.
+    nail_live.py            → measurement runs continuously on the live feed and the
                        annotated result is what you see on screen. You press
                        OK to accept the MEASUREMENT you are looking at.
 
@@ -412,7 +412,7 @@ def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None):
             data["_mpp"] = mpp
 
             overlay = draw_guide_line(draw_width_marker(
-                nm.draw_annotated(frame, data, corners, finger, show_polygon=False,
+                nm.draw_annotated(frame, data, corners, finger,
                                   show_width_label=False, show_skin_label=False), data, mpp),
                 guide_y)
     except Exception as e:

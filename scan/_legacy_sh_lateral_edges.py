@@ -1,3 +1,6 @@
+# LEGACY — one-off scratch script analyzing specific reference photos
+# (sh_middle/sh_thumb), hardcoded to their crop coordinates. Not imported
+# or run by anything. Kept for reference only.
 import cv2, numpy as np
 SC=4080/1200.
 crops={'sh_middle':(500,505,110,140),'sh_thumb':(460,590,130,150)}

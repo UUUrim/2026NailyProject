@@ -1,9 +1,12 @@
 """
-nail_capture.py
+_legacy_nail_capture.py
+LEGACY — superseded by server.py's web-based capture flow + nail_live.py's
+live measurement. Kept for reference only; not imported or run by anything.
+
 Webcam capture → measure → STL generation pipeline.
 
 Usage:
-    python nail_capture.py
+    python _legacy_nail_capture.py
 
 AUTO-CAPTURE mode (default):
     Place your finger + ArUco marker in view.
