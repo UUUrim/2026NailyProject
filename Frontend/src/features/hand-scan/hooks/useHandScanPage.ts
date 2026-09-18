@@ -81,6 +81,9 @@ export function useHandScanPage() {
   const [isFullscreen, setIsFullscreen]     = useState(false)
   const [cameraError, setCameraError]       = useState<string | null>(null)
   const [isUploading, setIsUploading]       = useState(false)
+  // 탑뷰 안정성(정확도) 게이지 — 0~1 채움 비율과 촬영 가능 여부(초록).
+  const [stabilityRatio, setStabilityRatio] = useState(0)
+  const [isStable, setIsStable]             = useState(false)
   // 기본값: 왼쪽(탑뷰)=USB 웹캠 인덱스 0, 오른쪽(사이드/c-curve)=폰(-2).
   // 매번 드롭다운에서 고르지 않아도 되도록 실제로 쓰는 조합을 기본값으로 둠.
   const [topCameraIdx, setTopCameraIdx]     = useState(0)
@@ -137,7 +140,28 @@ export function useHandScanPage() {
     sseRef.current?.close()
     sseRef.current = null
     setIsFullscreen(false)
+    setStabilityRatio(0)
+    setIsStable(false)
   }, [])
+
+  // ── 안정성 게이지 폴링: 풀스크린(촬영 중)일 때만 짧은 주기로 조회 ──
+  useEffect(() => {
+    if (!isFullscreen) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await fetch(`${SCAN_SERVER_URL}/capture/stability`)
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as { ratio?: number; ready?: boolean }
+        if (cancelled) return
+        setStabilityRatio(typeof data.ratio === 'number' ? data.ratio : 0)
+        setIsStable(Boolean(data.ready))
+      } catch { /* 폴링 실패는 무시하고 다음 tick에서 재시도 */ }
+    }
+    void poll()
+    const id = window.setInterval(() => void poll(), 150)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [isFullscreen])
 
   // ── SSE 연결: 스캔 서버 finger_done / capture_complete 수신 ──
   const connectSSE = useCallback(() => {
@@ -287,6 +311,8 @@ export function useHandScanPage() {
     isFullscreen,
     cameraError,
     isUploading,
+    stabilityRatio,
+    isStable,
     topCameraIdx,
     sideCameraIdx,
     currentStepIndex,

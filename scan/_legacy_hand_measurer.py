@@ -1,6 +1,9 @@
 """
-hand_measurer.py
-----------------
+_legacy_hand_measurer.py
+------------------------
+LEGACY — superseded by nail_measurer.py (per-finger measurement, used by
+server.py). Kept for reference only; not imported or run by anything.
+
 Full-hand nail measurement from a single photo.
 
 The photo should show a hand (palm down, fingers spread) on a dark background
@@ -8,7 +11,7 @@ with an ArUco marker visible in the frame.  All four fingers (index, middle,
 ring, pinky) plus the thumb are measured in one pass.
 
 Usage:
-    python hand_measurer.py --image wonji.jpg --aruco-size 20 --output hand_results/
+    python _legacy_hand_measurer.py --image wonji.jpg --aruco-size 20 --output hand_results/
 """
 
 import argparse
