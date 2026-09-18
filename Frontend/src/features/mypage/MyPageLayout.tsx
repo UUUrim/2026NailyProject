@@ -44,6 +44,7 @@ export function MyPageLayout() {
     setNickname,
     nicknameError,
     isSavingNickname,
+    isSocialLogin,
     handleStartEditNickname,
     handleCloseNicknameForm,
     handleVerifyNicknamePassword,
@@ -131,7 +132,6 @@ export function MyPageLayout() {
   })
   const calendarRef = useRef<HTMLDivElement | null>(null)
   const dayBodyRef = useRef<HTMLDivElement | null>(null)
-  const timelineDateInitialized = useRef(false)
   const [hoveredActivityId, setHoveredActivityId] = useState<string | null>(null)
   const [pinnedActivityId, setPinnedActivityId] = useState<string | null>(null)
   const [listSortOrder, setListSortOrder] = useState<'newest' | 'oldest'>('newest')
@@ -162,16 +162,9 @@ export function MyPageLayout() {
 
   const hasAnyTimelineActivity = timelineActivityDates.size > 0
 
-  useEffect(() => {
-    if (timelineDateInitialized.current || isLoading) return
-    timelineDateInitialized.current = true
-    if (timelineActivityDates.size > 0) {
-      const latest = [...timelineActivityDates].sort((a, b) => (a < b ? 1 : -1))[0]
-      setSelectedTimelineDate(latest)
-      const [y, m] = latest.split('-').map(Number)
-      setCalendarMonth({ year: y, month: m - 1 })
-    }
-  }, [isLoading, timelineActivityDates])
+  // 활동 타임라인은 항상 "오늘" 날짜로 시작한다 (selectedTimelineDate 초기값 = todayKey).
+  // 예전엔 첫 로드 시 마지막 활동이 있는 날짜로 점프시켰지만, 지금은 오늘을 기준으로 두고
+  // 사용자가 직접 이전/다음·캘린더로 이동하도록 한다.
 
   // 정렬 드롭다운(SortControl/FolderSortControl)은 각자 바깥 클릭 감지를 자체적으로
   // 처리하므로, 여기서는 날짜 선택 캘린더만 신경 쓰면 된다.
@@ -424,6 +417,7 @@ export function MyPageLayout() {
     totalDesignCount,
     totalFavoriteCount,
 
+    isSocialLogin,
     isEditingNickname,
     nicknameStage,
     nicknamePassword,

@@ -9,6 +9,7 @@ import {
 } from '@/shared/constants/designPreferences'
 import { getHandScanResult } from '@/features/nail-design/utils/handScanStorage'
 import { generateSkinTonePalette } from '@/shared/utils/skinTone'
+import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
 import { createChatSession, savePreferences, refineKeywords } from '@/features/nail-design/api/chat'
 import { generateDesign } from '@/entities/design/api'
 import { ApiError } from '@/shared/utils/apiClient'
@@ -67,7 +68,11 @@ export function useNailDesignPreferencePage() {
 
   const prompt = useMemo(() => buildDesignPrompt(preferences), [preferences])
   const skinToneHex = scanResult?.skinToneHex ?? DEFAULT_SKIN_HEX
-  const skinSwatches = useMemo(() => generateSkinTonePalette(skinToneHex, 24), [skinToneHex])
+  // .swatch-grid 는 6열 row-major, 24색 → 4행
+  const skinSwatches = useMemo(
+    () => arrangeRecommendedColors(generateSkinTonePalette(skinToneHex, 24), { columns: 6 }),
+    [skinToneHex],
+  )
   const isValidHex = /^#[0-9a-fA-F]{6}$/.test(pickerColor)
 
   const handleToggle = (key: PreferenceKey, value: string) => {

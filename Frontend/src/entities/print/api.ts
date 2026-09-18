@@ -29,6 +29,10 @@ export async function getMyPrintOrders(): Promise<PrintOrderResponse[]> {
     return res.data
 }
 
+export async function completePrintOrder(orderId: number): Promise<void> {
+    await apiClient.patch(`/prints/${orderId}/complete`)
+}
+
 export interface PrinterProgress {
     success: boolean
     state: string | null // 예: PRINTING, CALIBRATING_EXTRUSION, IDLE, UNKNOWN

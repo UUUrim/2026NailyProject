@@ -16,6 +16,7 @@ public class ScanResultRequestDto {
     private String skinToneHex;
     private List<String> recommendedColors;
     private String tone;       // warm/cool/neutral
+    private Double warmness;   // 웜/쿨 연속 스칼라 (LAB b - a*0.5), tone(범주) 판정의 원본 값
     private Double brightness; // 0~1
     private Double saturation; // 0~1
     private List<FingerResult> fingers;

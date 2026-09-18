@@ -144,6 +144,16 @@
   color: #fff;
   font-size: 15.5px;
   font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+/* 로그인 진행 중(disabled={isLoading})엔 살짝 흐린 핑크로 바꿔 비활성 상태처럼 보이게 한다.
+   '로그인 중...' 문구는 그대로 유지. */
+.login-form__submit:disabled {
+  background: #ecc2ce;
+  color: #fbeef2;
+  cursor: not-allowed;
 }
 
 .login-divider {

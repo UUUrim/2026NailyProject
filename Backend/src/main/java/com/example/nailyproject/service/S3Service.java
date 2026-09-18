@@ -81,4 +81,19 @@ public class S3Service {
             throw new RuntimeException("S3 이미지 업로드 중 오류 발생", e);
         }
     }
+
+    /**
+     * S3 URL로부터 이미지를 byte[]로 다운로드
+     */
+    public byte[] downloadImageBytes(String s3Url) {
+        String host = bucket + ".s3.amazonaws.com/";  // "naily-scans.s3.amazonaws.com/"
+        String s3Key = s3Url.substring(s3Url.indexOf(host) + host.length());
+        // → "designs/user_3/0cdc538c-....png"
+
+        try (InputStream is = amazonS3.getObject(bucket, s3Key).getObjectContent()) {
+            return is.readAllBytes();
+        } catch (Exception e) {
+            throw new RuntimeException("S3 이미지 다운로드 실패: " + s3Key, e);
+        }
+    }
 }

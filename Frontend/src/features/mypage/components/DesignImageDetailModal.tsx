@@ -48,6 +48,7 @@ type Props = {
   showChatHistoryToggle?: boolean
   /** "이미지 상세보기" 토글을 보여줄지 (기본 true) */
   showDesignDetailsToggle?: boolean
+
   /** 찜하기 버튼 + 찜 폴더명 배지를 보여줄지 (기본 true) */
   showLike?: boolean
   /** 공유 상태 배지 + 공유하기 버튼을 보여줄지 (기본 true) */
@@ -181,6 +182,7 @@ export function DesignImageDetailModal({
     setDetails(null)
     setShape(null)
     setNailTipCropUrls(null)
+
 
     if (image.designId == null) return
     let cancelled = false
@@ -458,12 +460,10 @@ export function DesignImageDetailModal({
               <span>{shareBusy ? '처리 중...' : shared ? '공유 해제' : '공유하기'}</span>
             </button>
           )}
-          {showAr && (
-            <button type="button" className="mypage-x__modal-action--accent" onClick={() => setArTryOnImageUrl(viewImageUrl)}>
-              {ModalActionIcons.ar}
-              <span>AR로 미리보기</span>
-            </button>
-          )}
+          <button type="button" className="mypage-x__modal-action--accent" onClick={() => setArTryOnImageUrl(viewImageUrl)}>
+            {ModalActionIcons.ar}
+            <span>AR로 미리보기</span>
+          </button>
         </div>
       </div>
 

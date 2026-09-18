@@ -49,6 +49,7 @@ export const HAND_LABELS: Record<HandSide, string> = {
 type ScanStep = { hand: HandSide; finger: Finger }
 export const STEPS: ScanStep[] = HANDS.flatMap((hand) => FINGERS.map((finger) => ({ hand, finger })))
 
+
 // 촬영 진행 상태(몇 번째 손가락까지 찍었는지)를 모듈 스코프에 스냅샷으로 저장해서, 다른 페이지로
 // 갔다가 돌아와도 처음부터 다시 찍지 않아도 되도록 한다. 카메라 스트림 자체는 하드웨어 리소스라
 // 여기 포함하지 않고(다시 열 때 새로 요청), 서버에 이미 업로드된 진행 상황만 보존한다.

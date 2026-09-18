@@ -224,11 +224,13 @@ def _get_printer():
 
 def _fetch_printer_status() -> dict:
     p = _get_printer()
+    if str(p.get_current_state()) == 'UNKNOWN':
+            time.sleep(3)  # 처음 연결 시만 대기
     return {
         "state":            str(p.get_current_state()),
         "percentage":       p.get_percentage(),
-        "currentLayer":     p.current_layer_num,
-        "totalLayer":       p.total_layer_num,
+        "currentLayer":     p.current_layer_num(),
+        "totalLayer":       p.total_layer_num(),
         "remainingTimeMin": p.get_time(),
         "nozzleTemp":       p.get_nozzle_temperature(),
         "bedTemp":          p.get_bed_temperature(),
@@ -252,6 +254,9 @@ def _slice_and_print_local(local_3mf: str, output_dir: str, callback_url: str):
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
         requests.post(callback_url, json={
             "success": True, "status": "PRINTING", "gcodePath": gcode_path})
+
+        # 완료 감지 폴링
+        _poll_until_complete(callback_url)
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
@@ -283,16 +288,50 @@ def _run_merge_both_hands(userid, left_session, right_session,
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
+def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(interval)
+        try:
+            status = _fetch_printer_status()
+            state = status.get("state", "")
+            print(f"[Poll] 프린터 상태: {state}")  # ← 로그 확인용
+            if "FINISH" in state.upper() or "IDLE" in state.upper():
+                requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                return
+        except Exception as e:
+            print(f"[Poll] 폴링 오류: {e}")
 
 def _run_slice_and_print(merged_model_url, output_dir, callback_url):
     try:
         local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
         _download_3mf_from_url(merged_model_url, local_3mf)
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
+
+        # 출력 시작 콜백
         requests.post(callback_url, json={
             "success": True, "status": "PRINTING", "gcodePath": gcode_path})
+
+        # 완료 감지 폴링
+        _poll_until_complete(callback_url)
+
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
+
+
+def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
+    """출력 완료될 때까지 폴링, 완료되면 콜백으로 COMPLETED 전송"""
+    start = time.time()
+    while time.time() - start < timeout:
+        time.sleep(interval)
+        try:
+            status = _fetch_printer_status()
+            state = status.get("state", "")
+            if "FINISH" in state.upper() or "IDLE" in state.upper():
+                requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                return
+        except Exception:
+            pass  # 연결 끊겨도 폴링 계속
 
 
 # ══════════════════════════════════════════════════════════════

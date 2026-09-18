@@ -46,6 +46,13 @@ export type GenerationContext = {
     avgLength: number
     avgWidth: number
     avgCurve: number
+    skinToneHex?: string | null
+    shapeImage?: string | null
+    recommendedColors?: string[]
+    usedColors?: string[]
+    reflectedMood?: string | null
+    reflectedDesignType?: string | null
+    reflectedMotif?: string | null
   } | null
   revisionKeywords: string[]
 }
@@ -89,6 +96,13 @@ export function useNailDesignResultPage() {
   const pollCountRef = useRef(0)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // ★ 컬러팔레트 폴링
+  const [colorPalette, setColorPalette] = useState<DesignExtractedDetails['colorPalette'] | null>(
+      initialDetails?.colorPalette?.length ? initialDetails.colorPalette : null
+  )
+  const [nailParts, setNailParts] = useState<DesignExtractedDetails['nailParts'] | null>(null)
+  const colorPollCountRef = useRef(0)
+  const colorPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [liked, setLiked] = useState(false)
   const [likedFolder, setLikedFolder] = useState<{ folderId: number; name: string } | null>(null)
   const [isLiking, setIsLiking] = useState(false)
@@ -98,6 +112,7 @@ export function useNailDesignResultPage() {
   const [shareBusy, setShareBusy] = useState(false)
   const [shape, setShape] = useState<string | null>(null)
   const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
+
 
   // ★ 스와치 폴링
   useEffect(() => {
@@ -133,6 +148,31 @@ export function useNailDesignResultPage() {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
     }
   }, [hasRealResult, designId, swatches])
+
+  // ★ 컬러팔레트 폴링
+  useEffect(() => {
+    if (!hasRealResult || !designId || colorPalette?.length) return
+
+    const poll = async () => {
+      colorPollCountRef.current += 1
+      try {
+        const detail = await getDesignDetail(designId)
+        const palette = detail.details?.colorPalette
+        if (palette && palette.length > 0) {
+          setColorPalette(palette)
+          if (colorPollTimerRef.current) clearInterval(colorPollTimerRef.current)
+          return
+        }
+      } catch {}
+      if (colorPollCountRef.current >= POLL_MAX) {
+        if (colorPollTimerRef.current) clearInterval(colorPollTimerRef.current)
+      }
+    }
+
+    void poll()
+    colorPollTimerRef.current = setInterval(() => void poll(), POLL_INTERVAL)
+    return () => { if (colorPollTimerRef.current) clearInterval(colorPollTimerRef.current) }
+  }, [hasRealResult, designId, colorPalette])
 
   useEffect(() => {
     if (!hasRealResult) return
@@ -171,6 +211,37 @@ export function useNailDesignResultPage() {
 
     return () => { cancelled = true }
   }, [hasRealResult, designId, image])
+
+
+  // ★ nailParts 별도 폴링 (swatches 폴링과 동일한 패턴)
+  const nailPartsPollCountRef = useRef(0)
+  const nailPartsPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    if (!hasRealResult || !designId || nailParts?.length) return
+
+    const poll = async () => {
+      nailPartsPollCountRef.current += 1
+      try {
+        const detail = await getDesignDetail(designId)
+        const parts = detail.details?.nailParts
+        // ★ imageUrl 있는 객체 파츠가 있을 때만 종료
+        const hasImageParts = parts?.some(p => typeof p === 'object' && p !== null && 'imageUrl' in p && p.imageUrl)
+        if (hasImageParts) {
+          setNailParts(parts!)
+          if (nailPartsPollTimerRef.current) clearInterval(nailPartsPollTimerRef.current)
+          return
+        }
+      } catch {}
+      if (nailPartsPollCountRef.current >= POLL_MAX) {
+        if (nailPartsPollTimerRef.current) clearInterval(nailPartsPollTimerRef.current)
+      }
+    }
+
+    void poll()
+    nailPartsPollTimerRef.current = setInterval(() => void poll(), POLL_INTERVAL)
+    return () => { if (nailPartsPollTimerRef.current) clearInterval(nailPartsPollTimerRef.current) }
+  }, [hasRealResult, designId, nailParts])
 
   const handleToggleShare = async () => {
     if (!designId || shareBusy) return
@@ -217,9 +288,14 @@ export function useNailDesignResultPage() {
   }
   const applyShareChange = (nextShared: boolean) => setShared(nextShared)
 
-  // details에 폴링으로 받은 swatches 주입
+  // details에 폴링으로 받은 swatches + colorPalette + nailParts 주입
   const detailsWithSwatches: DesignExtractedDetails | null = initialDetails
-      ? { ...initialDetails, swatches: swatches ?? undefined }
+      ? {
+        ...initialDetails,
+        colorPalette: colorPalette ?? initialDetails.colorPalette,
+        nailParts: nailParts ?? initialDetails.nailParts,
+        swatches: swatches ?? undefined,
+      }
       : null
 
   return {

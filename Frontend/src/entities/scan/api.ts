@@ -25,6 +25,7 @@ export interface ScanResultResponse {
     skinToneHex: string
     recommendedColors: string[]
     tone: string | null       // warm/cool/neutral
+    warmness: number | null   // 웜/쿨 연속 스칼라 (LAB b - a*0.5), tone 범주의 원본 값 — 슬라이더 위치용
     brightness: number | null // 0~1
     saturation: number | null // 0~1
     overallSize: string
@@ -104,6 +105,7 @@ export interface ScanHistoryItem {
     skinToneHex: string | null
     recommendedColors: string[]
     tone: string | null
+    warmness: number | null
     brightness: number | null
     saturation: number | null
     avgLengthMm: number | null

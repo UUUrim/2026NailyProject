@@ -28,6 +28,7 @@ public class ScanResultResponseDto {
     private String skinToneHex;
     private List<String> recommendedColors;
     private String tone;
+    private Double warmness; // 웜/쿨 연속 스칼라 (tone 범주의 원본 값) — 슬라이더 위치용
     private Double brightness;
     private Double saturation;
     private String overallSize;
@@ -73,6 +74,7 @@ public class ScanResultResponseDto {
                 .skinToneHex(handScan.getSkinToneHex())
                 .recommendedColors(parseRecommendedColors(handScan.getRecommendedColors(), objectMapper))
                 .tone(handScan.getTone())
+                .warmness(handScan.getWarmness())
                 .brightness(handScan.getBrightness())
                 .saturation(handScan.getSaturation())
                 .overallSize(handScan.getOverallSize())

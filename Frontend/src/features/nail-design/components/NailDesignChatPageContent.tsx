@@ -119,11 +119,11 @@ function QuestionMarkIcon({ className, size = 16 }: { className?: string; size?:
 // 사이드바 헤더의 "분석 결과 선택" 드롭다운 — 손 분석 이력(양손 다 촬영된 세션)을
 // 대표 피부색 스와치 + 날짜 + 헥스값으로 보여주고 고를 수 있게 한다.
 function SessionDropdown({
-                              sessions,
-                              selectedKey,
-                              currentDateLabel,
-                              onSelect,
-                          }: {
+                             sessions,
+                             selectedKey,
+                             currentDateLabel,
+                             onSelect,
+                         }: {
     sessions: ScanSession[]
     selectedKey: string | null
     currentDateLabel: string
@@ -285,6 +285,7 @@ export function NailDesignChatPageContent() {
         scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
+        sidebarColorPalette,
         isMultiConfirmVisible,
         analysisSummary,
         MOTIF_NONE_VALUE,
@@ -422,11 +423,11 @@ export function NailDesignChatPageContent() {
                                         </div>
                                     )}
 
-                                    {analysisSummary.skinTonePalette.length > 0 && (
+                                    {sidebarColorPalette.length > 0 && (
                                         <div className="design-chat-sidebar__card">
                                             <span className="design-chat-sidebar__card-label">추천 컬러</span>
                                             <div className="design-chat-sidebar__palette">
-                                                {analysisSummary.skinTonePalette.map((hex, idx) => (
+                                                {sidebarColorPalette.map((hex, idx) => (
                                                     <span
                                                         key={`${hex}-${idx}`}
                                                         className="design-chat-sidebar__palette-chip"
@@ -478,7 +479,7 @@ export function NailDesignChatPageContent() {
                                             <li className="design-chat-sidebar__metric-row">
                                                 <div className="design-chat-sidebar__metric-top">
                                                     <span className="design-chat-sidebar__metric-name">곡률 (C-curve)</span>
-                                                    <span className="design-chat-sidebar__metric-value">{analysisSummary.avgCurve}</span>
+                                                    <span className="design-chat-sidebar__metric-value">{analysisSummary.avgCurve}mm</span>
                                                 </div>
                                                 <span className="design-chat-sidebar__metric-bar" aria-hidden="true">
                                                     <span style={{ width: `${analysisSummary.curvePct}%` }} />
@@ -628,7 +629,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
+                                                <p className="design-chat__color-picker-label">이달의 컬러</p>
                                             )}
 
                                             <div className="design-chat__color-main">
@@ -734,7 +735,7 @@ export function NailDesignChatPageContent() {
                                             {hasScanColorPalette ? (
                                                 <p className="design-chat__color-picker-label">{userName ? `${userName}님과 어울리는 컬러` : '회원님과 어울리는 컬러'}</p>
                                             ) : (
-                                                <p className="design-chat__color-picker-label">추천 컬러 팔레트</p>
+                                                <p className="design-chat__color-picker-label">이달의 컬러</p>
                                             )}
 
                                             <div className="design-chat__color-main">
@@ -1153,47 +1154,47 @@ export function NailDesignChatPageContent() {
                 </div>
             </div>
 
-    {zoomedImage && (
-        <DesignImageDetailModal
-            image={{ designId: null, imageUrl: zoomedImage, liked: false, folder: null }}
-            onClose={closeZoomedImage}
-            showDelete={false}
-            showChatHistoryToggle={false}
-            showDesignDetailsToggle={false}
-            showLike={false}
-            showShare={false}
-            showAr={false}
-        />
-    )}
+            {zoomedImage && (
+                <DesignImageDetailModal
+                    image={{ designId: null, imageUrl: zoomedImage, liked: false, folder: null }}
+                    onClose={closeZoomedImage}
+                    showDelete={false}
+                    showChatHistoryToggle={false}
+                    showDesignDetailsToggle={false}
+                    showLike={false}
+                    showShare={false}
+                    showAr={false}
+                />
+            )}
 
-    {tooltipAnchor &&
-        createPortal(
-            <div
-                className="design-chat__option-tooltip"
-                style={{ top: tooltipAnchor.top - 8, left: tooltipAnchor.left }}
-                role="tooltip"
-            >
-                {tooltipAnchor.info.image && !tooltipImgError ? (
-                    <img
-                        src={tooltipAnchor.info.image}
-                        alt=""
-                        className="design-chat__option-tooltip-img"
-                        onError={() => setTooltipImgError(true)}
-                    />
-                ) : (
-                    <div className="design-chat__option-tooltip-img design-chat__option-tooltip-img--placeholder" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
-                            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-                            <path d="m6.5 15 3.5-4 3 3 3.5-4.5 4 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                            <circle cx="8.5" cy="9" r="1.3" fill="currentColor" />
-                        </svg>
-                    </div>
+            {tooltipAnchor &&
+                createPortal(
+                    <div
+                        className="design-chat__option-tooltip"
+                        style={{ top: tooltipAnchor.top - 8, left: tooltipAnchor.left }}
+                        role="tooltip"
+                    >
+                        {tooltipAnchor.info.image && !tooltipImgError ? (
+                            <img
+                                src={tooltipAnchor.info.image}
+                                alt=""
+                                className="design-chat__option-tooltip-img"
+                                onError={() => setTooltipImgError(true)}
+                            />
+                        ) : (
+                            <div className="design-chat__option-tooltip-img design-chat__option-tooltip-img--placeholder" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
+                                    <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                                    <path d="m6.5 15 3.5-4 3 3 3.5-4.5 4 5.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                    <circle cx="8.5" cy="9" r="1.3" fill="currentColor" />
+                                </svg>
+                            </div>
+                        )}
+                        <strong className="design-chat__option-tooltip-title">{tooltipAnchor.label}</strong>
+                        <span className="design-chat__option-tooltip-desc">{tooltipAnchor.info.desc}</span>
+                    </div>,
+                    document.body,
                 )}
-                <strong className="design-chat__option-tooltip-title">{tooltipAnchor.label}</strong>
-                <span className="design-chat__option-tooltip-desc">{tooltipAnchor.info.desc}</span>
-            </div>,
-            document.body,
-        )}
         </AppShell>
     )
 }

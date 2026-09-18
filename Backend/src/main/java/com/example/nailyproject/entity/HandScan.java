@@ -53,6 +53,9 @@ public class HandScan {
     @Column(name = "tone", length = 10)
     private String tone; // 피부 웜/쿨 톤 (warm/cool/neutral)
 
+    @Column(name = "warmness")
+    private Double warmness; // 웜/쿨 연속 스칼라 (LAB b - a*0.5) — tone 범주 판정의 원본 값. 슬라이더 위치용
+
     @Column(name = "brightness")
     private Double brightness; // 명도 (0~1)
 
@@ -95,6 +98,7 @@ public class HandScan {
             String skinToneHex,
             String recommendedColors,
             String tone,
+            Double warmness,
             Double brightness,
             Double saturation,
             String overallSize
@@ -104,6 +108,7 @@ public class HandScan {
         this.skinToneHex = skinToneHex;
         this.recommendedColors = recommendedColors;
         this.tone = tone;
+        this.warmness = warmness;
         this.brightness = brightness;
         this.saturation = saturation;
         this.overallSize = overallSize;

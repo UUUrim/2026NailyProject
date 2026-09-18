@@ -62,6 +62,7 @@ public class UserHistoryController {
                             .skinToneHex(scan.getSkinToneHex())
                             .recommendedColors(ScanResultResponseDto.parseRecommendedColors(scan.getRecommendedColors(), objectMapper))
                             .tone(scan.getTone())
+                            .warmness(scan.getWarmness())
                             .brightness(scan.getBrightness())
                             .saturation(scan.getSaturation())
                             .avgLengthMm(averages.lengthMm())

@@ -1,10 +1,12 @@
 package com.example.nailyproject.controller;
 
 import com.example.nailyproject.dto.response.ApiResponse;
+import com.example.nailyproject.entity.User;
 import com.example.nailyproject.service.PrintOrderService;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -37,5 +39,13 @@ public class PrintCallbackController {
 
         printOrderService.receivePrintResult(orderId, payload);
         return ResponseEntity.ok(ApiResponse.success(200, "출력 결과 수신 완료.", null));
+    }
+
+    @PatchMapping("/{orderId}/complete")
+    public ResponseEntity<ApiResponse<Void>> completePrintOrder(
+            @PathVariable Long orderId,
+            @AuthenticationPrincipal User user) {
+        printOrderService.completePrintOrder(user, orderId);
+        return ResponseEntity.ok(ApiResponse.success(200, "출력 완료 처리되었습니다.", null));
     }
 }

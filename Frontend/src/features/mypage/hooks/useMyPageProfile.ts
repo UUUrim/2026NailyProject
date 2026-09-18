@@ -41,6 +41,10 @@ export function useMyPageProfile() {
   const [newPasswordSubmitError, setNewPasswordSubmitError] = useState('')
   const [isSavingPassword, setIsSavingPassword] = useState(false)
 
+  // 소셜 로그인(google/naver) 계정은 자체 비밀번호가 없다. 프로필 설정에서 "비밀번호 변경"을
+  // 숨기고, 닉네임 변경도 "현재 비밀번호 확인" 단계를 건너뛴다. (백엔드 User.provider 기본값 "local")
+  const isSocialLogin = (profile?.provider ?? 'local').toLowerCase() !== 'local'
+
   // 닉네임 입력칸 기본값 — 편집 중이 아닐 때만 서버 값으로 맞춰둔다 (편집 흐름 자체는
   // handleStartEditNickname/handleVerifyNicknamePassword가 별도로 초기화한다).
   useEffect(() => {
@@ -48,12 +52,18 @@ export function useMyPageProfile() {
   }, [profile, isEditingNickname])
 
   // ── 닉네임 변경: 1단계(비밀번호 확인) → 2단계(새 닉네임) → 완료 ──────
+  // 소셜 로그인 계정은 비밀번호가 없으므로 1단계를 건너뛰고 바로 새 닉네임 입력으로 간다.
   const handleStartEditNickname = () => {
-    setNicknameStage('password')
     setNicknamePassword('')
     setNicknamePasswordError('')
-    setNickname('')
     setNicknameError('')
+    if (isSocialLogin) {
+      setNickname(profile?.nickname ?? '')
+      setNicknameStage('nickname')
+    } else {
+      setNickname('')
+      setNicknameStage('password')
+    }
     setIsEditingNickname(true)
   }
 
@@ -190,6 +200,7 @@ export function useMyPageProfile() {
 
   return {
     profile,
+    isSocialLogin,
     isEditingNickname,
     nicknameStage,
     nicknamePassword,

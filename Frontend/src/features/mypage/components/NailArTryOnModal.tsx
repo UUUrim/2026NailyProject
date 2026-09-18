@@ -5,8 +5,18 @@ import { resetLandmarkSmoothing, smoothLandmarks } from '@/features/mypage/utils
 import { prepareNailDesignAsset, type NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
 import { isKnownNailShape, loadShapeTemplate } from '@/features/mypage/utils/nailMeshAsset'
 import { NailArScene } from '@/features/mypage/utils/nailArScene'
+import { CameraFeedSelect } from '@/features/hand-scan/components/CameraFeedSelect'
 import '@/styles/mypage.css'
+import '@/styles/hand-scan.css'
 import '@/styles/nail-ar-tryon.css'
+
+const DEFAULT_CAMERA_DEVICE_ID = 'default'
+
+function buildVideoConstraints(deviceId: string): MediaTrackConstraints {
+  return deviceId === DEFAULT_CAMERA_DEVICE_ID
+    ? { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    : { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+}
 
 type NailArTryOnModalProps = {
   imageUrl: string
@@ -50,6 +60,30 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('AR 미리보기를 준비하고 있어요...')
   const [mode, setMode] = useState<RenderMode>('2d')
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([])
+  const [selectedDeviceId, setSelectedDeviceId] = useState(DEFAULT_CAMERA_DEVICE_ID)
+
+  // 드롭다운에서 다른 카메라를 고르면, 초기 진입 때와 같은 제약 조건으로 새 스트림만
+  // 새로 받아 기존 스트림과 교체한다 - 디자인 에셋/HandLandmarker/3D 씬은 그대로 둔다.
+  const handleCameraChange = async (deviceId: string) => {
+    const video = videoRef.current
+    if (!video) return
+    try {
+      setMessage('카메라를 전환하는 중...')
+      const nextStream = await navigator.mediaDevices.getUserMedia({
+        video: buildVideoConstraints(deviceId),
+        audio: false,
+      })
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = nextStream
+      video.srcObject = nextStream
+      await video.play()
+      setSelectedDeviceId(deviceId)
+      setMessage('손을 카메라에 맞춰 네일 디자인을 확인해 보세요.')
+    } catch (error) {
+      setMessage(getErrorMessage(error, '카메라를 전환할 수 없습니다.'))
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -89,11 +123,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
 
         setMessage('카메라를 연결하는 중...')
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: 'user' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
+          video: buildVideoConstraints(DEFAULT_CAMERA_DEVICE_ID),
           audio: false,
         })
 
@@ -112,6 +142,16 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
         await video.play()
 
         if (cancelled) return
+
+        // 카메라 라벨은 getUserMedia로 권한을 얻은 뒤에야 채워지므로, 스트림이 실제로
+        // 붙은 지금 시점에 열거해야 드롭다운에 "카메라 1" 대신 실제 기기명이 나온다.
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          if (!cancelled) setVideoDevices(devices.filter((d) => d.kind === 'videoinput'))
+        } catch {
+          // 열거 실패해도 AR 자체는 계속 진행 - 드롭다운이 "기본 카메라"만 보여줄 뿐
+        }
+
         setStatus('ready')
         setMessage('손을 카메라에 맞춰 네일 디자인을 확인해 보세요.')
       } catch (error) {
@@ -245,6 +285,15 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
             ref={meshCanvasRef}
             className={`nail-ar-tryon__mesh-canvas${status === 'ready' && mode === '3d' ? ' is-visible' : ''}`}
           />
+
+          {status === 'ready' && (
+            <CameraFeedSelect
+              label="카메라"
+              value={selectedDeviceId}
+              devices={videoDevices}
+              onChange={(deviceId) => void handleCameraChange(deviceId)}
+            />
+          )}
         </div>
 
         <p className="nail-ar-tryon__hint">

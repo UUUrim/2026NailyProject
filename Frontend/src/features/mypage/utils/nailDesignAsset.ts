@@ -148,12 +148,12 @@ type RgbColor = { r: number; g: number; b: number }
 // interpolate an expected background color per pixel position, so the
 // comparison tracks the actual lighting falloff across the photo.
 function medianColorInPatch(
-  data: Uint8ClampedArray,
-  width: number,
-  height: number,
-  cx: number,
-  cy: number,
-  radius: number,
+    data: Uint8ClampedArray,
+    width: number,
+    height: number,
+    cx: number,
+    cy: number,
+    radius: number,
 ): RgbColor {
   const rs: number[] = []
   const gs: number[] = []
@@ -257,16 +257,16 @@ function getContentBounds(width: number, height: number, backgroundMask: Uint8Ar
 }
 
 function findNailBlobs(
-  width: number,
-  backgroundMask: Uint8Array,
-  bounds: ContentBounds,
+    width: number,
+    backgroundMask: Uint8Array,
+    bounds: ContentBounds,
 ): { blobs: NailBlob[]; blobIdMap: Int32Array } {
   const visited = new Uint8Array(width * (bounds.maxY + 1))
   const blobIdMap = new Int32Array(width * (bounds.maxY + 1)).fill(-1)
   const blobs: NailBlob[] = []
   const minBlobPixels = Math.max(
-    40,
-    Math.floor((bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1) * 0.008),
+      40,
+      Math.floor((bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1) * 0.008),
   )
 
   const idx = (x: number, y: number) => y * width + x
@@ -360,10 +360,10 @@ function createFingerCanvas(sourceCanvas: HTMLCanvasElement, bounds: ContentBoun
 }
 
 function buildAlphaMaskedCanvas(
-  sourceWidth: number,
-  data: Uint8ClampedArray,
-  bounds: ContentBounds,
-  isMember: (x: number, y: number) => boolean,
+    sourceWidth: number,
+    data: Uint8ClampedArray,
+    bounds: ContentBounds,
+    isMember: (x: number, y: number) => boolean,
 ): FingerNailAsset {
   const w = Math.max(1, bounds.maxX - bounds.minX + 1)
   const h = Math.max(1, bounds.maxY - bounds.minY + 1)
@@ -383,10 +383,10 @@ function buildAlphaMaskedCanvas(
       const x = bounds.minX + lx
       if (!isMember(x, y)) continue
       const neighborMemberCount =
-        (isMember(x - 1, y) ? 1 : 0) +
-        (isMember(x + 1, y) ? 1 : 0) +
-        (isMember(x, y - 1) ? 1 : 0) +
-        (isMember(x, y + 1) ? 1 : 0)
+          (isMember(x - 1, y) ? 1 : 0) +
+          (isMember(x + 1, y) ? 1 : 0) +
+          (isMember(x, y - 1) ? 1 : 0) +
+          (isMember(x, y + 1) ? 1 : 0)
       if (neighborMemberCount < 1) continue
       core[ly * w + lx] = 255
     }
@@ -477,11 +477,11 @@ function findVerticalSplitLines(width: number, backgroundMask: Uint8Array, bound
 }
 
 function splitByProjection(
-  width: number,
-  _height: number,
-  data: Uint8ClampedArray,
-  backgroundMask: Uint8Array,
-  bounds: ContentBounds,
+    width: number,
+    _height: number,
+    data: Uint8ClampedArray,
+    backgroundMask: Uint8Array,
+    bounds: ContentBounds,
 ): FingerNailAsset[] {
   const splitLines = findVerticalSplitLines(width, backgroundMask, bounds)
   const xStarts = [bounds.minX, ...splitLines]
@@ -512,7 +512,7 @@ function splitByProjection(
     }
 
     nails.push(
-      buildAlphaMaskedCanvas(width, data, { minX: x0, minY: segMinY, maxX: x1 - 1, maxY: segMaxY }, isMember),
+        buildAlphaMaskedCanvas(width, data, { minX: x0, minY: segMinY, maxX: x1 - 1, maxY: segMaxY }, isMember),
     )
   }
 
@@ -520,12 +520,12 @@ function splitByProjection(
 }
 
 function splitRowIntoFive(
-  sourceCanvas: HTMLCanvasElement,
-  width: number,
-  _height: number,
-  data: Uint8ClampedArray | null,
-  backgroundMask: Uint8Array | null,
-  bounds: ContentBounds,
+    sourceCanvas: HTMLCanvasElement,
+    width: number,
+    _height: number,
+    data: Uint8ClampedArray | null,
+    backgroundMask: Uint8Array | null,
+    bounds: ContentBounds,
 ): FingerNailAsset[] {
   const cropW = bounds.maxX - bounds.minX + 1
   const cropH = bounds.maxY - bounds.minY + 1
@@ -555,21 +555,21 @@ function splitRowIntoFive(
 
     if (data && backgroundMask) {
       nails.push(
-        buildAlphaMaskedCanvas(
-          width,
-          data,
-          { minX: x0, minY: segMinY, maxX: x1 - 1, maxY: segMaxY },
-          (x, y) => backgroundMask[y * width + x] === 0,
-        ),
+          buildAlphaMaskedCanvas(
+              width,
+              data,
+              { minX: x0, minY: segMinY, maxX: x1 - 1, maxY: segMaxY },
+              (x, y) => backgroundMask[y * width + x] === 0,
+          ),
       )
     } else {
       nails.push(
-        createFingerCanvas(sourceCanvas, {
-          minX: x0,
-          minY: segMinY,
-          maxX: x1 - 1,
-          maxY: segMaxY,
-        }),
+          createFingerCanvas(sourceCanvas, {
+            minX: x0,
+            minY: segMinY,
+            maxX: x1 - 1,
+            maxY: segMaxY,
+          }),
       )
     }
   }
@@ -582,9 +582,9 @@ function pickFingerBlobs(blobs: NailBlob[]): NailBlob[] {
 
   if (blobs.length > FINGER_COUNT) {
     return [...blobs]
-      .sort((a, b) => b.pixels - a.pixels)
-      .slice(0, FINGER_COUNT)
-      .sort((a, b) => a.centerX - b.centerX)
+        .sort((a, b) => b.pixels - a.pixels)
+        .slice(0, FINGER_COUNT)
+        .sort((a, b) => a.centerX - b.centerX)
   }
 
   return blobs
@@ -600,7 +600,7 @@ function extractFingerNails(prepared: PreparedImage): FingerNailAsset[] {
 
     if (blobs.length >= FINGER_COUNT) {
       return pickFingerBlobs(blobs).map((blob) =>
-        buildAlphaMaskedCanvas(width, data, blob, (x, y) => blobIdMap[y * width + x] === blob.id),
+          buildAlphaMaskedCanvas(width, data, blob, (x, y) => blobIdMap[y * width + x] === blob.id),
       )
     }
 
@@ -629,14 +629,14 @@ async function prepareFingerNailFromCrop(cropUrl: string): Promise<FingerNailAss
 // below cannot. Older designs (generated before this existed) simply won't
 // have crops, and any fetch failure here falls back to that heuristic too.
 export async function prepareNailDesignAsset(
-  imageUrl: string,
-  nailTipCropUrls?: string[] | null,
+    imageUrl: string,
+    nailTipCropUrls?: string[] | null,
 ): Promise<NailDesignAsset> {
   if (nailTipCropUrls && nailTipCropUrls.length === FINGER_COUNT) {
     try {
       const fingerNails = await Promise.all(nailTipCropUrls.map(prepareFingerNailFromCrop))
       const image = await loadImageElement(toReadableImageUrl(imageUrl), true).catch(() =>
-        loadImageElement(imageUrl),
+          loadImageElement(imageUrl),
       )
       return { image, fingerNails }
     } catch {

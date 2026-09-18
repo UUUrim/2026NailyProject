@@ -119,7 +119,7 @@ export function PrintPageContent() {
                             const isSelected = session.key === selectedKey
                             const skinHex = session.skinToneHex
                             const toneLabel = (
-                                skinToneAnalysisFromMetrics(session.tone, session.brightness, session.saturation)?.tone.label ??
+                                skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
                                 (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
                             )?.replace(/\s+/g, '') ?? '미분석'
                             const shapeLabel = session.recommendedShape
@@ -128,7 +128,7 @@ export function PrintPageContent() {
                             const metricsLine = [
                                 `길이 ${session.avgLengthMm != null ? `${Number(session.avgLengthMm).toFixed(1)}mm` : '-'}`,
                                 `너비 ${session.avgWidthMm != null ? `${Number(session.avgWidthMm).toFixed(1).replace(/\.0$/, '')}mm` : '-'}`,
-                                `곡률 ${formatMetricCurve(session.avgCurve)}`,
+                                `곡률 ${session.avgCurve != null ? `${formatMetricCurve(session.avgCurve)}mm` : '-'}`,
                             ].join(' · ')
 
                             return (

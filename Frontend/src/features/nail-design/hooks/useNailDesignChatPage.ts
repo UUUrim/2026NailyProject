@@ -6,7 +6,8 @@ import { getMyScans, getScanResult, type ScanResultResponse } from '@/entities/s
 import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
-import { NAIL_BASELINE, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
+import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
     sendChatMessage,
@@ -23,9 +24,55 @@ import {
     type PreferenceOptionInfo,
 } from '@/shared/constants/designPreferences'
 
-// Backend가 유효한 피부 LAB 데이터를 못 뽑았을 때 내려주는 기본 피부색(scan/skin_color.py 기준)과
-// 동일한 값 — 스캔 정보가 아예 없을 때 컬러 피커의 기본 팔레트로 사용한다.
-const DEFAULT_SKIN_HEX = '#C8A882'
+// 손 스캔 정보가 아예 없을 때(피부 톤 기반 "나와 어울리는 컬러"를 계산할 수 없을 때) 컬러
+// 피커에 대신 보여주는 "이달의 컬러" 30색 — 특정 피부톤에 맞춘 팔레트가 아니라, 그 자체로
+// 예쁘고 트렌디한 네일 컬러를 큐레이션한 고정 팔레트.
+// 구성: 요즘 유행하는 민트·아쿠아 계열, 파스텔~쨍한 레몬 옐로우, 스테디한 누디 톤, MLBB 로즈,
+// 블랙&화이트, 그리고 네일에 자주 쓰는 핑크·피치·버건디 등.
+// 순서는 색상환(hue) 기준 빨→주→노→초→파→남→보 무지개 순으로 배치하고, 같은 계열 안에서는
+// 연한 색 → 진한 색 순으로 정렬한다. 무채색 화이트는 맨 앞, 블랙은 맨 끝에 두고, 명도가 낮은
+// 네이비·플럼·버건디는 밝은 무지개 흐름을 깨지 않도록 블랙 직전에 모아 둔다
+// - 고정된 30색 목록이라 매번 계산할 필요가 없다.
+const MONTHLY_TRENDING_COLORS = [
+    '#FFFFFF', // 퓨어 화이트
+    // 빨강 (연 → 진)
+    '#E1A9A4', // MLBB 로즈
+    '#CE908F', // 로지 모브
+    '#B5746F', // 브릭 로즈
+    // 주황 (연 → 진)
+    '#F6F1E7', // 밀키 화이트
+    '#F3E7DC', // 밀키 누드
+    '#E6D2BE', // 크림 베이지
+    '#FBC7AC', // 피치 퍼즈
+    '#D9B79A', // 카멜 누드
+    '#C99C82', // 모카 누드
+    // 노랑 (연 → 진)
+    '#FCFBAC', // 파스텔 레몬
+    '#FAF875', // 소프트 레몬
+    '#FCFA4C', // 비비드 레몬
+    // 초록 (연 → 진)
+    '#DCF2E8', // 아이스 민트
+    '#D4FFC9', // 페일 라임
+    '#B3FBE0', // 페일 민트
+    // 파랑 (연 → 진)
+    '#D3FCFE', // 아이스 아쿠아
+    '#D6ECF7', // 아이스 블루
+    '#6FF8EF', // 아쿠아 민트
+    // 남색~보라 (연 → 진)
+    '#E7DBF3', // 라벤더 헤이즈
+    '#B79FD9', // 라일락 퍼플
+    // 보라~핑크(마젠타) (연 → 진)
+    '#F7DCE4', // 발레 핑크
+    '#F4C9D4', // 베이비 핑크
+    '#FEB3D6', // 캔디 핑크
+    '#F1A9BE', // 피오니 핑크
+    '#FC8DFC', // 네온 오키드
+    // 어두운 네이비·플럼·버건디 → 블랙
+    '#343B52', // 다크 네이비
+    '#362E45', // 다크 플럼
+    '#5D1519', // 다크 버건디
+    '#1C1C1E', // 오닉스 블랙
+]
 import { ApiError } from '@/shared/utils/apiClient'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import { registerChatSessionGuard, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
@@ -71,6 +118,14 @@ type GenerationContext = {
         avgLength: number
         avgWidth: number
         avgCurve: number
+        // scan-auto 전용: 대표 피부색 / 쉐입 이미지 + 추천 팔레트 전체 + 그 중 실제 반영된 색 + 반영된 무드/디자인 타입
+        skinToneHex?: string | null
+        shapeImage?: string | null
+        recommendedColors?: string[]
+        usedColors?: string[]
+        reflectedMood?: string | null
+        reflectedDesignType?: string | null
+        reflectedMotif?: string | null
     } | null // 손 스캔 기반 자동 생성일 때, 참고한 손 분석 정보
     revisionKeywords: string[] // 생성 방식에 상관없이, "수정하고 싶어요" 흐름에서 추가로 요청한 내용
 }
@@ -367,6 +422,7 @@ export function useNailDesignChatPage() {
     const [freeformShapePickerOpen, setFreeformShapePickerOpen] = useState(false)
 
     const [showAnalysisPanel, setShowAnalysisPanel] = useState(chatSessionSnapshot?.showAnalysisPanel ?? false)
+
     // 확대/이동은 공용 DesignImageDetailModal이 담당하므로, 여기서는 어떤 이미지를 확대해서 보여줄지만 들고 있는다.
     const [zoomedImage, setZoomedImage] = useState<string | null>(null)
     const openZoomedImage = (url: string) => setZoomedImage(url)
@@ -645,25 +701,28 @@ export function useNailDesignChatPage() {
     const buildScanAutoIntro = (): { text: string; colorSwatches: string[] } => {
         const skinToneHex = leftAnalysis?.skinToneHex || rightAnalysis?.skinToneHex || null
         const tone = leftAnalysis?.tone || rightAnalysis?.tone || null
+        const warmness = leftAnalysis?.warmness ?? rightAnalysis?.warmness ?? null
         const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
         const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
         const toneLabel =
-            skinToneAnalysisFromMetrics(tone, brightness, saturation)?.tone.label ??
+            skinToneAnalysisFromMetrics(tone, warmness, brightness, saturation)?.tone.label ??
             (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
-        const shapeId = leftAnalysis?.shape || rightAnalysis?.shape || null
+        // "?" 패널과 동일하게 recommendedShape를 쓴다 (출력 신청 시 유저가 고른 쉐입으로
+        // 덮어써지는 mutable shape가 아니라, 스캔 분석이 처음 추천한 값).
+        const shapeId = leftAnalysis?.recommendedShape || rightAnalysis?.recommendedShape || null
         const shapeLabel = shapeId ? getNailShape(shapeId)?.labelKo ?? shapeId : null
         const recommendedColors = leftAnalysis?.recommendedColors?.length
             ? leftAnalysis.recommendedColors
             : rightAnalysis?.recommendedColors ?? []
         const colorSwatches = recommendedColors.length > 0
-            ? pickSpreadColors(recommendedColors, 6)
-            : skinToneHex ? pickSpreadColors(generateSkinTonePalette(skinToneHex, 24), 6) : []
+            ? pickSpreadColors(sortRecommendedColors(recommendedColors), 6)
+            : skinToneHex ? pickSpreadColors(sortRecommendedColors(generateSkinTonePalette(skinToneHex, 24)), 6) : []
 
         const seasonPart = toneLabel ? `${toneLabel} 피부톤` : '내 피부톤'
         const shapePart = shapeLabel ? `${shapeLabel} 쉐입` : '추천 쉐입'
 
         return {
-            text: `${userName ? `${userName}님의` : '내'} 스캔 정보를 기반으로 Naily가 디자인을 추천해요.\n${seasonPart}, ${shapePart}에 어울리는 컬러와 무드를 골라 디자인을 생성해봤어요. 어떠신가요?\n3D 화면을 통해 확인해보세요!`,
+            text: `${userName ? `${userName}님의` : '내'} 스캔 정보를 기반으로 Naily가 디자인을 추천해요.\n${seasonPart}, ${shapePart}에 어울리는 컬러와 무드를 골라 디자인을 생성해봤어요. 어떠신가요?\n아래 이미지를 통해 확인해보세요!`,
             colorSwatches,
         }
     }
@@ -680,7 +739,13 @@ export function useNailDesignChatPage() {
         pushAssistant('디자인을 생성하고 있어요… 최대 1분 정도 걸릴 수 있어요 🎨')
 
         try {
-            const data = await generateDesign({ sessionId, scanId })
+            const data = await generateDesign({
+                sessionId,
+                scanId,
+                // 스캔 자동 생성일 때만 서버에 알려서, "?" 패널에 보이는 추천 쉐입 +
+                // 추천 컬러 팔레트만으로 (원컬러 아닌) 디자인을 만들게 한다.
+                mode: source === 'scan-auto' ? 'scan-auto' : undefined,
+            })
 
             // "수정하고 싶어요" 흐름을 거쳐 재생성된 경우, 그동안 추가로 요청한 내용도 함께 담는다.
             const revisionKeywords = buildFreeformKeywords(reviseLogRef.current)
@@ -698,6 +763,16 @@ export function useNailDesignChatPage() {
                                     avgLength: analysisSummary.avgLength,
                                     avgWidth: analysisSummary.avgWidth,
                                     avgCurve: analysisSummary.avgCurve,
+                                    skinToneHex: analysisSummary.skinToneHex,
+                                    shapeImage: analysisSummary.shapeImage,
+                                    // 추천 팔레트는 "?" 패널과 동일하게 정렬해서, 실제 반영된 색을 강조 표시한다.
+                                    recommendedColors: sortRecommendedColors(
+                                        data.scanAutoReflection?.recommendedColors ?? analysisSummary.skinTonePalette,
+                                    ),
+                                    usedColors: data.scanAutoReflection?.usedColors ?? [],
+                                    reflectedMood: data.scanAutoReflection?.mood ?? null,
+                                    reflectedDesignType: data.scanAutoReflection?.designType ?? null,
+                                    reflectedMotif: data.scanAutoReflection?.motif ?? null,
                                 }
                               : null,
                           revisionKeywords,
@@ -710,9 +785,9 @@ export function useNailDesignChatPage() {
                             handSummary: null,
                             revisionKeywords,
                         }
-                      : {
+                        : {
                             source,
-                            keywords: buildPreferenceKeywords(preferences),
+                            keywords: data.keywords ?? buildPreferenceKeywords(preferences),  // 슬롯 우선, 없으면 폴백
                             referenceImageUrl: null,
                             handSummary: null,
                             revisionKeywords,
@@ -724,7 +799,12 @@ export function useNailDesignChatPage() {
                 prompt: data.generatedPrompt,
                 preferences,
                 source,
-                shapeId: resolveShapeId(preferences),
+                // 스캔 자동 생성은 서버가 recommendedShape로 강제 고정하므로, 결과/AR 미리보기도
+                // "?" 패널과 같은 recommendedShape 기준으로 맞춘다.
+                shapeId:
+                    source === 'scan-auto' && analysisSummary?.shapeId
+                        ? (analysisSummary.shapeId as NailShapeId)
+                        : resolveShapeId(preferences),
                 details: data.details,
                 context,
             })
@@ -782,7 +862,7 @@ export function useNailDesignChatPage() {
                 details: data.details,
                 context: {
                     source: 'photo',
-                    keywords: [],
+                    keywords: data.keywords ?? [],
                     referenceImageUrl: selectedPhotoPreviewUrl,
                     handSummary: null,
                     revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
@@ -1017,6 +1097,7 @@ export function useNailDesignChatPage() {
 
         if (option.value === 'accept') {
             if (!lastDesign) return
+            // fire-and-forget — 결과 화면에서 폴링으로 채움
             confirmDesign(lastDesign.designId).catch((err) => {
                 // 확정 API가 실패해도 결과 화면 이동 자체는 막지 않되, 콘솔에는 남긴다
                 console.error('디자인 확정(confirm) 실패:', err)
@@ -1362,27 +1443,30 @@ export function useNailDesignChatPage() {
             } catch {
                 measurements = {}
             }
-            // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
+            // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
+            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 일반 손톱 대체값(mm)을 쓴다.
             return {
                 lengthMm: Number(measurements.lengthMm ?? measurements.length ?? 12),
                 widthMm: Number(measurements.widthMm ?? measurements.width ?? 9),
-                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? 0.55),
+                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? FALLBACK_C_CURVE_MM),
             }
         })
 
         const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
         const avgLength = Number(avg(details.map((d) => d.lengthMm)).toFixed(1))
         const avgWidth = Number(avg(details.map((d) => d.widthMm)).toFixed(1))
-        const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(2))
+        // cCurve는 C-curve sagitta 깊이(mm). 소수 첫째 자리까지만 보여 준다.
+        const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(1))
 
         // 톤/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
         // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는
         // 반드시 recommendedShape를 써야 한다 (ScanResultResponse 타입 주석 참고)
         const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
         const tone = leftAnalysis?.tone ?? rightAnalysis?.tone ?? null
+        const warmness = leftAnalysis?.warmness ?? rightAnalysis?.warmness ?? null
         const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
         const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
-        const backendSkinToneAnalysis = skinToneAnalysisFromMetrics(tone, brightness, saturation)
+        const backendSkinToneAnalysis = skinToneAnalysisFromMetrics(tone, warmness, brightness, saturation)
         const toneLabel = backendSkinToneAnalysis?.tone.label ?? (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
         const recommendedColors = leftAnalysis?.recommendedColors?.length
             ? leftAnalysis.recommendedColors
@@ -1411,21 +1495,34 @@ export function useNailDesignChatPage() {
             curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
             skinToneHex,
             skinToneAnalysis: backendSkinToneAnalysis ?? (skinToneHex ? analyzeSkinTone(skinToneHex) : null),
-            skinTonePalette:
+            skinTonePalette: sortRecommendedColors(
                 recommendedColors.length > 0
                     ? recommendedColors
                     : skinToneHex
                         ? generateSkinTonePalette(skinToneHex, 30)
-                        : [],
+                        : []
+            ),
         }
     }, [leftAnalysis, rightAnalysis])
 
     // 컬러 선택 단계에서 실제로 보여줄 팔레트 — 스캔 정보(대표 피부색)가 있으면 거기서 뽑은
-    // "나와 어울리는 컬러" 24색을, 없으면(스캔 전) 기본 피부색 기준 팔레트를 쓴다.
-    const scanColorPalette = analysisSummary?.skinTonePalette ?? []
+    // "나와 어울리는 컬러"를, 없으면(스캔 전) 이달의 컬러 30색을 쓴다.
+    const scanColorPalette = useMemo(() => analysisSummary?.skinTonePalette ?? [], [analysisSummary])
     const hasScanColorPalette = scanColorPalette.length > 0
-    const defaultColorPalette = useMemo(() => generateSkinTonePalette(DEFAULT_SKIN_HEX, 24), [])
-    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : defaultColorPalette
+
+    // 사이드바 "추천 컬러"(.design-chat-sidebar__palette): 6열 row-major
+    const sidebarColorPalette = useMemo(
+        () => arrangeRecommendedColors(scanColorPalette, { columns: 6 }),
+        [scanColorPalette],
+    )
+    // 컬러 선택 그리드(.design-chat__color-grid): 10열 row-major
+    const colorPickerPalette = useMemo(
+        () => arrangeRecommendedColors(
+            hasScanColorPalette ? scanColorPalette : MONTHLY_TRENDING_COLORS,
+            { columns: 10 },
+        ),
+        [hasScanColorPalette, scanColorPalette],
+    )
 
     const isMultiConfirmVisible = useMemo(
         () => !!activeQuickReply?.multi && selectedInQuickReply.length > 0,
@@ -1476,6 +1573,7 @@ export function useNailDesignChatPage() {
         scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
+        sidebarColorPalette,
         isMultiConfirmVisible,
         analysisSummary,
         MOTIF_NONE_VALUE,

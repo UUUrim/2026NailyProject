@@ -314,22 +314,18 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
         )
     }
 
-    // 컬러 팔레트는 항상 비슷한 색상끼리 묶어 연한 색 → 진한 색 순으로 보여준다
-    // (디자인 결과 화면·마이페이지 상세모달·홈 갤러리 모두 공용으로 이 컴포넌트를 쓴다)
     const normalizedPalette = sortPaletteByShade(
         (details?.colorPalette ?? []).map((item, i) => normalizeDetailItem(item, i, 'palette')),
-    )
+)
 
     const normalizedCharms = (details?.nailParts ?? []).map((item, i) => normalizeDetailItem(item, i, 'charm'))
 
-    // ★ 스와치: details.swatches의 모든 항목을 직접 렌더링
-    // textures 리스트가 아닌 swatches 맵 기준으로 렌더링해서 모든 스와치가 표시됨
     const swatchEntries = details?.swatches
-        ? Object.entries(details.swatches).filter(([key]) => key !== '3d_charm')
+        ? Object.entries(details.swatches).filter(([key]) => !key.startsWith('3d_charm'))
         : []
 
     const charmSwatchEntries = details?.swatches
-        ? Object.entries(details.swatches).filter(([key]) => key === '3d_charm')
+        ? Object.entries(details.swatches).filter(([key]) => key.startsWith('3d_charm'))
         : []
 
     return (
@@ -373,7 +369,8 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 ) : swatchEntries.length > 0 ? (
                     <div className="design-result-v2__texture-row">
                         {swatchEntries.map(([textureKey, swatchUrl]) => {
-                            const info = TEXTURE_INFO[textureKey]
+                            const infoKey = textureKey.startsWith('3d_charm') ? '3d_charm' : textureKey
+                            const info = TEXTURE_INFO[infoKey]
                             const alt = info?.labelKo ?? textureKey
                             return (
                                 <div className="design-result-v2__texture-item" key={textureKey}>
@@ -429,21 +426,27 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 {normalizedCharms.length > 0 || charmSwatchEntries.length > 0 ? (
                     <div className="design-result-v2__charm-row">
                         {/* 스와치에서 온 3d_charm */}
-                        {charmSwatchEntries.map(([key, url]) =>
-                            url ? (
+
+                        {charmSwatchEntries.map(([key, url]) => {
+                            const shapePart = key
+                                .replace(/^3d_charm_?/, '')
+                                .replace(/_\d+$/, '')
+                                .replace(/_/g, ' ')
+                            const label = shapePart ? shapePart : '3D 참'
+                            return url ? (
                                 <CharmImage
                                     key={key}
                                     imageUrl={url}
-                                    alt="3D 참"
+                                    alt={label}
                                     fallbackIcon="✧"
-                                    onClick={() => setLightbox({ url, alt: '3D 참' })}
+                                    onClick={() => setLightbox({ url, alt: label })}
                                 />
                             ) : (
-                                <span className="design-result-v2__charm-fallback" key={key} role="img" aria-label="3D 참">
-                                    ✧
-                                </span>
-                            ),
-                        )}
+                                <span className="design-result-v2__charm-fallback" key={key} role="img" aria-label={label}>
+            ✧
+        </span>
+                            )
+                        })}
                         {/* designPlan에서 온 파츠 */}
                         {normalizedCharms.map((item) => {
                             const info = item.label ? CHARM_INFO[item.label] ?? CHARM_INFO_BY_KO[item.label] : undefined
@@ -458,8 +461,8 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                                 />
                             ) : (
                                 <span className="design-result-v2__charm-fallback" key={item.key} role="img" aria-label={alt}>
-                                    {info?.icon ?? '✧'}
-                                </span>
+            {info?.icon ?? '✧'}
+        </span>
                             )
                         })}
                     </div>

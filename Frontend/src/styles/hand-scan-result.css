@@ -237,12 +237,9 @@
 
 .skin-tone-palette-grid {
   display: grid;
-  /* generateSkinTonePalette()가 6개 색상군 × 5단계(밝은→어두운) 순서로 30색을 만들어서,
-     같은 색상군 5개가 배열에서 연달아 나온다. grid-auto-flow: column으로 세로 방향부터
-     채우면 그 5개가 한 "열"을 위(밝음)→아래(어두움)로 채우고, 다음 색상군은 다음 열로
-     넘어가서 총 6열×5행으로 톤별로 깔끔하게 묶여 보인다. */
-  grid-auto-flow: column;
-  grid-template-rows: repeat(5, 1fr);
+  /* arrangeRecommendedColors({ columns: 6 })가 열=색상군, 행=명도 단계가 되도록 배열을 만든다.
+     기본 흐름(row-major)으로 채우면 세로줄 하나가 한 색상군(위=밝음 → 아래=어두움),
+     맨 아랫줄에 진한 색이 모인다. */
   grid-template-columns: repeat(6, 1fr);
   gap: 8px;
 }

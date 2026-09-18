@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { getScanResult } from '@/entities/scan/api'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
-import { analyzeSkinTone, classifySkinLevel, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
 import {
   buildScanDetail,
   dateKeyOf,
@@ -181,15 +182,18 @@ export function ScanDetailModal({ session, onClose }: Props) {
         // scan/skin_color.py가 10손가락 LAB 평균으로 계산해 API에 내려주는 실제 진단값을 우선 쓰고,
         // (구버전 스캔 등) 값이 없을 때만 대표 피부색 hex 하나로 만든 대체 추정치를 쓴다.
         const analysis =
-          skinToneAnalysisFromMetrics(detail.tone, detail.brightness, detail.saturation) ??
+          skinToneAnalysisFromMetrics(detail.tone, detail.warmness, detail.brightness, detail.saturation) ??
           (detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null)
         const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
-        const palette =
+        // .mypage-x__scanx-palette 는 6열 row-major 그리드 (열 = 색상군, 행 = 명도 단계, 진한 색은 맨 아랫줄)
+        const palette = arrangeRecommendedColors(
           detail.recommendedColors.length > 0
             ? detail.recommendedColors
             : detail.skinToneHex
               ? generateSkinTonePalette(detail.skinToneHex, 30)
-              : []
+              : [],
+          { columns: 6 }
+        )
         const shapeLabel = detail.shapeId
           ? getNailShape(detail.shapeId)?.labelKo ?? detail.shapeId
           : null
@@ -198,7 +202,8 @@ export function ScanDetailModal({ session, onClose }: Props) {
           : null
         const lengthPct = Math.min(100, Math.max(8, (detail.avgLength / 18) * 100))
         const widthPct = Math.min(100, Math.max(8, (detail.avgWidth / 14) * 100))
-        const curvePct = Math.min(100, Math.max(8, detail.avgCurve * 100))
+        // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
+        const curvePct = Math.min(100, Math.max(8, (detail.avgCurve / 5) * 100))
         const fingerList = detail.fingers.filter((f) => f.hand === fingerHand)
         // 세션 자체가 양손 스캔 페어링 결과라 leftScanId/rightScanId는 항상 둘 다 존재한다.
         // detail.fingers 유무로 탭을 판단하면, 한쪽 분석이 실패해서 손가락 데이터가 비어 있을 때
@@ -257,8 +262,8 @@ export function ScanDetailModal({ session, onClose }: Props) {
                     <div className="mypage-x__scanx-chips">
                       <span>{skinHex}</span>
                       <span>{toneLabel}</span>
-                      <span>{classifySkinLevel(analysis.brightness.percent)}명도</span>
-                      <span>{classifySkinLevel(analysis.saturation.percent)}채도</span>
+                      <span>{analysis.brightness.level}명도</span>
+                      <span>{analysis.saturation.level}채도</span>
                     </div>
                   )}
                 </div>
@@ -358,7 +363,10 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <div className="mypage-x__scanx-metric-top">
                     <div className="mypage-x__scanx-metric-copy">
                       <p>곡률</p>
-                      <strong>{detail.avgCurve.toFixed(2)}</strong>
+                      <strong>
+                        {detail.avgCurve.toFixed(1)}
+                        <em>mm</em>
+                      </strong>
                     </div>
                     <span className="mypage-x__scanx-metric-icon" aria-hidden="true">
                       {Icon.curveIcon}
@@ -367,7 +375,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
                   <div className="mypage-x__scanx-meter" aria-hidden="true">
                     <i style={{ width: `${curvePct}%` }} />
                   </div>
-                  <span className="mypage-x__scanx-metric-hint">C-curve</span>
+                  <span className="mypage-x__scanx-metric-hint">C-curve 깊이</span>
                 </article>
               </div>
             </section>
@@ -445,7 +453,10 @@ export function ScanDetailModal({ session, onClose }: Props) {
                               {f.widthMm.toFixed(1)}
                               <small>mm</small>
                             </span>
-                            <span>{f.cCurve.toFixed(2)}</span>
+                            <span>
+                              {f.cCurve.toFixed(1)}
+                              <small>mm</small>
+                            </span>
                           </div>
                         ))
                       ) : (

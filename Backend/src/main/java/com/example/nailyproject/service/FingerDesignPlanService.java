@@ -17,6 +17,7 @@ public class FingerDesignPlanService {
 
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
+    private final StyleTrendService styleTrendService;
 
     @Value("${gemini.api.key}")
     private String apiKey;
@@ -26,6 +27,7 @@ public class FingerDesignPlanService {
 
     private static final String SYSTEM_PROMPT = """
         당신은 네일 3D 디자인 플래너입니다.
+        %s
         아래 확정된 정보를 바탕으로 엄지(thumb)~소지(pinky) 5개 손가락의
         디자인을 JSON으로 생성하세요. 참고 이미지가 함께 제공되면
         그 이미지의 스타일/파츠를 최대한 반영하세요.
@@ -37,7 +39,7 @@ public class FingerDesignPlanService {
         아래처럼 "시각적 스타일 요소"를 최대한 세밀하게 관찰해서 motif/design_type/
         parts에 녹여내세요:
         - 화풍/장르: anime, chibi, cartoon, cel-shaded, manga style 등 (특정 작품명이 있다면 포함하세요.)
-        - 색상: 주조색, 보조색, 그라데이션 방향, 톤(파스텔/비비드/딥 등)
+        - 색상: 주조색, 보조색, 그라데이션 방향, 톤(파스텔/비비드/딥 등) 등 이미지에 나오는 색 사용
         - 선/윤곽: 굵은 아웃라인 여부, 셀셰이딩 여부, 부드러운 선 vs 각진 선 등
         - 질감/마감: 글로시, 매트, 글리터, 펄, 크리스탈 등 표면 느낌 등
         - 형태 모티프: 이미지 속 반복되는 도형/패턴(별, 구름, 줄무늬, 물방울 등)그리고
@@ -110,6 +112,12 @@ public class FingerDesignPlanService {
         색을 요청한 경우, 또는 참고 이미지에 서로 다른 색이 함께 나타나는 경우에만
         그 손가락의 base_color를 채우세요. 그 외(지정도 없고 참고 이미지도 없는 경우)
         손가락은 base_color를 빈 문자열("")로 두세요.
+        
+       [참고 이미지 색상 규칙 - 매우 중요]
+            - 이미지에서 실제로 보이는 색만 사용하세요.
+            - 이미지의 배경색, 주조색을 최우선으로 반영하세요.
+            - 로고/텍스트/아이콘의 색보다 전체 배경/분위기 색을 우선하세요.
+            - 이미지에 없는 색을 창작하거나 추측하지 마세요.
 
         [손가락별 지정 - 매우 중요]
             확정된 입력 정보에 "손가락별 지정"이 포함되어 있다면, 그 지정을 절대적으로
@@ -170,6 +178,20 @@ public class FingerDesignPlanService {
             피해야 할 값으로 표시되어 있다면, parts 태그에도 "3D"가 들어간 표현
             (예: "3D ribbon", "3D pearl stud")을 절대 쓰지 말고, 대신 "art" 또는 "sticker"
             스타일로 대체하세요. 이 제약은 손가락별 지정이 있든 없든 모든 손가락에 동일하게 적용됩니다.
+            
+            [parts_detect 작성 규칙 - 매우 중요]
+                    parts_detect는 파츠 검출 서버에 넘기는 단순 명사 리스트입니다.
+                    parts와 동일한 파츠를 1~2단어 단순 영어 명사로만 표현하세요.
+                    - 형용사, 크기, 재질, 색상 설명 절대 금지, 단 파츠 종류를 구분하는 핵심 명사는 유지
+                    - 파츠가 없으면 반드시 빈 배열 []로 두세요.
+                    - ribbon은 반드시 bow로 명시하세요.
+                    - 예시:
+                      "large 3D metallic star shaped charm" → "star"
+                      "3D ribbon bow charm" → "bow"
+                      "rhinestone crystal cluster" → "rhinestone"
+                      "transparent bubble sphere" → "bubble"
+                      "line of small crystals" → "crystal line"
+                      "metallic stud accent" → "stud"
 
         [규칙]
         - motif가 필요 없는 손가락은 motif를 "none"으로 두세요.
@@ -205,6 +227,7 @@ public class FingerDesignPlanService {
         가장 잘 어울리는 색상 하나(또는 조합)를 당신이 판단해서 최상위 color에 채우세요.
         color 후보도 없다면, mood/season에 어울리는 색을 자유롭게 만들어서 사용하세요.
         %s
+        
 
         [확정된 입력 정보]
         %s
@@ -212,19 +235,20 @@ public class FingerDesignPlanService {
         반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만 반환합니다.
         {
           "shape": "...", "mood": "...", "season": "...", "color": "...","designType": "...", "motif": "...",
-          "thumb": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "index": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "middle": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "ring": { "design_type": "", "base_color": "", "motif": "none", "parts": [] },
-          "pinky": { "design_type": "", "base_color": "", "motif": "none", "parts": [] }
+          "thumb": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "index": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "middle": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "ring": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] },
+          "pinky": { "design_type": "", "base_color": "", "motif": "none", "parts": [], "parts_detect": [] }
         }
+        
         """;
 
     /**
      * 참고 이미지 없이 플랜 생성
      */
     public JsonNode generatePlan(String confirmedInputSummary) {
-        return generatePlan(confirmedInputSummary, null, null, null);
+        return generatePlan(confirmedInputSummary, null, null, null, null);
     }
 
     /**
@@ -233,7 +257,15 @@ public class FingerDesignPlanService {
      * @param imageMimeType 예: "image/jpeg", "image/png"
      */
     public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType) {
-        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, null);
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, null, null);
+    }
+
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson) {
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, previousPlanJson, null);
+    }
+
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson, String userSeason) {
+        return generatePlan(confirmedInputSummary, imageBase64, imageMimeType, previousPlanJson, userSeason, false);
     }
 
     /**
@@ -241,8 +273,12 @@ public class FingerDesignPlanService {
      * 사용자가 요청한 부분만 바꾸고 나머지 손가락/필드는 이전 문구를 그대로 유지하도록 한다.
      * 이걸 안 넘기면(=previousPlanJson이 null) 매번 완전히 새로 창작하듯 플랜을 만들어서,
      * "새끼손가락에 파츠 하나만 추가해줘" 같은 사소한 수정에도 5개 손가락이 전부 바뀌어버렸다.
+     *
+     * @param scanAutoMode 스캔 정보 기반 자동 생성이면 true. 이 경우 "손가락별 지정도 참고 이미지도
+     *                     없으면 손가락 필드를 전부 비운다"(케이스 3)는 기본 규칙을 덮어쓰고,
+     *                     추천 팔레트에서 고른 색을 손가락별로 분산시켜 원컬러가 아닌 디자인을 만들게 한다.
      */
-    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson) {
+    public JsonNode generatePlan(String confirmedInputSummary, String imageBase64, String imageMimeType, String previousPlanJson, String userSeason, boolean scanAutoMode) {
 
         String editModeSection = "";
         if (previousPlanJson != null && !previousPlanJson.isBlank()) {
@@ -274,7 +310,27 @@ public class FingerDesignPlanService {
                     """.formatted(previousPlanJson);
         }
 
-        String systemPrompt = String.format(SYSTEM_PROMPT, editModeSection, confirmedInputSummary);
+        String scanAutoSection = "";
+        if (scanAutoMode) {
+            scanAutoSection = """
+                    [스캔 정보 기반 자동 생성 모드 - 위 케이스 규칙보다 우선]
+                    사용자가 취향을 하나도 입력하지 않았고, 참고 이미지도 손가락별 지정도 없습니다.
+                    하지만 이 모드에서는 "지정이 없으니 손가락 필드를 전부 비운다"(케이스 3)를 적용하지
+                    마세요. 대신 [확정된 입력 정보]의 "color 후보" 팔레트에서 서로 어울리는 2~4개의 색을
+                    직접 고른 뒤:
+                    - top-level color에는 고른 색 조합을 적고, mood/designType/motif는 그 색들의 분위기에
+                      맞춰 스스로 채우세요. 절대 단색(one-color) 디자인으로 만들지 마세요.
+                    - 5개 손가락 중 최소 2개는 서로 다른 base_color를 채우고, 나머지 손가락도
+                      design_type에 마감/그라데이션/패턴 등 서로 다른 디테일을 넣어 변화를 주세요.
+                    - 최소 1개 손가락의 parts에는 색·분위기와 어울리는 포인트 장식을 하나 이상 넣으세요.
+                    - 전체적으로는 하나의 세트로 보이도록 통일감은 유지하세요.
+                    - shape 값은 [확정된 입력 정보]에 적힌 추천 쉐입을 그대로 쓰고 절대 바꾸지 마세요.
+                    """;
+        }
+
+        String trendHint = styleTrendService.buildTrendHint(userSeason);
+        String systemPrompt = String.format(
+                SYSTEM_PROMPT, trendHint, editModeSection + scanAutoSection, confirmedInputSummary);
 
         List<Map<String, Object>> parts = new ArrayList<>();
         if (imageBase64 != null && imageMimeType != null) {
@@ -284,7 +340,7 @@ public class FingerDesignPlanService {
                             "data", imageBase64
                     )
             ));
-            parts.add(Map.of("text", "이 참고 이미지를 자세히 관찰해서, 캐릭터/작품을 특정하지 말고 " +
+            parts.add(Map.of("text", "이 참고 이미지를 자세히 관찰해서, 캐릭터/작품을 특정하고 " +
                     "색감·선/셰이딩 스타일·질감·반복되는 형태 모티프·전체 분위기를 최대한 " +
                     "구체적으로 뽑아낸 뒤, 위 정보와 함께 5개 손가락 디자인을 생성해주세요."));
         } else {
