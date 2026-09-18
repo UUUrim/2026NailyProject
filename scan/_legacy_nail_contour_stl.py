@@ -1,5 +1,10 @@
 """
-nail_contour_stl.py — hybrid: real contour body + designed tip shape
+_legacy_nail_contour_stl.py — hybrid: real contour body + designed tip shape
+
+LEGACY — superseded by nail_exact_stl.py (parametric, used by server.py).
+BROKEN as of the nail_polygon_px removal from nail_measurer.py's output —
+this file depends on that field and will error if run. Kept for reference
+only; not imported or run by anything.
 
 Body/sides: the ACTUAL captured nail_polygon_px outline (nail_measurer.py's
 traced footprint) — the person's real, asymmetric nail silhouette.

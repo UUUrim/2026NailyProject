@@ -1,13 +1,16 @@
 """
-run_pipeline.py
----------------
+_legacy_run_pipeline.py
+-----------------------
+LEGACY — superseded by server.py's web-based capture/measure/STL/upload
+flow. Kept for reference only; not imported or run by anything.
+
 End-to-end nail pipeline: crop -> measure -> generate STL -> upload to S3
 
 Usage (finger mode, default):
-    python run_pipeline.py --userid u001 --session 1 --hand right --shape round
+    python _legacy_run_pipeline.py --userid u001 --session 1 --hand right --shape round
 
 Usage (hand mode — single full-hand photo):
-    python run_pipeline.py --userid u001 --session 1 --hand right --shape round --mode hand
+    python _legacy_run_pipeline.py --userid u001 --session 1 --hand right --shape round --mode hand
 
 Finger mode — photos must be placed in:
     photos/{userid}/{session}/{hand}/thumb.jpg
@@ -194,14 +197,14 @@ def main():
         print(f"{'='*60}")
         cropped_path = crop_image(hand_photo, args.crop_fraction)
 
-        # ── Step 2: Measure all fingers via hand_measurer.py ─────
+        # ── Step 2: Measure all fingers via _legacy_hand_measurer.py ─────
         print(f"\n{'='*60}")
-        print("  [Hand Mode] Step 2: Measure (hand_measurer.py)")
+        print("  [Hand Mode] Step 2: Measure (_legacy_hand_measurer.py)")
         print(f"{'='*60}")
         os.makedirs(results_root, exist_ok=True)
         run([
             sys.executable,
-            os.path.join(BASE, "hand_measurer.py"),
+            os.path.join(BASE, "_legacy_hand_measurer.py"),
             "--image",      cropped_path,
             "--aruco-size", str(args.aruco_size),
             "--output",     results_root,

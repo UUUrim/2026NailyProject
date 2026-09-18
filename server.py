@@ -1,7 +1,7 @@
 """
 server.py — Naily 통합 서버 (스캔 + 프린터)
 --------------------------------------------
-스캔 서버(scan/server.py)와 프린터 서버(printer/server.py)를 하나로 합쳐
+스캔 서버(scan/_legacy_server.py, 미사용 레거시)와 프린터 서버(printer/server.py)를 하나로 합쳐
 ngrok 터널 하나만으로 EC2 Spring Boot와 통신한다.
 
 Usage:
@@ -19,6 +19,7 @@ Usage:
     GET  /status/events       — SSE: 손가락 촬영 진행상황
     POST /capture/force       — 수동 촬영 트리거 (웹 "지금 촬영" 버튼)
     GET  /capture/status      — 현재 촬영 세션 상태
+    GET  /capture/stability   — 탑뷰 정확도 게이지 (ratio/ready)
 
   [폰 사이드뷰 카메라] — CAMERA_SIDE = -2 일 때 물리 웹캠 대신 사용
     GET  /phone/side          — 폰 브라우저에서 여는 카메라 페이지
@@ -103,6 +104,7 @@ from nail_measurer import recommend_nail_shape                    # scan/
 from nail_live import (MeasureWorker, compose as _live_compose,     # scan/
                         median_result as _live_median_result,
                         MEDIAN_N as _LIVE_MEDIAN_N,
+                        stability as _live_stability,
                         detect_marker_only as _live_detect_marker_only)
 
 # ─────────────────────────────────────────────────────────────
@@ -369,6 +371,20 @@ class _StreamState:
         # 루프(_top_camera_idle_preview_loop)도 같이 참조해서 손가락 사이
         # 대기 화면에서도 마커가 다시 드러나지 않게 한다.
         self.marker_hide_x: int = 0
+        # 탑뷰 측정 정확도 게이지 — 프론트가 /capture/stability로 폴링해서
+        # 화면 왼쪽 게이지 바를 채운다. ratio: 0~1 (최근 측정 이력이 얼마나
+        # 찼는지), ready: 최근 MEDIAN_N개 측정의 W/L이 서로 합의된 상태
+        # (nail_live.stability와 동일한 기준) — true일 때만 촬영 버튼 활성화.
+        self.stability: dict = {"ratio": 0.0, "ready": False}
+        # 손가락별 라이브 측정 평균값 — 촬영 순간 게이지를 채운 그 안정 구간
+        # (nail_live.stability가 합의로 판단한 연속 프레임들)의 width_mm/
+        # length_mm 평균을 담아둔다. 키는 (hand, finger) — 왼손/오른손이
+        # 같은 손가락 이름을 쓰므로 섞이지 않게 구분. _measure_one_finger가
+        # 오프라인 재측정 직후 이 값으로 최종 width_mm/length_mm을 덮어써서,
+        # "여러 프레임이 합의한 값"이 실제로 최종 결과에 반영되게 한다 —
+        # 재측정 자체는 사진 한 장짜리 단일 프레임 값이라 라이브 평균보다
+        # 노이즈에 더 취약하기 때문.
+        self.live_wl: dict = {}
 
 _S = _StreamState()
 
@@ -555,7 +571,7 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
         time.sleep(0.05)
 
 
-def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
+def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     """탑뷰 스트리밍 - nail_live.py(로컬 CLI)와 동일한 실시간 측정 미리보기.
 
     매 프레임 nail_measurer로 실측정을 돌려 폭/길이와 윤곽선을 그려 보여준다.
@@ -572,6 +588,8 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
     # the operator's manual button, however long that takes - same as the
     # side/c-curve view.
     _S.force_capture_top.clear()
+    _S.stability = {"ratio": 0.0, "ready": False}
+    _S.live_wl.pop((hand, finger), None)
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (실시간 측정)")
 
@@ -609,6 +627,15 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
                     history.append(result)
                 else:
                     history.clear()
+
+            # ── 정확도 게이지 갱신: history가 찰수록 ratio가 오르고, MEDIAN_N개
+            # 읽음값의 W/L이 서로 합의(agree)하면 ready=true (초록) — nail_live.py
+            # CLI의 auto-capture 조건과 동일한 기준을 재사용한다.
+            is_stable, _dw, _dl = _live_stability(history)
+            _S.stability = {
+                "ratio": min(len(history) / _LIVE_MEDIAN_N, 1.0),
+                "ready": is_stable,
+            }
 
             # measure_frame silences nail_measurer's own prints (see
             # quiet()), so without this the operator has no way to see
@@ -664,12 +691,29 @@ def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
                 if len(history) == _LIVE_MEDIAN_N:
                     accepted = _live_median_result(history)
                     print(f"  [{finger}] 탑뷰 수동 촬영 (median of {_LIVE_MEDIAN_N})")
+                    # 게이지를 초록으로 만든 그 합의 구간 자체가 신호 — 사진은
+                    # median 프레임 하나를 저장하지만(자기 자신을 재측정해도
+                    # 같은 값이 나오는 실제 프레임이어야 하므로), 최종 W/L은
+                    # 그 구간 전체의 평균을 쓰는 게 단일 프레임보다 노이즈에
+                    # 덜 흔들린다 — _measure_one_finger가 재측정 직후 이 값으로
+                    # 덮어쓴다.
+                    _S.live_wl[(hand, finger)] = {
+                        "width_mm":  sum(h["data"]["width_mm"]  for h in history) / len(history),
+                        "length_mm": sum(h["data"]["length_mm"] for h in history) / len(history),
+                    }
                 elif result is not None and result["ok"]:
                     accepted = result
                     print(f"  [{finger}] 탑뷰 수동 촬영 (단일 프레임)")
+                    # 합의 구간이 없으니(연속 측정 부족) 평균 낼 것도 없다 —
+                    # 이 한 프레임의 값을 그대로 라이브 값으로 둔다.
+                    _S.live_wl[(hand, finger)] = {
+                        "width_mm":  result["data"]["width_mm"],
+                        "length_mm": result["data"]["length_mm"],
+                    }
                 else:
                     accepted = {"frame": frame}
                     print(f"  [{finger}] 탑뷰 수동 촬영 (측정 실패, 원본 프레임 저장)")
+                    # 라이브 측정 자체가 없었으니 override 없이 재측정 결과를 그대로 쓴다.
                 break
     finally:
         worker.stop()
@@ -745,7 +789,7 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
         _S.side_capture_busy.clear()
 
 
-def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str):
+def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str, hand: str):
     """탑뷰 + 사이드뷰 동시 캡처. /capture/force 한 번으로 두 카메라 동시 촬영."""
     top_path  = os.path.join(local_dir, f"{finger}_top.jpg")
     side_path = os.path.join(local_dir, f"{finger}_side.jpg")
@@ -754,7 +798,7 @@ def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str):
     side_result = [False]
 
     def capture_top():
-        top_result[0] = _capture_top_stream(cap_top, finger, top_path)
+        top_result[0] = _capture_top_stream(cap_top, finger, top_path, hand)
 
     def capture_side():
         side_result[0] = _capture_side_stream(cap_side, finger, side_path)
@@ -803,7 +847,7 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
             _S.force_capture_top.clear()
             _S.force_capture_side.clear()
 
-            top_ok, _ = _capture_finger_both(cap_top, cap_side, finger, local_dir)
+            top_ok, _ = _capture_finger_both(cap_top, cap_side, finger, local_dir, hand)
             if not top_ok:
                 print(f"  [{finger}] 탑뷰 실패 → 건너뜀")
                 continue
@@ -830,7 +874,7 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
     return local_dir
 
 
-def _measure_one_finger(finger: str, photos_root: str, results_root: str):
+def _measure_one_finger(finger: str, photos_root: str, results_root: str, hand: str):
     top_path   = os.path.join(photos_root, f"{finger}_top.jpg")
     side_path  = os.path.join(photos_root, f"{finger}_side.jpg")
     finger_out = os.path.join(results_root, finger)
@@ -848,6 +892,14 @@ def _measure_one_finger(finger: str, photos_root: str, results_root: str):
     if os.path.isfile(side_path):
         cmd += ["--ccurve-top", side_path]
 
+    # 촬영 순간 게이지를 채운 라이브 평균값이 있으면, 재측정(사진 한 장짜리
+    # 단일 프레임)이 내놓는 값 대신 그걸 최종 width_mm/length_mm으로 쓴다 —
+    # 여러 프레임이 합의한 값이 노이즈에 더 강하다는 게 이 override의 취지.
+    live = _S.live_wl.pop((hand, finger), None)
+    if live is not None:
+        cmd += ["--live-width-mm", str(live["width_mm"]),
+                "--live-length-mm", str(live["length_mm"])]
+
     result = subprocess.run(cmd, cwd=_SCAN_DIR, capture_output=True, text=True,
                              encoding="utf-8", errors="replace")
     if result.returncode != 0:
@@ -864,7 +916,7 @@ def _run_measure_only(userid: str, session: str, hand: str):
     threads = [
         threading.Thread(
             target=_measure_one_finger,
-            args=(finger, photos_root, results_root),
+            args=(finger, photos_root, results_root, hand),
             daemon=True,
         )
         for finger in FINGER_ORDER
@@ -931,7 +983,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             sizes.append(nail_size)
 
             # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
-            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/server.py와 동일).
+            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/_legacy_server.py와 동일).
             if fd.get("skin_L") is not None:
                 skin_metrics.append({
                     "L":          fd["skin_L"],
@@ -979,7 +1031,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
           f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
 
     # 유효한 손가락들의 LAB 평균으로 피부색/웜쿨/명도/채도/추천컬러 30개를
-    # 한 번에 계산한다 (scan/server.py의 build_callback_data와 동일한 방식).
+    # 한 번에 계산한다 (scan/_legacy_server.py의 build_callback_data와 동일한 방식).
     if skin_metrics:
         avg_L    = sum(m["L"] for m in skin_metrics) / len(skin_metrics)
         avg_a    = sum(m["a"] for m in skin_metrics) / len(skin_metrics)
@@ -1204,6 +1256,12 @@ def capture_force():
 @app.get("/capture/status")
 def capture_status():
     return {"active": _S.active, "currentFinger": _S.current_finger, "doneFinger": _S.done_fingers}
+
+
+@app.get("/capture/stability")
+def capture_stability():
+    """탑뷰 정확도 게이지 조회 — 프론트가 짧은 주기로 폴링."""
+    return _S.stability
 
 
 # ── 폰 사이드뷰 카메라 ───────────────────────────────────────
