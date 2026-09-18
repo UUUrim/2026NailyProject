@@ -627,8 +627,11 @@
 
 .design-result-v2__lightbox-content {
   position: relative;
-  max-width: min(92vw, 480px);
-  max-height: 86vh;
+  /* 참·파츠 원본 이미지는 대부분 저해상도 낱장이라, max-width/height만 있으면 박스가
+     이미지의 작은 원본 크기로 줄어들어 버린다. width/height를 고정값으로 줘서 박스 자체를
+     항상 이 크기로 만들고, 아래 img가 그 안을 꽉 채우도록(object-fit: contain) 한다. */
+  width: min(92vw, 520px);
+  height: min(86vh, 520px);
   display: flex;
   overflow: hidden;
   border-radius: 16px;
@@ -637,8 +640,8 @@
 }
 
 .design-result-v2__lightbox-content img {
-  max-width: 100%;
-  max-height: 86vh;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   transform-origin: center center;
   user-select: none;

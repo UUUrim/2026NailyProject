@@ -595,6 +595,7 @@ public class NailDesignService {
 
         return DesignDetailResponseDto.builder()
                 .designId(design.getId())
+                .sessionId(design.getSession() != null ? design.getSession().getId() : null)
                 .imageUrl(imageUrl)
                 .imageUrls(design.getImageUrls())
                 .createdAt(formattedDate)
@@ -632,7 +633,13 @@ public class NailDesignService {
         try {
             JsonNode plan = objectMapper.readTree(design.getDesignPlan());
             String shape = plan.path("shape").asText(null);
-            return (shape == null || shape.isBlank()) ? null : shape;
+            if (shape == null || shape.isBlank()) return null;
+            // Gemini가 이 모양을 영어 업계 용어인 "coffin"으로 적어둘 때가 있는데, 앱
+            // 내부에서는 같은 모양을 항상 "ballerina"로 통일해서 쓴다(3D 쉐입 템플릿 파일명,
+            // 선택지 목록 등 전부 ballerina 기준). 그대로 두면 isKnownNailShape()에 안 걸려서
+            // AR 미리보기가 3D 대신 2D 합성으로 조용히 폴백해버린다.
+            if ("coffin".equalsIgnoreCase(shape.trim())) return "ballerina";
+            return shape;
         } catch (Exception e) {
             return null;
         }

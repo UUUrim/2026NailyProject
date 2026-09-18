@@ -110,6 +110,9 @@ export interface DesignLikeResponse {
 
 export interface DesignDetailResponse {
     designId: number
+    /** 이 디자인이 만들어진 채팅 세션 ID — "디자인 다시 생성하기"에서 같은 세션으로 이어서
+     *  수정(refine)하기 위해 쓴다. 세션 없이 만들어진 옛 디자인이면 null. */
+    sessionId?: number | null
     imageUrl: string
     createdAt: string
     shared: boolean

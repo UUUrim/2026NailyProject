@@ -129,6 +129,7 @@ export function buildHandScanAnalysis(skinToneHex: string): HandScanAnalysis {
     cCurve: {
       value: Number(baseCurve.toFixed(1)),
       unit: 'mm',
+      // 길이/너비와 동일하게, 막대 위치와 비교 문구를 같은 percentile 값 하나로 통일한다.
       percentile: curvePercentile,
       comparisonLabel: comparisonLabel(curvePercentile, '완만한 편', '깊은 편', '평균 범위'),
     },

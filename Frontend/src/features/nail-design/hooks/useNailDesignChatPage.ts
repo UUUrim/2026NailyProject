@@ -7,13 +7,20 @@ import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
     sendChatMessage,
     refineKeywords,
 } from '@/features/nail-design/api/chat'
-import { generateDesign, generateDesignFromImage, confirmDesign, type DesignExtractedDetails } from '@/entities/design/api'
+import {
+    generateDesign,
+    generateDesignFromImage,
+    confirmDesign,
+    getDesignChatHistory,
+    type DesignExtractedDetails,
+    type DesignChatMessage,
+} from '@/entities/design/api'
 import { getNailShape, type NailShapeId } from '@/shared/constants/nailShapes'
 import {
     INITIAL_PREFERENCES,
@@ -212,6 +219,18 @@ const MENU_QUICK_REPLY: QuickReply = {
     limit: 1,
     layout: 'list',
 }
+// 결과 화면 "디자인 다시 생성하기"로 돌아왔을 때, 채팅 내역을 복원한 뒤 물어보는 선택지.
+const REGENERATE_CHOICE_QUICK_REPLY: QuickReply = {
+    id: 'regenerate-choice',
+    question: '이 디자인을 이어서 수정할까요, 아니면 처음부터 새로 만들까요?',
+    options: [
+        { value: 'continue', label: '이어서 수정할게요' },
+        { value: 'restart', label: '처음부터 새로 만들게요' },
+    ],
+    multi: false,
+    limit: 1,
+    layout: 'list',
+}
 // 분위기 → 디자인 타입 → 모티프 → 계절감 → 네일 쉐입 → 컬러
 const PREFERENCE_STEPS: PreferenceKey[] = ['mood', 'designType', 'motif', 'season', 'shape', 'color']
 
@@ -269,12 +288,30 @@ function buildPreferenceQuickReply(step: PreferenceKey): QuickReply {
         layout: STEP_LAYOUT[step],
     }
 }
+// 결과 화면 "디자인 다시 생성하기"에서 넘어올 때 실어오는 정보 — 그 디자인을 만들 때 쓴
+// 채팅 세션으로 이어서 수정할 수 있게, 세션 ID와 그 디자인을 그대로 lastDesign처럼 재구성할
+// 수 있는 값들을 함께 받는다.
+type RegenerateNavState = {
+    designId: number
+    sessionId: number | null
+    imageUrls: string[]
+    preferences: NailDesignPreferences
+    shapeId: NailShapeId
+    details?: DesignExtractedDetails
+    context: GenerationContext
+}
+
 export function useNailDesignChatPage() {
     const navigate = useNavigate()
     const location = useLocation()
     const queryClient = useQueryClient()
     const navState = (location.state as
-        | { leftScanId?: number | null; rightScanId?: number | null; scanId?: number | null }
+        | {
+              leftScanId?: number | null
+              rightScanId?: number | null
+              scanId?: number | null
+              regenerate?: RegenerateNavState | null
+          }
         | null) ?? null
 
     // 브라우저 뒤로/앞으로가기(POP)로 돌아온 경우에만 이전 채팅 스냅샷을 복원한다. 앱 안의
@@ -287,6 +324,10 @@ export function useNailDesignChatPage() {
         if (!restored) chatSessionSnapshot = null
         return restored
     })
+
+    // 결과 화면에서 "디자인 다시 생성하기"로 갓 들어온 경우에만 유효하다 — 뒤로가기로 복원된
+    // 마운트라면 이미 진행 중이던 채팅이 있으므로 무시한다(그 채팅을 그대로 이어간다).
+    const regenerateState = !wasRestored ? navState?.regenerate ?? null : null
 
     // 헤더의 "디자인 채팅" 링크처럼 특정 스캔을 지정하지 않고 들어온 경우에만 분석 결과를
     // 골라볼 수 있게 한다. 인쇄 페이지에서 scanId를 콕 집어 넘겨준 경우(= 메인 "시작하기"로
@@ -546,6 +587,14 @@ export function useNailDesignChatPage() {
         }
 
         const initChatSession = async () => {
+            // "디자인 다시 생성하기"로 들어온 경우, 그 디자인을 만든 세션을 그대로 이어써야
+            // "이어서 수정하기"가 그 세션의 마지막 디자인을 기준으로 refine된다. 새 세션을
+            // 만들면 서버가 이어서 수정할 대상을 찾지 못한다 — 세션 복원/초기 안내는 별도
+            // 이펙트(아래 채팅 이력 복원)에서 처리하므로 여기서는 세션 생성만 건너뛴다.
+            if (regenerateState) {
+                if (!cancelled) setSessionId(regenerateState.sessionId ?? null)
+                return
+            }
             try {
                 const id = await createChatSession()
                 if (!cancelled) setSessionId(id)
@@ -571,6 +620,47 @@ export function useNailDesignChatPage() {
     useEffect(() => {
         // 복원된 마운트에서는 이미 인사말을 포함한 이전 대화가 남아있으므로 다시 붙이지 않는다.
         if (!isInitReady || wasRestored) return
+
+        // "디자인 다시 생성하기"로 들어온 경우 — 그 디자인을 만들 때 나눈 채팅 내역을 그대로
+        // 불러와 복원하고, 이어서 수정할지 처음부터 새로 만들지 물어본다.
+        if (regenerateState) {
+            let cancelled = false
+            getDesignChatHistory(regenerateState.designId)
+                .then((history: DesignChatMessage[]) => {
+                    if (cancelled) return
+                    const restoredBubbles: ChatBubble[] = history.map((msg) => ({
+                        id: makeId(),
+                        role: msg.role,
+                        text: msg.content,
+                        imageUrls: msg.imageUrls,
+                        isDesignResult: msg.role === 'assistant' && !!msg.imageUrls?.length,
+                    }))
+                    setBubbles((prev) => [...restoredBubbles, ...prev])
+                })
+                .catch(() => {
+                    // 이력을 못 불러와도(옛 디자인 등) 계속/새로 만들기 선택 자체는 가능해야 한다.
+                    if (!cancelled) pushAssistant('이전 대화 내역을 불러오지 못했어요.')
+                })
+                .finally(() => {
+                    if (cancelled) return
+                    setLastDesign({
+                        designId: regenerateState.designId,
+                        imageUrls: regenerateState.imageUrls,
+                        prompt: '',
+                        preferences: regenerateState.preferences,
+                        source: (regenerateState.context.source as GenerationSource) ?? 'freeform',
+                        shapeId: regenerateState.shapeId,
+                        details: regenerateState.details,
+                        context: regenerateState.context,
+                    })
+                    pushAssistant('이 디자인을 이어서 수정할까요, 아니면 처음부터 새로 만들까요?')
+                    setActiveQuickReply(REGENERATE_CHOICE_QUICK_REPLY)
+                })
+            return () => {
+                cancelled = true
+            }
+        }
+
         const greetingName = userName ? `${userName}님` : '회원'
         setBubbles((prev) => [
             {
@@ -1123,6 +1213,51 @@ export function useNailDesignChatPage() {
         )
     }
 
+    // 진행 상태를 전부 비우고 새 채팅 세션을 만들어 생성 방식 선택 메뉴로 되돌아간다.
+    // ("디자인 다시 생성하기"에서 "처음부터 새로 만들게요"를 골랐을 때 쓴다)
+    const startFreshMenu = async () => {
+        reviseLogRef.current = []
+        freeformLogRef.current = []
+        setCollectedPreferences(INITIAL_PREFERENCES)
+        setLastDesign(null)
+        setMode('menu')
+        try {
+            const id = await createChatSession()
+            setSessionId(id)
+        } catch {
+            pushAssistant('채팅 세션을 시작하지 못했어요. 새로고침 후 다시 시도해 주세요.')
+            return
+        }
+        pushAssistant('알겠어요! 원하시는 네일 디자인 생성 방식을 선택해 주세요.')
+        setActiveQuickReply(MENU_QUICK_REPLY)
+    }
+
+    // "디자인 다시 생성하기"로 복원된 채팅에서 "이어서 수정할게요" / "처음부터 새로 만들게요"를
+    // 골랐을 때. sessionId가 그 디자인을 만든(=refine 대상 디자인이 들어있는) 세션 그대로이므로,
+    // "이어서 수정"은 별도 처리 없이 바로 revise 모드로 들어가면 handleReviseSubmit이 그 세션
+    // 기준으로 알아서 이어서 수정해준다.
+    const handleRegenerateChoice = (option: QuickReplyOption) => {
+        pushUser(option.label)
+        setActiveQuickReply(null)
+
+        if (option.value === 'continue') {
+            if (!sessionId) {
+                // 세션 정보 없는 옛 디자인 — 이어서 수정할 방법이 없으니 새로 시작한다.
+                pushAssistant('이 디자인은 이어서 수정할 수 있는 세션 정보가 없어요. 처음부터 새로 만들어드릴게요.')
+                void startFreshMenu()
+                return
+            }
+            setMode('revise')
+            pushAssistant(
+                '어떤 부분을 수정하고 싶으신지 자유롭게 말씀해 주세요! 예) "컬러를 더 밝게 해줘", "글리터 대신 무광으로", "하트 모티프를 빼줘"',
+            )
+            return
+        }
+
+        // restart
+        void startFreshMenu()
+    }
+
     const handleReviseSubmit = async (text: string) => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
@@ -1338,6 +1473,10 @@ export function useNailDesignChatPage() {
             handleMenuSelect(option)
             return
         }
+        if (activeQuickReply?.id === 'regenerate-choice') {
+            handleRegenerateChoice(option)
+            return
+        }
         if (activeQuickReply?.id === 'design-feedback') {
             handleDesignFeedback(option)
             return
@@ -1436,18 +1575,20 @@ export function useNailDesignChatPage() {
         // 손 분석 결과 화면과 동일하게: 왼손 5손가락 + 오른손 5손가락 = 10손가락 실측 평균
         const combinedFingers = [...(leftAnalysis?.fingers ?? []), ...(rightAnalysis?.fingers ?? [])]
 
-        const details = combinedFingers.map((finger) => {
+        const details = combinedFingers.map((finger, index) => {
             let measurements: { lengthMm?: number; length?: number; widthMm?: number; width?: number; cCurveMm?: number; cCurve?: number; curve?: number } = {}
             try {
                 measurements = JSON.parse(finger.measurements ?? '{}') || {}
             } catch {
                 measurements = {}
             }
+            // index는 0~9(왼손 0~4 + 오른손 5~9)이므로, 손가락 종류(엄지~소지)는 %5로 구한다.
+            const fingerSize = FINGER_SIZE_MM[index % 5]
             // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
-            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 일반 손톱 대체값(mm)을 쓴다.
+            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 해당 손가락의 실측 평균값을 쓴다.
             return {
-                lengthMm: Number(measurements.lengthMm ?? measurements.length ?? 12),
-                widthMm: Number(measurements.widthMm ?? measurements.width ?? 9),
+                lengthMm: Number(measurements.lengthMm ?? measurements.length ?? fingerSize.lengthMm),
+                widthMm: Number(measurements.widthMm ?? measurements.width ?? fingerSize.widthMm),
                 cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? FALLBACK_C_CURVE_MM),
             }
         })

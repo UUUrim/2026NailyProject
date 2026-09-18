@@ -9,6 +9,8 @@ import { DesignImageDetailModal, Icon as MypageImageIcon } from '@/features/mypa
 import { NailArTryOnModal } from '@/features/mypage/components/NailArTryOnModal'
 import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { useNailDesignResultPage } from '@/features/nail-design/hooks/useNailDesignResultPage'
+import { INITIAL_PREFERENCES } from '@/shared/constants/designPreferences'
+import type { NailShapeId } from '@/shared/constants/nailShapes'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
 
@@ -17,6 +19,7 @@ export function NailDesignResultPageContent() {
         navigate,
         image,
         designId,
+        sessionId,
         context,
         swatchLoading,
         liked,
@@ -48,6 +51,28 @@ export function NailDesignResultPageContent() {
         () => ({ designId, imageUrl: image, liked, folder: likedFolder }),
         [designId, image, liked, likedFolder],
     )
+
+    // "디자인 다시 생성하기" — 이 디자인을 만들 때 쓴 채팅 세션/내역을 그대로 들고 채팅 화면으로
+    // 돌아가서, 거기서 이어서 수정할지 처음부터 새로 만들지 고르게 한다.
+    const handleRegenerate = () => {
+        if (!designId) {
+            navigate('/design/chat')
+            return
+        }
+        navigate('/design/chat', {
+            state: {
+                regenerate: {
+                    designId,
+                    sessionId,
+                    imageUrls: [image],
+                    preferences: INITIAL_PREFERENCES,
+                    shapeId: (shape as NailShapeId | null) ?? 'oval',
+                    details: detailsWithSwatches ?? undefined,
+                    context,
+                },
+            },
+        })
+    }
 
     if (!image) {
         return (
@@ -288,7 +313,7 @@ export function NailDesignResultPageContent() {
                     <PillButton
                         variant="ghost"
                         className="design-result-v2__btn"
-                        onClick={() => navigate('/design/chat')}
+                        onClick={handleRegenerate}
                     >
                         디자인 다시 생성하기
                     </PillButton>
