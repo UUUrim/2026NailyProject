@@ -96,7 +96,7 @@ FLAT_TIP_SHAPES = {"square", "ballerina"}
 LONG_SHAPES = {"almond", "stiletto", "ballerina"}
 TIP_EXTENSION_DEFAULT_MM = {
     "round": 5.0, "oval": 5.0, "square": 5.0,
-    "almond": 7.0, "stiletto": 7.0, "ballerina": 7.0,
+    "almond": 7.0, "stiletto": 8.0, "ballerina": 7.0,
 }
 
 # Default top-edge fillet reach (--edge-round) in mm, per shape. This is a
@@ -118,13 +118,19 @@ CORNER_ROUND_DEFAULT_MM = {"square": 1.5, "ballerina": 1.3}
 # Ballerina only: short local ease-in radius (--shoulder-round) where the
 # straight body meets the taper's start — just enough to avoid a visible
 # kink there; the taper itself stays a literal straight line past it.
-SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0}
+SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5}
 
 # 폭 보정(fit margin): 측정한 평평한 폭을 C-curve로 구부리면 실제 손가락을
 # 감싸는 현(chord) 폭이 측정값보다 작아져서, 프린트한 손톱이 실제보다 작게
 # 나옴.  이를 보정하기 위해 STL 생성 전에 측정 폭에 이 값을 더한다.
 # (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
 WIDTH_FIT_MARGIN_MM = 1.5
+
+# Stiletto plan-view taper shape — see the superellipse formula where it's
+# used below. 1 = straight line to the point, 2 = full ellipse (round/oval/
+# almond's curve); tuned between the two so the point stays clearly pointed
+# but isn't a razor-straight wedge.
+STILETTO_TAPER_N = 1.4
 
 
 # ─────────────────────────────────────────────────────────────
@@ -179,6 +185,48 @@ def _ballerina_shoulder_blend(y_val, W, tip_h, y_side_top, r):
         taper_slope = -tp_hi * (W / 2.0) / half_w_hi * (BALLERINA_TAPER_T_END / tip_h)
     else:
         taper_slope = 0.0
+    u = (y_val - y_lo) / (y_hi - y_lo) if y_hi > y_lo else 1.0
+    u = min(max(u, 0.0), 1.0)
+    h = y_hi - y_lo
+    H00 = 2 * u ** 3 - 3 * u ** 2 + 1
+    H01 = -2 * u ** 3 + 3 * u ** 2
+    H11 = u ** 3 - u ** 2
+    x_right = x_lo * H00 + x_hi * H01 + h * taper_slope * H11   # H10 term drops: slope_lo=0
+    return W - x_right, x_right
+
+
+def _stiletto_half_width(t, W, n=STILETTO_TAPER_N):
+    """Superellipse taper half-width at normalised tip position t (0=shoulder,
+    full width; 1=point). See STILETTO_TAPER_N above."""
+    return W / 2.0 * (1.0 - t ** n) ** (1.0 / n)
+
+
+def _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, r):
+    """
+    Cubic-Hermite blend of stiletto's right-boundary x(y) across the corner
+    where the straight body (dx/dy=0) meets the start of the superellipse
+    taper, over y in [y_side_top-r, y_side_top+r].
+
+    The raw superellipse has zero SLOPE at t=0 (matches the straight side,
+    so the 2-D outline looks seamless there) but its CURVATURE blows up to
+    infinity right at that same point for 1<n<2 — invisible in a flat plan
+    view, but a highly visible crease once the width curve gets combined
+    with the C-curve height (a real 3-D render shows a sharp fold exactly
+    at the taper's start). This spreads that curvature spike across r mm
+    of cubic blend instead of dumping it all in one row, which removes the
+    crease. Matches the taper's own value/slope at y_hi so it's seamless
+    from the shoulder onward. Returns (x_left, x_right).
+    """
+    y_lo, y_hi = y_side_top - r, y_side_top + r
+    t_hi = (y_hi - y_side_top) / tip_h if tip_h > 0 else 1.0
+    t_hi = min(max(t_hi, 1e-6), 1.0 - 1e-6)
+    half_w_hi = _stiletto_half_width(t_hi, W)
+    x_hi = W / 2.0 + half_w_hi
+    x_lo = W
+    n = STILETTO_TAPER_N
+    # d(half_w)/dt at t_hi, times dt/dy = 1/tip_h (chain rule).
+    dhalf_dt = -(W / 2.0) * t_hi ** (n - 1.0) * (1.0 - t_hi ** n) ** (1.0 / n - 1.0)
+    taper_slope = dhalf_dt / tip_h if tip_h > 0 else 0.0
     u = (y_val - y_lo) / (y_hi - y_lo) if y_hi > y_lo else 1.0
     u = min(max(u, 0.0), 1.0)
     h = y_hi - y_lo
@@ -279,12 +327,20 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
             half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         elif shape == "stiletto":
-            # Convex taper to a sharp point.
-            # Power < 1 makes sides bow outward (convex) near the taper base
-            # then converge smoothly to the tip — matches the elegant stiletto
-            # silhouette in the reference (vs. a harsh straight-line taper).
-            # w(t) = W·(1−t)^0.65
-            half_w = W / 2 * (1.0 - t) ** 0.65
+            # Superellipse taper: w(t) = W/2 · (1 − t^n)^(1/n).
+            # n=1 is a dead-straight line to the point (still read as too
+            # sharp — no curvature to "ease into" the point at all); n=2 is
+            # the round/oval/almond ellipse (goes vertical early, too blunt/
+            # round). STILETTO_TAPER_N=1.4 sits between the two: enough
+            # curve to avoid a razor-straight wedge, narrow enough through
+            # the taper to read as slender, closer to the reference photo's
+            # clean-but-not-needle point.
+            # A short Hermite shoulder blend (shoulder_r) smooths the
+            # curvature spike this curve has right at t=0 — see
+            # _stiletto_shoulder_blend for why that's needed.
+            if shoulder_r > 0 and y_val < (y_side_top + shoulder_r):
+                return _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r)
+            half_w = _stiletto_half_width(t, W)
 
         elif shape == "ballerina":
             # Quarter-ellipse taper (see BALLERINA_TAPER_T_END above) — the
@@ -318,6 +374,9 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
         if shape == "ballerina" and shoulder_r > 0 and y_val >= (y_side_top - shoulder_r):
             # Lower half of the shoulder ease-in (see _ballerina_shoulder_blend).
             return _ballerina_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r)
+        if shape == "stiletto" and shoulder_r > 0 and y_val >= (y_side_top - shoulder_r):
+            # Lower half of the shoulder ease-in (see _stiletto_shoulder_blend).
+            return _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r)
         return 0.0, float(W)
 
     elif y_val >= -cuticle_depth:
@@ -434,6 +493,10 @@ def generate_stl(params, output_path):
     # Coffin: taper over extension only (flat tip keeps full width longer).
     if shape == "stiletto":
         tip_h = L_ext + L * 0.30
+        # Shoulder ease-in (see _stiletto_shoulder_blend): keep it short
+        # relative to the taper region so the blend zone can't eat past
+        # the tip itself on a very short nail/extension.
+        SHOULDER_R = min(SHOULDER_R, tip_h * 0.4)
     elif shape == "coffin":
         tip_h = L_ext
     elif shape == "ballerina":
@@ -695,8 +758,9 @@ def main():
     p.add_argument("--output",         default="nail_stl",
                    help="Output directory (default: nail_stl)")
     p.add_argument("--tip-extension",  type=float, default=None,
-                   help="Extra mm beyond nail tip (default: 7mm for almond/"
-                        "stiletto, 12mm for ballerina, 3mm for all other shapes)")
+                   help="Extra mm beyond nail tip (default: 7mm for almond, "
+                        "8mm for stiletto, 12mm for ballerina, 3mm for all "
+                        "other shapes)")
     p.add_argument("--cuticle-depth",  type=float, default=2.7,
                    help="Depth of cuticle arch below cuticle line in mm "
                         "(default 2.7 — increase for deeper arch; also "
