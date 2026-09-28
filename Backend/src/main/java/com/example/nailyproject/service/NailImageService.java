@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -46,21 +47,33 @@ public class NailImageService {
      * 프롬프트 기반 네일 이미지를 생성하고 base64 문자열로 반환한다.
      *
      * @param prompt 조립된 최종 프롬프트
-     * @param seed   재현용 시드 (null 이면 서버가 랜덤 처리)
+//     * @param seed   재현용 시드 (null 이면 서버가 랜덤 처리)
      * @return base64 인코딩된 PNG 이미지
      */
-    public String generateNailImage(String prompt, Long seed) {
+//    public String generateNailImage(String prompt, Long seed) {
+//        Map<String, Object> body = new HashMap<>();
+//        body.put("prompt", prompt);
+//        // negative_prompt 파라미터가 있지만 z-image-turbo는 반영 안 됨.
+//        // NailDesignService에서 "no X" 표현을 positive 프롬프트에 이미 녹여두므로 생략.
+//        body.put("steps", 10);
+//        body.put("guidance_scale", 1);
+//        body.put("width", 768);
+//        body.put("height", 512);
+//        if (seed != null) {
+//            body.put("seed", seed);
+//        }
+//
+//        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
+//        ResponseEntity<String> response = restTemplate.postForEntity(
+//                genServerUrl + "/generate", request, String.class
+//        );
+//
+//        return extractBase64(response.getBody(), "image_base64");
+//    }
+
+    public String generateNailImage(String prompt) {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", prompt);
-        // negative_prompt 파라미터가 있지만 z-image-turbo는 반영 안 됨.
-        // NailDesignService에서 "no X" 표현을 positive 프롬프트에 이미 녹여두므로 생략.
-        body.put("steps", 30);
-        body.put("guidance_scale", 1);
-        body.put("width", 768);
-        body.put("height", 512);
-        if (seed != null) {
-            body.put("seed", seed);
-        }
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
         ResponseEntity<String> response = restTemplate.postForEntity(
@@ -104,6 +117,37 @@ public class NailImageService {
                 genServerUrl + "/inpaint", request, String.class
         );
 
+        return extractBase64(response.getBody(), "image_base64");
+    }
+
+    /**
+     * 새 inpaint 방식: mask_prompt(GroundingDINO) 대신 nail_index로 대상 손톱을 지정한다.
+     * nail_index는 왼쪽부터 1·2·3·4·5. 여러 개 전달 가능 (예: [3, 4]).
+     * 서버가 해당 인덱스의 손톱 영역을 자동으로 잡아서 그 부분만 재생성한다.
+     *
+     * @param imageBase64 원본 세트 이미지 base64
+     * @param prompt      수정할 손톱 묘사 (단일 nail tip 기준으로 작성)
+     * @param nailIndex   수정 대상 인덱스 목록 (1=엄지 … 5=새끼)
+     * @param seed        원본과 동일 seed 사용 시 퀄리티 유지에 유리
+     * @return base64 인코딩된 전체 세트 PNG (지정 손톱만 바뀌고 나머지는 픽셀 보존)
+     */
+    public String inpaintNailByIndex(String imageBase64, String prompt,
+                                     List<Integer> nailIndex, Long seed) {
+        Map<String, Object> body = new HashMap<>();
+        body.put("image_base64", imageBase64);
+        body.put("prompt", prompt);
+        body.put("nail_index", nailIndex);
+        body.put("steps", 8);
+        body.put("guidance_scale", 1);
+        body.put("strength", 0.65);   // 테스트 검증값; 낮을수록 원본 유지
+        if (seed != null) {
+            body.put("seed", seed);
+        }
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                genServerUrl + "/inpaint", request, String.class
+        );
         return extractBase64(response.getBody(), "image_base64");
     }
 

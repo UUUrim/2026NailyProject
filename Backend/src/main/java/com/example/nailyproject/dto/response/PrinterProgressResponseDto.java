@@ -13,4 +13,5 @@ public class PrinterProgressResponseDto {
     private Double nozzleTemp;
     private Double bedTemp;
     private String message;          // 실패 시 원인 메시지
+    private Integer queueSize;
 }

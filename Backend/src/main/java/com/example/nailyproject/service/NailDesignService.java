@@ -160,7 +160,7 @@ public class NailDesignService {
 
         // 1. gen 서버에서 이미지 생성 (base64 반환)
         long seed = (long) (Math.random() * Long.MAX_VALUE);
-        String imageBase64 = nailImageService.generateNailImage(prompt, seed);
+        String imageBase64 = nailImageService.generateNailImage(prompt);
 
         // 2. base64 → bytes → S3 업로드
         byte[] imageBytes = Base64.getDecoder().decode(imageBase64);

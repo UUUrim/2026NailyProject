@@ -331,6 +331,25 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7
         except Exception:
             pass  # 연결 끊겨도 폴링 계속
 
+# ── 프린트 큐 ────────────────────────────────────────────────
+_print_job_queue: _q.Queue = _q.Queue()
+
+def _print_queue_worker():
+    """한 번에 하나씩 순서대로 처리하는 워커."""
+    while True:
+        merged_model_url, output_dir, callback_url = _print_job_queue.get()
+        try:
+            print(f"[PrintQueue] 출력 시작 (대기 {_print_job_queue.qsize()}개 남음)")
+            _run_slice_and_print(merged_model_url, output_dir, callback_url)
+        except Exception as e:
+            print(f"[PrintQueue] 작업 실패: {e}")
+            try:
+                requests.post(callback_url, json={"success": False, "message": str(e)})
+            except Exception:
+                pass
+        finally:
+            _print_job_queue.task_done()
+
 
 # ══════════════════════════════════════════════════════════════
 # 스캔 관련
@@ -478,8 +497,8 @@ def _get_top_cam() -> cv2.VideoCapture:
         if cap is None or not cap.isOpened():
             raise RuntimeError(f"탑뷰 카메라(인덱스 {CAMERA_TOP})를 열 수 없습니다.")
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
         _top_cam       = cap
         _top_cam_index = CAMERA_TOP
         return _top_cam
@@ -1115,6 +1134,7 @@ class StartPrintRequest(BaseModel):
 @app.on_event("startup")
 def _startup():
     threading.Thread(target=_phone_side_idle_preview_loop, daemon=True).start()
+    threading.Thread(target=_print_queue_worker, daemon=True).start()  # 프린터 큐 제작용으로 추가
 
 
 @app.get("/health")
@@ -1293,7 +1313,11 @@ def test_side_capture():
 @app.get("/print/status")
 def print_status():
     try:
-        return {"success": True, **_fetch_printer_status()}
+        return {
+            "success": True,
+            "queueSize": _print_job_queue.qsize(),  # ← 추가
+            **_fetch_printer_status()
+        }
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -1323,13 +1347,13 @@ def merge_both(request: MergeBothHandsRequest):
 
 @app.post("/print/start")
 def start_print(request: StartPrintRequest):
-    threading.Thread(
-        target=_run_slice_and_print,
-        args=(request.mergedModelUrl, request.outputDir, request.callbackUrl),
-        daemon=True,
-    ).start()
-    return {"status": "started", "message": "슬라이싱 및 출력이 시작되었습니다."}
-
+    _print_job_queue.put((request.mergedModelUrl, request.outputDir, request.callbackUrl))
+    waiting = _print_job_queue.qsize() - 1
+    return {
+        "status": "queued",
+        "queuePosition": _print_job_queue.qsize(),
+        "message": f"출력 대기열에 추가되었습니다. (앞에 {waiting}개 대기 중)"
+    }
 
 # ── 카메라 인덱스 설정 (웹 UI에서 카메라 선택용) ─────────────
 @app.get("/camera/config")
@@ -1338,7 +1362,7 @@ def get_camera_config():
     return {"top": CAMERA_TOP, "side": CAMERA_SIDE}
 
 @app.post("/camera/config")
-def set_camera_config(top: int = 1, side: int = -2):
+def set_camera_config(top: int = 2, side: int = -2):
     global CAMERA_TOP, CAMERA_SIDE
     CAMERA_TOP = top
     CAMERA_SIDE = side

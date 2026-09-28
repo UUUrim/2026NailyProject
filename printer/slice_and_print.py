@@ -49,6 +49,34 @@ SUPPORT_OVERRIDES = {
     "brim_type": "outer_only",
     "brim_width": "5",
     "curr_bed_type": "Textured PEI Plate",
+    "brim_separation": "0.1",
+    "support_type": "tree(auto)",
+    "support_style": "tree_slim",
+
+    # 벽/쉘
+    "wall_loops": "5",              # 4 → 5
+    "top_shell_layers": "6",
+    "bottom_shell_layers": "3",
+
+    # 인필
+    "sparse_infill_density": "15%",
+    "sparse_infill_pattern": "gyroid",
+
+    # 레이어
+    "layer_height": "0.16",         # 0.12 → 0.16 확정
+
+    # 시임/속도/Z-hop
+    "seam_position": "back",
+    "seam_slope_type": "external",   # Scarf joint seam - Contour
+    "outer_wall_speed": "30",
+    "inner_wall_speed": "60",
+    "small_perimeter_speed": "20",
+    "top_surface_speed": "25",
+    "slow_down_layer_time": "10",
+    "min_print_speed": "10",
+    "z_hop_type": "1", #노즐이 수직으로 올라갔가 이동하는 방식 (0.2만큼)
+    "z_hop": "0.2",
+    "enable_overhang_speed": "1",
 }
 
 FILAMENT_OVERRIDES = {
@@ -57,6 +85,11 @@ FILAMENT_OVERRIDES = {
     "nozzle_temperature": ["230"],
     "nozzle_temperature_initial_layer": ["230"],
     "filament_retraction_length": ["0.5"],
+    "close_fan_the_first_x_layers": ["3"],
+    "fan_min_speed": ["30"],
+    "fan_max_speed": ["50"],
+    "fan_cooling_layer_time": ["15"],
+    "slow_down_for_cooling": ["1"],
 }
 
 
@@ -87,7 +120,6 @@ def _build_patched_filament_profile(output_dir: str) -> str:
         json.dump(data, f, indent=8, ensure_ascii=False)
     return patched_path
 
-# 프린터 연결 정보 (Bambu Studio 앱 > 설정 > 프린터에서 확인)
 # 프린터 연결 정보 (Bambu Studio 앱 > 설정 > 프린터에서 확인)
 # 실제 값은 절대 이 파일에 직접 적지 않는다 — .env 파일(printer/.env, git에 안 올라감)에서 읽어온다.
 def _load_env():

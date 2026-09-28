@@ -17,6 +17,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.net.URI;
 import java.util.Base64;
 import java.util.Map;
+import com.example.nailyproject.dto.request.InpaintRequestDto;
+import com.example.nailyproject.dto.response.InpaintResponseDto;
+import com.example.nailyproject.service.InpaintService;
+import jakarta.validation.Valid;
 
 @RestController
 @RequiredArgsConstructor
@@ -24,6 +28,7 @@ import java.util.Map;
 public class DesignController {
 
     private final NailDesignService nailDesignService;
+    private final InpaintService inpaintService;
 
     /**
      * 디자인 생성 요청 POST /designs/generate
@@ -231,6 +236,25 @@ public class DesignController {
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "스와치 조회 성공", swatches)
+        );
+    }
+
+    /**
+     * 특정 손톱(들)만 바꾸는 inpaint  POST /designs/{designId}/inpaint
+     * Request: { prompt, nailIndex, strength?, seed? }
+     * Response: { imageUrl, imageBase64 }
+     */
+    @PostMapping("/{designId}/inpaint")
+    public ResponseEntity<ApiResponse<InpaintResponseDto>> inpaintDesign(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId,
+            @Valid @RequestBody InpaintRequestDto request) throws Exception {
+
+        request.setDesignId(designId);
+        InpaintResponseDto data = inpaintService.inpaint(user, request);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "인페인트 완료.", data)
         );
     }
 

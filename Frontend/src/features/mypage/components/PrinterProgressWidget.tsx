@@ -82,11 +82,17 @@ export function PrinterProgressWidget({ orderId, onComplete }: Props) {
 
     const pct = progress.percentage ?? 0
     const stateLabel = progress.state ? (STATE_LABEL_KO[progress.state] ?? progress.state) : '알 수 없음'
+    const queueSize = (progress as any).queueSize ?? 0  // api 타입 업데이트 전 임시
 
     return (
         <div className="printer-progress">
             <div className="printer-progress__head">
                 <span className="printer-progress__state">{stateLabel}</span>
+                {queueSize > 0 && (                                    // ← 추가
+                    <span className="printer-progress__queue">
+                    앞에 {queueSize}개 대기 중
+                </span>
+                )}
                 <span className="printer-progress__percentage">{pct}%</span>
             </div>
 

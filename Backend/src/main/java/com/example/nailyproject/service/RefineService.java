@@ -17,8 +17,8 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * 채팅으로 수정 요청이 들어오면 Gemini가 prompt + mask_prompt를 생성하고,
- * gen 서버 /inpaint로 원본 이미지에서 해당 영역만 재생성한다.
+ * 채팅으로 수정 요청이 들어오면 Gemini가 prompt + fingerOverrides를 생성하고,
+ * fingerOverrides 키를 nail_index(1~5)로 변환해 gen 서버 /inpaint를 호출한다.
  * 전체 이미지를 새로 만들지 않아서 원본과 분위기가 크게 달라지지 않는다.
  */
 @Service
@@ -43,6 +43,15 @@ public class RefineService {
     private String apiUrl;
 
     private static final Pattern HEX_PATTERN = Pattern.compile("^#[0-9A-Fa-f]{6}$");
+
+    /** fingerOverrides 키(엄지~새끼 영문명) → nail_index (왼쪽부터 1~5) */
+    private static final Map<String, Integer> FINGER_INDEX = Map.of(
+            "thumb",  1,
+            "index",  2,
+            "middle", 3,
+            "ring",   4,
+            "pinky",  5
+    );
     private static final RestTemplate restTemplate = new RestTemplate();
 
     private static final String SYSTEM_PROMPT_TEMPLATE = """
@@ -65,43 +74,15 @@ public class RefineService {
                - 원본 프롬프트에서 shape, 베이스 컬러 등 변하지 않는 요소는 그대로 유지.
                - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
-            2. mask_prompt
-               - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
-               - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
-               - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
-               - mask_prompt는 수정할 대상(제거/교체할 파츠나 요소)을 묘사하세요.
-                 손톱 전체를 묘사하지 말고, 실제로 변경할 부분만 묘사하세요.
-                 예: 캐릭터 얼굴 관련 → "nail tip with character art"
-                     파츠 교체 → "nail tip with bow charm"
-                     색상 변경 → "yellow nail tip"
-               - 형식: "nail tip with {현재 존재하는 특징}"
-              
-               - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
-               - 10단어 이내로 작성하세요.
-               - 좋은 예시:
-                 * "nail tip with 3d heart charm" (현재 하트 3d 파츠가 있을 때)
-                 * "nail tip with white base" (현재 흰색일 때)
-                 * "nail tip with glitter" (현재 글리터가 있을 때)
-               - 나쁜 예시 (절대 금지):
-                 * 수정 후 결과물 색상
-                 * "nail tip with previous design" (의미 없음)
-                 * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
-                 
-            [mask_prompt 작성 규칙 - 매우 중요]
-            - 원본 이미지에서 실제로 보이는 특징만 묘사하세요. 수정 후 결과물 금지.
-            - designPlan의 base_color 이름(예: "Pumpkin Green", "Tulipan Violet")을\s
-              그대로 쓰지 말고 실제 보이는 색감으로 변환하세요.
-              예: "Pumpkin Green" → "green nail tip"
-                    "Tulipan Violet" → "purple nail tip"
-                    "Sun Baked Earth" → "brown nail tip"
-            - 최대한 짧고 단순하게: "[색상/파츠] nail tip" 형식
-            - 색상 수정 시: "[단순 색상] nail tip" 형식으로 간결하게
-              예: "brown nail tip", "dark nail tip", "light pink nail tip"
-            - 파츠 수정 시: "nail tip with [파츠]"
-              예: "nail tip with bow charm", "nail tip with star charm"
-            - 같은 파츠가 여러 손톱에 있을 때: 베이스 색도 함께
-              예: "brown nail tip with 3d bow charm"
-            - 수정 후 결과물을 묘사하지 말고, 현재 원본 이미지에 있는 것을 묘사하세요.
+            2. fingerOverrides (필수 — 수정 대상 손가락 반드시 명시)
+               - 키: thumb / index / middle / ring / pinky
+               - 값: 무엇을 어떻게 바꾸는지 영어 한 문장.
+               - 수정 대상 손가락만 포함. 전체 변경이면 5개 모두 포함.
+               - 예: {"middle": "replace 3D heart charm with 3D star charm"}
+                      {"index": "change base color to coral pink"}
+                      {"thumb": "add glitter", "ring": "add glitter"}
+               - [직전 손가락별 플랜]에서 어느 손가락에 뭐가 있는지 확인해서
+                 정확한 손가락을 지정하세요.
 
             3. slotActions (기존과 동일, 세션 슬롯 업데이트용)
                - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
@@ -110,12 +91,14 @@ public class RefineService {
                - 언급 안 된 카테고리는 넣지 마세요.
                
             [중요 규칙]
+            - 첨부된 이미지가 현재 실제 디자인입니다.
+              텍스트 플랜과 이미지가 다를 수 있으니, 어느 손가락을 수정할지는
+              반드시 이미지를 직접 보고 판단하세요.
             - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만.
             {
                 "prompt": "A studio product photo of individual ...",
-                "mask_prompt": "nail tip with heart charm",
                 "slotActions": [
                     {"category": "motif", "action": "add_dislike", "value": "heart"}
                 ],
@@ -145,11 +128,26 @@ public class RefineService {
         String previousPlanJson = prevDesign.getDesignPlan() != null
                 ? prevDesign.getDesignPlan() : "(직전 플랜 없음)";
 
-        // 1. Gemini로 prompt + mask_prompt 생성
+        // 1. 원본 이미지 먼저 다운로드 — Gemini와 gen 서버 양쪽에 쓰임
+        String originalImageUrl = prevDesign.getImageUrls().get(0);
+        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
+        if (originalImageBytes == null) {
+            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
+        }
+        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
+
+        // 2. Gemini로 prompt + fingerOverrides 생성 → nail_index 추출
+        //    이미지(inline_data) + 텍스트 요청을 함께 보내 실제 디자인 기반으로 판단하게 함
         String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
         Map<String, Object> requestBody = Map.of(
                 "contents", List.of(Map.of("role", "user",
-                        "parts", List.of(Map.of("text", message)))),
+                        "parts", List.of(
+                                Map.of("inline_data", Map.of(
+                                        "mime_type", "image/png",
+                                        "data", originalImageBase64
+                                )),
+                                Map.of("text", message)
+                        ))),
                 "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
                 "generationConfig", Map.of(
                         "responseMimeType", "application/json",
@@ -169,20 +167,21 @@ public class RefineService {
             System.err.println("수정 요청 JSON 파싱 실패: " + aiText);
             throw new IllegalStateException("수정 내용을 이해하지 못했어요. 다시 말씀해 주세요.");
         }
-// ★ 이 줄 추가
+// ★ 이 줄 추가9.22
         System.out.println("[RefineService] Gemini 응답: " + aiText);
 
         String inpaintPrompt = resultJson.path("prompt").asText("");
-        String maskPrompt    = resultJson.path("mask_prompt").asText("");
+        List<Integer> nailIndex = extractNailIndex(resultJson.path("fingerOverrides"));
 
-// ★ 이 줄 추가
-        System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt + " / maskPrompt: " + maskPrompt);
+// ★ 이 줄 추가9.22 (inpaint)
+        System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt
+                + " / nail_index: " + nailIndex);
 
-        if (inpaintPrompt.isBlank() || maskPrompt.isBlank()) {
-            throw new IllegalStateException("수정할 영역을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
+        if (inpaintPrompt.isBlank()) {
+            throw new IllegalStateException("수정할 내용을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
         }
 
-        // 2. 슬롯 업데이트 (세션 컨텍스트 유지)
+        // 3. 슬롯 업데이트 (세션 컨텍스트 유지)
         Map<String, SlotData> slots = loadSlots(session.getExtractedPreferences());
         applySlotActions(slots, resultJson.path("slotActions"));
         try {
@@ -194,18 +193,10 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
-        // 3. 원본 이미지 → base64 변환 (S3 URL에서 다운로드)
-        String originalImageUrl = prevDesign.getImageUrls().get(0);
-        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
-        if (originalImageBytes == null) {
-            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
-        }
-        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
-
         // 4. gen 서버 /inpaint 호출 — seed는 원본과 동일해야 퀄리티 유지
         Long seed = prevDesign.getSeed(); // NailDesign에 seed 컬럼 필요
-        String inpaintedBase64 = nailImageService.inpaintNail(
-                originalImageBase64, inpaintPrompt, maskPrompt, seed
+        String inpaintedBase64 = nailImageService.inpaintNailByIndex(
+                originalImageBase64, inpaintPrompt, nailIndex, seed
         );
 
         // 5. 수정된 이미지 S3 업로드
@@ -288,6 +279,36 @@ public class RefineService {
                 slot.getLiked().remove(value);
             }
         }
+    }
+
+    /**
+     * Gemini가 반환한 fingerOverrides 키(엄지~새끼 영문명)를
+     * gen 서버 nail_index(1~5)로 변환한다.
+     *
+     * - fingerOverrides가 비어 있으면 전체 5개 손톱([1,2,3,4,5])을 반환.
+     *   (전체 분위기 변경처럼 특정 손가락을 지목하지 않는 요청에 해당)
+     * - 인식되지 않는 키는 조용히 무시한다.
+     * - 결과는 오름차순 정렬(생성 서버 권장).
+     */
+    private List<Integer> extractNailIndex(JsonNode fingerOverridesNode) {
+        if (fingerOverridesNode == null
+                || !fingerOverridesNode.isObject()
+                || fingerOverridesNode.isEmpty()) {
+            return List.of(1, 2, 3, 4, 5);
+        }
+
+        List<Integer> indices = new ArrayList<>();
+        fingerOverridesNode.fieldNames().forEachRemaining(finger -> {
+            Integer idx = FINGER_INDEX.get(finger.toLowerCase());
+            if (idx != null) indices.add(idx);
+        });
+
+        if (indices.isEmpty()) {
+            return List.of(1, 2, 3, 4, 5);
+        }
+
+        Collections.sort(indices);
+        return indices;
     }
 
     private void mergeFingerOverrides(JsonNode newNode, String existingJson,

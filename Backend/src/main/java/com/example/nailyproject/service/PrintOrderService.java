@@ -336,6 +336,7 @@ public class PrintOrderService {
 
             return PrinterProgressResponseDto.builder()
                     .success(body.path("success").asBoolean(false))
+                    .queueSize(body.hasNonNull("queueSize") ? body.get("queueSize").asInt() : 0)
                     .state(body.path("state").asText(null))
                     .percentage(body.hasNonNull("percentage") ? body.get("percentage").asInt() : null)
                     .remainingTimeMin(body.hasNonNull("remainingTimeMin") ? body.get("remainingTimeMin").asInt() : null)

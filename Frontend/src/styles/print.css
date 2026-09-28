@@ -379,6 +379,12 @@
     color: #4a3540;
 }
 
+.printer-progress__queue {
+    font-size: 12px;
+    color: var(--color-text-secondary, #888);
+    margin-left: 8px;
+}
+
 .printer-progress__percentage {
     font-weight: 800;
     font-size: 1.15rem;
