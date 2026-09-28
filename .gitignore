@@ -135,4 +135,6 @@ scan/_phone_check/
 photos/
 results/
 
-
+scan/_warp_NEW_box.jpg
+scan/_warp_OLD_box.jpg
+scan/naily_pipeline.py

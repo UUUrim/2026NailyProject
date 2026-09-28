@@ -265,6 +265,18 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     valid_cnts = [c for c in cnts if cv2.contourArea(c) > min_area]
     if not valid_cnts:
         valid_cnts = cnts
+    # The finger always enters the rig from the BOTTOM, so its fingertip sits
+    # somewhere inside the frame - a blob touching the TOP border can't be it.
+    # The rig has a red object/tape at the top edge that passes the warm-tone
+    # threshold; with no finger in frame it was the only blob and got measured
+    # as a ~95mm "nail", and with a finger present it still won the topmost
+    # rule below because it reaches y=0.
+    valid_cnts = [c for c in valid_cnts if cv2.boundingRect(c)[1] > 0]
+    if not valid_cnts:
+        raise RuntimeError(
+            "No finger detected.\n"
+            "  → Only blobs touching the top edge of the frame were found."
+        )
     # Reject warm-toned BACKGROUND (floor, furniture, shoes) that the a*/L
     # threshold also passes.  The marker is by protocol placed right beside the
     # finger on the same surface, so the finger blob is horizontally adjacent to
@@ -512,6 +524,16 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
         with np.errstate(all='ignore'):
             profile = np.nanmean(strip, axis=0)
 
+        # 손톱 폭 양 끝 열이 finger_mask 밖이면 그 열 전체가 NaN이 되는데,
+        # uniform_filter1d는 NaN을 이웃 열로 번지게 해서 edge/centre 평균이
+        # 통째로 NaN → c_curve_mm=nan → 라이브 측정이 매 프레임 UNUSABLE이 됐다.
+        # 유효한 열로 보간해서 NaN을 메운 뒤 스무딩한다.
+        valid = np.isfinite(profile)
+        if valid.sum() < 6:
+            continue
+        profile = np.interp(np.arange(len(profile)),
+                            np.flatnonzero(valid), profile[valid])
+
         profile_smooth = uniform_filter1d(profile, size=7)
         nc = len(profile_smooth)
         if nc < 6:
@@ -522,6 +544,8 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
         right_b  = float(profile_smooth[-nc//6:].mean())
         edge_b   = (left_b + right_b) / 2.0
         drop     = centre_b - edge_b
+        if not np.isfinite(drop):
+            continue
 
         c_est = float(np.clip(round(drop * 0.08 + 0.8, 2), 0.3, 5.0))
         c_estimates.append(c_est)

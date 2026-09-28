@@ -126,6 +126,10 @@ CAMERA_TOP        = 0       # 탑뷰: USB 웹캠 (C920)
 CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1: 사용 안 함
 ARUCO_SIZE_MM     = 20.0
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
+# 탑뷰 상단 crop 픽셀 (0 = 크롭 없음). 리그 상단 가장자리의 빨간 물체(1080p 기준
+# y≈0~95)가 피부색 임계값을 통과해 손가락으로 오인식되던 문제 - 카메라에서
+# 읽은 직후 잘라내서 라이브 측정/화면/저장 사진이 모두 같은 크롭을 쓴다.
+CROP_TOP_PX       = 120
 # 탑뷰 웹 스트림에서 ArUco 마커를 가리기 위한 왼쪽 crop 설정 (측정용 저장
 # 사진에는 영향 없음 — _capture_top_stream 참고). 마커는 매트에 고정된
 # 위치라 오른쪽 끝 + 여백을 한 번 잡으면 그 finger 촬영 내내 그대로 쓴다.
@@ -418,9 +422,16 @@ class PhoneCamera:
         self._full_res        = None
         self._capture_wanted  = threading.Event()
         self._full_res_ready  = threading.Event()
+        self._last_preview_t  = 0.0
 
     def isOpened(self):
         return True
+
+    def is_connected(self, max_age: float = 3.0) -> bool:
+        """폰 카메라 페이지가 최근 max_age초 안에 프리뷰를 보냈는지 - 폰 없이
+        탑뷰만으로 테스트할 때 사이드뷰 고화질 촬영 타임아웃(8초)을 손가락마다
+        기다리지 않고 바로 건너뛰기 위한 판단 기준."""
+        return time.time() - self._last_preview_t < max_age
 
     def read(self):
         with self._lock:
@@ -430,6 +441,7 @@ class PhoneCamera:
     def push_preview(self, frame: np.ndarray):
         with self._lock:
             self._preview = cv2.rotate(frame, self.ROTATE)
+            self._last_preview_t = time.time()
 
     def capture_wanted(self) -> bool:
         return self._capture_wanted.is_set()
@@ -503,6 +515,10 @@ def _get_top_cam() -> cv2.VideoCapture:
         return _top_cam
 
 
+def _crop_top(frame: np.ndarray) -> np.ndarray:
+    return frame[CROP_TOP_PX:, :] if CROP_TOP_PX > 0 else frame
+
+
 def _push_frame(q: _q.Queue, frame: np.ndarray):
     if q.full():
         try: q.get_nowait()
@@ -555,6 +571,7 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
         if not _S.top_capture_busy.is_set():
             ret, frame = cap.read()
             if ret:
+                frame = _crop_top(frame)
                 # 세션 시작 직후(_capture_top_stream이 아직 첫 프레임도 못 돌린
                 # 찰나) 이 idle 루프가 먼저 프레임을 밀어넣는 경우, 마커가
                 # 아직 안 잡혀 있어(_S.marker_hide_x == 0) 그대로 노출된다 —
@@ -619,6 +636,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             ret, frame = cap.read()
             if not ret:
                 return False
+            frame = _crop_top(frame)
 
             worker.submit(frame)
             result = worker.latest()
@@ -766,6 +784,11 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
 
             if _S.force_capture_side.is_set():
                 _S.force_capture_side.clear()
+                if is_phone and not cap.is_connected():
+                    # 폰 카메라 페이지가 안 열려있음 - 8초 타임아웃을 기다리지 않고
+                    # 바로 건너뛴다. 탑뷰만으로도 측정은 진행된다 (c-curve만 생략).
+                    print(f"  [{finger}] 폰 사이드뷰 미연결 → 사이드뷰 건너뜀 (탑뷰만 측정)")
+                    return False
                 if is_phone:
                     if ret:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",

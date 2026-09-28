@@ -96,7 +96,7 @@ FLAT_TIP_SHAPES = {"square", "ballerina"}
 LONG_SHAPES = {"almond", "stiletto", "ballerina"}
 TIP_EXTENSION_DEFAULT_MM = {
     "round": 5.0, "oval": 5.0, "square": 5.0,
-    "almond": 7.0, "stiletto": 8.0, "ballerina": 7.0,
+    "almond": 7.0, "stiletto": 15.0, "ballerina": 7.0,
 }
 
 # Default top-edge fillet reach (--edge-round) in mm, per shape. This is a
@@ -130,7 +130,7 @@ WIDTH_FIT_MARGIN_MM = 1.5
 # used below. 1 = straight line to the point, 2 = full ellipse (round/oval/
 # almond's curve); tuned between the two so the point stays clearly pointed
 # but isn't a razor-straight wedge.
-STILETTO_TAPER_N = 1.4
+STILETTO_TAPER_N = 1.2
 
 
 # ─────────────────────────────────────────────────────────────
@@ -487,9 +487,9 @@ def generate_stl(params, output_path):
     CUTICLE_R = float(params.get("cuticle_round_mm", 0.0) or 0.0)
     CUTICLE_R = min(CUTICLE_R, CUT_DEPTH * 0.9, W * 0.4, L * 0.4)
 
-    # Stiletto: taper covers the extension plus the top 30 % of the natural nail,
-    # so the sides start narrowing before the free edge — matches the smooth
-    # elongated silhouette in the reference (not just an abrupt spike at the tip).
+    # Stiletto: sides start narrowing at 70% of the natural (measured) nail
+    # length — y_side_top = L_total - tip_h = 0.7*L, so tip_h works out to
+    # the extension plus the remaining 30% of the natural nail.
     # Coffin: taper over extension only (flat tip keeps full width longer).
     if shape == "stiletto":
         tip_h = L_ext + L * 0.30
