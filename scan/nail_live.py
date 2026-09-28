@@ -773,18 +773,12 @@ def live_ccurve_stage(cap, finger, width_mm, output_dir):
 # ─────────────────────────────────────────────────────────────
 
 def save_results(results, aruco_size_mm, output_dir):
-    payload   = nm.build_payload(results, aruco_size_mm)
-    json_path = os.path.join(output_dir, "nail_measurements.json")
-    with open(json_path, "w") as f:
-        json.dump(payload, f, indent=2)
-
-    profiles     = nm.build_profile(results)
-    profile_path = os.path.join(output_dir, "profile.json")
-    with open(profile_path, "w") as f:
-        json.dump(profiles[0] if len(profiles) == 1 else profiles, f, indent=2)
+    payload   = nm.build_merged_payload(results, aruco_size_mm)
+    json_path = os.path.join(output_dir, "measurements.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
     print(f"\n[Saved] {json_path}")
-    print(f"[Saved] {profile_path}")
     return json_path
 
 
