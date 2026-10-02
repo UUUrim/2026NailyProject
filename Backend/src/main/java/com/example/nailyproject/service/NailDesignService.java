@@ -748,7 +748,18 @@ public class NailDesignService {
         // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
         //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
         if (!scanAuto) {
+            // 사용자가 색을 직접 고르지 않았는지 미리 기록 (fillMissingFromScan 이 랜덤 색을 채워 넣기 때문)
+            boolean userPickedColor = !getLiked(slots, "color").isEmpty();
             fillMissingFromScan(slots, handScan);
+
+            // 참고 이미지 기반 생성: 색의 기준은 "사진"이다.
+            // 사용자가 색을 직접 고르지 않았다면, 스캔 팔레트에서 랜덤으로 채워진 색이
+            // 사진 색(예: 핑크)을 덮어쓰지 않도록 되돌린다. (disliked 는 건드리지 않음)
+            boolean hasRefImage = imageBase64 != null && !imageBase64.isBlank();
+            if (hasRefImage && !userPickedColor) {
+                SlotData colorSlot = slots.get("color");
+                if (colorSlot != null) colorSlot.getLiked().clear();
+            }
         }
 
         if (session != null) {
@@ -758,8 +769,8 @@ public class NailDesignService {
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
                 : summarizeSlots(slots, handScan)
-                        + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
-                        + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null);
+                + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
+                + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null);
 
         String previousPlanJson = null;
         if (session != null && !scanAuto) {
@@ -782,6 +793,14 @@ public class NailDesignService {
         if (scanAuto && plan != null && plan.isObject()
                 && handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
             ((ObjectNode) plan).put("shape", handScan.getRecommendedShape());
+        }
+
+        // 색상은 LLM이 아니라 코드가 확정한다.
+        //  - 슬롯에 hex가 있으면 고정 표(ColorNameService)로 변환 → 첫 번째 = base 색, 두 번째 = accent 색
+        //  - 슬롯이 없으면(scan-auto / 참고 이미지 등) 플랜이 고른 색 문구의 앞 2개를 그대로 사용
+        List<String> promptColors = resolvePromptColors(slots, plan);
+        if (plan != null && plan.isObject()) {
+            ((ObjectNode) plan).put("color", String.join(", ", promptColors));
         }
 
         if (session != null) {
@@ -815,7 +834,7 @@ public class NailDesignService {
             } catch (Exception ignored) {}
         }
 
-        String combinedPrompt = buildCombinedPromptFromPlan(plan, noPhrases, fingerDislikesMap);
+        String combinedPrompt = buildCombinedPromptFromPlan(plan, noPhrases, fingerDislikesMap, promptColors);
 
         if (session != null) {
             session.updateGeneratedPrompt(combinedPrompt);
@@ -881,14 +900,20 @@ public class NailDesignService {
             } catch (JsonProcessingException ignored) {}
         }
 
-        StringBuilder chosen = new StringBuilder(plan.path("color").asText("").toLowerCase());
-        for (String f : List.of("thumb", "index", "middle", "ring", "pinky")) {
-            chosen.append(' ').append(plan.path(f).path("base_color").asText("").toLowerCase());
+        // 플랜이 고른 색 문구(top-level color 는 콤마 구분, 손가락별 base_color)를 정규화해 집합으로 만든다.
+        // (단어 '포함'이 아니라 '일치'로 판정: "rose"가 "dusty rose"에 포함된다고 오판하지 않도록)
+        Set<String> chosenSet = new HashSet<>();
+        for (String c : plan.path("color").asText("").split(",")) {
+            String n = c.toLowerCase().replaceAll("[^a-z0-9]", "");
+            if (!n.isBlank()) chosenSet.add(n);
         }
-        String chosenNorm = chosen.toString().replaceAll("[^a-z0-9]", "");
+        for (String f : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            String n = plan.path(f).path("base_color").asText("").toLowerCase().replaceAll("[^a-z0-9]", "");
+            if (!n.isBlank()) chosenSet.add(n);
+        }
 
         List<String> used = new ArrayList<>();
-        if (!palette.isEmpty() && !chosenNorm.isBlank()) {
+        if (!palette.isEmpty() && !chosenSet.isEmpty()) {
             List<String> names;
             try {
                 names = colorNameService.resolveColorNames(palette);
@@ -897,7 +922,7 @@ public class NailDesignService {
             }
             for (int i = 0; i < palette.size() && i < names.size(); i++) {
                 String nameNorm = names.get(i) == null ? "" : names.get(i).toLowerCase().replaceAll("[^a-z0-9]", "");
-                if (nameNorm.length() >= 3 && chosenNorm.contains(nameNorm)) {
+                if (nameNorm.length() >= 3 && chosenSet.contains(nameNorm)) {
                     used.add(palette.get(i));
                 }
             }
@@ -1139,17 +1164,51 @@ public class NailDesignService {
         } catch (Exception e) { return ""; }
     }
 
+    /**
+     * 슬롯의 color(liked) → 프롬프트용 색상 단어. 최대 2개, 중복 단어 제거.
+     * hex는 ColorNameService의 고정 표로 변환되고, hex가 아닌 값은 그대로 통과한다.
+     * 첫 번째 = base 색, 두 번째 = accent 색.
+     */
+    private List<String> resolveSlotColorWords(List<String> liked) {
+        List<String> words = new ArrayList<>();
+        if (liked == null) return words;
+        for (String v : liked) {
+            if (v == null || v.isBlank()) continue;
+            String resolved = colorNameService.resolveColorName(v);
+            if (resolved == null || resolved.isBlank()) continue;
+            final String w = resolved.trim();
+            if (words.stream().noneMatch(x -> x.equalsIgnoreCase(w))) words.add(w);
+            if (words.size() == 2) break;
+        }
+        return words;
+    }
+
+    /**
+     * 최종 프롬프트에 쓸 색상 단어(최대 2개) 결정.
+     * 1순위: 사용자가 확정한 슬롯 색(hex → 고정 표)   2순위: 플랜 LLM이 고른 top-level color 문구
+     */
+    private List<String> resolvePromptColors(Map<String, SlotData> slots, JsonNode plan) {
+        List<String> words = resolveSlotColorWords(getLiked(slots, "color"));
+        if (!words.isEmpty()) return words;
+
+        String planColor = (plan == null) ? "" : plan.path("color").asText("");
+        for (String c : planColor.split(",")) {
+            final String w = c.trim();
+            if (w.isBlank()) continue;
+            if (words.stream().noneMatch(x -> x.equalsIgnoreCase(w))) words.add(w);
+            if (words.size() == 2) break;
+        }
+        return words;
+    }
+
     private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan) {
         StringBuilder sb = new StringBuilder();
         for (String cat : List.of("shape", "mood", "designType", "color", "season", "motif")) {
             List<String> liked = getLiked(slots, cat);
             if (!liked.isEmpty()) {
                 if ("color".equals(cat)) {
-                    boolean allHex = liked.stream().allMatch(v -> v != null && v.trim().matches("^#?[0-9A-Fa-f]{6}$"));
-                    List<String> resolvedNames = allHex
-                            ? colorNameService.resolveColorNames(liked).stream().distinct().toList()
-                            : liked.stream().distinct().toList();
-                    sb.append("color(이미 확정된 값, 절대 다른 이름으로 바꾸지 말고 그대로 사용): ")
+                    List<String> resolvedNames = resolveSlotColorWords(liked);
+                    sb.append("color(서버가 확정한 색상 단어 - 첫 번째=base 색, 두 번째=accent 색. 단어와 순서를 절대 바꾸지 말고 그대로 사용): ")
                             .append(String.join(", ", resolvedNames)).append("\n");
                 } else {
                     sb.append(cat).append(": ").append(String.join(", ", liked)).append("\n");
@@ -1166,8 +1225,8 @@ public class NailDesignService {
                 List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
                         objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
                 if (!palette.isEmpty()) {
-                    List<String> resolvedPalette = colorNameService.resolveColorNames(palette);
-                    sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, 이 중에서 mood와 가장 잘 어울리는 것을 선택): ")
+                    List<String> resolvedPalette = colorNameService.resolveColorNames(palette).stream().distinct().toList();
+                    sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트를 서버가 색상 단어로 변환한 목록, 이 중에서 mood와 가장 잘 어울리는 것을 그대로 선택): ")
                             .append(String.join(", ", resolvedPalette)).append("\n");
                 }
             } catch (JsonProcessingException ignored) {}
@@ -1231,13 +1290,13 @@ public class NailDesignService {
         return sb.toString();
     }
 
-    private String buildCombinedPromptFromPlan(JsonNode plan, List<String> noPhrases, Map<String, List<String>> fingerDislikesMap) {
+    private String buildCombinedPromptFromPlan(JsonNode plan, List<String> noPhrases,
+                                               Map<String, List<String>> fingerDislikesMap, List<String> colorWords) {
         String shape = toPromptText(plan.path("shape").asText("round"));
         // ballerina → coffin (프롬프트에서만)
         if ("ballerina".equalsIgnoreCase(shape)) shape = "coffin";
         String mood = plan.path("mood").asText("");
         String season = plan.path("season").asText("");
-        String overallColor = plan.path("color").asText("");
         String overallDesignType = plan.path("designType").asText("");
         String overallMotif = plan.path("motif").asText("");
 
@@ -1246,13 +1305,9 @@ public class NailDesignService {
         parts.add("nailart");
 
         if (!overallDesignType.isBlank()) parts.add(toPromptText(overallDesignType));
-        if (!overallColor.isBlank()) {
-            String colorPrompt = Arrays.stream(overallColor.split(","))
-                    .map(String::trim)
-                    .filter(c -> !c.isBlank())
-                    .map(c -> toPromptText(c) + " color") //base color말고 그냥 color로 써봄
-                    .collect(Collectors.joining(", "));
-            parts.add(colorPrompt);
+        // 첫 번째 색 = base 색 태그 (예: "pale pink base"). 두 번째 색은 아래 accent 문장에만 쓴다.
+        if (colorWords != null && !colorWords.isEmpty()) {
+            parts.add(toPromptText(colorWords.get(0)) + " base");
         }
         if (!overallMotif.isBlank() && !"none".equalsIgnoreCase(overallMotif)) parts.add(toPromptText(overallMotif) + " motif");
 
@@ -1267,6 +1322,11 @@ public class NailDesignService {
                 parts.add(desc);
                 if (desc.contains("\"")) hasExplicitTextRequest = true;
             }
+        }
+
+        // 두 번째 색 = accent 네일/장식의 색 (문장 안에서만 사용, 태그로는 넣지 않음)
+        if (colorWords != null && colorWords.size() > 1) {
+            parts.add("with accent nails in " + toPromptText(colorWords.get(1)));
         }
 
         parts.add("placed with generous spacing and no overlapping, each charm must have perfectly defined sharp edges and clean precise shape");

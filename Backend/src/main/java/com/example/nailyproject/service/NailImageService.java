@@ -11,6 +11,7 @@ import org.springframework.web.client.RestTemplate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 이미지 생성 서버(main_gen.py, port 8000) 클라이언트.
@@ -31,6 +32,23 @@ public class NailImageService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
+    /**
+     * gen 서버는 diffusers 파이프라인(스케줄러 포함)을 하나 공유하기 때문에 동시 요청에 안전하지 않다.
+     * (steps가 다른 요청이 겹치면 "index 9 is out of bounds ..." / "tensors on different devices" 500이 난다.)
+     * 스와치 백그라운드 스레드, 메인 생성, inpaint 가 겹치지 않도록 이 앱에서 나가는 요청은 한 번에 하나만 보낸다.
+     */
+    private static final ReentrantLock GEN_SERVER_LOCK = new ReentrantLock(true); // fair: 먼저 온 요청부터
+
+    private ResponseEntity<String> postToGenServer(String path, Map<String, Object> body) {
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
+        GEN_SERVER_LOCK.lock();
+        try {
+            return restTemplate.postForEntity(genServerUrl + path, request, String.class);
+        } finally {
+            GEN_SERVER_LOCK.unlock();
+        }
+    }
+
     private HttpHeaders buildHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -47,7 +65,7 @@ public class NailImageService {
      * 프롬프트 기반 네일 이미지를 생성하고 base64 문자열로 반환한다.
      *
      * @param prompt 조립된 최종 프롬프트
-//     * @param seed   재현용 시드 (null 이면 서버가 랜덤 처리)
+    //     * @param seed   재현용 시드 (null 이면 서버가 랜덤 처리)
      * @return base64 인코딩된 PNG 이미지
      */
 //    public String generateNailImage(String prompt, Long seed) {
@@ -74,11 +92,12 @@ public class NailImageService {
     public String generateNailImage(String prompt) {
         Map<String, Object> body = new HashMap<>();
         body.put("prompt", prompt);
+        body.put("steps", 20);
+        body.put("guidance_scale", 1);
+        body.put("width", 768);
+        body.put("height", 512);
 
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                genServerUrl + "/generate", request, String.class
-        );
+        ResponseEntity<String> response = postToGenServer("/generate", body);
 
         return extractBase64(response.getBody(), "image_base64");
     }
@@ -112,10 +131,7 @@ public class NailImageService {
             body.put("seed", seed);
         }
 
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                genServerUrl + "/inpaint", request, String.class
-        );
+        ResponseEntity<String> response = postToGenServer("/inpaint", body);
 
         return extractBase64(response.getBody(), "image_base64");
     }
@@ -144,10 +160,7 @@ public class NailImageService {
             body.put("seed", seed);
         }
 
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                genServerUrl + "/inpaint", request, String.class
-        );
+        ResponseEntity<String> response = postToGenServer("/inpaint", body);
         return extractBase64(response.getBody(), "image_base64");
     }
 
@@ -174,10 +187,7 @@ public class NailImageService {
             body.put("seed", seed);
         }
 
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                genServerUrl + "/generate", request, String.class
-        );
+        ResponseEntity<String> response = postToGenServer("/generate", body);
 
         return extractBase64(response.getBody(), "image_base64");
     }
