@@ -126,6 +126,19 @@ SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5}
 # (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
 WIDTH_FIT_MARGIN_MM = 1.5
 
+# 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
+# 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → L*DOME_CREST_END부터
+# 팁 끝(C*TIP_DOME_FRAC)으로 완만히 줄어드는 렌즈 모양.
+DOME_CREST_START = 0.40
+# 돔 최고 높이 배율(측정/하한 C에 곱함).  1.0이면 C 그대로, 낮출수록 천장이 낮아짐.
+DOME_HEIGHT_SCALE = 0.75
+DOME_CREST_END   = 0.55
+TIP_DOME_FRAC    = 0.2
+
+# 폭 방향 C-curve 하한(mm).  측정값/폴백이 이보다 작으면 이 값으로 올린다.
+# 0이면 하한 없음.  --exact 모드에는 적용하지 않음.
+MIN_C_CURVE_DEFAULT_MM = 2.0
+
 # Stiletto plan-view taper shape — see the superellipse formula where it's
 # used below. 1 = straight line to the point, 2 = full ellipse (round/oval/
 # almond's curve); tuned between the two so the point stays clearly pointed
@@ -464,6 +477,14 @@ def generate_stl(params, output_path):
         L_ext = float(params.get("tip_extension_mm") or _ext_default)
     x_cen     = W / 2.0
 
+    # Width-direction curvature floor: a too-shallow measured C-curve (or the
+    # 1.0 mm fallback) prints nearly flat, so raise it to the minimum and
+    # recompute the arc radius for the final width (R = W²/(8C) + C/2).
+    MIN_C = float(params.get("min_c_curve_mm", MIN_C_CURVE_DEFAULT_MM) or 0.0)
+    if not EXACT and C < MIN_C:
+        C     = MIN_C
+        arc_r = W ** 2 / (8.0 * C) + C / 2.0
+
     shape   = params.get("shape", "round")
     EDGE_R  = float(params.get("edge_round_mm", 0.0))
     L_total = L + L_ext
@@ -565,9 +586,31 @@ def generate_stl(params, output_path):
         sag   = R_row[:, None] - np.sqrt(
             np.maximum(R_row[:, None] ** 2 - dx ** 2, 0.0))
         z_bot = C_row[:, None] - sag                 # rounder dome at base
-    else:
+    elif EXACT:
         arc_off = arc_z(grid_x, x_cen, C, arc_r)   # (ny, nx)  0→C  bowl
         z_bot   = C - arc_off                        # (ny, nx)  C→0  dome (inner)
+    else:
+        # Row-wise dome that runs all the way to the free edge.  Each row gets
+        # its own arch spanning that row's footprint (edges at z=0), so the
+        # dome keeps following the narrowing tip instead of going flat.
+        hw     = (grid_x[:, -1] - grid_x[:, 0]) / 2.0               # (ny,)
+        xc_row = (grid_x[:, -1] + grid_x[:, 0]) / 2.0
+        # Lens-shaped height profile along the length: the rim stays on one
+        # flat plane (z=0) while the dome's crest rises from the cuticle end,
+        # peaks over the body, and eases down toward the tip (but keeps a
+        # weak dome, TIP_DOME_FRAC*C, right to the free edge).
+        y0, y1, y2 = -CUT_DEPTH, DOME_CREST_START * L, DOME_CREST_END * L
+        up   = np.clip((ys - y0) / max(y1 - y0, 1e-6), 0.0, 1.0)
+        up   = np.sin(up * np.pi / 2.0)   # ease-out: rises at once, flattens at the crest
+        dn   = np.clip((ys - y2) / max(L_total - y2, 1e-6), 0.0, 1.0)
+        dn   = dn * dn * (3.0 - 2.0 * dn)
+        fade = up * (1.0 - (1.0 - TIP_DOME_FRAC) * dn)
+        C_row  = C * DOME_HEIGHT_SCALE * fade
+        # Parabolic cross-section per row (edges at z=0).  Unlike a circular
+        # arc it stays valid for any height/width ratio, so the narrow cuticle
+        # arch rows can rise smoothly instead of being clamped flat.
+        u      = (grid_x - xc_row[:, None]) / np.maximum(hw, 1e-6)[:, None]
+        z_bot  = C_row[:, None] * np.maximum(1.0 - u ** 2, 0.0)
     z_top = z_bot + THICK                          # (ny, nx)  uniform shell
 
     # ── Top perimeter edge rounding ───────────────────────────
@@ -778,6 +821,11 @@ def main():
                         "2.35; 0 = sharp corner, matching the arch's raw "
                         "tangent exactly). Capped at ~90%% of "
                         "--cuticle-depth — raise that too for more room")
+    p.add_argument("--min-c-curve",    type=float,
+                   default=MIN_C_CURVE_DEFAULT_MM,
+                   help="Minimum width-direction C-curve height in mm; a "
+                        "smaller measured value is raised to this "
+                        "(default 2.0; 0 = no floor). Ignored in --exact mode")
     p.add_argument("--thickness",      type=float, default=0.6,
                    help="Uniform shell thickness in mm (default 0.6)")
     p.add_argument("--exact",          action="store_true",
@@ -866,6 +914,7 @@ def main():
             "tip_extension_mm":    args.tip_extension,
             "cuticle_depth_mm":    args.cuticle_depth,
             "cuticle_curve_mm":    args.cuticle_curve,
+            "min_c_curve_mm":      args.min_c_curve,
             "cuticle_round_mm":    args.cuticle_round,
             "thickness_mm":        args.thickness,
             "shape":               args.shape,
