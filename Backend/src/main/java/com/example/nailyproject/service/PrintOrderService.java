@@ -268,9 +268,12 @@ public class PrintOrderService {
         // 기존 PRINTING 상태 닫기
         printOrderRepository.completeAllPrintingByUser(user);  // 추가
 
-        // 실제 PRINTING 전환은 /print-result 콜백에서 하지만, 사용자 화면엔 "요청은 갔다"는
-        // 걸 바로 보여주기 위해 낙관적으로 미리 반영해둔다. 콜백이 실패로 오면 다시 FAILED로 덮어써진다.
-        order.updateStatus(PrintOrder.PrintStatus.PRINTING);
+        // printer 서버의 /print/start는 큐에 작업을 넣기만 하고 즉시 응답한다 (다른 작업이
+        // 출력 중이면 그 뒤에서 대기). 그래서 여기서 바로 PRINTING으로 찍으면, 실제로는 큐에서
+        // 기다리고 있을 뿐인데 "출력 중"으로 잘못 보이는 문제. 진짜 출력이 시작됐다는
+        // 신호(슬라이싱+프린터 업로드까지 끝남)는 /print-result 콜백(receivePrintResult)으로
+        // 따로 오니, 여기서는 "큐에 들어갔다"까지만 반영.
+        order.updateStatus(PrintOrder.PrintStatus.WAITING_IN_QUEUE);
         printOrderRepository.save(order);
         return toDto(order);
     }

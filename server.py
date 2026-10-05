@@ -316,17 +316,37 @@ def _run_slice_and_print(merged_model_url, output_dir, callback_url):
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
-
+#실제 동작하는 poll_until_complete부분
 def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
-    """출력 완료될 때까지 폴링, 완료되면 콜백으로 COMPLETED 전송"""
+    """출력 완료될 때까지 폴링, 완료되면 콜백으로 COMPLETED 전송.
+
+    FINISH와 IDLE을 똑같이 "완료"로 취급하면, 사용자가 프린터에서 출력을 도중에
+    취소했을 때도 프린터가 결국 IDLE로 돌아가기 때문에 취소를 완료로 잘못 보고하는
+    문제가 있었다. 그래서 IDLE로 돌아간 시점의 진행률(percentage)을 같이 봐서,
+    거의 다 찍은 상태(95% 이상)에서 IDLE이면 완료로, 그보다 낮은 진행률에서
+    IDLE이면 중간에 취소/중단된 것으로 구분한다.
+    """
     start = time.time()
+    last_percentage = 0
     while time.time() - start < timeout:
         time.sleep(interval)
         try:
             status = _fetch_printer_status()
             state = status.get("state", "")
-            if "FINISH" in state.upper() or "IDLE" in state.upper():
+            pct = status.get("percentage") or 0
+            last_percentage = max(last_percentage, pct)
+
+            if "FINISH" in state.upper():
                 requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                return
+            if "IDLE" in state.upper():
+                if last_percentage >= 95:
+                    requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                else:
+                    requests.post(callback_url, json={
+                        "success": False,
+                        "message": f"출력이 중간에 취소되거나 중단됐습니다 (진행률 {last_percentage}%에서 중단)."
+                    })
                 return
         except Exception:
             pass  # 연결 끊겨도 폴링 계속

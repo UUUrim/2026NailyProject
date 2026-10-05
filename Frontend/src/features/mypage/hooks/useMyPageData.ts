@@ -44,7 +44,8 @@ export function useMyPageData() {
       const hasActive = prints.some(p =>
           p.status === 'PRINTING' ||
           p.status === 'MERGING' ||
-          p.status === 'MERGED'
+          p.status === 'MERGED' ||
+          p.status === 'WAITING_IN_QUEUE'
       )
       return hasActive ? 5000 : false
     }

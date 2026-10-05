@@ -60,6 +60,7 @@ public class PrintOrder {
         QUEUED,     // 신청만 된 상태
         MERGING,    // printer 서버에 병합 요청 보냄, 응답 대기 중
         MERGED,     // 병합 완료 — 사용자 확인 후 /print/start를 눌러야 진짜 출력 시작
+        WAITING_IN_QUEUE, //출력 대기 (큐 용)
         PRINTING,   // 슬라이싱+프린터 업로드까지 끝나서 실제 출력 중
         COMPLETED,
         FAILED

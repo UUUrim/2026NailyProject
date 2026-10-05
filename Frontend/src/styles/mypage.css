@@ -1516,6 +1516,11 @@
   background: linear-gradient(145deg, #eef1ff 0%, #fff 52%, #e8ecff 100%);
 }
 
+.mypage-x__printx-status--waiting_in_queue {
+  border-color: #d8dff8;
+  background: linear-gradient(145deg, #eef1ff 0%, #fff 52%, #e8ecff 100%);
+}
+
 .mypage-x__printx-status--merging {
   border-color: #ddd0f5;
   background: linear-gradient(145deg, #f4eefd 0%, #fff 52%, #efe6fb 100%);
@@ -1564,6 +1569,10 @@
 }
 
 .mypage-x__printx-status--queued .mypage-x__printx-status-copy span {
+  color: #6a78b8;
+}
+
+.mypage-x__printx-status--waiting_in_queue .mypage-x__printx-status-copy span {
   color: #6a78b8;
 }
 
@@ -2099,7 +2108,8 @@
 }
 
 .mypage-x__badge--queued,
-.mypage-x__badge--ready {
+.mypage-x__badge--ready,
+.mypage-x__badge--waiting_in_queue{
   background: #eef1ff;
   color: #5468d4;
 }
