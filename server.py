@@ -1300,7 +1300,10 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
 
-def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, callback_url: str):
+def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, callback_url: str,
+                          tip_extension_mm: float | None = None):
+    """손가락별로 "내 실측 손톱 길이 + 연장 길이(tip_extension_mm)"짜리 STL을 만들어 S3에 올린다.
+    tip_extension_mm이 None이면 nail_exact_stl.py가 쉐입별 기본값(TIP_EXTENSION_DEFAULT_MM)을 쓴다."""
     try:
         results_root = os.path.join(BASE, "results", userid, session, hand)
         stl_dir      = os.path.join(results_root, "stl")
@@ -1313,28 +1316,54 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
         with open(mp, encoding="utf-8") as f:
             available_fingers = set(json.load(f).get("by_finger", {}))
 
+        ext_label = f"+{tip_extension_mm}mm" if tip_extension_mm is not None else "쉐입 기본값"
+        print(f"[STL] {userid}/{session}/{hand} shape={shape} 연장 길이={ext_label}")
+
+        succeeded = []
         for finger in FINGER_ORDER:
             if finger not in available_fingers:
                 continue
-            stl_result = subprocess.run([
+            # STL 파일명엔 길이가 안 들어가서(nail_{finger}_{shape}.stl) 이전 출력 때 만든 파일과
+            # 이름이 같다. 이번 생성이 실패했을 때 예전 길이의 파일이 남아 있다가 업로드·출력되지
+            # 않도록, 먼저 지우고 새로 만든다.
+            out_path = os.path.join(stl_dir, f"nail_{finger}_{shape}.stl")
+            if os.path.isfile(out_path):
+                os.remove(out_path)
+
+            cmd = [
                 sys.executable, os.path.join(_SCAN_DIR, "nail_exact_stl.py"),
                 "--input", mp, "--shape", shape, "--finger", finger, "--output", stl_dir,
-            ], cwd=_SCAN_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            if stl_result.returncode != 0:
+            ]
+            if tip_extension_mm is not None:
+                cmd += ["--tip-extension", str(tip_extension_mm)]
+            stl_result = subprocess.run(cmd, cwd=_SCAN_DIR, capture_output=True, text=True,
+                                        encoding="utf-8", errors="replace")
+            if stl_result.returncode != 0 or not os.path.isfile(out_path):
                 print(f"  [{finger}] STL 생성 실패: {stl_result.stderr[-500:]}")
             else:
                 print(f"  [{finger}] STL 생성 완료")
+                succeeded.append(finger)
 
-        from s3_upload import upload_folder
-        upload_folder(stl_dir, f"{s3_prefix}/stl")
+        fingers_data = []
+        for finger in FINGER_ORDER:
+            s3_key = f"{s3_prefix}/stl/nail_{finger}_{shape}.stl"
+            if finger in succeeded:
+                _upload_file(os.path.join(stl_dir, f"nail_{finger}_{shape}.stl"), s3_key)
+                fingers_data.append({"finger": finger.upper(), "stlUrl": _s3_url(s3_key)})
+            else:
+                # 이번에 못 만든 손가락은 S3에 남아 있을 수 있는 예전 길이의 STL을 지운다 - 안 그러면
+                # 병합 단계가 그 파일을 그대로 받아서 사용자가 고른 길이와 다른 팁이 출력된다.
+                # 지우면 병합 단계에서 "빠진 손가락(missing)"으로 정상 처리된다.
+                try:
+                    _s3_client().delete_object(Bucket=BUCKET, Key=s3_key)
+                except Exception as e:
+                    print(f"  [{finger}] 이전 STL 삭제 실패: {e}")
 
-        fingers_data = [
-            {"finger": f.upper(),
-             "stlUrl": _s3_url(f"{s3_prefix}/stl/nail_{f}_{shape}.stl")}
-            for f in FINGER_ORDER
-        ]
-        requests.post(callback_url, json={"fingers": fingers_data})
+        if not succeeded:
+            raise RuntimeError("STL을 하나도 생성하지 못했습니다.")
+        requests.post(callback_url, json={"success": True, "fingers": fingers_data})
     except Exception as e:
+        print(f"[STL] 오류: {e}")
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
 
@@ -1347,6 +1376,9 @@ class MeasureRequest(BaseModel):
 
 class StlRequest(BaseModel):
     userid: str; session: str; hand: str; shape: str; callbackUrl: str
+    # 출력 화면에서 사용자가 설정한 팁 연장 길이(mm). 없으면 쉐입별 기본값을 쓴다.
+    # (이 필드가 없으면 pydantic이 Spring이 보낸 값을 조용히 버린다)
+    tip_extension_mm: float | None = None
 
 class MergeOneHandRequest(BaseModel):
     userid: str; session: str; hand: str
@@ -1395,7 +1427,8 @@ def analyze_measure(request: MeasureRequest):
 def analyze_stl(request: StlRequest):
     threading.Thread(
         target=_run_stl_and_callback,
-        args=(request.userid, request.session, request.hand, request.shape, request.callbackUrl),
+        args=(request.userid, request.session, request.hand, request.shape, request.callbackUrl,
+              request.tip_extension_mm),
         daemon=True,
     ).start()
     return {"status": "started", "message": "STL 생성이 시작되었습니다."}

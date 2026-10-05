@@ -219,7 +219,7 @@ export function usePrintPage() {
                 rightScanId ? generateStl(rightScanId, selectedShape, extensionMm) : Promise.resolve(),
             ])
             const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
-            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId })
+            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId, tipExtensionMm: extensionMm })
             setPrintConfirmed(true)
             setPrintModalStep('done')
         } catch (e) {

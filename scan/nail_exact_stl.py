@@ -94,6 +94,8 @@ FLAT_TIP_SHAPES = {"square", "ballerina"}
 
 # Shapes worn long — default tip extension mm instead of the base 3 mm.
 LONG_SHAPES = {"almond", "stiletto", "ballerina"}
+# 값을 바꾸면 Frontend/src/shared/constants/nailShapes.ts의 TIP_EXTENSION_DEFAULT_MM도 같이
+# 바꿔야 한다 — 출력 화면이 그 값을 기본 길이로 보여 주고 그대로 --tip-extension으로 넘긴다.
 TIP_EXTENSION_DEFAULT_MM = {
     "round": 5.0, "oval": 5.0, "square": 5.0,
     "almond": 7.0, "stiletto": 15.0, "ballerina": 7.0,

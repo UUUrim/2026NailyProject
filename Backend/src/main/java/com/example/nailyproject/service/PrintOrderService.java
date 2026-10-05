@@ -64,6 +64,7 @@ public class PrintOrderService {
                 .user(user)
                 .shapeId(request.getShapeId())
                 .shapeLabelKo(request.getShapeLabelKo())
+                .tipExtensionMm(request.getTipExtensionMm())
                 .leftScanId(request.getLeftScanId())
                 .rightScanId(request.getRightScanId())
                 .build();
@@ -75,9 +76,51 @@ public class PrintOrderService {
         // tryStartMergeForScan()이 나중에 병합을 시작시킨다.
         if (isReadyToMerge(saved)) {
             requestMerge(saved);
+        } else if (hasStlFailed(saved)) {
+            // STL 생성 실패 웹훅이 이 주문이 저장되기도 전에 먼저 도착한 경우 — 기다릴 웹훅이 더
+            // 없으니 QUEUED로 영원히 남지 않도록 바로 실패 처리한다.
+            failOrder(saved, "네일 팁 STL 생성에 실패했습니다. 다시 신청해 주세요.");
         }
 
         return toDto(saved);
+    }
+
+    /**
+     * STL 생성 실패 웹훅(ScanService.receiveStlResult)이 도착했을 때 호출된다. 이 scanId를
+     * 기다리던 QUEUED 출력 주문을 실패 처리한다 — 병합을 시작하면 S3에 남아 있던 예전 STL
+     * (사용자가 이번에 고른 길이가 아닌)이 출력될 수 있으므로 절대 진행하지 않는다.
+     */
+    public void failWaitingOrdersForScan(Long scanId, String reason) {
+        List<PrintOrder> waiting = new java.util.ArrayList<>(
+                printOrderRepository.findByStatusAndLeftScanId(PrintOrder.PrintStatus.QUEUED, scanId));
+        waiting.addAll(printOrderRepository.findByStatusAndRightScanId(PrintOrder.PrintStatus.QUEUED, scanId));
+
+        for (PrintOrder order : waiting) {
+            failOrder(order, reason);
+        }
+    }
+
+    private void failOrder(PrintOrder order, String reason) {
+        order.updateStatus(PrintOrder.PrintStatus.FAILED);
+        order.updateFailReason(reason);
+        printOrderRepository.save(order);
+    }
+
+    /**
+     * 출력 신청 직전에 프론트가 generateStl()을 호출하므로, 주문이 참조하는 스캔은
+     * GENERATING_STL(생성 중) 또는 COMPLETED(생성 완료)여야 정상이다. 그 외(MEASURED 등)라면
+     * STL 생성이 이미 실패해서 되돌려진 것이다 (ScanService.receiveStlResult 참고).
+     */
+    private boolean hasStlFailed(PrintOrder order) {
+        return isStlFailedScan(order.getLeftScanId()) || isStlFailedScan(order.getRightScanId());
+    }
+
+    private boolean isStlFailedScan(Long scanId) {
+        if (scanId == null) return false;
+        return handScanRepository.findById(scanId)
+                .map(scan -> scan.getStatus() != HandScan.ScanStatus.GENERATING_STL
+                        && scan.getStatus() != HandScan.ScanStatus.COMPLETED)
+                .orElse(true);
     }
 
     /**
@@ -356,6 +399,7 @@ public class PrintOrderService {
                 .id(order.getId())
                 .shapeId(order.getShapeId())
                 .shapeLabelKo(order.getShapeLabelKo())
+                .tipExtensionMm(order.getTipExtensionMm())
                 .status(order.getStatus().name())
                 .orderedAt(order.getOrderedAt() != null ? order.getOrderedAt().format(FORMATTER) : "")
                 .leftScanId(order.getLeftScanId())

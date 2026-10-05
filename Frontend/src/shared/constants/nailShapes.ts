@@ -69,7 +69,7 @@ export const TIP_EXTENSION_DEFAULT_MM: Record<NailShapeId, number> = {
   oval: 5.0,
   square: 5.0,
   almond: 7.0,
-  stiletto: 7.0,
+  stiletto: 15.0,
   ballerina: 7.0,
 }
 

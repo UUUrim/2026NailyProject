@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { type PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/api'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
-import { PRINT_STATUS_LABEL, Icon, formatDateTimeFull } from '@/features/mypage/shared'
+import { PRINT_STATUS_LABEL, Icon, formatDateTimeFull, formatTipExtension } from '@/features/mypage/shared'
 
 type PrintOrderRowProps = {
     order: NailTipPrintOrder
@@ -49,6 +49,10 @@ export const PrintOrderRow = memo(function PrintOrderRow({
             </div>
             <div className="mypage-x__scan-info">
                 <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일팁 출력</p>
+                <p className="mypage-x__print-length">
+                    {order.tipExtensionMm != null && '연장 길이 '}
+                    {formatTipExtension(order.tipExtensionMm)}
+                </p>
             </div>
             <div className="mypage-x__print-meta-end">
                 <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>

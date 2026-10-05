@@ -9,6 +9,7 @@ public class PrintOrderResponseDto {
     private Long id;
     private String shapeId;
     private String shapeLabelKo;
+    private Double tipExtensionMm; // null이면 길이 기록 전 예전 주문 (쉐입 기본 길이로 출력됨)
     private String status;
     private String orderedAt; // yyyy. M. d. HH:mm
     private Long leftScanId;

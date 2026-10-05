@@ -6,7 +6,7 @@ import {
 import { NailLengthPreview } from '@/features/print/components/NailLengthPreview'
 
 // "+5mm"라는 숫자만으로는 실제로 어느 정도 길이인지 감이 잘 안 와서, 구간마다 이름과
-// 한 줄 설명을 붙여 준다. 쉐입별 기본값(5mm/7mm)은 모두 '미디엄' 구간에 들어간다.
+// 한 줄 설명을 붙여 준다.
 const LENGTH_TIERS = [
     { maxMm: 3, label: '숏', description: '일상생활에 부담 없는 짧고 깔끔한 길이예요.' },
     { maxMm: 7, label: '미디엄', description: '데일리로 무난하게 어울리는 자연스러운 길이예요.' },
