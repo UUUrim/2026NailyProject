@@ -546,9 +546,18 @@ def generate_stl(params, output_path):
 
     # ── Build structured grid ─────────────────────────────────
     nx = 50   # columns across width
-    ny = 80   # rows along length
-
-    ys = np.linspace(-CUT_DEPTH, L_total, ny)
+    # Rows along the length.  The cuticle arch's width changes like sqrt(y)
+    # near its bottom point, so evenly spaced rows leave only a few vertices
+    # there and the arc renders as a faceted polyline.  Cosine spacing packs
+    # the arch rows densely at the bottom point; the body keeps even spacing.
+    n_arch = 40
+    n_body = 70
+    t_arch = np.linspace(0.0, 1.0, n_arch, endpoint=False)
+    ys = np.concatenate([
+        -CUT_DEPTH * np.cos(t_arch * np.pi / 2.0),
+        np.linspace(0.0, L_total, n_body),
+    ])
+    ny = len(ys)
 
     # grid_x[i, j], grid_y[i, j] = XY position of grid point (i, j)
     grid_x = np.zeros((ny, nx))
