@@ -45,6 +45,7 @@ Photography requirements (end-on C-curve photo):
 
 import argparse
 import json
+import math
 import os
 import sys
 from collections import Counter
@@ -264,6 +265,18 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     valid_cnts = [c for c in cnts if cv2.contourArea(c) > min_area]
     if not valid_cnts:
         valid_cnts = cnts
+    # The finger always enters the rig from the BOTTOM, so its fingertip sits
+    # somewhere inside the frame - a blob touching the TOP border can't be it.
+    # The rig has a red object/tape at the top edge that passes the warm-tone
+    # threshold; with no finger in frame it was the only blob and got measured
+    # as a ~95mm "nail", and with a finger present it still won the topmost
+    # rule below because it reaches y=0.
+    valid_cnts = [c for c in valid_cnts if cv2.boundingRect(c)[1] > 0]
+    if not valid_cnts:
+        raise RuntimeError(
+            "No finger detected.\n"
+            "  → Only blobs touching the top edge of the frame were found."
+        )
     # Reject warm-toned BACKGROUND (floor, furniture, shoes) that the a*/L
     # threshold also passes.  The marker is by protocol placed right beside the
     # finger on the same surface, so the finger blob is horizontally adjacent to
@@ -511,6 +524,16 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
         with np.errstate(all='ignore'):
             profile = np.nanmean(strip, axis=0)
 
+        # 손톱 폭 양 끝 열이 finger_mask 밖이면 그 열 전체가 NaN이 되는데,
+        # uniform_filter1d는 NaN을 이웃 열로 번지게 해서 edge/centre 평균이
+        # 통째로 NaN → c_curve_mm=nan → 라이브 측정이 매 프레임 UNUSABLE이 됐다.
+        # 유효한 열로 보간해서 NaN을 메운 뒤 스무딩한다.
+        valid = np.isfinite(profile)
+        if valid.sum() < 6:
+            continue
+        profile = np.interp(np.arange(len(profile)),
+                            np.flatnonzero(valid), profile[valid])
+
         profile_smooth = uniform_filter1d(profile, size=7)
         nc = len(profile_smooth)
         if nc < 6:
@@ -521,6 +544,8 @@ def estimate_ccurve_from_nailfold(image: np.ndarray,
         right_b  = float(profile_smooth[-nc//6:].mean())
         edge_b   = (left_b + right_b) / 2.0
         drop     = centre_b - edge_b
+        if not np.isfinite(drop):
+            continue
 
         c_est = float(np.clip(round(drop * 0.08 + 0.8, 2), 0.3, 5.0))
         c_estimates.append(c_est)
@@ -1768,7 +1793,7 @@ def measure_finger(top_path: str, finger: str,
 
     # 이 손가락의 측정 파이프라인(ArUco 인식부터 저장까지) 전체를 하나로 감싼다 - 어느
     # 단계에서 실패하든(사진 자체가 이상해서 ArUco/손톱 인식이 안 되거나, W/L 보정이나
-    # 오버레이 저장에서 예외가 나거나) 이 손가락의 nail_measurements.json/profile.json이
+    # 오버레이 저장에서 예외가 나거나) 이 손가락의 nail_measurements.json이
     # 아예 안 생기고 넘어가면, 서버가 이 손가락을 건너뛰면서 SSE finger_done도 안 나가
     # 촬영 진행이 그 자리에서 멈춘다. 그래서 예외를 던지는 대신 평균값(Yeo et al. 2017)으로
     # 대체해서 항상 완전한 결과를 반환한다.
@@ -2040,6 +2065,163 @@ def build_profile(results: list) -> dict:
     return {"summary": summary, "fingers": fingers}
 
 
+def build_merged_payload(results: list, aruco_size_mm: float) -> dict:
+    """
+    Single-JSON replacement for the old build_payload()+build_profile() pair
+    (nail_measurements.json + profile.json). Folds each finger's profile
+    verdict (width_size/length_size/nail_size/vs-average deltas) directly
+    onto its "nails"/"by_finger" entry, and keeps the hand-level profile
+    summary (averages, majority size, summary_text) as payload["summary"].
+    """
+    payload = build_payload(results, aruco_size_mm)
+    profile = build_profile(results)
+    prof_by_finger = {f["finger"]: f for f in profile["fingers"]}
+    for nail in payload["nails"]:
+        p = prof_by_finger.get(nail["finger"], {})
+        nail["width_vs_avg_mm"]  = p.get("width_vs_avg_mm")
+        nail["length_vs_avg_mm"] = p.get("length_vs_avg_mm")
+        nail["width_size"]       = p.get("width_size")
+        nail["length_size"]      = p.get("length_size")
+        nail["nail_size"]        = p.get("nail_size")
+    payload["by_finger"] = {n["finger"]: n for n in payload["nails"]}
+    payload["summary"]   = profile["summary"]
+    return payload
+
+
+def merge_hand_measurements(per_finger_payloads: dict) -> dict:
+    """
+    Combine several build_merged_payload() outputs - one per finger,
+    each produced by a separate nail_measurer.py subprocess (server.py
+    measures the 5 fingers of a hand in parallel) - into a single
+    hand-level measurements.json with a summary recomputed across all
+    of that hand's fingers, instead of each finger's own (n=1) summary.
+
+    per_finger_payloads: {finger_name: build_merged_payload() dict}
+    """
+    FID   = {"thumb": 0, "index": 1, "middle": 2, "ring": 3, "pinky": 4}
+    STANDARD_LENGTH = {
+        "thumb": 14.5, "index": 12.5, "middle": 13.5, "ring": 12.5, "pinky": 10.5,
+    }
+
+    nails = []
+    for payload in per_finger_payloads.values():
+        finger_nails = payload.get("nails") or []
+        if finger_nails:
+            nails.append(finger_nails[0])
+    nails.sort(key=lambda n: FID.get(n["finger"], 9))
+
+    votes = []
+    for n in nails:
+        std = STANDARD_LENGTH.get(n["finger"])
+        cl  = n.get("corrected_length_mm")
+        if std and cl:
+            votes.append("long" if cl >= std else "short")
+    nail_length = "long" if votes.count("long") > votes.count("short") else "short"
+
+    n_count        = len(nails)
+    avg_width_mm   = round(sum(n["width_mm"]  for n in nails) / n_count, 2) if n_count else None
+    avg_length_mm  = round(sum(n["length_mm"] for n in nails) / n_count, 2) if n_count else None
+    c_curve_vals   = [n["c_curve_mm"] for n in nails if n.get("c_curve_mm") is not None]
+    avg_c_curve_mm = round(sum(c_curve_vals) / len(c_curve_vals), 2) if c_curve_vals else None
+
+    width_size  = _majority([n.get("width_size")  for n in nails])
+    length_size = _majority([n.get("length_size") for n in nails])
+    nail_size   = _majority([n.get("nail_size")   for n in nails])
+
+    length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
+    width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
+    summary_text = (
+        f"손톱 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
+        + (f" 평균 C-curve는 {avg_c_curve_mm}mm입니다." if avg_c_curve_mm is not None else "")
+    )
+
+    meta = dict(next(iter(per_finger_payloads.values()), {}).get("meta", {}))
+    meta["nails_detected"] = n_count
+
+    return {
+        "nail_length": nail_length,
+        "meta": meta,
+        "summary": {
+            "avg_width_mm":   avg_width_mm,
+            "avg_length_mm":  avg_length_mm,
+            "avg_c_curve_mm": avg_c_curve_mm,
+            "width_size":     width_size,
+            "length_size":    length_size,
+            "nail_size":      nail_size,
+            "summary_text":   summary_text,
+        },
+        "nails":     nails,
+        "by_finger": {n["finger"]: n for n in nails},
+        "mesh_params": {
+            n["finger"]: {
+                "bounding_box_mm": {
+                    "x": n["width_mm"],
+                    "y": n.get("thickness_mm", 0.6),
+                    "z": n["length_mm"],
+                },
+                "curvature": {
+                    "c_curve_sagitta_mm": n["c_curve_mm"],
+                    "arc_radius_mm":      n["arc_radius_mm"],
+                },
+                "skin_tone_hex": n.get("skin_tone_hex", "#FFFFFF"),
+            }
+            for n in nails
+        },
+    }
+
+
+def classify_size_totals(all_nails: list) -> dict:
+    """
+    Aggregate-vs-aggregate size verdict across BOTH hands (10 fingers).
+
+    Per 팀장's request: instead of classifying each finger against its own
+    per-finger Asian-women reference and majority-voting the resulting 5/10
+    labels (what build_profile()/merge_hand_measurements() do per hand),
+    sum this person's measured width/length across all 10 fingers and
+    compare that ONE total against the combined 10-finger reference total
+    (each of the 5 STANDARD_NAILS entries counted once per hand) - one
+    z-score, one verdict, for "양손 vs 아시아 여성 평균 양손".
+
+    Combining the reference: assuming each finger's measurement is
+    independent, the sum of 10 means is the reference mean, and the SD of
+    that sum is sqrt(sum of the 10 variances) (SDs don't just add).
+
+    all_nails: the 10 "nails" entries from a left hand's measurements.json
+               + a right hand's measurements.json (5 each).
+    """
+    std_width_mean  = 2 * sum(STANDARD_NAILS[f]["width_mm"]         for f in FINGER_NAMES)
+    std_width_sd    = math.sqrt(2 * sum(STANDARD_NAILS[f]["width_sd"]  ** 2 for f in FINGER_NAMES))
+    std_length_mean = 2 * sum(STANDARD_NAILS[f]["length_mm"]        for f in FINGER_NAMES)
+    std_length_sd   = math.sqrt(2 * sum(STANDARD_NAILS[f]["length_sd"] ** 2 for f in FINGER_NAMES))
+
+    total_width  = sum(n["width_mm"] for n in all_nails)
+    total_length = sum((n.get("corrected_length_mm") or n["length_mm"]) for n in all_nails)
+
+    width_z  = (total_width  - std_width_mean)  / std_width_sd
+    length_z = (total_length - std_length_mean) / std_length_sd
+
+    width_size  = _size_category(width_z)
+    length_size = _size_category(length_z)
+    nail_size   = _size_category((width_z + length_z) / 2.0)
+
+    length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
+    width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
+    summary_text = f"양손 손톱을 전체로 봤을 때 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
+
+    return {
+        "total_width_mm":       round(total_width, 2),
+        "total_length_mm":      round(total_length, 2),
+        "reference_width_mm":   round(std_width_mean, 2),
+        "reference_length_mm":  round(std_length_mean, 2),
+        "width_z":              round(width_z, 3),
+        "length_z":             round(length_z, 3),
+        "width_size":           width_size,
+        "length_size":          length_size,
+        "nail_size":            nail_size,
+        "summary_text":         summary_text,
+    }
+
+
 # ─────────────────────────────────────────────────────────────
 # 11. CLI
 # ─────────────────────────────────────────────────────────────
@@ -2108,15 +2290,10 @@ def main():
                            live_length_mm=args.live_length_mm)
         results.append(r)
 
-    payload   = build_payload(results, args.aruco_size)
+    payload   = build_merged_payload(results, args.aruco_size)
     json_path = os.path.join(args.output, "nail_measurements.json")
-    with open(json_path, "w") as f:
-        json.dump(payload, f, indent=2)
-
-    profile_data  = build_profile(results)
-    profile_path  = os.path.join(args.output, "profile.json")
-    with open(profile_path, "w", encoding="utf-8") as f:
-        json.dump(profile_data, f, indent=2, ensure_ascii=False)
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
     print(f"\n{'='*55}")
     print(f"[OK] Saved -> {json_path}")

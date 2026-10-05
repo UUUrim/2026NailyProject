@@ -12,9 +12,14 @@ Usage:
     GET  /health
 
   [스캔]
-    POST /analyze/measure     — 스캔 시작 (카메라 촬영 → 측정 → S3 업로드 → 콜백)
+    POST /analyze/measure     — 스캔 시작 (카메라 촬영 → 측정 → 콜백; measurements.json은 로컬에만 저장)
     POST /analyze/stl         — STL 생성 → S3 업로드 → 콜백
+<<<<<<< HEAD
     GET  /stream/top          — 탑뷰 MJPEG 스트림 (큐티클 가이드는 프론트가 /capture/stability의 guide로 그림)
+=======
+    POST /analyze/measurements/merge-both — 양손 measurements.json 통합 → S3 업로드 → 콜백
+    GET  /stream/top          — 탑뷰 MJPEG 스트림 (ArUco 가이드선 포함)
+>>>>>>> e045054c81304a0fbd9571d72ad255ed0a1ff19f
     GET  /stream/side         — 사이드뷰 MJPEG 스트림 (오버레이 없음)
     GET  /status/events       — SSE: 손가락 촬영 진행상황
     POST /capture/force       — 수동 촬영 트리거 (웹 "지금 촬영" 버튼)
@@ -96,7 +101,8 @@ from merge_fingers   import merge_hand, merge_both_hands          # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 from skin_color import recommend_nail_colors, lab_to_rgb_hex      # scan/
-from nail_measurer import recommend_nail_shape                    # scan/
+from nail_measurer import (recommend_nail_shape, merge_hand_measurements,  # scan/
+                            classify_size_totals)
 
 # 탑뷰 라이브 프리뷰 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정 화면을
 # 웹 스트림에도 그대로 재사용한다. 매 프레임 nail_measurer로 실측정을 돌리되,
@@ -127,11 +133,13 @@ CAMERA_TOP        = 0       # 탑뷰: USB 웹캠 (C920)
 CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1: 사용 안 함
 ARUCO_SIZE_MM     = 20.0
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
-# 탑뷰 웹 스트림 화면 영역 (측정용 저장 사진에는 영향 없음 — 원본 프레임
-# 그대로 측정/저장하고, 화면에 보낼 때만 잘라낸다). 마커는 가리고 손가락
-# 자리가 화면 가운데 오도록, 손가락 자리를 중심으로 좌우 대칭인 창을
-# 잘라낸다 — _top_view_rect 참고. 마커는 매트에 고정돼 있어 처음 잡힐 때
-# 한 번 계산하면 세션 내내 그대로 쓴다.
+# 탑뷰 상단 crop 픽셀 (0 = 크롭 없음). 리그 상단 가장자리의 빨간 물체(1080p 기준
+# y≈0~95)가 피부색 임계값을 통과해 손가락으로 오인식되던 문제 - 카메라에서
+# 읽은 직후 잘라내서 라이브 측정/화면/저장 사진이 모두 같은 크롭을 쓴다.
+CROP_TOP_PX       = 120
+# 탑뷰 웹 스트림에서 ArUco 마커를 가리기 위한 왼쪽 crop 설정 (측정용 저장
+# 사진에는 영향 없음 — _capture_top_stream 참고). 마커는 매트에 고정된
+# 위치라 오른쪽 끝 + 여백을 한 번 잡으면 그 finger 촬영 내내 그대로 쓴다.
 MARKER_HIDE_MARGIN_PX      = 40    # 마커 오른쪽 끝에서 추가로 더 잘라낼 여백
 # 손가락 자리의 가로 중심 — 마커 오른쪽 끝에서 손가락 중심까지 거리(mm).
 # 실제 촬영 사진 17장(09-04, 세션 145~149)에서 손가락 중심이 49~64mm,
@@ -444,9 +452,16 @@ class PhoneCamera:
         self._full_res        = None
         self._capture_wanted  = threading.Event()
         self._full_res_ready  = threading.Event()
+        self._last_preview_t  = 0.0
 
     def isOpened(self):
         return True
+
+    def is_connected(self, max_age: float = 3.0) -> bool:
+        """폰 카메라 페이지가 최근 max_age초 안에 프리뷰를 보냈는지 - 폰 없이
+        탑뷰만으로 테스트할 때 사이드뷰 고화질 촬영 타임아웃(8초)을 손가락마다
+        기다리지 않고 바로 건너뛰기 위한 판단 기준."""
+        return time.time() - self._last_preview_t < max_age
 
     def read(self):
         with self._lock:
@@ -456,6 +471,7 @@ class PhoneCamera:
     def push_preview(self, frame: np.ndarray):
         with self._lock:
             self._preview = cv2.rotate(frame, self.ROTATE)
+            self._last_preview_t = time.time()
 
     def capture_wanted(self) -> bool:
         return self._capture_wanted.is_set()
@@ -527,6 +543,10 @@ def _get_top_cam() -> cv2.VideoCapture:
         _top_cam       = cap
         _top_cam_index = CAMERA_TOP
         return _top_cam
+
+
+def _crop_top(frame: np.ndarray) -> np.ndarray:
+    return frame[CROP_TOP_PX:, :] if CROP_TOP_PX > 0 else frame
 
 
 def _push_frame(q: _q.Queue, frame: np.ndarray):
@@ -668,6 +688,7 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
         if not _S.top_capture_busy.is_set():
             ret, frame = cap.read()
             if ret:
+                frame = _crop_top(frame)
                 # 세션 시작 직후(_capture_top_stream이 아직 첫 프레임도 못 돌린
                 # 찰나) 이 idle 루프가 먼저 프레임을 밀어넣는 경우, 마커가
                 # 아직 안 잡혀 있어(_S.top_view_rect is None) 그대로 노출된다 —
@@ -727,6 +748,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             ret, frame = cap.read()
             if not ret:
                 return False
+            frame = _crop_top(frame)
 
             worker.submit(frame)
             result = worker.latest()
@@ -875,6 +897,11 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
 
             if _S.force_capture_side.is_set():
                 _S.force_capture_side.clear()
+                if is_phone and not cap.is_connected():
+                    # 폰 카메라 페이지가 안 열려있음 - 8초 타임아웃을 기다리지 않고
+                    # 바로 건너뛴다. 탑뷰만으로도 측정은 진행된다 (c-curve만 생략).
+                    print(f"  [{finger}] 폰 사이드뷰 미연결 → 사이드뷰 건너뜀 (탑뷰만 측정)")
+                    return False
                 if is_phone:
                     if ret:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",
@@ -1038,55 +1065,128 @@ def _run_measure_only(userid: str, session: str, hand: str):
         t.join()
 
 
-def _upload_results(userid: str, session: str, hand: str):
-    """Upload all 5 fingers' results (up to 15 files) to S3 in parallel.
+def _merge_hand_results(userid: str, session: str, hand: str) -> str | None:
+    """Combine each finger's own nail_measurements.json (written by its own
+    nail_measurer.py subprocess - see _measure_one_finger) into a single
+    hand-level measurements.json, with a summary recomputed across all of
+    that hand's fingers instead of each finger's own single-finger one.
 
-    This used to be a plain sequential loop - up to 15 blocking round trips
-    back to back, one file at a time. These are independent uploads to
-    different S3 keys, so there's no ordering requirement between them;
-    running them concurrently turns ~15x(one upload's latency) into
-    ~1x(one upload's latency), which was the single biggest contributor to
-    how long the result screen sat waiting after the last finger.
+    The per-finger nail_measurements.json files are internal intermediates
+    only (never uploaded, never read by the callback/STL steps) and are
+    removed once merged, so a hand only ever leaves behind one
+    measurements.json.
     """
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    s3_prefix    = f"results/{userid}/{session}/{hand}"
-    jobs = []
+    per_finger = {}
     for finger in FINGER_ORDER:
-        finger_dir = os.path.join(results_root, finger)
-        for fname in [f"{finger}_annotated.jpg", "nail_measurements.json", "profile.json"]:
-            lp = os.path.join(finger_dir, fname)
-            if os.path.isfile(lp):
-                jobs.append((lp, f"{s3_prefix}/{finger}/{fname}"))
-    if not jobs:
-        return
-    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-        list(pool.map(lambda job: _upload_file(*job), jobs))
+        p = os.path.join(results_root, finger, "nail_measurements.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    per_finger[finger] = json.load(f)
+            except Exception as e:
+                print(f"  [{finger}] measurements 읽기 오류: {e}")
+    if not per_finger:
+        return None
+
+    merged   = merge_hand_measurements(per_finger)
+    out_path = os.path.join(results_root, "measurements.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, indent=2, ensure_ascii=False)
+
+    for finger in per_finger:
+        try:
+            os.remove(os.path.join(results_root, finger, "nail_measurements.json"))
+        except Exception:
+            pass
+    return out_path
+
+
+def _run_merge_both_measurements(userid: str, left_session: str, right_session: str,
+                                  callback_url: str):
+    """Combine the left/right hands' local-only measurements.json (each
+    written by _merge_hand_results once that hand's scan finishes) into one
+    both-hands JSON, and upload only that combined file to S3 - mirrors
+    _run_merge_both_hands' left_session_right_session S3 key convention for
+    the merged STL.
+    """
+    try:
+        left_path  = os.path.join(BASE, "results", userid, left_session,  "left",  "measurements.json")
+        right_path = os.path.join(BASE, "results", userid, right_session, "right", "measurements.json")
+        missing = [p for p in (left_path, right_path) if not os.path.isfile(p)]
+        if missing:
+            raise RuntimeError(f"measurements.json 없음: {missing}")
+
+        with open(left_path, encoding="utf-8") as f:
+            left_data = json.load(f)
+        with open(right_path, encoding="utf-8") as f:
+            right_data = json.load(f)
+
+        # 손가락 각각을 지 손가락 평균과 비교해서 5/10개 판정을 다수결로 모으는
+        # 대신, 양손 10개 손톱의 측정값 합계를 아시아 여성 평균 10개 손톱 합계와
+        # 통째로 비교한 "양손 vs 양손" 단일 판정 (팀장 요청) - nail_measurer.
+        # classify_size_totals() 참고.
+        all_nails    = left_data.get("nails", []) + right_data.get("nails", [])
+        both_summary = classify_size_totals(all_nails)
+
+        combined = {"left": left_data, "right": right_data, "summary": both_summary}
+
+        both_dir = os.path.join(BASE, "results", userid, f"{left_session}_{right_session}", "both")
+        os.makedirs(both_dir, exist_ok=True)
+        combined_path = os.path.join(both_dir, "measurements.json")
+        with open(combined_path, "w", encoding="utf-8") as f:
+            json.dump(combined, f, indent=2, ensure_ascii=False)
+
+        s3_key = f"results/{userid}/{left_session}_{right_session}/both/measurements.json"
+        measurements_url = _upload_file(combined_path, s3_key)
+
+        requests.post(callback_url, json={
+            "success":          True,
+            "measurementsUrl":  measurements_url,
+            "overallSize":      both_summary["nail_size"],
+            "widthSize":        both_summary["width_size"],
+            "lengthSize":       both_summary["length_size"],
+            "summaryText":      both_summary["summary_text"],
+        })
+    except Exception as e:
+        requests.post(callback_url, json={"success": False, "message": str(e)})
 
 
 def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    s3_prefix    = f"results/{userid}/{session}/{hand}"
+    measurements_path = os.path.join(results_root, "measurements.json")
 
     fingers_data = []
     skin_tones   = []
     skin_metrics = []
     sizes        = []
     wl_checks    = []
+    summary_text = ""
 
-    for finger in FINGER_ORDER:
-        finger_dir        = os.path.join(results_root, finger)
-        measurements_path = os.path.join(finger_dir, "nail_measurements.json")
-        profile_path      = os.path.join(finger_dir, "profile.json")
-        if not (os.path.exists(measurements_path) and os.path.exists(profile_path)):
-            continue
+    mj = {}
+    if os.path.isfile(measurements_path):
         try:
             with open(measurements_path, encoding="utf-8") as f:
                 mj = json.load(f)
-            fd = mj.get("by_finger", {}).get(finger, {})
-            with open(profile_path, encoding="utf-8") as f:
-                prof = json.load(f)
-            summary   = prof.get("summary") or {}
-            nail_size = summary.get("nail_size", "average")
+        except Exception as e:
+            print(f"  measurements.json 읽기 오류: {e}")
+
+    by_finger    = mj.get("by_finger", {})
+    summary_text = (mj.get("summary") or {}).get("summary_text", "")
+
+    for finger in FINGER_ORDER:
+        fd = by_finger.get(finger)
+        if not fd:
+            continue
+        try:
+            # [레거시] fd["nail_size"]는 이 손가락 하나를 그 손가락 전용 아시아
+            # 여성 평균과 비교한 개별 판정 - sizes에 모아 아래 overall_size를
+            # 만드는 데만 쓴다 (recommend_nail_shape 게이팅용, 계속 필요).
+            # "평균보다 크다/작다/평균이다" 라는 고객 노출용 종합 판정은 더 이상
+            # 이 방식(손가락별 비교 후 다수결)을 쓰지 않고, 양손 스캔이 다 끝난
+            # 뒤 /analyze/measurements/merge-both가 10개 손톱 합계 대 합계로
+            # 다시 계산한다 (nail_measurer.classify_size_totals 참고).
+            nail_size = fd.get("nail_size", "average")
             skin_tone = fd.get("skin_tone_hex", "")
             if fd.get("wl_ratio_check"):
                 wl_checks.append(fd["wl_ratio_check"])
@@ -1103,15 +1203,9 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
                     "warmness":   fd["skin_warmness"],
                     "saturation": fd["skin_saturation"],
                 })
-            # profile.json fingers 배열에서 이 손가락 데이터 찾기
-            finger_prof = next(
-                (f for f in prof.get("fingers", []) if f.get("finger") == finger),
-                {}
-            )
 
             fingers_data.append({
-                "finger":            finger.upper(),
-                "annotatedImageUrl": _s3_url(f"{s3_prefix}/{finger}/{finger}_annotated.jpg"),
+                "finger": finger.upper(),
                 "measurements": {
                     # 측정 수치
                     "widthMm":           safe_float(fd.get("width_mm")),
@@ -1120,12 +1214,12 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
                     "cCurveMm":          safe_float(fd.get("c_curve_mm")),
                     "arcRadiusMm":       safe_float(fd.get("arc_radius_mm")),
                     "thicknessMm":       safe_float(fd.get("thickness_mm")),
-                    # profile.json 논문 기준 비교값
-                    "widthVsAvgMm":  safe_float(finger_prof.get("width_vs_avg_mm")),
-                    "lengthVsAvgMm": safe_float(finger_prof.get("length_vs_avg_mm")),
-                    "widthSize":     finger_prof.get("width_size", "average"),
-                    "lengthSize":    finger_prof.get("length_size", "average"),
-                    "nailSize":      finger_prof.get("nail_size", "average"),
+                    # 논문 기준 비교값
+                    "widthVsAvgMm":  safe_float(fd.get("width_vs_avg_mm")),
+                    "lengthVsAvgMm": safe_float(fd.get("length_vs_avg_mm")),
+                    "widthSize":     fd.get("width_size", "average"),
+                    "lengthSize":    fd.get("length_size", "average"),
+                    "nailSize":      fd.get("nail_size", "average"),
                 },
                 "size": nail_size,
             })
@@ -1133,6 +1227,9 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             print(f"  [{finger}] 결과 읽기 오류: {e}")
 
     skin_tone_hex = skin_tones[0] if skin_tones else "#C8A882"
+    # [레거시] 이 손(hand) 5개 손가락의 개별 판정 다수결 - recommend_nail_shape
+    # 게이팅에만 쓴다. 아래 return의 overallSize/summaryText는 이 값 그대로라
+    # 마찬가지로 레거시(잠정값)이고, 최종 종합 판정은 merge-both 콜백에서 온다.
     overall_size  = max(set(sizes), key=sizes.count) if sizes else "average"
     recommended_colors = []
     tone = brightness = saturation = None
@@ -1163,25 +1260,11 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     else:
         print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
-    # summary_text: 왼손 profile.json summary에서 가져옴
-    summary_text = ""
-    for finger in FINGER_ORDER:
-        profile_path = os.path.join(results_root, finger, "profile.json")
-        if os.path.exists(profile_path):
-            try:
-                with open(profile_path, encoding="utf-8") as f:
-                    _p = json.load(f)
-                summary_text = _p.get("summary", {}).get("summary_text", "")
-                if summary_text:
-                    break
-            except Exception:
-                pass
-
     return {
         "shape":             recommended_shape,
         "skinToneHex":       skin_tone_hex,
-        "overallSize":       overall_size,
-        "summaryText":       summary_text,
+        "overallSize":       overall_size,  # [레거시] 잠정값 - 최종은 merge-both 콜백 참고
+        "summaryText":       summary_text,  # [레거시] 잠정값 - 최종은 merge-both 콜백 참고
         "recommendedColors": recommended_colors,
         "tone":              tone,
         "brightness":        brightness,
@@ -1199,7 +1282,10 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
         def _background_measure():
             try:
                 _run_measure_only(userid, session, hand)
-                _upload_results(userid, session, hand)
+                # 왼손/오른손 각각의 measurements.json은 로컬에만 남기고, S3에는
+                # /analyze/measurements/merge-both가 두 손 다 끝난 뒤 하나로
+                # 합친 결과만 올린다.
+                _merge_hand_results(userid, session, hand)
                 data = _build_callback_data(userid, session, hand)
                 requests.post(callback_url, json=data)
                 print(f"[Pipeline] 콜백 완료: {hand}")
@@ -1221,9 +1307,14 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
         os.makedirs(stl_dir, exist_ok=True)
         s3_prefix    = f"results/{userid}/{session}/{hand}"
 
+        mp = os.path.join(results_root, "measurements.json")
+        if not os.path.isfile(mp):
+            raise RuntimeError(f"measurements.json 없음: {mp}")
+        with open(mp, encoding="utf-8") as f:
+            available_fingers = set(json.load(f).get("by_finger", {}))
+
         for finger in FINGER_ORDER:
-            mp = os.path.join(results_root, finger, "nail_measurements.json")
-            if not os.path.isfile(mp):
+            if finger not in available_fingers:
                 continue
             stl_result = subprocess.run([
                 sys.executable, os.path.join(_SCAN_DIR, "nail_exact_stl.py"),
@@ -1267,6 +1358,9 @@ class MergeBothHandsRequest(BaseModel):
     leftShapes: dict[str, str]; rightShapes: dict[str, str]
     callbackUrl: str; printCallbackUrl: str | None = None
 
+class MergeBothMeasurementsRequest(BaseModel):
+    userid: str; leftSession: str; rightSession: str; callbackUrl: str
+
 class StartPrintRequest(BaseModel):
     mergedModelUrl: str; outputDir: str; callbackUrl: str
 
@@ -1305,6 +1399,16 @@ def analyze_stl(request: StlRequest):
         daemon=True,
     ).start()
     return {"status": "started", "message": "STL 생성이 시작되었습니다."}
+
+
+@app.post("/analyze/measurements/merge-both")
+def analyze_measurements_merge_both(request: MergeBothMeasurementsRequest):
+    threading.Thread(
+        target=_run_merge_both_measurements,
+        args=(request.userid, request.leftSession, request.rightSession, request.callbackUrl),
+        daemon=True,
+    ).start()
+    return {"status": "started", "message": "양손 측정 결과 통합이 시작되었습니다."}
 
 
 def _placeholder_jpeg(text: str = "") -> bytes:
