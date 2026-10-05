@@ -34,7 +34,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 FINGER_ORDER = ["thumb", "index", "middle", "ring", "pinky"]
 
 SPACING_MM = 10.0       # 손가락 사이 간격 (mm)
-TILT_DEG = 0.0         # 음수 = 반대 방향으로 기울임 40.0
+TILT_DEG = 90.0         # 음수 = 반대 방향으로 기울임 40.0
 TILT_AXIS = [1, 0, 0]    # X축 기준 회전 (앞뒤로 기울이고 싶으면 [0,1,0]으로 변경)
 
 ROW_SPACING_MM = 40.0   # 왼손 줄과 오른손 줄 사이 Y축 간격 (손가락 두께+여유를 감안한 값)
@@ -91,18 +91,18 @@ def _build_scene(finger_paths: dict, hand_label: str = "", y_offset: float = 0.0
         # 자기 중심으로 먼저 이동시킨 후에 기울여야 원점 기준으로 안 날아감
         mesh.apply_translation(-mesh.centroid)
 
-#         tilt_matrix = trimesh.transformations.rotation_matrix(
-#             angle=np.radians(TILT_DEG),
-#             direction=TILT_AXIS,
-#             point=[0, 0, 0],
-#         )
-#         mesh.apply_transform(tilt_matrix)
-        flip_matrix = trimesh.transformations.rotation_matrix(
-            angle=np.radians(180),
-            direction=[1, 0, 0],
+        tilt_matrix = trimesh.transformations.rotation_matrix(
+            angle=np.radians(TILT_DEG),
+            direction=TILT_AXIS,
             point=[0, 0, 0],
         )
-        mesh.apply_transform(flip_matrix)
+        mesh.apply_transform(tilt_matrix)
+#         flip_matrix = trimesh.transformations.rotation_matrix(
+#             angle=np.radians(180),
+#             direction=[1, 0, 0],
+#             point=[0, 0, 0],
+#         )
+#         mesh.apply_transform(flip_matrix)
 
         # 기울인 뒤 빌드 플레이트(Z=0)에 다시 붙이기
         mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
