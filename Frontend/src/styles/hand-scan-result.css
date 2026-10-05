@@ -82,8 +82,7 @@
   border-radius: 999px;
 }
 
-.scan-metric-card__hint,
-.scan-metric-card__percentile {
+.scan-metric-card__hint {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
   color: #888;

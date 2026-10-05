@@ -6,7 +6,7 @@ import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import type { FingerDetail } from '@/shared/utils/handScanAnalysis'
@@ -298,21 +298,27 @@ export function useHandScanResultPage() {
             measurements = {}
         }
 
+        // index는 0~9(왼손 0~4 + 오른손 5~9)이므로, 손가락 종류(엄지~소지)는 %5로 구한다.
+        const fingerSize = FINGER_SIZE_MM[index % 5]
+
         return {
             id: `finger-${index}`,
             name: FINGER_NAMES[index] ?? finger.finger,
 
-            // 백엔드(scan/server.py) 실측값을 그대로 사용. 값이 없는 경우에만 임시 Mock 값으로 대체.
+            // 백엔드(scan/server.py) 실측값을 그대로 사용. 값이 없는 경우에만 해당 손가락의
+            // 실측 평균값(FINGER_SIZE_MM)으로 대체 — 예전엔 손가락 종류와 무관하게 index가
+            // 커질수록(엄지→소지) 값도 커지는 식이라, 실제로는 소지가 가장 작은데 대체값은
+            // 오히려 가장 크게 나오는 등 방향이 거꾸로였다.
             lengthMm: Number(
                 measurements.lengthMm ??
                 measurements.length ??
-                (12 + index * 0.3)
+                fingerSize.lengthMm
             ),
 
             widthMm: Number(
                 measurements.widthMm ??
                 measurements.width ??
-                (9 + index * 0.2)
+                fingerSize.widthMm
             ),
 
             // 실제 파이프라인이 내려주는 곡률 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
@@ -338,6 +344,8 @@ export function useHandScanResultPage() {
 
     const lengthPercentile = percentileAgainstBaseline(lengthValue, NAIL_BASELINE.length)
     const widthPercentile = percentileAgainstBaseline(widthValue, NAIL_BASELINE.width)
+    // 곡률도 길이/너비와 동일하게, 막대 위치와 비교 문구를 같은 기준값(NAIL_BASELINE.cCurve) 대비
+    // percentile 하나로 통일해서 계산한다 — 막대가 채워진 위치와 텍스트가 항상 같은 판단 기준을 쓴다.
     const cCurvePercentile = percentileAgainstBaseline(cCurveValue, NAIL_BASELINE.cCurve)
 
     const AVERAGE_METRICS = {

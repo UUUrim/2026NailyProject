@@ -10,6 +10,9 @@ import java.util.List;
 @Builder
 public class DesignDetailResponseDto {
     private Long designId;
+    // 이 디자인이 만들어진 채팅 세션 ID — "디자인 다시 생성하기"에서 같은 세션으로 이어서
+    // 수정(refine)할 수 있게 결과 화면에 내려준다. 세션 없이 만들어진 옛 디자인이면 null.
+    private Long sessionId;
     private String imageUrl;
     private String createdAt;
     private boolean shared;

@@ -28,7 +28,6 @@ function MetricCard({
                 <span style={{ width: `${barPercent}%` }} />
             </div>
             <p className="scan-metric-card__hint">{hint}</p>
-            <p className="scan-metric-card__percentile">상위 {100 - barPercent}% 수준</p>
         </article>
     )
 }
@@ -192,6 +191,40 @@ export function HandScanResultPageContent() {
                 {/*</div>*/}
             </section>
 
+            {isLoading ? (
+                <section className="scan-result-section" aria-hidden="true">
+                    <h2>추천 네일팁 쉐입</h2>
+                    <div className="scan-shape-highlight scan-shape-highlight--skeleton">
+                        <div className="scan-shape-highlight__body">
+                            <p className="scan-shape-highlight__name">&nbsp;</p>
+                            <p className="scan-shape-highlight__desc">분석중...</p>
+                        </div>
+                        <div className="scan-shape-highlight__icon-skeleton" />
+                    </div>
+                </section>
+            ) : (
+                <section className="scan-result-section">
+                    <h2>추천 네일팁 쉐입</h2>
+                    {recommended ? (
+                        <div className="scan-shape-highlight">
+                            <div className="scan-shape-highlight__body">
+                                <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
+                                <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
+                                <p className="scan-shape-highlight__desc">
+                                    {userName ? `${userName}님은 ` : '회원님께는 '}
+                                    {recommended.description}이 잘 어울려요.
+                                </p>
+                            </div>
+                            <div className="scan-shape-highlight__icon" aria-hidden="true">
+                                <img src={recommended.image} alt="" />
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="scan-result-section__sub">AI가 추천 쉐입을 분석하고 있어요.</p>
+                    )}
+                </section>
+            )}
+
             <section className="scan-result-section">
                 <h2>피부 톤 분석</h2>
                 {isLoading ? (
@@ -279,40 +312,6 @@ export function HandScanResultPageContent() {
                     )
                 )}
             </section>
-
-            {isLoading ? (
-                <section className="scan-result-section" aria-hidden="true">
-                    <h2>추천 네일팁 쉐입</h2>
-                    <div className="scan-shape-highlight scan-shape-highlight--skeleton">
-                        <div className="scan-shape-highlight__body">
-                            <p className="scan-shape-highlight__name">&nbsp;</p>
-                            <p className="scan-shape-highlight__desc">분석중...</p>
-                        </div>
-                        <div className="scan-shape-highlight__icon-skeleton" />
-                    </div>
-                </section>
-            ) : (
-                <section className="scan-result-section">
-                    <h2>추천 네일팁 쉐입</h2>
-                    {recommended ? (
-                        <div className="scan-shape-highlight">
-                            <div className="scan-shape-highlight__body">
-                                <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
-                                <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
-                                <p className="scan-shape-highlight__desc">
-                                    {userName ? `${userName}님은 ` : '회원님께는 '}
-                                    {recommended.description}이 잘 어울려요.
-                                </p>
-                            </div>
-                            <div className="scan-shape-highlight__icon" aria-hidden="true">
-                                <img src={recommended.image} alt="" />
-                            </div>
-                        </div>
-                    ) : (
-                        <p className="scan-result-section__sub">AI가 추천 쉐입을 분석하고 있어요.</p>
-                    )}
-                </section>
-            )}
 
             <div className="scan-result-actions">
                 <NextStepButton label="네일팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />

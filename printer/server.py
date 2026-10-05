@@ -2,7 +2,7 @@
 server.py (printer)
 --------------------
 Spring Boot로부터 3D 프린트용 병합 요청을 받는 FastAPI 서버.
-scan/server.py와 동일한 패턴: 무거운 작업(STL 다운로드+병합)은 백그라운드
+scan/_legacy_server.py와 동일한 패턴: 무거운 작업(STL 다운로드+병합)은 백그라운드
 스레드에서 처리하고, 끝나면 콜백 URL로 결과를 POST한다.
 
 Usage:

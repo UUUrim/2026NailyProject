@@ -40,7 +40,6 @@ function MetricCard({
                 <span style={{ width: `${barPercent}%` }} />
             </div>
             <p className="scan-metric-card__hint">{hint}</p>
-            <p className="scan-metric-card__percentile">상위 {100 - barPercent}% 수준</p>
         </article>
     )
 }
@@ -111,6 +110,24 @@ export function HandScanResultPagePreviewContent() {
             </section>
 
             <section className="scan-result-section">
+                <h2>추천 네일팁 쉐입</h2>
+                {recommended && (
+                    <div className="scan-shape-highlight">
+                        <div className="scan-shape-highlight__body">
+                            <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
+                            <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
+                            <p className="scan-shape-highlight__desc">
+                                미리보기 회원님은 {recommended.description}이 잘 어울려요.
+                            </p>
+                        </div>
+                        <div className="scan-shape-highlight__icon" aria-hidden="true">
+                            <img src={recommended.image} alt="" />
+                        </div>
+                    </div>
+                )}
+            </section>
+
+            <section className="scan-result-section">
                 <h2>피부 톤 분석</h2>
                 <div className="skin-tone-grid">
                     <article className="skin-tone-card">
@@ -170,24 +187,6 @@ export function HandScanResultPagePreviewContent() {
                         </p>
                     </article>
                 </div>
-            </section>
-
-            <section className="scan-result-section">
-                <h2>추천 네일팁 쉐입</h2>
-                {recommended && (
-                    <div className="scan-shape-highlight">
-                        <div className="scan-shape-highlight__body">
-                            <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
-                            <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
-                            <p className="scan-shape-highlight__desc">
-                                미리보기 회원님은 {recommended.description}이 잘 어울려요.
-                            </p>
-                        </div>
-                        <div className="scan-shape-highlight__icon" aria-hidden="true">
-                            <img src={recommended.image} alt="" />
-                        </div>
-                    </div>
-                )}
             </section>
 
             <div className="scan-result-actions">

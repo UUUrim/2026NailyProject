@@ -104,6 +104,7 @@ scan/_lunula_*
 scan/daily_summary_2026-08-15.txt
 scan/nail_stl_square_test/
 scan/ccurve_images_wj/
+scan/ccurve_test1/
 
 
 #################### printer
@@ -134,4 +135,6 @@ scan/_phone_check/
 photos/
 results/
 
-
+scan/_warp_NEW_box.jpg
+scan/_warp_OLD_box.jpg
+scan/naily_pipeline.py

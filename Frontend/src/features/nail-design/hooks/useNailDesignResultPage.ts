@@ -112,6 +112,9 @@ export function useNailDesignResultPage() {
   const [shareBusy, setShareBusy] = useState(false)
   const [shape, setShape] = useState<string | null>(null)
   const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
+  // 이 디자인이 만들어진 채팅 세션 ID — "디자인 다시 생성하기"에서 같은 세션으로 이어서
+  // 수정할 수 있도록 넘겨준다. 세션 정보 없는 옛 디자인이면 null.
+  const [sessionId, setSessionId] = useState<number | null>(null)
 
 
   // ★ 스와치 폴링
@@ -191,6 +194,7 @@ export function useNailDesignResultPage() {
             setShared(Boolean(detail.shared))
             setShape(detail.shape ?? null)
             setNailTipCropUrls(detail.nailTipCropUrls ?? null)
+            setSessionId(detail.sessionId ?? null)
           })
           .catch(() => {})
 
@@ -302,6 +306,7 @@ export function useNailDesignResultPage() {
     navigate,
     image,
     designId,
+    sessionId,
     context,
     swatchLoading,
     liked,

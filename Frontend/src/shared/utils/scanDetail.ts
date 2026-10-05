@@ -1,6 +1,6 @@
 import type { ScanHistoryItem, ScanResultResponse } from '@/entities/scan/api'
 import { generateSkinTonePalette } from '@/shared/utils/skinTone'
-import { FALLBACK_C_CURVE_MM, NAIL_BASELINE } from '@/shared/utils/nailMetrics'
+import { FALLBACK_C_CURVE_MM, FALLBACK_LENGTH_MM, FALLBACK_WIDTH_MM, NAIL_BASELINE } from '@/shared/utils/nailMetrics'
 
 /** 한 번의 촬영에서 나온 왼손/오른손 스캔 기록을 하나로 묶은 단위 */
 export type ScanSession = {
@@ -95,12 +95,12 @@ function parseFingerMeasurements(measurements: string | null | undefined) {
     }
     // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm — cCurve/curve는 옛 목업 호환용
     return {
-      lengthMm: Number(m.lengthMm ?? m.length ?? 12),
-      widthMm: Number(m.widthMm ?? m.width ?? 9),
+      lengthMm: Number(m.lengthMm ?? m.length ?? FALLBACK_LENGTH_MM),
+      widthMm: Number(m.widthMm ?? m.width ?? FALLBACK_WIDTH_MM),
       cCurve: Number(m.cCurveMm ?? m.cCurve ?? m.curve ?? FALLBACK_C_CURVE_MM),
     }
   } catch {
-    return { lengthMm: 12, widthMm: 9, cCurve: FALLBACK_C_CURVE_MM }
+    return { lengthMm: FALLBACK_LENGTH_MM, widthMm: FALLBACK_WIDTH_MM, cCurve: FALLBACK_C_CURVE_MM }
   }
 }
 

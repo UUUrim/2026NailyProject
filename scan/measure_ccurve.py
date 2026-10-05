@@ -168,27 +168,50 @@ def _locate_finger_by_edge_variance(img: np.ndarray, edge_row: int,
     return img[cy0:cy1, cx0:cx1], cx0, cy0
 
 
-def _fit_circle_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
-    """Kåsa circle fit with iterative outlier rejection.
+def _fit_parabola_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
+    """Robust quadratic fit y = A*x^2 + B*x + C, iterative outlier rejection.
 
-    Returns (cx, cy, r, inlier_mask).
+    Replaces an earlier algebraic (Kasa) circle fit. A real nail's C-curve
+    is always a SHALLOW arc (chord >> sagitta), and a shallow arc is exactly
+    what a parabola models directly and stably - whereas the Kasa circle fit
+    is well known to be ill-conditioned in this regime: a small amount of
+    noise (nail-surface texture, JPEG blocking, a wrinkle/ridge line) is
+    enough to flip the fitted centre to the wrong side of the data entirely.
+    Confirmed on real end-on photos from the old 1920x1080 box rig: all 5
+    fingers of one session fit with the circle's centre on the WRONG side of
+    the traced band (2026-09-05) - re-tracing the same boundary from
+    higher-resolution photos on the rebuilt rig showed the true trace is a
+    clean, low-noise dome shape the whole time; the circle fit's instability
+    was amplifying photo noise into a wrong-direction answer even when the
+    underlying signal was fine.
+
+    A plain quadratic regression has no such failure mode: a bad fit shows
+    up as a small or negative leading coefficient (a mostly-flat or
+    wrong-direction curve), never as a wildly relocated vertex - so the
+    validity check (see geom_valid below) is just the coefficient's sign
+    rather than a derived geometric comparison.
+
+    Returns (A, B, C, x0, y0, inlier_mask) - (A,B,C) are the polynomial
+    coefficients, (x0,y0) the vertex in the same pixel coordinates.
     """
     keep = np.ones(len(xs), bool)
-    cx = cy = r = None
+    coef = np.polyfit(xs, ys, 2)
     for _ in range(iters):
-        x, y = xs[keep], ys[keep]
-        M = np.column_stack([x, y, np.ones(len(x))])
-        b = x ** 2 + y ** 2
-        sol, *_ = np.linalg.lstsq(M, b, rcond=None)
-        cx, cy = sol[0] / 2, sol[1] / 2
-        r = np.sqrt(sol[2] + cx ** 2 + cy ** 2)
-        res = np.abs(np.hypot(xs - cx, ys - cy) - r)
+        coef = np.polyfit(xs[keep], ys[keep], 2)
+        res = np.abs(ys - np.polyval(coef, xs))
         s = max(np.median(res[keep]) * 2.5, 1.5)
         new_keep = res < s
         if new_keep.sum() < 8 or (new_keep == keep).all():
             break
         keep = new_keep
-    return cx, cy, r, keep
+    A, B, C = coef
+    if abs(A) > 1e-9:
+        x0 = -B / (2 * A)
+        y0 = C - B ** 2 / (4 * A)
+    else:
+        x0 = float(np.mean(xs[keep]))
+        y0 = float(np.mean(ys[keep]))
+    return A, B, C, x0, y0, keep
 
 
 def _compute_tilt_angle(mask: np.ndarray) -> float:
@@ -205,7 +228,7 @@ def _compute_tilt_angle(mask: np.ndarray) -> float:
 
     Compares the centroid of the mask's upper half (toward the nail) to its
     lower half (toward the table) - the same two-slice technique
-    hand_measurer.py's _compute_finger_angle uses to de-rotate the
+    _legacy_hand_measurer.py's _compute_finger_angle uses to de-rotate the
     equivalent top-view tilt, adapted to this view's "up" direction.
     """
     ys, xs = np.where(mask > 0)
@@ -247,37 +270,50 @@ def measure_ccurve(image_path: str, width_mm: float,
                    table_edge: bool = False,
                    edge_margin_px: int = 350,
                    top_crop_frac: float = 0.0,
-                   bottom_crop_frac: float = 0.0) -> dict:
+                   bottom_crop_frac: float = 0.0,
+                   left_crop_frac: float = 0.0,
+                   right_crop_frac: float = 0.0) -> dict:
 
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Cannot open: {image_path}")
 
-    # ── 0. Ceiling/floor crop ──────────────────────────────────
+    # ── 0. Fixed-rig crop ──────────────────────────────────────
     # Box-style rigs shoot the end-on photo through a hole in a far wall,
-    # with the phone framing enough of the box to also catch its ceiling
-    # (bright strip light + blue alignment LEDs) and a long stretch of the
-    # near-camera mat. Neither is background in the "isolated finger on a
-    # dark backdrop" sense the mask/split logic below assumes: the ceiling
-    # is brighter and more textured than the finger itself, and the mat can
-    # end up merged into the same contour as the finger (both are large,
-    # uniform-ish regions with weak contrast at the box's dark corners) —
-    # confirmed on real rig photos where the "finger" contour it picked
-    # actually traced the ceiling light housing. Slicing off fixed top/
-    # bottom bands before any of that runs removes the confusing content
-    # outright rather than trying to out-threshold it.
-    if top_crop_frac > 0 or bottom_crop_frac > 0:
+    # with the camera framing enough of the box to also catch its ceiling
+    # (bright strip light + blue alignment LEDs), a long stretch of the
+    # near-camera mat, an ID/ArUco tag glued to the mat, and a foil seam
+    # strip on the box wall. None of that is background in the "isolated
+    # finger on a dark backdrop" sense the mask/split logic below assumes:
+    # the ceiling is brighter and more textured than the finger itself, the
+    # tag and foil seam are themselves warm/high-contrast blobs, and the mat
+    # can end up merged into the same contour as the finger — confirmed on
+    # real rig photos where the "finger" contour it picked actually traced
+    # the ceiling light housing or the ID tag instead of the fingertip.
+    #
+    # The rig is fixed-mounted (camera and hole never move), so the
+    # fingertip lands in almost the same place on every capture — measured
+    # across 20 real captures (4 sessions x 5 fingers) at x=0.37-0.54,
+    # y=0.48-0.53 of the frame. Cropping to a fixed box around that region
+    # (with generous margin) removes all of the confusing content outright,
+    # rather than trying to out-threshold it in a full, cluttered frame.
+    if top_crop_frac > 0 or bottom_crop_frac > 0 or left_crop_frac > 0 or right_crop_frac > 0:
         H0, W0 = img.shape[:2]
         y0 = int(H0 * top_crop_frac)
         y1 = H0 - int(H0 * bottom_crop_frac)
-        if y1 - y0 < 50:
+        x0 = int(W0 * left_crop_frac)
+        x1 = W0 - int(W0 * right_crop_frac)
+        if y1 - y0 < 50 or x1 - x0 < 50:
             raise RuntimeError(
-                f"top_crop_frac={top_crop_frac} + bottom_crop_frac="
-                f"{bottom_crop_frac} leaves almost nothing ({y1-y0}px) — "
-                "check the fractions.")
-        img = img[y0:y1, :]
+                f"crop fractions leave almost nothing "
+                f"({x1-x0}x{y1-y0}px) — top={top_crop_frac} "
+                f"bottom={bottom_crop_frac} left={left_crop_frac} "
+                f"right={right_crop_frac}; check the fractions.")
+        img = img[y0:y1, x0:x1]
         print(f"  [Crop] top={top_crop_frac:.2f} bottom={bottom_crop_frac:.2f} "
-              f"→ {img.shape[1]}×{img.shape[0]} (rows {y0}:{y1} of {H0})")
+              f"left={left_crop_frac:.2f} right={right_crop_frac:.2f} "
+              f"→ {img.shape[1]}×{img.shape[0]} "
+              f"(rows {y0}:{y1}, cols {x0}:{x1} of {W0}x{H0})")
 
     located = False
     if table_edge:
@@ -492,19 +528,34 @@ def measure_ccurve(image_path: str, width_mm: float,
     band_mask[byy[keep_px], bxx[keep_px]] = 255
 
     xs, ys = cols.astype(float), top_y
-    cx, cy, r_px, keep = _fit_circle_robust(xs, ys)
+    A_fit, B_fit, C_fit, vx, vy, keep = _fit_parabola_robust(xs, ys)
     res_med = float(np.median(np.abs(
-        np.hypot(xs[keep] - cx, ys[keep] - cy) - r_px)))
-    print(f"  [Circle fit] centre=({cx:.0f},{cy:.0f})  R={r_px:.1f}px  "
+        ys[keep] - np.polyval((A_fit, B_fit, C_fit), xs[keep]))))
+    print(f"  [Parabola fit] vertex=({vx:.0f},{vy:.1f})  A={A_fit:.6f}  "
           f"inliers={keep.sum()}/{len(xs)}  med.res={res_med:.1f}px")
 
-    # hook tips: extreme-x band pixels lying on the fitted circle
+    # ── Geometry sanity check: curvature must open the physically correct way ──
+    # A real nail cross-section is a shallow, convex-up arc: highest (closest
+    # to camera, furthest from the pulp) at the width centre, curving down
+    # toward the pulp at the lateral edges - i.e. the vertex is a MINIMUM,
+    # which for y=A*x^2+... means A must be positive. A<=0 means the fit
+    # found the wrong curvature direction (or the data is too flat/noisy to
+    # show any), and the reading must not be trusted even when the residual
+    # above looks small.
+    geom_valid = A_fit > 1e-6
+    geom_reason = (None if geom_valid else
+                   f"parabola coefficient A={A_fit:.6f} is not positive "
+                   f"(wrong curvature direction)")
+    print(f"  [Geometry] curvature {'valid' if geom_valid else 'INVALID'} "
+          f"(A={A_fit:.6f})" + ("" if geom_valid else "  -> INVALID FIT"))
+
+    # hook tips: extreme-x band pixels lying on the fitted parabola
     bys, bxs = np.nonzero(band_mask)
-    on_circle = np.abs(np.hypot(bxs - cx, bys - cy) - r_px) < \
-        max(3.0, 2.5 * res_med)
-    if on_circle.sum() < 8:
-        raise RuntimeError("Fitted circle does not match the band.")
-    obx, oby = bxs[on_circle], bys[on_circle]
+    pred_at_bxs = np.polyval((A_fit, B_fit, C_fit), bxs.astype(float))
+    on_curve = np.abs(bys - pred_at_bxs) < max(3.0, 2.5 * res_med)
+    if on_curve.sum() < 8:
+        raise RuntimeError("Fitted parabola does not match the band.")
+    obx, oby = bxs[on_curve], bys[on_curve]
     iL, iR = np.argmin(obx), np.argmax(obx)
     x_L, y_L = float(obx[iL]), float(oby[iL])
     x_R, y_R = float(obx[iR]), float(oby[iR])
@@ -541,16 +592,25 @@ def measure_ccurve(image_path: str, width_mm: float,
     scale_mm_per_px = (INSET_FRAC * width_mm) / chord80_px
     chord_px_full = chord80_px / INSET_FRAC   # extrapolated to full width
     half_c = chord_px_full / 2.0
-    if r_px <= half_c:
-        sagitta_px = r_px          # ≥ half circle; clamp
-    else:
-        sagitta_px = r_px - np.sqrt(r_px ** 2 - half_c ** 2)
+    # Sagitta straight from the parabola: how far y rises from the vertex
+    # over a run of half_c - no sqrt/circle algebra needed, and it can never
+    # produce the sqrt-of-negative clamp the old circle formula needed for
+    # a too-small radius, since a parabola has no such domain limit.
+    sagitta_px = A_fit * half_c ** 2
     h_mm = round(sagitta_px * scale_mm_per_px, 2)
-    arc_R = round(width_mm ** 2 / (8 * h_mm) + h_mm / 2, 2)
-    fit_R_mm = round(r_px * scale_mm_per_px, 2)
-    # arc length over the curve (what a flexible ruler measures)
-    half = min(1.0, chord_px_full / (2 * r_px))
-    arc_len_mm = round(2 * r_px * np.arcsin(half) * scale_mm_per_px, 2)
+    # Circle-equivalent radius (osculating circle at the vertex, R=1/(2A)) -
+    # kept only for reporting/consistency with the arc_radius_mm field
+    # downstream code already expects; the measurement itself no longer
+    # depends on it.
+    if A_fit > 1e-9:
+        r_px_equiv = 1.0 / (2 * A_fit)
+        fit_R_mm  = round(r_px_equiv * scale_mm_per_px, 2)
+        half      = min(1.0, chord_px_full / (2 * r_px_equiv))
+        arc_len_mm = round(2 * r_px_equiv * np.arcsin(half) * scale_mm_per_px, 2)
+    else:
+        r_px_equiv = fit_R_mm = arc_len_mm = None
+    arc_R = (round(width_mm ** 2 / (8 * h_mm) + h_mm / 2, 2)
+             if h_mm and h_mm > 0 else None)
 
     print(f"  [Nail arc]  L=({x_L:.0f},{y_L:.0f})  R=({x_R:.0f},{y_R:.0f})  "
           f"peak=({x_P:.0f},{y_P:.0f})")
@@ -558,7 +618,7 @@ def measure_ccurve(image_path: str, width_mm: float,
           f"(full~{chord_px_full:.1f}px vs raw hook-tip {chord_px:.1f}px)  "
           f"W_mm={width_mm}mm  →  {scale_mm_per_px:.5f} mm/px")
     print(f"  [C-curve]  sagitta={sagitta_px:.1f}px  →  h={h_mm}mm")
-    print(f"  [Arc R]  chord formula R={arc_R}mm   circle-fit R={fit_R_mm}mm")
+    print(f"  [Arc R]  chord formula R={arc_R}mm   parabola-fit R={fit_R_mm}mm")
     print(f"  [Arc length] over-the-curve width ~ {arc_len_mm}mm")
 
     # ── 7. Debug visualisation ────────────────────────────────
@@ -573,18 +633,27 @@ def measure_ccurve(image_path: str, width_mm: float,
         for xa, ya, kp in zip(xs, ys, keep):
             cv2.circle(vis, (int(xa), int(ya)), 2,
                        (0, 255, 255) if kp else (0, 0, 255), -1)
-        # fitted circle arc
-        th = np.linspace(0, 2 * np.pi, 720)
-        for t_ in th:
-            px_, py_ = int(cx + r_px * np.cos(t_)), int(cy + r_px * np.sin(t_))
-            if 0 <= px_ < W_img and 0 <= py_ < H:
-                vis[py_, px_] = (255, 0, 255)
+        # Fitted parabola, drawn only across the traced band's own width (plus
+        # a small margin) - unlike the old full-circle overlay (which forced
+        # the reader to reason about major/minor arcs and a centre point off
+        # in the background), this directly shows the fitted curve sitting
+        # over the data: valid = it caps/roofs the yellow band from above.
+        px_lo = max(0, int(cols.min()) - 15)
+        px_hi = min(W_img, int(cols.max()) + 16)
+        pts = np.array([[px_, int(round(np.polyval((A_fit, B_fit, C_fit), px_)))]
+                        for px_ in range(px_lo, px_hi)], np.int32)
+        cv2.polylines(vis, [pts.reshape(-1, 1, 2)], False, (255, 0, 255), 2)
 
         cv2.circle(vis, (int(x_L), int(y_L)), 6, (0, 200, 0), 2)
         cv2.circle(vis, (int(x_R), int(y_R)), 6, (0, 200, 0), 2)
         cv2.circle(vis, (int(x_P), int(y_P)), 6, (0, 0, 255), -1)
         cv2.line(vis, (int(x_L), int(y_L)), (int(x_R), int(y_R)),
                  (255, 200, 0), 2)
+        # Vertex of the fitted parabola - the point the geometry check's
+        # curvature sign is anchored to.
+        if 0 <= int(vx) < W_img and 0 <= int(vy) < H:
+            cv2.drawMarker(vis, (int(vx), int(vy)), (255, 255, 255),
+                           markerType=cv2.MARKER_CROSS, markerSize=16, thickness=2)
 
         # zoomed crop around the fingertip with labels
         m = 80
@@ -594,8 +663,11 @@ def measure_ccurve(image_path: str, width_mm: float,
         zoom = max(1, int(900 / max(crop.shape[:2])))
         crop = cv2.resize(crop, None, fx=zoom, fy=zoom,
                           interpolation=cv2.INTER_NEAREST)
-        pad = np.zeros((crop.shape[0] + 160, crop.shape[1], 3), np.uint8)
+        pad = np.zeros((crop.shape[0] + 200, crop.shape[1], 3), np.uint8)
         pad[:crop.shape[0]] = crop
+        geom_txt   = "geometry: OK (curvature opens correctly)" if geom_valid \
+            else f"geometry: INVALID ({geom_reason})"
+        geom_color = (0, 220, 0) if geom_valid else (0, 0, 255)
         for i, txt in enumerate([
                 f"W={width_mm}mm  chord={chord_px:.0f}px  "
                 f"scale={scale_mm_per_px:.4f}mm/px",
@@ -603,8 +675,13 @@ def measure_ccurve(image_path: str, width_mm: float,
                 f"over-the-curve width={arc_len_mm}mm"]):
             cv2.putText(pad, txt, (12, crop.shape[0] + 40 + 45 * i),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+        cv2.putText(pad, geom_txt, (12, crop.shape[0] + 40 + 45 * 3),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, geom_color, 2)
         cv2.imwrite(debug_out, pad)
         print(f"  [Debug] saved → {debug_out}")
+
+    if not geom_valid:
+        raise RuntimeError(f"Invalid arc geometry: {geom_reason}")
 
     return {
         "c_curve_mm":    h_mm,
@@ -652,6 +729,14 @@ def main():
                    help="Fraction of image height to cut off the bottom "
                         "before measuring (e.g. 0.12 to remove excess "
                         "near-camera mat).")
+    p.add_argument("--left-crop-frac", type=float, default=0.0,
+                   help="Fraction of image width to cut off the left "
+                        "before measuring (e.g. 0.25 to remove a box rig's "
+                        "wall seam / off-centre clutter).")
+    p.add_argument("--right-crop-frac", type=float, default=0.0,
+                   help="Fraction of image width to cut off the right "
+                        "before measuring (e.g. 0.30 to remove a box rig's "
+                        "ID/ArUco tag).")
     args = p.parse_args()
 
     print(f"\nC-curve measurement: {args.image}")
@@ -661,7 +746,9 @@ def main():
                              table_edge=args.table_edge,
                              edge_margin_px=args.edge_margin_px,
                              top_crop_frac=args.top_crop_frac,
-                             bottom_crop_frac=args.bottom_crop_frac)
+                             bottom_crop_frac=args.bottom_crop_frac,
+                             left_crop_frac=args.left_crop_frac,
+                             right_crop_frac=args.right_crop_frac)
 
     print(f"\n  ┌─ C-CURVE RESULT ─────────────────────────────")
     print(f"  │  Sagitta (C-curve)  : {result['c_curve_mm']} mm")

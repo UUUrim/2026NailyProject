@@ -1,7 +1,7 @@
 """
 diagnose_camera.py
 Quick diagnostic: shows live camera feed and tries ALL ArUco dictionaries.
-Run this to check if your webcam + marker are working before nail_capture.py.
+Run this to check if your webcam + marker are working.
 
 Usage:
     python diagnose_camera.py
