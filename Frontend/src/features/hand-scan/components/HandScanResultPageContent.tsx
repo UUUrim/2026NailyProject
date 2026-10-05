@@ -174,7 +174,7 @@ export function HandScanResultPageContent() {
                         </>
                     ) : (
                         <>
-                            <MetricCard title="길이 (Length)" metric={AVERAGE_METRICS.length} hint="손톱 끝에서 베이스까지 평균 길이" />
+                            <MetricCard title="길이 (Length)" metric={AVERAGE_METRICS.length} hint="큐티클에서 손톱 끝까지의 길이 평균" />
                             <MetricCard title="너비 (Width)" metric={AVERAGE_METRICS.width} hint="손톱 최대 너비 평균" />
                             <MetricCard
                                 title="곡률 (C-curve)"

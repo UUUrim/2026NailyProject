@@ -2,6 +2,10 @@ import { createPortal } from 'react-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { CameraSetupPreview } from '@/features/hand-scan/components/CameraSetupPreview'
+import { TopViewFingerGuide } from '@/features/hand-scan/components/TopViewFingerGuide'
+import { CaptureButton } from '@/features/hand-scan/components/CaptureButton'
+import { ScanProgressDots } from '@/features/hand-scan/components/ScanProgressDots'
+import { CAPTURE_COPY, getCaptureStatus, toGuidePhase } from '@/features/hand-scan/utils/captureStatus'
 import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { PillButton } from '@/shared/components/PillButton'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
@@ -33,6 +37,9 @@ export function HandScanPageContent() {
     isUploading,
     stabilityRatio,
     isStable,
+    topGuide,
+    isCapturing,
+    completedStep,
     sideCameraIdx,
     currentStepIndex,
     uploadedSteps,
@@ -50,32 +57,44 @@ export function HandScanPageContent() {
   } = useHandScanPage()
 
   // ── 풀스크린 오버레이 ─────────────────────────────────────────
+  // 화면 상태(안내 문구·촬영 버튼 막대)는 서버가 이미 주는 값에서 계산만 한다 —
+  // 측정/촬영 요청은 예전과 같다 (captureStatus.ts 참고).
+  const captureStatus = getCaptureStatus({
+    cameraReady: topGuide !== null,
+    ratio: stabilityRatio,
+    stable: isStable,
+    capturing: isCapturing,
+  })
+  const target = `${HAND_LABELS[currentHand]} ${FINGER_LABELS[currentFinger]}`
+
   const fullscreenOverlay = isFullscreen
       ? createPortal(
-          <div className="hand-scan-fs" role="dialog" aria-modal="true" aria-label="손 촬영">
+          <div
+              className={`hand-scan-fs hand-scan-fs--${captureStatus}`}
+              role="dialog"
+              aria-modal="true"
+              aria-label="손 촬영"
+          >
+            <header className="hand-scan-fs__header">
+              <ScanProgressDots currentStepIndex={currentStepIndex} uploadedSteps={uploadedSteps} />
+              <h2 className="hand-scan-fs__title" aria-live="polite">
+                {CAPTURE_COPY[captureStatus].title(target)}
+              </h2>
+            </header>
+
             <div className="hand-scan-fs__feeds">
-              {/* 탑뷰: 스캔 서버 MJPEG 스트림 (ArUco 가이드선 포함) */}
+              {/* 탑뷰: 스캔 서버 MJPEG 스트림 + 손가락/큐티클 가이드(프론트에서 그림) */}
               <div className="hand-scan-fs__feed">
-                <div
-                    className={[
-                      'hand-scan-fs__gauge',
-                      isStable ? 'hand-scan-fs__gauge--ready' : '',
-                    ].filter(Boolean).join(' ')}
-                    role="progressbar"
-                    aria-label="측정 정확도"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(stabilityRatio * 100)}
-                >
-                  <div
-                      className="hand-scan-fs__gauge-fill"
-                      style={{ height: `${Math.round(stabilityRatio * 100)}%` }}
-                  />
-                </div>
                 <img
                     src={`${SCAN_SERVER_URL}/stream/top`}
                     className="hand-scan-fs__video"
                     alt="탑뷰 스캔 피드"
+                />
+                <TopViewFingerGuide
+                    guide={topGuide}
+                    finger={currentFinger}
+                    fingerLabel={FINGER_LABELS[currentFinger]}
+                    phase={toGuidePhase(captureStatus)}
                 />
               </div>
 
@@ -106,42 +125,39 @@ export function HandScanPageContent() {
               </svg>
             </button>
 
-            <p className="hand-scan-fs__prompt">
-              <svg className="hand-scan-fs__prompt-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
-                <path d="M12 4.5l9 15.5H3l9-15.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
-                <line x1="12" y1="10.5" x2="12" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <circle cx="12" cy="17.2" r="1" fill="currentColor" />
-              </svg>
-              {HAND_LABELS[currentHand]} {FINGER_LABELS[currentFinger]}를 넣어주세요
-              <svg className="hand-scan-fs__prompt-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" aria-hidden="true">
-                <path d="M12 4.5l9 15.5H3l9-15.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
-                <line x1="12" y1="10.5" x2="12" y2="14.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <circle cx="12" cy="17.2" r="1" fill="currentColor" />
-              </svg>
-            </p>
-
-            <div className="hand-scan-fs__finger-badge">
-            <span className="hand-scan-fs__finger-badge-name">
-              {FINGER_LABELS[currentFinger]}
-              <span className="hand-scan-fs__finger-badge-hand">
-                ({currentHand === 'LEFT' ? 'L' : 'R'})
-              </span>
-            </span>
-              <span className="hand-scan-fs__finger-badge-divider" />
-              <span className="hand-scan-fs__finger-badge-progress">
-              {currentStepIndex + 1}/{STEPS.length}
-            </span>
-            </div>
-
-            <div className="hand-scan-fs__capture-wrap">
-              <button
-                  type="button"
-                  className="hand-scan__action-btn hand-scan-fs__capture"
-                  onClick={() => void handleCaptureFinger()}
-                  disabled={!isStable}
-              >
-                {isStable ? '지금 촬영' : '정확도를 채워주세요'}
-              </button>
+            {/* 촬영 완료 — 화면 가운데 잠깐 떴다 사라진다 (key가 바뀔 때마다 새로 떠서 CSS 애니메이션으로 사라짐) */}
+            {completedStep ? (
+                <div
+                    key={`${completedStep.hand}-${completedStep.finger}`}
+                    className="hand-scan-fs__toast"
+                    role="status"
+                >
+                  <span className="hand-scan-fs__toast-icon" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" width="18" height="18">
+                      <path d="M3 8.5l3.2 3L13 4.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <span className="hand-scan-fs__toast-text">
+                    {HAND_LABELS[completedStep.hand]} {FINGER_LABELS[completedStep.finger]} 촬영 완료
+                    {completedStep.hand === 'LEFT' && completedStep.finger === 'PINKY' ? (
+                        <small>이제 오른손을 촬영해요</small>
+                    ) : null}
+                  </span>
+                </div>
+            ) : null}
+            <div className="hand-scan-fs__dock">
+              {/* 촬영 요청 오류 — 버튼 바로 위에 계속 표시 (다음에 촬영 버튼을 누르면 지워짐) */}
+              {cameraError ? (
+                  <p className="hand-scan-fs__error" role="alert">
+                    <span className="hand-scan-fs__error-icon" aria-hidden="true">!</span>
+                    {cameraError}
+                  </p>
+              ) : null}
+              <CaptureButton
+                  status={captureStatus}
+                  ratio={stabilityRatio}
+                  onCapture={() => void handleCaptureFinger()}
+              />
             </div>
           </div>,
           document.body,

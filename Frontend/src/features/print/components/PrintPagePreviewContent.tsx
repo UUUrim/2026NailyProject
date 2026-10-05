@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
-import { getNailShape, NAIL_SHAPES } from '@/shared/constants/nailShapes'
+import {
+    getDefaultTipExtensionMm,
+    getNailShape,
+    NAIL_SHAPES,
+    clampTipExtensionMm,
+} from '@/shared/constants/nailShapes'
+import { NailLengthPanel } from '@/features/print/components/NailLengthPanel'
 import {
     formatMetricCurve,
     type ScanSession,
@@ -66,6 +72,9 @@ const ChevronRightIcon = (
 export function PrintPagePreviewContent() {
     const [selectedKey, setSelectedKey] = useState<string | null>(MOCK_SESSIONS[0].key)
     const [selectedShape, setSelectedShape] = useState<string | null>(MOCK_SESSIONS[0].recommendedShape ?? MOCK_SESSIONS[0].shape)
+    const [tipExtensionMm, setTipExtensionMm] = useState<number>(
+        getDefaultTipExtensionMm(MOCK_SESSIONS[0].recommendedShape ?? MOCK_SESSIONS[0].shape),
+    )
     const [sessionPage, setSessionPage] = useState(1)
     const [printModalStep, setPrintModalStep] = useState<'confirm' | 'done' | null>(null)
     const [printConfirmed, setPrintConfirmed] = useState(false)
@@ -82,7 +91,20 @@ export function PrintPagePreviewContent() {
     const handleSelectSession = (session: ScanSession) => {
         if (printConfirmed) return
         setSelectedKey(session.key)
-        setSelectedShape(session.recommendedShape ?? session.shape ?? 'round')
+        const nextShape = session.recommendedShape ?? session.shape ?? 'round'
+        setSelectedShape(nextShape)
+        setTipExtensionMm(getDefaultTipExtensionMm(nextShape))
+    }
+
+    const handleSelectShape = (shapeId: string) => {
+        if (printConfirmed) return
+        setSelectedShape(shapeId)
+        setTipExtensionMm(getDefaultTipExtensionMm(shapeId))
+    }
+
+    const handleSetTipExtension = (valueMm: number) => {
+        if (printConfirmed) return
+        setTipExtensionMm(clampTipExtensionMm(valueMm))
     }
 
     return (
@@ -213,15 +235,11 @@ export function PrintPagePreviewContent() {
                                 <article
                                     key={shape.id}
                                     className={`scan-shape-card ${isRecommended ? 'is-recommended' : ''} ${isSelected ? 'is-selected' : ''} ${printConfirmed ? 'is-locked' : ''}`}
-                                    onClick={() => {
-                                        if (printConfirmed) return
-                                        setSelectedShape(shape.id)
-                                    }}
+                                    onClick={() => handleSelectShape(shape.id)}
                                     role="button"
                                     tabIndex={printConfirmed ? -1 : 0}
                                     onKeyDown={(e) => {
-                                        if (printConfirmed) return
-                                        if (e.key === 'Enter') setSelectedShape(shape.id)
+                                        if (e.key === 'Enter') handleSelectShape(shape.id)
                                     }}
                                     aria-pressed={isSelected}
                                     aria-disabled={printConfirmed}
@@ -249,6 +267,28 @@ export function PrintPagePreviewContent() {
                             )
                         })}
                     </div>
+                </section>
+
+                <section className="print-page__section">
+                    <div className="print-page__section-head">
+                        <h2>3. 네일 팁 길이 설정</h2>
+                    </div>
+                    <p className="print-page__section-sub">
+                        내 손톱 끝에서 팁이 얼마나 더 길게 나올지 정해 주세요.
+                        {selectedShape && (
+                            <>
+                                {' '}<strong>{getNailShape(selectedShape)?.labelKo ?? selectedShape}</strong> 쉐입의 기본 길이는{' '}
+                                <strong>{getDefaultTipExtensionMm(selectedShape)}mm</strong>예요.
+                            </>
+                        )}
+                    </p>
+                    <NailLengthPanel
+                        shapeId={selectedShape}
+                        valueMm={tipExtensionMm}
+                        onChange={handleSetTipExtension}
+                        measuredLengthMm={selectedSession?.avgLengthMm}
+                        disabled={printConfirmed}
+                    />
                 </section>
 
                 <div className="print-page__actions">
@@ -303,7 +343,7 @@ export function PrintPagePreviewContent() {
                                     {selectedSession ? formatScanDateLabel(selectedSession.scannedAt) : ''} 분석 결과를 기반으로
                                     <br />
                                     <strong> {selectedShape ? getNailShape(selectedShape)?.labelKo ?? selectedShape : ''} </strong>
-                                    네일팁이 3D 프린터로 출력됩니다.
+                                    네일팁이 연장 길이 <strong>+{tipExtensionMm}mm</strong>로 3D 프린터로 출력됩니다.
                                     <br />
                                     출력을 진행하시겠습니까?
                                 </p>

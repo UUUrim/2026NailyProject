@@ -19,12 +19,11 @@ export type DesignDetailItem =
 
 /**
  * 디자인 생성 모델이 이미지와 함께 추출해서 내려주는 세부 요소.
- * (컬러팔레트 / 질감·텍스처 / 네일 파츠는 모델 쪽에서 추출 — 프론트는 받아서 표시만 함)
+ * (컬러팔레트 / 질감·텍스처는 모델 쪽에서 추출 — 프론트는 받아서 표시만 함)
  */
 export interface DesignExtractedDetails {
     colorPalette: DesignDetailItem[] // 디자인에 사용된 컬러 (예: ["#FDE2EA", "#DE869F"])
     textures: DesignDetailItem[]     // 디자인의 질감/텍스처 (예: ["글리터", "그라데이션"])
-    nailParts: DesignDetailItem[]    // 디자인에 사용된 네일 파츠 (예: ["펄", "하트 스톤"])
     swatches?: Record<string, string> //추가: { "glitter": "S3_URL", ... } 비동기 생성이라 null일 수 있음
 }
 

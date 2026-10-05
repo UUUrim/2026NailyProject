@@ -42,8 +42,6 @@ public class TextureExtractService {
             Rules:
             - Extract only textures that genuinely appear in the prompt. Do NOT invent textures.
             - No duplicate texture entries.
-            - For 3d_charm: also include "charm_shape" (e.g. "bow", "heart", "star", "ribbon")
-              and "charm_material" (e.g. "velvet", "crystal", "metallic", "glossy").
             - "color" should be the primary color associated with that texture in the design.
               Use descriptive English color names like "dusty rose pink", "ivory", "Hazelnut".
               Set color to null if the texture has its own inherent color (e.g. magnetic_chrome).
@@ -56,8 +54,7 @@ public class TextureExtractService {
             Output format:
             [
               {"texture": "glitter", "color": "dusty rose pink"},
-              {"texture": "plain_solid", "color": "ivory"},
-              {"texture": "3d_charm", "color": null, "charm_shape": "bow", "charm_material": "velvet"}
+              {"texture": "plain_solid", "color": "ivory"}
             ]
             """;
 
@@ -92,30 +89,18 @@ public class TextureExtractService {
             String cleaned = text.replaceAll("```json|```", "").trim();
             JsonNode arrayNode = objectMapper.readTree(cleaned);
             List<Map<String, Object>> result = new ArrayList<>();
-            int charmIndex = 1;
             if (arrayNode.isArray()) {
                 for (JsonNode item : arrayNode) {
                     Map<String, Object> pair = new java.util.LinkedHashMap<>();
                     String texture = item.path("texture").asText();
 
-                    //3d_charm 중복 처리
-                    if ("3d_charm".equals(texture)) {
-                        String charmShape = item.has("charm_shape")
-                                ? item.get("charm_shape").asText().toLowerCase().replace(" ", "_")
-                                : String.valueOf(charmIndex);
-                        texture = charmIndex == 1 ? "3d_charm_" + charmShape : "3d_charm_" + charmShape + "_" + charmIndex;
-                        charmIndex++;
-                    }
+                    // 3D 참은 파츠라서 스와치를 만들지 않는다. 참이 다른 텍스처로 잘못 분류되지
+                    // 않도록 프롬프트의 분류 키에는 남겨두고, 결과에서만 뺀다.
+                    if ("3d_charm".equals(texture)) continue;
 
                     pair.put("texture", texture);
                     pair.put("color", item.has("color") && !item.get("color").isNull()
                             ? item.get("color").asText() : null);
-                    if (item.has("charm_shape")) {
-                        pair.put("charm_shape", item.get("charm_shape").asText());
-                    }
-                    if (item.has("charm_material")) {
-                        pair.put("charm_material", item.get("charm_material").asText());
-                    }
                     final String finalTexture = texture;
                     boolean alreadyExists = result.stream()
                             .anyMatch(p -> finalTexture.equals(p.get("texture")));

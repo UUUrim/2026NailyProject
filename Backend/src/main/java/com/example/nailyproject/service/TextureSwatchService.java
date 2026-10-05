@@ -65,13 +65,7 @@ public class TextureSwatchService {
                     "quick loose pen sketch style, imperfect wobbly linework, " +
                     "minimal thin black outline only, maybe one small area of {color}, " +
                     "casual doodle illustration, sketchy and unrefined, " +
-                    "the drawing appears embedded within the transparent gel, " + TAIL,
-
-            "3d_charm",
-            "A circular material swatch sample, a clear transparent glossy gel base disc " +
-                    "with a single large 3D sculptural {charm_material} {charm_shape} charm resting on top, " +
-                    "dimensional textured relief, soft shadow beneath the charm, " +
-                    "the surrounding base fully transparent, " + TAIL
+                    "the drawing appears embedded within the transparent gel, " + TAIL
     );
 
     /**
@@ -93,27 +87,15 @@ public class TextureSwatchService {
                 continue;
             }
 
-            //3d_charm은 파츠 검출 이미지 사용 → 스와치 생성 스킵
-            if (texture.startsWith("3d_charm")) {
-                System.out.println("[TextureSwatchService] " + texture + " — 파츠 검출 이미지 사용, 스와치 생성 스킵");
-                continue;
-            }
-
-            String templateKey = texture.startsWith("3d_charm") ? "3d_charm" : texture;
-            String template = TEMPLATES.get(templateKey);
+            String template = TEMPLATES.get(texture);
             if (template == null) {
                 System.err.println("[TextureSwatchService] 알 수 없는 텍스처 키: " + texture + " — 건너뜀");
                 continue;
             }
 
             String color = pair.get("color") != null ? (String) pair.get("color") : "";
-            String charmShape = (String) pair.getOrDefault("charm_shape", "charm");
-            String charmMaterial = (String) pair.getOrDefault("charm_material", "glossy");
 
-            String prompt = template
-                    .replace("{color}", color)
-                    .replace("{charm_shape}", charmShape)
-                    .replace("{charm_material}", charmMaterial);
+            String prompt = template.replace("{color}", color);
 
             try {
                 // 1. 스와치 이미지 생성

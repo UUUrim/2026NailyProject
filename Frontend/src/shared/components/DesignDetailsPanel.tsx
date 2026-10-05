@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { TEXTURE_INFO, CHARM_INFO } from '@/shared/constants/designPreferences'
+import { TEXTURE_INFO } from '@/shared/constants/designPreferences'
 import type { DesignDetailItem, DesignExtractedDetails } from '@/entities/design/api'
 import '@/styles/nail-design.css'
 
 const TEXTURE_INFO_BY_KO = Object.fromEntries(Object.entries(TEXTURE_INFO).map(([, v]) => [v.labelKo, v]))
-const CHARM_INFO_BY_KO = Object.fromEntries(Object.entries(CHARM_INFO).map(([, v]) => [v.labelKo, v]))
 
 type NormalizedDetail = { key: string; label: string; hex: string | null; imageUrl: string | null }
 
@@ -136,16 +135,28 @@ const LIGHTBOX_ZOOM_MIN = 1
 const LIGHTBOX_ZOOM_MAX = 4
 const LIGHTBOX_WHEEL_ZOOM_SENSITIVITY = 0.0015
 
-// 텍스처·파츠 썸네일을 눌렀을 때 원본 이미지를 화면 중앙에 크게 띄우는 라이트박스.
+// 질감(텍스처) 썸네일을 눌렀을 때 원본 이미지를 화면 중앙에 크게 띄우는 라이트박스.
 // document.body에 포탈로 붙여서, 이 패널이 어떤 모달(마이페이지 상세모달 등) 안에
 // 중첩되어 있어도 그 모달 경계에 잘리지 않고 항상 화면 전체를 덮는다.
 // 확대/이동은 DesignImageDetailModal의 이미지 뷰포트와 동일한 방식 - 휠로 zoom을
 // 조절하고, 확대된 상태에서만 드래그로 pan한다. transform(scale/translate)만
 // 건드리므로 레이아웃 크기는 그대로 유지되고, 넘치는 부분은 overflow:hidden으로 잘린다.
-function ImageLightbox({ imageUrl, alt, onClose }: { imageUrl: string; alt: string; onClose: () => void }) {
+//
+// 박스는 고정 크기 대신 이미지의 실제 픽셀 크기(뷰포트 한도 내)에 맞춰 잡는다 - 원본보다
+// 더 키워서 보여주면(업스케일) 흐려지므로, 스와치는 실제 해상도 그대로 보여주는 쪽이 더 선명하다.
+function ImageLightbox({
+                            imageUrl,
+                            alt,
+                            onClose,
+                        }: {
+    imageUrl: string
+    alt: string
+    onClose: () => void
+}) {
     const [zoom, setZoom] = useState(1)
     const [pan, setPan] = useState({ x: 0, y: 0 })
     const [isDragging, setIsDragging] = useState(false)
+    const [naturalBoxSize, setNaturalBoxSize] = useState<{ w: number; h: number } | null>(null)
     const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
     const viewportRef = useRef<HTMLDivElement | null>(null)
 
@@ -195,12 +206,25 @@ function ImageLightbox({ imageUrl, alt, onClose }: { imageUrl: string; alt: stri
 
     const stopDragging = () => setIsDragging(false)
 
+    // 로드된 이미지의 naturalWidth/Height를 읽어, 뷰포트 한도(60vw/50vh) 안에서
+    // 원본 비율 그대로 박스 크기를 정한다. 원본보다 크게 키우지 않는다(스케일 <= 1).
+    const handleImageLoad = (event: SyntheticEvent<HTMLImageElement>) => {
+        const img = event.currentTarget
+        const maxW = window.innerWidth * 0.6
+        const maxH = window.innerHeight * 0.5
+        const scale = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight)
+        setNaturalBoxSize({ w: img.naturalWidth * scale, h: img.naturalHeight * scale })
+    }
+
+    const contentStyle = naturalBoxSize ? { width: `${naturalBoxSize.w}px`, height: `${naturalBoxSize.h}px` } : undefined
+
     return createPortal(
         <div className="design-result-v2__lightbox" role="dialog" aria-modal="true" aria-label={alt}>
             <button type="button" className="design-result-v2__lightbox-backdrop" aria-label="닫기" onClick={onClose} />
             <div
                 ref={viewportRef}
                 className={`design-result-v2__lightbox-content${zoom > 1 ? ' is-zoomed' : ''}${isDragging ? ' is-dragging' : ''}`}
+                style={contentStyle}
                 onMouseUp={stopDragging}
                 onMouseLeave={stopDragging}
             >
@@ -214,46 +238,11 @@ function ImageLightbox({ imageUrl, alt, onClose }: { imageUrl: string; alt: stri
                     style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
                     onMouseDown={handlePointerDown}
                     onMouseMove={handlePointerMove}
+                    onLoad={handleImageLoad}
                 />
             </div>
         </div>,
         document.body,
-    )
-}
-
-// 팔레트/텍스처와 달리 참·파츠는 이미 배경이 제거된 낱장 이미지라, 박스에 가두지
-// 않고 그 이미지 자체를 보여준다 - 로드 실패시에만 최소한의 아이콘으로 대체한다.
-function CharmImage({
-                         imageUrl,
-                         alt,
-                         fallbackIcon,
-                         onClick,
-                     }: {
-    imageUrl: string
-    alt: string
-    fallbackIcon: string
-    onClick: () => void
-}) {
-    const [broken, setBroken] = useState(false)
-
-    if (broken) {
-        return (
-            <span className="design-result-v2__charm-fallback" role="img" aria-label={alt}>
-                {fallbackIcon}
-            </span>
-        )
-    }
-
-    return (
-        <button type="button" className="design-result-v2__charm-image-button" onClick={onClick} aria-label={`${alt} 확대 보기`}>
-            <img
-                className="design-result-v2__charm-image"
-                src={imageUrl}
-                alt={alt}
-                loading="lazy"
-                onError={() => setBroken(true)}
-            />
-        </button>
     )
 }
 
@@ -297,6 +286,72 @@ function DetailThumb({
     )
 }
 
+// Clipboard API는 보안 컨텍스트(HTTPS/localhost)에서만 쓸 수 있어서, 막혀 있으면
+// 숨긴 textarea + execCommand('copy') 방식으로 한 번 더 시도한다.
+async function copyText(text: string): Promise<boolean> {
+    try {
+        await navigator.clipboard.writeText(text)
+        return true
+    } catch {
+        // 아래 폴백으로 진행
+    }
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+        return document.execCommand('copy')
+    } catch {
+        return false
+    } finally {
+        textarea.remove()
+    }
+}
+
+// 컬러 팔레트 - 색을 가로 한 줄 띠로 이어 붙이고, 호버한 색 구간을 넓혀
+// 그 위에 HEX 값을 띄운다. 클릭하면 HEX 값을 클립보드에 복사한다.
+function PaletteStrip({ items }: { items: NormalizedDetail[] }) {
+    const [copiedKey, setCopiedKey] = useState<string | null>(null)
+    const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    useEffect(() => () => {
+        if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+    }, [])
+
+    const handleCopy = async (item: NormalizedDetail) => {
+        if (!item.hex) return
+        if (!(await copyText(item.hex.toUpperCase()))) return
+        setCopiedKey(item.key)
+        if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+        copiedTimerRef.current = setTimeout(() => setCopiedKey(null), 1200)
+    }
+
+    return (
+        <div className="design-result-v2__palette-strip">
+            {items.map((item) => {
+                const hex = item.hex?.toUpperCase() ?? null
+                const copied = copiedKey === item.key
+                return (
+                    <button
+                        type="button"
+                        key={item.key}
+                        className={`design-result-v2__palette-seg${copied ? ' is-copied' : ''}`}
+                        style={{ background: hex ?? (item.imageUrl ? `center / cover no-repeat url("${item.imageUrl}")` : '#eee') }}
+                        onClick={() => void handleCopy(item)}
+                        disabled={!hex}
+                        aria-label={hex ? `${hex} 복사하기` : '컬러'}
+                    >
+                        {hex && <span className="design-result-v2__palette-hex">{copied ? '복사됨' : hex}</span>}
+                    </button>
+                )
+            })}
+        </div>
+    )
+}
+
 type Props = {
     details?: DesignExtractedDetails | null
     loading?: boolean
@@ -318,14 +373,9 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
         (details?.colorPalette ?? []).map((item, i) => normalizeDetailItem(item, i, 'palette')),
 )
 
-    const normalizedCharms = (details?.nailParts ?? []).map((item, i) => normalizeDetailItem(item, i, 'charm'))
-
+    // 예전에 만들어진 디자인엔 3D 참(파츠) 스와치가 섞여 있을 수 있어서 질감 목록에서 뺀다.
     const swatchEntries = details?.swatches
         ? Object.entries(details.swatches).filter(([key]) => !key.startsWith('3d_charm'))
-        : []
-
-    const charmSwatchEntries = details?.swatches
-        ? Object.entries(details.swatches).filter(([key]) => key.startsWith('3d_charm'))
         : []
 
     return (
@@ -335,24 +385,10 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
             )}
 
             {/* 컬러 팔레트 */}
-            <div className="design-result-v2__detail-block">
+            <div className="design-result-v2__detail-block design-result-v2__detail-block--palette">
                 <p className="design-result-v2__detail-label">컬러 팔레트</p>
                 {normalizedPalette.length > 0 ? (
-                    <div className="design-result-v2__color-row">
-                        {normalizedPalette.map((item) => (
-                            <div className="design-result-v2__color-item" key={item.key}>
-                                <DetailThumb
-                                    imageUrl={item.imageUrl}
-                                    shape="square"
-                                    background={item.hex ?? '#eee'}
-                                    alt={item.hex ?? item.label ?? '컬러 팔레트'}
-                                />
-                                {(item.hex || item.label) && (
-                                    <span className="design-result-v2__color-hex">{item.hex ?? item.label}</span>
-                                )}
-                            </div>
-                        ))}
-                    </div>
+                    <PaletteStrip items={normalizedPalette} />
                 ) : (
                     <p className="design-result-v2__panel-hint">컬러 정보가 없어요.</p>
                 )}
@@ -369,8 +405,7 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 ) : swatchEntries.length > 0 ? (
                     <div className="design-result-v2__texture-row">
                         {swatchEntries.map(([textureKey, swatchUrl]) => {
-                            const infoKey = textureKey.startsWith('3d_charm') ? '3d_charm' : textureKey
-                            const info = TEXTURE_INFO[infoKey]
+                            const info = TEXTURE_INFO[textureKey]
                             const alt = info?.labelKo ?? textureKey
                             return (
                                 <div className="design-result-v2__texture-item" key={textureKey}>
@@ -417,57 +452,6 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                     ) : (
                         <p className="design-result-v2__panel-hint">질감 정보가 없어요.</p>
                     )
-                )}
-            </div>
-
-            {/* 네일 참 · 파츠 */}
-            <div className="design-result-v2__detail-block">
-                <p className="design-result-v2__detail-label">네일 참 · 파츠</p>
-                {normalizedCharms.length > 0 || charmSwatchEntries.length > 0 ? (
-                    <div className="design-result-v2__charm-row">
-                        {/* 스와치에서 온 3d_charm */}
-
-                        {charmSwatchEntries.map(([key, url]) => {
-                            const shapePart = key
-                                .replace(/^3d_charm_?/, '')
-                                .replace(/_\d+$/, '')
-                                .replace(/_/g, ' ')
-                            const label = shapePart ? shapePart : '3D 참'
-                            return url ? (
-                                <CharmImage
-                                    key={key}
-                                    imageUrl={url}
-                                    alt={label}
-                                    fallbackIcon="✧"
-                                    onClick={() => setLightbox({ url, alt: label })}
-                                />
-                            ) : (
-                                <span className="design-result-v2__charm-fallback" key={key} role="img" aria-label={label}>
-            ✧
-        </span>
-                            )
-                        })}
-                        {/* designPlan에서 온 파츠 */}
-                        {normalizedCharms.map((item) => {
-                            const info = item.label ? CHARM_INFO[item.label] ?? CHARM_INFO_BY_KO[item.label] : undefined
-                            const alt = info?.labelKo ?? item.label ?? '네일 파츠'
-                            return item.imageUrl ? (
-                                <CharmImage
-                                    key={item.key}
-                                    imageUrl={item.imageUrl}
-                                    alt={alt}
-                                    fallbackIcon={info?.icon ?? '✧'}
-                                    onClick={() => setLightbox({ url: item.imageUrl as string, alt })}
-                                />
-                            ) : (
-                                <span className="design-result-v2__charm-fallback" key={item.key} role="img" aria-label={alt}>
-            {info?.icon ?? '✧'}
-        </span>
-                            )
-                        })}
-                    </div>
-                ) : (
-                    <p className="design-result-v2__panel-hint">사용된 파츠가 없어요.</p>
                 )}
             </div>
         </section>

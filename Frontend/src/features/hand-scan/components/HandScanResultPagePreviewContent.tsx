@@ -5,8 +5,7 @@ import { FingerDetailModal } from '@/features/hand-scan/components/FingerDetailM
 import { NextStepButton } from '@/shared/components/NextStepButton'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { buildHandScanAnalysis } from '@/shared/utils/handScanAnalysis'
-import { analyzeSkinTone, generateSkinTonePalette } from '@/shared/utils/skinTone'
-import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
+import { analyzeSkinTone } from '@/shared/utils/skinTone'
 import '@/styles/hand-scan-result.css'
 
 // ══════════════════════════════════════════════════════════════════════
@@ -16,6 +15,15 @@ import '@/styles/hand-scan-result.css'
 // ══════════════════════════════════════════════════════════════════════
 
 const MOCK_SKIN_HEX = '#F3D2B8'
+
+// 추천 컬러 팔레트 (6열 × 5행, 가로 방향으로 채워진다)
+const MOCK_PALETTE = [
+    '#955368', '#975554', '#895E3B', '#387352', '#00728E', '#88587F',
+    '#975362', '#965551', '#786535', '#2E7359', '#266D97', '#8D5679',
+    '#97535E', '#95574B', '#726835', '#007474', '#366B98', '#94908E',
+    '#97545B', '#925946', '#616C39', '#005B5C', '#6E6091', '#1A1715',
+    '#975458', '#8D5C3F', '#5A6E3D', '#007389', '#775D8C', '#F1EDEA',
+]
 
 function MetricCard({
     title,
@@ -82,10 +90,7 @@ export function HandScanResultPagePreviewContent() {
     const analysis = buildHandScanAnalysis(MOCK_SKIN_HEX)
     const recommended = getNailShape(analysis.recommendedShape)
     const skinToneAnalysis = analyzeSkinTone(analysis.skinToneHex)
-    const skinTonePalette = arrangeRecommendedColors(
-        generateSkinTonePalette(analysis.skinToneHex, 30),
-        { columns: 6 },
-    )
+    const skinTonePalette = MOCK_PALETTE
 
     return (
         <AppShell mainClassName="scan-result-page">
@@ -103,21 +108,21 @@ export function HandScanResultPagePreviewContent() {
                     </button>
                 </div>
                 <div className="scan-result-metrics">
-                    <MetricCard title="길이 (Length)" metric={analysis.length} hint="손톱 끝에서 베이스까지 평균 길이" />
+                    <MetricCard title="길이 (Length)" metric={analysis.length} hint="큐티클에서 손톱 끝까지의 길이 평균" />
                     <MetricCard title="너비 (Width)" metric={analysis.width} hint="손톱 최대 너비 평균" />
                     <MetricCard title="곡률 (C-curve)" metric={analysis.cCurve} hint="C-curve 깊이" />
                 </div>
             </section>
 
             <section className="scan-result-section">
-                <h2>추천 네일팁 쉐입</h2>
+                <h2>추천 네일 팁 쉐입</h2>
                 {recommended && (
                     <div className="scan-shape-highlight">
                         <div className="scan-shape-highlight__body">
                             <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
                             <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
                             <p className="scan-shape-highlight__desc">
-                                미리보기 회원님은 {recommended.description}이 잘 어울려요.
+                                네일리 님은 {recommended.description}이 잘 어울려요.
                             </p>
                         </div>
                         <div className="scan-shape-highlight__icon" aria-hidden="true">
@@ -183,7 +188,7 @@ export function HandScanResultPagePreviewContent() {
                             ))}
                         </div>
                         <p className="skin-tone-palette-card__desc">
-                            미리보기 회원님과 어울리는 컬러들이에요.
+                            네일리 님과 어울리는 컬러들이에요.
                         </p>
                     </article>
                 </div>

@@ -60,3 +60,27 @@ export const NAIL_SHAPE_MAP = Object.fromEntries(
 export function getNailShape(id: string): NailShapeInfo | undefined {
   return NAIL_SHAPE_MAP[id as NailShapeId]
 }
+
+// 쉐입별 기본 팁 연장 길이(mm) — scan/nail_exact_stl.py의 TIP_EXTENSION_DEFAULT_MM와
+// 동일한 값이어야 한다. STL 생성 시 이 길이만큼 실측 손톱 길이 위에 더해서 출력하는데,
+// 출력 페이지의 길이 조절 UI 기본값도 이 "현재 보정하고 있는 길이" 그대로 맞춘다.
+export const TIP_EXTENSION_DEFAULT_MM: Record<NailShapeId, number> = {
+  round: 5.0,
+  oval: 5.0,
+  square: 5.0,
+  almond: 7.0,
+  stiletto: 7.0,
+  ballerina: 7.0,
+}
+
+export const TIP_EXTENSION_MIN_MM = 1
+export const TIP_EXTENSION_MAX_MM = 15
+
+export function getDefaultTipExtensionMm(shapeId: string | null | undefined): number {
+  if (!shapeId) return TIP_EXTENSION_DEFAULT_MM.round
+  return TIP_EXTENSION_DEFAULT_MM[shapeId as NailShapeId] ?? TIP_EXTENSION_DEFAULT_MM.round
+}
+
+export function clampTipExtensionMm(value: number): number {
+  return Math.min(TIP_EXTENSION_MAX_MM, Math.max(TIP_EXTENSION_MIN_MM, value))
+}

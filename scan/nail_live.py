@@ -326,10 +326,19 @@ def detect_marker_only(frame, aruco_size_mm):
         return None
 
 
+def marker_mm_per_px(corners, aruco_size_mm):
+    """mm/px from the marker's average side length — same formula
+    nm.detect_aruco uses, for callers that only kept the corners
+    (detect_marker_only)."""
+    sides = [np.linalg.norm(corners[i] - corners[(i + 1) % 4]) for i in range(4)]
+    return aruco_size_mm / float(np.mean(sides))
+
+
 GUIDE_Y_SMOOTHING = 0.7  # weight kept from the previous frame's guide_y (EMA)
 
 
-def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None):
+def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None,
+                  draw_guide=True):
     """Run the full measurement on one frame.
 
     Returns a result dict. Never raises: a failed frame (no marker, no finger)
@@ -354,6 +363,10 @@ def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None):
     the actual cuticle_y fed into measure_top too, not just the drawn line
     - the two must never diverge, or the line would stop showing what's
     actually being measured.
+
+    draw_guide : False leaves the dashed guide line off the overlay — the web
+    stream draws its own guide in the browser from result["guide_y"]
+    (see server.py /capture/stability), so burning one in too would double it.
     """
     result = {"ok": False, "marker_ok": False, "finger_ok": False,
               "t": time.time()}
@@ -411,10 +424,11 @@ def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None):
             # c-curve stage. Leading underscore keeps it out of the JSON.
             data["_mpp"] = mpp
 
-            overlay = draw_guide_line(draw_width_marker(
+            overlay = draw_width_marker(
                 nm.draw_annotated(frame, data, corners, finger,
-                                  show_width_label=False, show_skin_label=False), data, mpp),
-                guide_y)
+                                  show_width_label=False, show_skin_label=False), data, mpp)
+            if draw_guide:
+                overlay = draw_guide_line(overlay, guide_y)
     except Exception as e:
         result["err"] = str(e).split("\n")[0]
         return result
@@ -427,10 +441,11 @@ def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None):
 class MeasureWorker(threading.Thread):
     """Measures the most recent frame, over and over, in the background."""
 
-    def __init__(self, finger, aruco_size_mm):
+    def __init__(self, finger, aruco_size_mm, draw_guide=True):
         super().__init__(daemon=True)
         self.finger     = finger
         self.aruco_size = aruco_size_mm
+        self.draw_guide = draw_guide
         self._lock      = threading.Lock()
         self._pending   = None      # newest frame waiting to be measured
         self._result    = None      # newest completed result
@@ -456,7 +471,8 @@ class MeasureWorker(threading.Thread):
                 time.sleep(0.01)
                 continue
             result = measure_frame(frame, self.finger, self.aruco_size,
-                                   prev_guide_y=prev_guide_y)
+                                   prev_guide_y=prev_guide_y,
+                                   draw_guide=self.draw_guide)
             if result.get("guide_y") is not None:
                 prev_guide_y = result["guide_y"]
             with self._lock:
@@ -507,14 +523,14 @@ def hint_bar(view, text):
 
 
 def compose(result, live_frame, history, finger, n_measured,
-           crop_left_px: int = 0, show_pip: bool = True):
+           crop_rect=None, show_pip: bool = True):
     """Build the window image: measured overlay + live PiP + status bar.
 
-    crop_left_px : cuts this many columns off the left of both the main
-        image and the PiP source before anything else runs — used by the
-        web stream to keep the physical ArUco marker (glued to the mat at
-        a fixed spot, always left of the finger) out of the customer-facing
-        view. The local CLI tool leaves this at 0.
+    crop_rect : (x0, y0, x1, y1) window cut out of both the main image and
+        the PiP source before anything else runs — used by the web stream to
+        keep the physical ArUco marker (glued to the mat at a fixed spot,
+        always left of the finger) out of the customer-facing view and to
+        centre the finger in it. The local CLI tool leaves this at None.
     show_pip : the local CLI tool wants the live PiP (main image can be up
         to a second behind); the web stream turns it off since it isn't a
         second measurement view an operator needs, just a second copy of
@@ -522,8 +538,9 @@ def compose(result, live_frame, history, finger, n_measured,
     """
     have = result is not None and result.get("ok")
     base = result["overlay"] if have else live_frame
-    if crop_left_px > 0:
-        base = base[:, crop_left_px:]
+    if crop_rect is not None:
+        x0, y0, x1, y1 = crop_rect
+        base = base[y0:y1, x0:x1]
 
     scale = DISPLAY_H / base.shape[0]
     view  = cv2.resize(base, (int(base.shape[1] * scale), DISPLAY_H))
@@ -532,7 +549,7 @@ def compose(result, live_frame, history, finger, n_measured,
     if show_pip:
         # Live picture-in-picture so the user can position the finger while
         # the main image is up to a second behind.
-        pip_src = live_frame[:, crop_left_px:] if crop_left_px > 0 else live_frame
+        pip_src = live_frame[y0:y1, x0:x1] if crop_rect is not None else live_frame
         pip_w   = w // 4
         pip     = cv2.resize(pip_src, (pip_w, int(pip_src.shape[0] * pip_w /
                                                   pip_src.shape[1])))

@@ -235,27 +235,6 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     labelKo: '드로잉 아트',
     swatchStyle: { background: 'linear-gradient(135deg, #fff 60%, #f0e6ea 100%)' },
   },
-  '3d_charm': {
-    labelKo: '3D 참',
-    swatchStyle: { background: 'radial-gradient(circle at 40% 35%, #fff 0%, #e8d5db 60%, #d4b8bf 100%)' },
-  },
-}
-
-export type CharmInfo = {
-  labelKo: string
-  icon: string
-}
-
-// 모티프(motif) 키워드 → 결과 페이지 [nail charms] 패널용 아이콘
-export const CHARM_INFO: Record<string, CharmInfo> = {
-  star: { labelKo: '별', icon: '✦' },
-  ribbon: { labelKo: '리본', icon: '🎀' },
-  floral: { labelKo: '플로럴', icon: '✿' },
-  heart: { labelKo: '하트', icon: '♥' },
-  crystal: { labelKo: '크리스탈', icon: '💎' },
-  pearl: { labelKo: '진주', icon: '⚪' },
-  swirl: { labelKo: '소용돌이', icon: '@' },
-  'polka dot': { labelKo: '도트', icon: '●' },
 }
 
 function formatPreferenceValues(key: PreferenceKey, values: string[]): string {

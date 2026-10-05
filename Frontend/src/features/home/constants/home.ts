@@ -2,8 +2,13 @@ export const MAIN_BG = '/images/main-bg.png'
 
 export const BRAND_COLOR = '#DE869F'
 
+export const HERO_TITLE = 'Own your Nail'
+
+// 좁은 화면에서 한 줄로 넣으면 글자가 너무 작아질 때 사용하는 2줄 배치
+export const HERO_TITLE_STACKED = ['Own Your', 'Nail']
+
 export const HERO_SUBTITLE =
-  '지금 바로 세상에 단 하나뿐인 당신만의 네일팁을 만드세요.'
+  '지금 바로 세상에 단 하나뿐인 당신만의 네일 팁을 만들어 보세요.'
 
 export type FeatureIcon = 'scan' | 'print' | 'design'
 

@@ -4,6 +4,7 @@ import { Footer } from '@/features/home/components/Footer'
 import { GallerySection } from '@/features/home/components/GallerySection'
 import { HeroPanel } from '@/features/home/components/HeroPanel'
 import { HowItWorksSection } from '@/features/home/components/HowItWorksSection'
+import { PrintHero } from '@/features/home/components/PrintHero'
 import { StatsSection } from '@/features/home/components/StatsSection'
 import { WaveDivider } from '@/features/home/components/WaveDivider'
 import { WhyNailySection } from '@/features/home/components/WhyNailySection'
@@ -15,7 +16,7 @@ export function HomePageContent() {
 
     return (
         <div className="landing landing--snap">
-            <HeroPanel variant="top" showHeader onStartClick={handleStartClick} />
+            <PrintHero onStartClick={handleStartClick} />
             <main className="landing__middle">
                 <StatsSection />
                 <WaveDivider variant="bottom" color="#faf8f9" />

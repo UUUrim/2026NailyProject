@@ -14,7 +14,7 @@ Usage:
   [스캔]
     POST /analyze/measure     — 스캔 시작 (카메라 촬영 → 측정 → S3 업로드 → 콜백)
     POST /analyze/stl         — STL 생성 → S3 업로드 → 콜백
-    GET  /stream/top          — 탑뷰 MJPEG 스트림 (ArUco 가이드선 포함)
+    GET  /stream/top          — 탑뷰 MJPEG 스트림 (큐티클 가이드는 프론트가 /capture/stability의 guide로 그림)
     GET  /stream/side         — 사이드뷰 MJPEG 스트림 (오버레이 없음)
     GET  /status/events       — SSE: 손가락 촬영 진행상황
     POST /capture/force       — 수동 촬영 트리거 (웹 "지금 촬영" 버튼)
@@ -105,7 +105,10 @@ from nail_live import (MeasureWorker, compose as _live_compose,     # scan/
                         median_result as _live_median_result,
                         MEDIAN_N as _LIVE_MEDIAN_N,
                         stability as _live_stability,
-                        detect_marker_only as _live_detect_marker_only)
+                        detect_marker_only as _live_detect_marker_only,
+                        guide_line_row as _live_guide_line_row,
+                        guide_line_offset_mm as _live_guide_offset_mm,
+                        marker_mm_per_px as _live_marker_mm_per_px)
 
 # ─────────────────────────────────────────────────────────────
 BASE   = _THIS_DIR
@@ -124,11 +127,27 @@ CAMERA_TOP        = 0       # 탑뷰: USB 웹캠 (C920)
 CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1: 사용 안 함
 ARUCO_SIZE_MM     = 20.0
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
-# 탑뷰 웹 스트림에서 ArUco 마커를 가리기 위한 왼쪽 crop 설정 (측정용 저장
-# 사진에는 영향 없음 — _capture_top_stream 참고). 마커는 매트에 고정된
-# 위치라 오른쪽 끝 + 여백을 한 번 잡으면 그 finger 촬영 내내 그대로 쓴다.
+# 탑뷰 웹 스트림 화면 영역 (측정용 저장 사진에는 영향 없음 — 원본 프레임
+# 그대로 측정/저장하고, 화면에 보낼 때만 잘라낸다). 마커는 가리고 손가락
+# 자리가 화면 가운데 오도록, 손가락 자리를 중심으로 좌우 대칭인 창을
+# 잘라낸다 — _top_view_rect 참고. 마커는 매트에 고정돼 있어 처음 잡힐 때
+# 한 번 계산하면 세션 내내 그대로 쓴다.
 MARKER_HIDE_MARGIN_PX      = 40    # 마커 오른쪽 끝에서 추가로 더 잘라낼 여백
-MARKER_HIDE_MIN_VISIBLE_PX = 200   # 잘라내고도 최소한 이만큼은 화면에 남긴다
+# 손가락 자리의 가로 중심 — 마커 오른쪽 끝에서 손가락 중심까지 거리(mm).
+# 실제 촬영 사진 17장(09-04, 세션 145~149)에서 손가락 중심이 49~64mm,
+# 중앙값 56mm에 놓여 있었다. 박스/매트 배치가 바뀌면 여기만 조정한다.
+FINGER_SLOT_FROM_MARKER_MM = 55.0
+# 화면 창의 가로/세로 비율 — 프론트 .hand-scan-fs__feed의 aspect-ratio(11/8)와
+# 같게 맞춰서 브라우저의 object-fit: cover가 추가로 잘라내지 않게 한다.
+TOP_VIEW_ASPECT            = 11 / 8
+# 큐티클 라인이 화면 높이에서 놓일 위치(위=0, 아래=1). 손끝과 안내 라벨이
+# 들어갈 위쪽 여백을 두면서 손가락이 들어오는 아래쪽도 조금 보이게 한다.
+# 프레임 아래 끝에 막히면 그보다 위에 놓인다.
+TOP_VIEW_CUTICLE_Y         = 0.72
+TOP_VIEW_MIN_W_PX          = 480   # 창이 이보다 좁아지면 예전 방식(마커 왼쪽만 잘라냄)으로
+# 손가락이 잠깐 인식 안 된 한두 측정 사이클 동안 가이드 선이 마커 기준
+# 추정 위치로 튀지 않도록 마지막 실측 guide_y를 유지하는 시간.
+GUIDE_LIVE_HOLD_SEC  = 0.5
 
 # ─────────────────────────────────────────────────────────────
 app = FastAPI(title="Naily 통합 서버")
@@ -366,11 +385,20 @@ class _StreamState:
         self.active:       bool = False
         self.current_finger: str | None = None
         self.done_fingers: list = []
-        # 탑뷰 웹 스트림에서 마커를 가리기 위한 왼쪽 crop 폭(px). 마커가
-        # 처음 잡힐 때 _capture_top_stream이 갱신하고, 그 값을 idle preview
-        # 루프(_top_camera_idle_preview_loop)도 같이 참조해서 손가락 사이
-        # 대기 화면에서도 마커가 다시 드러나지 않게 한다.
-        self.marker_hide_x: int = 0
+        # 탑뷰 웹 스트림에 보낼 화면 창 (x0, y0, x1, y1, 원본 프레임 px) —
+        # 마커는 가리고 손가락 자리를 가운데 둔다(_top_view_rect). 마커가
+        # 처음 잡힐 때 정해지고, idle preview 루프(_top_camera_idle_preview_loop)도
+        # 같은 창을 써서 손가락 사이 대기 화면에서도 마커가 드러나지 않게 한다.
+        # None이면 아직 마커를 못 잡은 것.
+        self.top_view_rect: tuple | None = None
+        # 손가락 자리 가로 중심(원본 프레임 px) — 가이드 실루엣이 놓이는 열.
+        self.finger_slot_x: float = 0.0
+        # 마커를 처음 잡았을 때의 코너 — 손가락이 아직 없을 때도 프론트
+        # 가이드의 큐티클 라인 위치와 실루엣 크기(mm/px)를 계산하는 데 쓴다.
+        self.marker_corners = None
+        # 실측 중인 guide_y(원본 프레임 px)와 마지막으로 확인된 시각. 측정이
+        # 실제로 쓰는 행이라 있으면 마커 기준 추정보다 항상 우선한다.
+        self.live_guide: tuple | None = None
         # 탑뷰 측정 정확도 게이지 — 프론트가 /capture/stability로 폴링해서
         # 화면 왼쪽 게이지 바를 채운다. ratio: 0~1 (최근 측정 이력이 얼마나
         # 찼는지), ready: 최근 MEDIAN_N개 측정의 W/L이 서로 합의된 상태
@@ -535,6 +563,93 @@ def _phone_side_idle_preview_loop():
         time.sleep(0.15)
 
 
+def _top_view_rect(frame_w: int, frame_h: int, corners) -> tuple[tuple, float]:
+    """탑뷰 웹 스트림 화면 창 (x0, y0, x1, y1)과 손가락 자리 가로 중심 x.
+
+    예전엔 마커 왼쪽만 잘라내고 나머지를 전부 보여줘서, 화면 중심이 실제
+    손가락 자리보다 한참 오른쪽에 있었다(손가락이 왼쪽으로 치우쳐 보임).
+    이제 손가락 자리(마커 오른쪽 끝 + FINGER_SLOT_FROM_MARKER_MM)를 중심으로
+    좌우 대칭 창을 잡는다 — 왼쪽 끝은 마커를 가리는 선, 오른쪽 끝은 프레임
+    끝을 넘지 않는 한에서 가장 넓게. 세로는 TOP_VIEW_ASPECT에 맞춰 정하고,
+    큐티클 라인이 TOP_VIEW_CUTICLE_Y 높이에 오도록 위치시킨다.
+    """
+    mpp = _live_marker_mm_per_px(corners, ARUCO_SIZE_MM)
+    marker_right = float(corners[:, 0].max())
+    left_limit = marker_right + MARKER_HIDE_MARGIN_PX
+    slot_x = marker_right + FINGER_SLOT_FROM_MARKER_MM / mpp
+    half_w = min(slot_x - left_limit, frame_w - slot_x)
+
+    if half_w * 2 < TOP_VIEW_MIN_W_PX:
+        # 손가락 자리가 마커나 프레임 끝에 너무 붙어 있어 대칭 창이 너무
+        # 작아지는 배치 — 예전처럼 마커 왼쪽만 잘라내고 나머지를 보여준다.
+        x0 = int(min(left_limit, frame_w - TOP_VIEW_MIN_W_PX))
+        return (x0, 0, frame_w, frame_h), (x0 + frame_w) / 2
+
+    view_w = min(half_w * 2, frame_h * TOP_VIEW_ASPECT)
+    view_h = view_w / TOP_VIEW_ASPECT
+    cuticle_y = _live_guide_line_row(corners, slot_x, _live_guide_offset_mm("") / mpp)
+    y0 = min(max(cuticle_y - view_h * TOP_VIEW_CUTICLE_Y, 0.0), frame_h - view_h)
+    x0 = slot_x - view_w / 2
+    rect = (int(round(x0)), int(round(y0)),
+            int(round(x0 + view_w)), int(round(y0 + view_h)))
+    return rect, slot_x
+
+
+def _top_view(frame: np.ndarray) -> np.ndarray:
+    """웹 스트림에 보낼 부분만 잘라낸다 — 마커를 아직 못 잡았으면 원본 그대로."""
+    rect = _S.top_view_rect
+    if rect is None:
+        return frame
+    x0, y0, x1, y1 = rect
+    return frame[y0:y1, x0:x1]
+
+
+def _remember_marker(frame: np.ndarray):
+    """마커를 처음 잡았을 때 한 번만 위치를 기록한다 — 웹 스트림 화면 창과
+    프론트 가이드 계산용 코너/손가락 자리. 마커는 매트에 고정돼 있어 한 번
+    잡히면 세션 내내 안 바뀌므로 이후엔 바로 반환한다."""
+    if _S.top_view_rect is not None:
+        return
+    marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+    if marker_corners is None:
+        return
+    rect, slot_x = _top_view_rect(frame.shape[1], frame.shape[0], marker_corners)
+    print(f"[Capture] 탑뷰 화면 창: {rect} (손가락 자리 x={slot_x:.0f}px)")
+    _S.marker_corners = marker_corners
+    _S.finger_slot_x = slot_x
+    _S.top_view_rect = rect   # 마지막에 — None 여부가 "마커 잡힘" 표시라서
+
+
+def _top_guide() -> dict | None:
+    """프론트 탑뷰 손가락/큐티클 가이드 위치 — 스트림 화면(_top_view_rect 창) 기준 비율.
+
+    cuticleY는 측정이 실제로 쓰는 guide_y 행 그대로다: 손가락이 잡혀 있으면
+    MeasureWorker의 실측값(EMA 포함), 아니면 같은 함수(guide_line_row)를
+    손가락 자리 열에서 마커만으로 계산한 값. 예전에 스트림에 직접
+    그리던 파란 점선과 같은 위치이고, 그리는 방식만 프론트로 옮겼다.
+    """
+    corners, rect = _S.marker_corners, _S.top_view_rect
+    if corners is None or rect is None:
+        return None
+    x0, y0, x1, y1 = rect
+    view_w, view_h = x1 - x0, y1 - y0
+    mpp = _live_marker_mm_per_px(corners, ARUCO_SIZE_MM)
+
+    live = _S.live_guide
+    if live is not None and time.time() - live[1] < GUIDE_LIVE_HOLD_SEC:
+        guide_y = live[0]
+    else:
+        offset_px = _live_guide_offset_mm(_S.current_finger or "") / mpp
+        guide_y = _live_guide_line_row(corners, _S.finger_slot_x, offset_px)
+
+    return {
+        "aspect":   view_w / view_h,                      # 스트림 화면 가로/세로 비율
+        "cuticleY": (guide_y - y0) / view_h,              # 0(위)~1(아래)
+        "centerX":  (_S.finger_slot_x - x0) / view_w,     # 0(왼쪽)~1(오른쪽)
+        "mmToH":    1.0 / mpp / view_h,                   # 1mm가 화면 높이에서 차지하는 비율
+    }
+
+
 def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.Event):
     """Keeps /stream/top live between per-finger capture windows.
 
@@ -555,19 +670,11 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
             if ret:
                 # 세션 시작 직후(_capture_top_stream이 아직 첫 프레임도 못 돌린
                 # 찰나) 이 idle 루프가 먼저 프레임을 밀어넣는 경우, 마커가
-                # 아직 안 잡혀 있어(_S.marker_hide_x == 0) 그대로 노출된다 —
+                # 아직 안 잡혀 있어(_S.top_view_rect is None) 그대로 노출된다 —
                 # 손가락 없이도 되는 가벼운 감지라 여기서도 똑같이 시도해서
-                # 그 틈을 없앤다. 한 번 잡히면 이후로는 아래 조건이 계속
-                # False라 추가 비용이 없다.
-                if _S.marker_hide_x == 0:
-                    marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
-                    if marker_corners is not None:
-                        marker_right_px = int(round(float(marker_corners[:, 0].max())))
-                        _S.marker_hide_x = min(
-                            marker_right_px + MARKER_HIDE_MARGIN_PX,
-                            frame.shape[1] - MARKER_HIDE_MIN_VISIBLE_PX)
-                disp = frame[:, _S.marker_hide_x:] if _S.marker_hide_x > 0 else frame
-                _push_frame(_S.top_frame, disp)
+                # 그 틈을 없앤다. 한 번 잡히면 이후로는 추가 비용이 없다.
+                _remember_marker(frame)
+                _push_frame(_S.top_frame, _top_view(frame))
         time.sleep(0.05)
 
 
@@ -580,7 +687,9 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     그 median을, 아니면 그 순간의 단일 프레임을 accept한다 (nail_live.py의
     ENTER 키 동작과 동일) - 사이드뷰(force_capture_side)와 같은 원칙.
     """
-    worker = MeasureWorker(finger, ARUCO_SIZE_MM)
+    # 큐티클 가이드는 프론트가 /capture/stability의 guide로 직접 그린다 —
+    # 스트림에 점선을 또 구우면 두 줄이 겹쳐 보이므로 여기선 끈다.
+    worker = MeasureWorker(finger, ARUCO_SIZE_MM, draw_guide=False)
     worker.start()
     history  = deque(maxlen=_LIVE_MEDIAN_N)
     last_t   = 0.0
@@ -589,6 +698,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     # side/c-curve view.
     _S.force_capture_top.clear()
     _S.stability = {"ratio": 0.0, "ready": False}
+    _S.live_guide = None
     _S.live_wl.pop((hand, finger), None)
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (실시간 측정)")
@@ -660,13 +770,13 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             # 마커가 가려지지 않는다 (실제로 확인된 문제). 마커는 매트에
             # 고정돼 있어 한 번 잡히면 세션(손가락 5개) 내내 안 바뀌므로,
             # 이미 잡힌 뒤에는 매 프레임 다시 돌릴 필요가 없다.
-            if _S.marker_hide_x == 0:
-                marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
-                if marker_corners is not None:
-                    marker_right_px = int(round(float(marker_corners[:, 0].max())))
-                    _S.marker_hide_x = min(
-                        marker_right_px + MARKER_HIDE_MARGIN_PX,
-                        frame.shape[1] - MARKER_HIDE_MIN_VISIBLE_PX)
+            _remember_marker(frame)
+
+            # 프론트 큐티클 가이드는 측정이 실제로 쓰는 행을 따라가야 한다 —
+            # 손가락이 잡힌 측정 결과가 있는 동안 계속 갱신하고, 끊기면
+            # GUIDE_LIVE_HOLD_SEC 뒤 _top_guide가 마커 기준 추정으로 돌아간다.
+            if result is not None and result.get("guide_y") is not None:
+                _S.live_guide = (float(result["guide_y"]), now)
 
             if result is not None and result.get("ok"):
                 last_ok_result, last_ok_t = result, now
@@ -677,7 +787,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
 
             _push_frame(_S.top_frame, _live_compose(
                 display_result, frame, history, finger, 0,
-                crop_left_px=_S.marker_hide_x, show_pip=False))
+                crop_rect=_S.top_view_rect, show_pip=False))
 
             if _S.force_capture_top.is_set():
                 _S.force_capture_top.clear()
@@ -717,6 +827,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
                 break
     finally:
         worker.stop()
+        _S.live_guide = None
         _S.top_capture_busy.clear()
 
     h = accepted["frame"].shape[0]
@@ -1260,8 +1371,9 @@ def capture_status():
 
 @app.get("/capture/stability")
 def capture_stability():
-    """탑뷰 정확도 게이지 조회 — 프론트가 짧은 주기로 폴링."""
-    return _S.stability
+    """탑뷰 정확도 게이지 + 손가락/큐티클 가이드 위치 조회 — 프론트가 짧은 주기로 폴링.
+    guide는 마커를 아직 못 잡았으면 null (_top_guide 참고)."""
+    return {**_S.stability, "guide": _top_guide()}
 
 
 # ── 폰 사이드뷰 카메라 ───────────────────────────────────────

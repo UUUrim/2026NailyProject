@@ -21,6 +21,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -211,13 +212,17 @@ public class ScanService {
         handScan.updateStatus(HandScan.ScanStatus.GENERATING_STL);
 
         // 2. 파이썬 FastAPI로 보낼 데이터 조합
-        Map<String, Object> requestBody = Map.of(
-                "userid", String.valueOf(user.getId()),
-                "session", String.valueOf(scanId),
-                "hand", handScan.getHandSide().name().toLowerCase(),
-                "shape", request.getShape(), //유저가 고른 쉐입 정보 전달
-                "callbackUrl", backendServerUrl + "/scans/" + scanId + "/generate-stl/result" // 2차 웹훅 주소
-        );
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("userid", String.valueOf(user.getId()));
+        requestBody.put("session", String.valueOf(scanId));
+        requestBody.put("hand", handScan.getHandSide().name().toLowerCase());
+        requestBody.put("shape", request.getShape()); //유저가 고른 쉐입 정보 전달
+        requestBody.put("callbackUrl", backendServerUrl + "/scans/" + scanId + "/generate-stl/result"); // 2차 웹훅 주소
+        // 유저가 길이 조절 UI에서 커스텀 값을 넣은 경우에만 전달 — 생략 시 파이썬 서버가
+        // 쉐입별 기본 연장 길이를 사용한다.
+        if (request.getTipExtensionMm() != null) {
+            requestBody.put("tip_extension_mm", request.getTipExtensionMm());
+        }
 
         // FastAPI 2번 주소(STL 생성) 찌르기 (비동기)
         webClientBuilder.build()

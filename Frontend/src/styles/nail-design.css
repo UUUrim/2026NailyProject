@@ -385,11 +385,14 @@
 
 /* 제목 카드는 공통 PageHero 컴포넌트(page-hero.css)로 대체됨 */
 
+/* 왼쪽 디자인 이미지 박스와 오른쪽 컬러 팔레트·텍스처 박스 묶음의 세로 높이를 맞춘다 -
+   두 칸을 같은 행 높이로 늘리고(stretch), 이미지는 박스를 꽉 채우며(cover),
+   오른쪽은 남는 높이를 컬러 팔레트 띠가 가져간다(.design-result-v2__detail-block--palette). */
 .design-result-v2__body {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
   gap: 1.15rem;
-  align-items: start;
+  align-items: stretch;
   margin-bottom: 1.35rem;
 }
 
@@ -402,6 +405,7 @@
 
 .design-result-v2__image-wrap {
   position: relative;
+  flex: 1 1 auto;
   width: 100%;
   max-height: 420px;
   border-radius: 18px;
@@ -481,34 +485,101 @@
   font-weight: 600;
 }
 
-.design-result-v2__color-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-}
-
-.design-result-v2__color-item {
+/* ── 컬러 팔레트: 가로 한 줄 띠 (디자인 결과 화면·마이페이지·갤러리 공용) ──────────
+   호버(키보드 포커스)한 색 구간이 넓어지면서 그 위에 HEX 값이 뜨고, 클릭하면 복사된다. */
+.design-result-v2__detail-block--palette {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.3rem;
 }
 
-.design-result-v2__color-hex {
+.design-result-v2__body .design-result-v2__detail-block--palette {
+  flex: 1 1 auto;
+}
+
+.design-result-v2__palette-strip {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 4rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.design-result-v2__palette-seg {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    flex-grow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    min-width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.design-result-v2__palette-seg:hover,
+.design-result-v2__palette-seg:focus-visible,
+.design-result-v2__palette-seg.is-copied {
+  flex-grow: 3;
+  /* 색이 많아 구간이 좁아져도 HEX 값이 들어갈 폭은 확보한다 */
+  min-width: 5.5rem;
+}
+
+.design-result-v2__palette-seg:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+}
+
+.design-result-v2__palette-seg:disabled {
+  cursor: default;
+}
+
+.design-result-v2__palette-hex {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  color: #5f4a52;
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
-  font-size: 0.62rem;
-  color: #9a848c;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }
 
-.design-result-v2__texture-row,
-.design-result-v2__charm-row {
+.design-result-v2__palette-seg:hover .design-result-v2__palette-hex,
+.design-result-v2__palette-seg:focus-visible .design-result-v2__palette-hex,
+.design-result-v2__palette-seg.is-copied .design-result-v2__palette-hex {
+  opacity: 1;
+}
+
+.design-result-v2__palette-seg.is-copied .design-result-v2__palette-hex {
+  color: #c45f7e;
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .design-result-v2__palette-seg {
+    transition: none;
+  }
+}
+
+.design-result-v2__texture-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65rem 0.55rem;
 }
 
-.design-result-v2__texture-item,
-.design-result-v2__charm-item {
+.design-result-v2__texture-item {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -516,8 +587,7 @@
   width: 3.4rem;
 }
 
-.design-result-v2__texture-label,
-.design-result-v2__charm-label {
+.design-result-v2__texture-label {
   font-size: 0.68rem;
   font-weight: 700;
   color: #5f4a52;
@@ -545,13 +615,6 @@
   display: block;
 }
 
-.design-result-v2__color-item .design-result-v2__thumb {
-  width: 2.35rem;
-  height: 2.35rem;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
 .design-result-v2__texture-item .design-result-v2__thumb {
   width: 2.75rem;
   height: 2.75rem;
@@ -566,45 +629,12 @@
   transition: transform 0.15s ease;
 }
 
-.design-result-v2__color-item .design-result-v2__thumb--zoomable,
 .design-result-v2__texture-item .design-result-v2__thumb--zoomable {
   border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .design-result-v2__thumb--zoomable:hover {
   transform: scale(1.08);
-}
-
-.design-result-v2__charm-image {
-  width: 3.4rem;
-  height: 3.4rem;
-  object-fit: contain;
-  flex-shrink: 0;
-  display: block;
-}
-
-.design-result-v2__charm-image-button {
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: zoom-in;
-  flex-shrink: 0;
-  transition: transform 0.15s ease;
-}
-
-.design-result-v2__charm-image-button:hover {
-  transform: scale(1.08);
-}
-
-.design-result-v2__charm-fallback {
-  width: 3.4rem;
-  height: 3.4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: 1.1rem;
-  color: #de869f;
 }
 
 .design-result-v2__lightbox {
@@ -627,11 +657,11 @@
 
 .design-result-v2__lightbox-content {
   position: relative;
-  /* 참·파츠 원본 이미지는 대부분 저해상도 낱장이라, max-width/height만 있으면 박스가
-     이미지의 작은 원본 크기로 줄어들어 버린다. width/height를 고정값으로 줘서 박스 자체를
-     항상 이 크기로 만들고, 아래 img가 그 안을 꽉 채우도록(object-fit: contain) 한다. */
-  width: min(92vw, 520px);
-  height: min(86vh, 520px);
+  /* 질감 스와치 원본 이미지 로드 전 기본 크기. 로드되면 JS가 인라인 스타일로 실제
+     naturalWidth/Height에 맞춰 덮어쓴다 - 스와치 원본(512x384)과 같은 비율로 작게 시작해서
+     로드 중 큰 박스가 잠깐 보였다가 줄어드는 깜빡임을 막는다. */
+  width: min(60vw, 384px);
+  height: min(50vh, 288px);
   display: flex;
   overflow: hidden;
   border-radius: 16px;
