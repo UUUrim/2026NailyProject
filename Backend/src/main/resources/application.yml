@@ -75,6 +75,17 @@ gemini:
     key: ENC(r7E1eFRjogbReg0hDJoOieJu/7/QBgctrZjI5XTkZFVZYzogIGQdIHsykK2m1fCv1eNSmBWJFzTvtpaWbq1cFQ==)
     url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
 
+# OpenAI 설정 - ChatService/FingerDesignPlanService/RefineService/TextureExtractService가 전부
+# GptClientService를 통해 이 설정을 쓴다. key는 환경변수 OPENAI_API_KEY로만 넣을 것(코드/깃에 직접 쓰지 말 것).
+openai:
+  api:
+    key: ${OPENAI_API_KEY:}
+    url: https://api.openai.com/v1/chat/completions
+    model: gpt-4.1
+    # 이미지 "생성"(naily.image-provider: gptimage일 때)용. 생략하면 코드 기본값을 쓴다.
+    # image-url: https://api.openai.com/v1/images/generations
+    # image-model: gpt-image-2.5-sunburst
+
 
 cloud:
   aws:
@@ -100,5 +111,6 @@ printer:
     url: https://sermon-friction-unequal.ngrok-free.dev
 
 naily:
+  image-provider: diffusers  # 5손톱 메인 디자인 생성 이미지를 어디서 만들지: diffusers(기본, 기존 gen 서버) / comfy / gptimage (바꾸면 백엔드 재시작)
   gen-server-url: https://scalded-lard-seduce.ngrok-free.dev     # 생성 서버 (예서 컴퓨터, port 8000)
   detect-server-url: https://armhole-iphone-monitor.ngrok-free.dev  # 검출 서버 (학교 컴퓨터, port 8001)

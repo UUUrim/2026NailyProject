@@ -24,12 +24,14 @@ public class TextureExtractService {
 
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
+    private final GptClientService gptClientService;
 
-    @Value("${gemini.api.key}")
-    private String apiKey;
-
-    @Value("${gemini.api.url}")
-    private String apiUrl;
+    // Gemini 설정 - GPT로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // @Value("${gemini.api.key}")
+    // private String apiKey;
+    //
+    // @Value("${gemini.api.url}")
+    // private String apiUrl;
 
     // test_texture_batch.py의 TEXTURE_KEYWORDS와 동일한 8종
     private static final String SYSTEM_PROMPT = """
@@ -65,25 +67,29 @@ public class TextureExtractService {
      * @return [{"texture": "glitter", "color": "pink"}, ...] 형태의 리스트
      */
     public List<Map<String, Object>> extractTextureColorPairs(String designPrompt) {
-        Map<String, Object> requestBody = Map.of(
-                "contents", List.of(Map.of(
-                        "role", "user",
-                        "parts", List.of(Map.of("text", designPrompt))
-                )),
-                "systemInstruction", Map.of(
-                        "parts", List.of(Map.of("text", SYSTEM_PROMPT))
-                ),
-                "generationConfig", Map.of(
-                        "responseMimeType", "application/json",
-                        "maxOutputTokens", 4096,
-                        "thinkingConfig", Map.of("thinkingLevel", "LOW")
-                )
-        );
+        // [Gemini 방식 - 주석 처리]
+        // Map<String, Object> requestBody = Map.of(
+        //         "contents", List.of(Map.of(
+        //                 "role", "user",
+        //                 "parts", List.of(Map.of("text", designPrompt))
+        //         )),
+        //         "systemInstruction", Map.of(
+        //                 "parts", List.of(Map.of("text", SYSTEM_PROMPT))
+        //         ),
+        //         "generationConfig", Map.of(
+        //                 "responseMimeType", "application/json",
+        //                 "maxOutputTokens", 4096,
+        //                 "thinkingConfig", Map.of("thinkingLevel", "LOW")
+        //         )
+        // );
+        // JsonNode responseNode = callGeminiWithRetry(requestBody);
+        // String text = responseNode.path("candidates").get(0)
+        //         .path("content").path("parts").get(0).path("text").asText();
 
-        JsonNode responseNode = callGeminiWithRetry(requestBody);
-
-        String text = responseNode.path("candidates").get(0)
-                .path("content").path("parts").get(0).path("text").asText();
+        // 응답 최상위가 배열이라 response_format=json_object(오브젝트 강제)를 쓸 수 없다 —
+        // jsonObjectMode=false로 두고 프롬프트 지시(SYSTEM_PROMPT의 "Respond ONLY with a
+        // JSON array")와 아래 markdown 코드펜스 제거 로직에 그대로 의존한다.
+        String text = gptClientService.chat(SYSTEM_PROMPT, designPrompt, 4096, false);
 
         try {
             String cleaned = text.replaceAll("```json|```", "").trim();
@@ -117,39 +123,39 @@ public class TextureExtractService {
         }
     }
 
-    // FingerDesignPlanService.callGeminiWithRetry()와 동일한 패턴
-    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
-        WebClient webClient = webClientBuilder.build();
-        int maxAttempts = 3;
-        long backoffMillis = 1500;
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                return webClient.post()
-                        .uri(apiUrl + "?key=" + apiKey.trim())
-                        .bodyValue(requestBody)
-                        .retrieve()
-                        .bodyToMono(JsonNode.class)
-                        .block();
-            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-                int statusCode = e.getStatusCode().value();
-                boolean isRetryable = statusCode == 429 || statusCode == 503;
-                boolean hasAttemptsLeft = attempt < maxAttempts;
-
-                System.err.println("[TextureExtractService] Gemini 호출 실패 (시도 " + attempt
-                        + "/" + maxAttempts + "): " + e.getStatusCode());
-
-                if (isRetryable && hasAttemptsLeft) {
-                    try {
-                        Thread.sleep(backoffMillis * attempt);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
-                    continue;
-                }
-                throw new IllegalStateException("텍스처 추출 중 AI 서버 오류: " + e.getStatusCode());
-            }
-        }
-        throw new IllegalStateException("텍스처 추출 AI 응답 실패");
-    }
+    // Gemini 호출 로직 - GPT(GptClientService)로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+    //     WebClient webClient = webClientBuilder.build();
+    //     int maxAttempts = 3;
+    //     long backoffMillis = 1500;
+    //
+    //     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+    //         try {
+    //             return webClient.post()
+    //                     .uri(apiUrl + "?key=" + apiKey.trim())
+    //                     .bodyValue(requestBody)
+    //                     .retrieve()
+    //                     .bodyToMono(JsonNode.class)
+    //                     .block();
+    //         } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+    //             int statusCode = e.getStatusCode().value();
+    //             boolean isRetryable = statusCode == 429 || statusCode == 503;
+    //             boolean hasAttemptsLeft = attempt < maxAttempts;
+    //
+    //             System.err.println("[TextureExtractService] Gemini 호출 실패 (시도 " + attempt
+    //                     + "/" + maxAttempts + "): " + e.getStatusCode());
+    //
+    //             if (isRetryable && hasAttemptsLeft) {
+    //                 try {
+    //                     Thread.sleep(backoffMillis * attempt);
+    //                 } catch (InterruptedException ie) {
+    //                     Thread.currentThread().interrupt();
+    //                 }
+    //                 continue;
+    //             }
+    //             throw new IllegalStateException("텍스처 추출 중 AI 서버 오류: " + e.getStatusCode());
+    //         }
+    //     }
+    //     throw new IllegalStateException("텍스처 추출 AI 응답 실패");
+    // }
 }
