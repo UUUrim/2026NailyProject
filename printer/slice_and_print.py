@@ -35,9 +35,9 @@ ORCASLICER_PATH = r"C:\Program Files\OrcaSlicer\orca-slicer.exe"
 # CLI가 "unknown config type"으로 거부하는 문제가 있었는데, 이 내장 파일들은 "type": "process"가
 # 이미 포함된 완결된 프리셋이라 이 문제가 없다.
 _ORCASLICER_RESOURCES = r"C:\Program Files\OrcaSlicer\resources\profiles\BBL"
-PRINT_PROFILE_MACHINE = _ORCASLICER_RESOURCES + r"\machine\Bambu Lab A1 0.4 nozzle.json"
-_BASE_PROCESS_PROFILE = _ORCASLICER_RESOURCES + r"\process\0.12mm High Quality @BBL A1.json"
-PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Translucent @BBL A1.json"
+PRINT_PROFILE_MACHINE = _ORCASLICER_RESOURCES + r"\machine\Bambu Lab A1 0.2 nozzle.json"
+_BASE_PROCESS_PROFILE = _ORCASLICER_RESOURCES + r"\process\0.06mm Fine @BBL A1 0.2 nozzle.json"
+PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Translucent @BBL A1 0.2 nozzle.json"
 
 # 네일팁용 서포트 오버라이드. 내장 기본 프로파일엔 이 값들이 아예 없는데, 그러면 CLI가
 # "서포트 필요성 자동 판단" 단계에서 우리 모델(작고 심하게 기울어진 형태)에 대해 비정상적으로
