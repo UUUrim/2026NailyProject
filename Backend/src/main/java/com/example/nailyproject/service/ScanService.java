@@ -21,6 +21,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -211,13 +212,17 @@ public class ScanService {
         handScan.updateStatus(HandScan.ScanStatus.GENERATING_STL);
 
         // 2. 파이썬 FastAPI로 보낼 데이터 조합
-        Map<String, Object> requestBody = Map.of(
-                "userid", String.valueOf(user.getId()),
-                "session", String.valueOf(scanId),
-                "hand", handScan.getHandSide().name().toLowerCase(),
-                "shape", request.getShape(), //유저가 고른 쉐입 정보 전달
-                "callbackUrl", backendServerUrl + "/scans/" + scanId + "/generate-stl/result" // 2차 웹훅 주소
-        );
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("userid", String.valueOf(user.getId()));
+        requestBody.put("session", String.valueOf(scanId));
+        requestBody.put("hand", handScan.getHandSide().name().toLowerCase());
+        requestBody.put("shape", request.getShape()); //유저가 고른 쉐입 정보 전달
+        requestBody.put("callbackUrl", backendServerUrl + "/scans/" + scanId + "/generate-stl/result"); // 2차 웹훅 주소
+        // 유저가 길이 조절 UI에서 커스텀 값을 넣은 경우에만 전달 — 생략 시 파이썬 서버가
+        // 쉐입별 기본 연장 길이를 사용한다.
+        if (request.getTipExtensionMm() != null) {
+            requestBody.put("tip_extension_mm", request.getTipExtensionMm());
+        }
 
         // FastAPI 2번 주소(STL 생성) 찌르기 (비동기)
         webClientBuilder.build()
@@ -236,17 +241,25 @@ public class ScanService {
         HandScan handScan = handScanRepository.findById(scanId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
 
-        // 1. 손가락별로 완성된 STL 파일 S3 주소 업데이트
-        // fingers가 null일 수 있음 — 파이썬 쪽 STL 생성 파이프라인이 예외를 만나면
-        // {"success": false, "message": ...}만 콜백으로 보내는데 fingers 자체가 없다.
-        if (resultDto.getFingers() != null) {
-            for (StlResultRequestDto.StlFingerResult fingerResult : resultDto.getFingers()) {
-                ScanImg.Finger fingerEnum = ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase());
-                ScanImg scanImg = scanImgRepository.findByHandScanAndFinger(handScan, fingerEnum)
-                        .orElseThrow(() -> new IllegalArgumentException("해당 손가락을 찾을 수 없습니다."));
+        // 0. STL 생성 실패 — 예전엔 실패해도 COMPLETED로 바꾸고 병합을 시작해서, S3에 남아 있던
+        //    이전 출력 때의 STL(다른 길이/쉐입일 수 있음)이 그대로 출력될 위험이 있었다.
+        //    측정값 자체는 멀쩡하므로 스캔은 MEASURED로 되돌리고(분석 결과·디자인 채팅은 계속 사용 가능),
+        //    이 스캔을 기다리던 출력 주문만 실패 처리한다.
+        if (resultDto.isFailed()) {
+            handScan.updateStatus(HandScan.ScanStatus.MEASURED);
+            String detail = resultDto.getMessage() != null ? " (" + resultDto.getMessage() + ")" : "";
+            printOrderService.failWaitingOrdersForScan(scanId, "네일 팁 STL 생성에 실패했습니다" + detail);
+            return;
+        }
 
-                scanImg.updateStlUrl(fingerResult.getStlUrl());
-            }
+        // 1. 손가락별로 완성된 STL 파일 S3 주소 업데이트 — 파이썬은 이번에 실제로 생성된 손가락만
+        //    보내고, 못 만든 손가락의 예전 STL은 S3에서 지운다. 그래서 목록에 없는 손가락은 주소도 비운다.
+        Map<ScanImg.Finger, String> stlUrls = new HashMap<>();
+        for (StlResultRequestDto.StlFingerResult fingerResult : resultDto.getFingers()) {
+            stlUrls.put(ScanImg.Finger.valueOf(fingerResult.getFinger().toUpperCase()), fingerResult.getStlUrl());
+        }
+        for (ScanImg scanImg : scanImgRepository.findByHandScan(handScan)) {
+            scanImg.updateStlUrl(stlUrls.get(scanImg.getFinger()));
         }
 
         // 2. 모든 과정이 끝났으므로 최종 상태를 COMPLETED로 변경!

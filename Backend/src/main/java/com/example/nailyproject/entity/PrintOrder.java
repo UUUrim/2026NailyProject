@@ -39,6 +39,11 @@ public class PrintOrder {
     @Column(name = "shape_label_ko", nullable = false, length = 50)
     private String shapeLabelKo;
 
+    // 출력 화면에서 사용자가 설정한 팁 연장 길이(mm) — 실측 손톱 길이에 이만큼 더해서 출력된다.
+    // null이면 길이를 기록하기 전에 신청된 예전 주문 (쉐입별 기본 길이로 출력됨)
+    @Column(name = "tip_extension_mm")
+    private Double tipExtensionMm;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     @Builder.Default

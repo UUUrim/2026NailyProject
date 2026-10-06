@@ -33,7 +33,6 @@ const SAMPLE_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent(`
 const SAMPLE_DETAILS: DesignExtractedDetails = {
   colorPalette: ['#FDE2EA', '#DE869F', '#C9A8FF'],
   textures: ['그라데이션', '펄'],
-  nailParts: ['플로럴', '크리스탈'],
 }
 
 export type GenerationContext = {
@@ -100,7 +99,6 @@ export function useNailDesignResultPage() {
   const [colorPalette, setColorPalette] = useState<DesignExtractedDetails['colorPalette'] | null>(
       initialDetails?.colorPalette?.length ? initialDetails.colorPalette : null
   )
-  const [nailParts, setNailParts] = useState<DesignExtractedDetails['nailParts'] | null>(null)
   const colorPollCountRef = useRef(0)
   const colorPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [liked, setLiked] = useState(false)
@@ -217,36 +215,6 @@ export function useNailDesignResultPage() {
   }, [hasRealResult, designId, image])
 
 
-  // ★ nailParts 별도 폴링 (swatches 폴링과 동일한 패턴)
-  const nailPartsPollCountRef = useRef(0)
-  const nailPartsPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    if (!hasRealResult || !designId || nailParts?.length) return
-
-    const poll = async () => {
-      nailPartsPollCountRef.current += 1
-      try {
-        const detail = await getDesignDetail(designId)
-        const parts = detail.details?.nailParts
-        // ★ imageUrl 있는 객체 파츠가 있을 때만 종료
-        const hasImageParts = parts?.some(p => typeof p === 'object' && p !== null && 'imageUrl' in p && p.imageUrl)
-        if (hasImageParts) {
-          setNailParts(parts!)
-          if (nailPartsPollTimerRef.current) clearInterval(nailPartsPollTimerRef.current)
-          return
-        }
-      } catch {}
-      if (nailPartsPollCountRef.current >= POLL_MAX) {
-        if (nailPartsPollTimerRef.current) clearInterval(nailPartsPollTimerRef.current)
-      }
-    }
-
-    void poll()
-    nailPartsPollTimerRef.current = setInterval(() => void poll(), POLL_INTERVAL)
-    return () => { if (nailPartsPollTimerRef.current) clearInterval(nailPartsPollTimerRef.current) }
-  }, [hasRealResult, designId, nailParts])
-
   const handleToggleShare = async () => {
     if (!designId || shareBusy) return
     setShareBusy(true)
@@ -292,12 +260,11 @@ export function useNailDesignResultPage() {
   }
   const applyShareChange = (nextShared: boolean) => setShared(nextShared)
 
-  // details에 폴링으로 받은 swatches + colorPalette + nailParts 주입
+  // details에 폴링으로 받은 swatches + colorPalette 주입
   const detailsWithSwatches: DesignExtractedDetails | null = initialDetails
       ? {
         ...initialDetails,
         colorPalette: colorPalette ?? initialDetails.colorPalette,
-        nailParts: nailParts ?? initialDetails.nailParts,
         swatches: swatches ?? undefined,
       }
       : null

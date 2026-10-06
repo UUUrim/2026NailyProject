@@ -282,7 +282,10 @@
     flex-direction: column;
     justify-content: center;
     overflow: hidden;
-    --hand-scan-fs-reserved: 120px; /* 캡처 버튼 공간 확보 (위아래로 절반씩 분배됨) */
+    /* 위: 진행 점·안내, 아래: 촬영 버튼 — 위아래로 절반씩 분배됨 */
+    --hand-scan-fs-reserved: 200px;
+    /* 상단 안내를 카메라 위 여백 한가운데 두려고 cq 단위(이 화면 크기 기준)를 쓴다 */
+    container-type: size;
 }
 
 .hand-scan-fs__feeds {
@@ -291,7 +294,8 @@
     grid-template-columns: 1fr 2px 1fr;
     align-items: center;
     min-height: 0;
-    max-height: calc(100svh - var(--hand-scan-fs-reserved));
+    /* 이 화면(컨테이너) 높이 기준 — 상단 안내 위치 계산(.hand-scan-fs__header)과 같은 기준을 써야 정확히 가운데 온다 */
+    max-height: calc(100cqh - var(--hand-scan-fs-reserved));
 }
 
 .hand-scan-fs__feed {
@@ -299,57 +303,240 @@
     overflow: hidden;
     background: #111;
     width: 100%;
-    /* Matches the top camera's real output shape once the server crops
-       the ArUco marker off its left edge (native 1920x1080, ~436px of
-       marker + margin trimmed -> ~1484x1080, ~11:8). Both panes share
-       this ratio so their rendered heights land exactly the same;
-       object-fit on .hand-scan-fs__video decides how each feed's own
-       (differently-shaped) source content fills that shared box.
-       Approximate, not exact - retune if the rig's camera or marker
-       placement changes enough to visibly mismatch. */
+    /* The server crops the top camera to exactly this shape - a window
+       centred on the finger slot with the ArUco marker cut off
+       (server.py _top_view_rect, TOP_VIEW_ASPECT) - so change both
+       together. Both panes share this ratio so their rendered heights
+       land exactly the same; object-fit on .hand-scan-fs__video decides
+       how each feed's own (differently-shaped) source content fills
+       that shared box. */
     aspect-ratio: 11 / 8;
     max-height: 100%;
 }
 
-/* 정확도 게이지 바 — 탑뷰 피드 왼쪽에 표시. 안정성(recent 버퍼)이 찰수록
-   차오르고, 자동 촬영 기준을 만족하면(ready) 초록으로 바뀌며 이때만
-   촬영 버튼이 활성화된다. */
-.hand-scan-fs__gauge {
+/* ── 탑뷰 손가락/큐티클 가이드 (TopViewFingerGuide) ──
+   place: 손가락을 놓기 전 — 실루엣 밖을 어둡게, 손톱 자리와 라벨까지 모두 표시
+   measuring: 손가락이 잡혀 측정 중 — 실제 손톱이 보이도록 채움/어둡게를 걷어내고
+              큐티클 라인과 라벨만 유지
+   ready: 맞춰짐(촬영 가능) — 큐티클 라인이 하늘색 → 초록으로 바뀌고 "큐티클 라인" 라벨은 사라짐 */
+.hand-scan-guide {
+    --guide-line: #67e8f9;
+    --guide-line-rgb: 103, 232, 249;
     position: absolute;
-    top: 16px;
-    left: 16px;
-    bottom: 16px;
-    width: 14px;
-    z-index: 2;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.hand-scan-guide--ready {
+    --guide-line: #4ade80;
+    --guide-line-rgb: 74, 222, 128;
+}
+
+.hand-scan-guide__svg {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+}
+
+.hand-scan-guide__anchor {
+    transition: transform 0.25s ease-out;
+}
+
+.hand-scan-guide__dim {
+    fill: rgba(0, 0, 0, 0.34);
+    transition: opacity 0.35s ease;
+}
+
+.hand-scan-guide__finger {
+    fill: rgba(255, 255, 255, 0.07);
+    stroke: rgba(255, 255, 255, 0.9);
+    stroke-width: 2;
+    stroke-dasharray: 7 6;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.7));
+    transition: opacity 0.35s ease, fill 0.35s ease;
+}
+
+.hand-scan-guide__nail {
+    fill: rgba(222, 134, 159, 0.34);
+    stroke: rgba(255, 214, 226, 0.95);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    transition: opacity 0.35s ease;
+}
+
+.hand-scan-guide__track {
+    stroke: rgba(var(--guide-line-rgb), 0.5);
+    stroke-width: 1.5;
+    stroke-dasharray: 10 8;
+    transition: stroke 0.3s ease;
+}
+
+.hand-scan-guide__line-glow {
+    stroke: rgba(var(--guide-line-rgb), 0.45);
+    stroke-width: 12;
+    stroke-linecap: round;
+    filter: blur(4px);
+    animation: hand-scan-guide-pulse 1.6s ease-in-out infinite;
+}
+
+.hand-scan-guide__line-halo {
+    stroke: rgba(0, 0, 0, 0.55);
+    stroke-width: 6;
+    stroke-linecap: round;
+}
+
+.hand-scan-guide__line {
+    stroke: var(--guide-line);
+    stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke 0.3s ease;
+}
+
+.hand-scan-guide__end {
+    fill: var(--guide-line);
+    stroke: rgba(0, 0, 0, 0.55);
+    stroke-width: 1.5;
+    transition: fill 0.3s ease;
+}
+
+.hand-scan-guide__place-label {
+    position: absolute;
+    top: 0;
+    left: 0;
     display: flex;
-    align-items: flex-end;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.45);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    overflow: hidden;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 12px 4px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    backdrop-filter: blur(8px);
+    transition: transform 0.25s ease-out, opacity 0.3s ease;
 }
 
-.hand-scan-fs__gauge-fill {
-    width: 100%;
-    background: linear-gradient(180deg, #ffb84d 0%, #ff8a3d 100%);
-    border-radius: 999px;
-    transition: height 0.12s linear, background 0.25s ease;
+.hand-scan-guide__place-label svg {
+    color: rgba(255, 255, 255, 0.8);
+    animation: hand-scan-guide-nudge 1.6s ease-in-out infinite;
 }
 
-.hand-scan-fs__gauge--ready .hand-scan-fs__gauge-fill {
-    background: linear-gradient(180deg, #4ade80 0%, #22c55e 100%);
-    box-shadow: 0 0 12px rgba(74, 222, 128, 0.7);
+.hand-scan-guide__cuticle-label {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 7px 12px;
+    border-radius: 10px;
+    transform: translateY(-50%);
+    color: #fff;
+    background: rgba(8, 12, 16, 0.66);
+    border: 1px solid rgba(var(--guide-line-rgb), 0.7);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(8px);
+    transition: top 0.25s ease-out, border-color 0.3s ease, opacity 0.3s ease;
+}
+
+/* 라벨 오른쪽 끝에서 큐티클 라인 쪽을 가리키는 꼬리 */
+.hand-scan-guide__cuticle-label::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: -6px;
+    width: 10px;
+    height: 10px;
+    background: inherit;
+    border-top: 1px solid rgba(var(--guide-line-rgb), 0.7);
+    border-right: 1px solid rgba(var(--guide-line-rgb), 0.7);
+    transform: translateY(-50%) rotate(45deg);
+    backdrop-filter: none;
+}
+
+.hand-scan-guide__cuticle-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--guide-line);
+    white-space: nowrap;
+    transition: color 0.3s ease;
+}
+
+.hand-scan-guide__cuticle-desc {
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.88);
+    word-break: keep-all;
+}
+
+.hand-scan-guide__cuticle-label--compact {
+    padding: 5px 9px;
+}
+
+.hand-scan-guide__cuticle-label--compact .hand-scan-guide__cuticle-desc {
+    display: none;
+}
+
+/* 라벨 자리가 아예 없을 만큼 좁은 화면 — 선만 남긴다 (display:flex가 hidden을 덮지 않게) */
+.hand-scan-guide__cuticle-label[hidden] {
+    display: none;
+}
+
+.hand-scan-guide--measuring .hand-scan-guide__dim,
+.hand-scan-guide--ready .hand-scan-guide__dim,
+.hand-scan-guide--measuring .hand-scan-guide__nail,
+.hand-scan-guide--ready .hand-scan-guide__nail,
+.hand-scan-guide--measuring .hand-scan-guide__place-label,
+.hand-scan-guide--ready .hand-scan-guide__place-label,
+.hand-scan-guide--ready .hand-scan-guide__cuticle-label {
+    opacity: 0;
+}
+
+.hand-scan-guide--measuring .hand-scan-guide__finger,
+.hand-scan-guide--ready .hand-scan-guide__finger {
+    fill: transparent;
+    opacity: 0.35;
+}
+
+.hand-scan-guide--ready .hand-scan-guide__line-glow {
+    animation: none;
+    opacity: 0.8;
+}
+
+@keyframes hand-scan-guide-pulse {
+    0%, 100% { opacity: 0.25; }
+    50% { opacity: 0.95; }
+}
+
+@keyframes hand-scan-guide-nudge {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hand-scan-guide__line-glow,
+    .hand-scan-guide__place-label svg {
+        animation: none;
+    }
 }
 
 .hand-scan-fs__video {
     width: 100%;
     height: 100%;
     display: block;
-    /* cover: the box above is already sized to the top feed's real
-       content ratio, so this barely crops the top view (just enough to
-       absorb the approximation) while fully cropping the side feed's
-       portrait phone frame down to a centered band matching the top
-       view's height - exactly what both feeds needed. */
+    /* cover: the box above matches the top feed's cropped ratio, so the
+       top view fills it as-is while the side feed's portrait phone frame
+       is cropped down to a centered band matching the top view's height -
+       exactly what both feeds needed. */
     object-fit: cover;
     object-position: center;
     background: #000;
@@ -526,110 +713,389 @@
     background: rgba(222, 134, 159, 0.55);
 }
 
-.hand-scan-fs__prompt {
+/* ── 상단: 진행 점 + 지금 할 일 ──
+   카메라 위 여백 전체(높이 = (화면 높이 - 카메라 높이) / 2)를 헤더 영역으로 잡고, 그 안에서
+   진행 점은 여백 높이의 37% 지점에, 안내 문장은 점 아래 끝과 카메라 위 끝의 정확히 가운데에 둔다.
+   카메라 높이는 .hand-scan-fs__feed와 같은 규칙: 폭 절반 × 8/11, 단 화면 높이 - 예약 공간을 넘지 않음 */
+.hand-scan-fs__header {
+    --hand-scan-fs-feeds-h: min((50cqw - 1px) * 8 / 11, 100cqh - var(--hand-scan-fs-reserved));
+    --hand-scan-steps-y: 37%;
+    --hand-scan-steps-h: 18px;   /* 진행 점 줄 높이 = 가장 큰 점(지금 손가락) 높이 */
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2;
+    width: min(calc(100% - 140px), 760px);
+    height: calc((100cqh - var(--hand-scan-fs-feeds-h)) / 2);
+    text-align: center;
+    pointer-events: none;
+}
+
+/* 촬영 진행 점 10개 + 잇는 선 — 준비 화면 손가락 배지와 같은 색 규칙:
+   끝낸 손가락 = 초록(✓), 지금 손가락 = 분홍 깜빡임, 남은 손가락 = 흐린 빈 점 */
+.hand-scan-steps {
+    position: absolute;
+    top: var(--hand-scan-steps-y);
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    height: var(--hand-scan-steps-h);
+}
+
+/* 점 사이를 잇는 선 — 앞 손가락을 끝냈으면 초록, 왼손→오른손 구간만 조금 더 길게 */
+.hand-scan-steps__line {
+    width: 12px;
+    height: 2px;
+    border-radius: 1px;
+    background: rgba(255, 255, 255, 0.22);
+    transition: background 0.25s ease;
+}
+
+.hand-scan-steps__line--done {
+    background: #7cc88a;
+}
+
+.hand-scan-steps__line--hand {
+    width: 26px;
+}
+
+.hand-scan-steps__dot {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255, 255, 255, 0.3);
+    transition: background 0.25s ease, border-color 0.25s ease;
+}
+
+.hand-scan-steps__dot--done {
+    color: #fff;
+    background: #7cc88a;
+    border-color: #7cc88a;
+}
+
+/* 지금 손가락 — 조금 더 크게, 진한 분홍 ↔ 밝은 분홍으로 깜빡이며 바깥 고리가 퍼진다
+   (어두운 배경에서 흐려져 사라지지 않도록 투명도 대신 색으로 깜빡임) */
+.hand-scan-steps__dot--current {
+    width: 18px;
+    height: 18px;
+    margin: -1px;
+    background: var(--naily-pink, #de869f);
+    border-color: #fff;
+    border-width: 2px;
+    animation: hand-scan-step-blink 1.1s ease-in-out infinite;
+}
+
+@keyframes hand-scan-step-blink {
+    0%, 100% { background: #de869f; box-shadow: 0 0 0 0 rgba(222, 134, 159, 0.75); }
+    50% { background: #ffd3e0; box-shadow: 0 0 0 7px rgba(222, 134, 159, 0); }
+}
+
+/* 점 아래 끝(37% + 줄 높이 절반)과 헤더 아래 끝(= 카메라 위 끝, 100%)의 한가운데 */
+.hand-scan-fs__title {
+    position: absolute;
+    top: calc((var(--hand-scan-steps-y) + var(--hand-scan-steps-h) / 2 + 100%) / 2);
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    margin: 0;
+    font-size: clamp(1.1rem, 2vw, 1.45rem);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #fff;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    transition: color 0.25s ease;
+}
+
+.hand-scan-fs--unsteady .hand-scan-fs__title {
+    color: #fcd34d;
+}
+
+.hand-scan-fs--ready .hand-scan-fs__title {
+    color: #86efac;
+}
+
+/* ── 화면 가운데 잠깐 떴다 사라지는 안내 (촬영 완료 / 오류) ──
+   key가 바뀔 때마다 새로 붙어서 애니메이션이 처음부터 다시 돈다 */
+.hand-scan-fs__toast {
     position: absolute;
     top: 50%;
     left: 50%;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 28px 18px 20px;
+    border-radius: 18px;
+    color: #fff;
+    background: rgba(12, 16, 14, 0.82);
+    border: 1px solid rgba(124, 200, 138, 0.55);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(12px);
+    white-space: nowrap;
+    pointer-events: none;
     transform: translate(-50%, -50%);
+    animation: hand-scan-toast 2.4s ease forwards;
+}
+
+.hand-scan-fs__toast-icon {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: #fff;
+    background: #7cc88a;
+}
+
+.hand-scan-fs__toast-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.hand-scan-fs__toast-text small {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+@keyframes hand-scan-toast {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+    10% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.97); }
+}
+
+/* ── 하단: 촬영 버튼 = 측정 정확도 막대 (CaptureButton) ── */
+.hand-scan-fs__dock {
+    position: absolute;
+    bottom: 26px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 2;
-    display: inline-flex;
+}
+
+/* 촬영 요청 오류 — 버튼 바로 위에 붙어서 계속 보인다 (버튼 위치는 그대로) */
+.hand-scan-fs__error {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
     align-items: center;
     gap: 8px;
+    width: max-content;
+    max-width: min(90vw, 480px);
     margin: 0;
-    padding: 10px 20px;
-    max-width: min(90vw, 420px);
-    text-align: center;
-    font-size: clamp(0.78rem, 1.6vw, 0.92rem);
+    padding: 8px 14px 8px 10px;
+    border-radius: 12px;
+    font-size: 0.88rem;
     font-weight: 600;
     line-height: 1.4;
-    color: #fff;
-    white-space: normal;
-    text-align: center;
-    pointer-events: none;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(222, 134, 159, 0.55);
-    box-shadow: 0 4px 18px rgba(222, 134, 159, 0.22);
-    transition: opacity 0.35s ease;
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.55);
+    border: 1px solid rgba(248, 113, 113, 0.65);
+    backdrop-filter: blur(8px);
 }
 
-.hand-scan-fs__prompt-icon {
+.hand-scan-fs__error-icon {
+    display: grid;
+    place-items: center;
     flex-shrink: 0;
-    color: #de869f;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: #fff;
+    background: #ef4444;
 }
 
-.hand-scan-fs__finger-badge {
+.hand-scan-capture {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 340px;
+    height: 58px;
+    padding: 0 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 1.05rem;
+    font-weight: 700;
+    cursor: not-allowed;
+    transition: color 0.25s ease, border-color 0.25s ease, transform 0.15s ease;
+}
+
+/* 버튼 안에서 서버 ratio만큼 차오르는 막대 */
+.hand-scan-capture__fill {
     position: absolute;
-    top: 76px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 2;
+    inset: 0 auto 0 0;
+    z-index: -1;
+    background: linear-gradient(90deg, rgba(222, 134, 159, 0.5), rgba(222, 134, 159, 0.85));
+    transition: width 0.4s ease;
+}
+
+.hand-scan-capture__label {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    margin: 0;
-    padding: 7px 16px;
-    border-radius: 999px;
-    color: rgba(255, 255, 255, 0.95);
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(222, 134, 159, 0.45);
-    pointer-events: none;
-    white-space: nowrap;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
 }
 
-.hand-scan-fs__finger-badge-name {
-    font-size: 0.9rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
+/* 측정 중 / 다시 맞추는 중 — 막대 위로 줄무늬가 흘러 진행 중임을 보여준다 */
+.hand-scan-capture--measuring,
+.hand-scan-capture--unsteady {
+    color: #fff;
 }
 
-.hand-scan-fs__finger-badge-hand {
-    margin-left: 2px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.75);
+.hand-scan-capture--measuring .hand-scan-capture__fill {
+    background:
+        repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.2) 0 10px, transparent 10px 20px),
+        linear-gradient(90deg, rgba(222, 134, 159, 0.5), rgba(222, 134, 159, 0.85));
+    background-size: 28.28px 28.28px, 100% 100%;
+    animation: hand-scan-capture-stripes 0.9s linear infinite;
 }
 
-.hand-scan-fs__finger-badge-divider {
-    width: 1px;
-    height: 12px;
-    background: rgba(255, 255, 255, 0.25);
+.hand-scan-capture--unsteady {
+    border-color: rgba(251, 191, 36, 0.6);
 }
 
-.hand-scan-fs__finger-badge-progress {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.65);
-    font-variant-numeric: tabular-nums;
+.hand-scan-capture--unsteady .hand-scan-capture__fill {
+    background:
+        repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.18) 0 10px, transparent 10px 20px),
+        linear-gradient(90deg, rgba(251, 191, 36, 0.45), rgba(251, 191, 36, 0.75));
+    background-size: 28.28px 28.28px, 100% 100%;
+    animation: hand-scan-capture-stripes 0.9s linear infinite;
 }
 
-.hand-scan-fs__capture-wrap {
-    position: absolute;
-    bottom: 36px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 2;
-    width: 220px;
+/* 가득 참 = 촬영 가능: 버튼 전체가 분홍으로 바뀌고 눌린다 */
+.hand-scan-capture--ready {
+    color: #fff;
+    border-color: transparent;
 }
 
-.hand-scan-fs__capture {
-    width: 100%;
+.hand-scan-capture--ready .hand-scan-capture__fill {
+    background: linear-gradient(135deg, #de869f 0%, #c96d88 100%);
 }
 
-.hand-scan-fs__capture:hover:not(:disabled) {
+.hand-scan-capture--ready {
+    cursor: pointer;
+    animation: hand-scan-capture-ready 1.6s ease-in-out infinite;
+}
+
+.hand-scan-capture--ready:hover {
     transform: translateY(-1px);
 }
 
-.hand-scan-fs__capture:active:not(:disabled) {
+.hand-scan-capture--ready:active {
     transform: translateY(0);
 }
 
-.hand-scan-fs__capture:disabled {
-    transform: none;
+/* 촬영 중 — 누를 수 없다는 게 바로 보이게 분홍을 빼고 회색 비활성 모양으로 */
+.hand-scan-capture--capturing {
+    cursor: not-allowed;
+    color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.14);
+    border-style: dashed;
+}
+
+.hand-scan-capture--capturing .hand-scan-capture__fill {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.hand-scan-capture--capturing .hand-scan-capture__label {
+    text-shadow: none;
+}
+
+.hand-scan-capture--capturing .hand-scan-capture__spinner {
+    border-color: rgba(255, 255, 255, 0.18);
+    border-top-color: rgba(255, 255, 255, 0.6);
+}
+
+.hand-scan-capture:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 3px;
+}
+
+.hand-scan-capture__spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: #fff;
+    animation: hand-scan-spin 0.8s linear infinite;
+}
+
+@keyframes hand-scan-capture-stripes {
+    to { background-position: 28.28px 0, 0 0; }
+}
+
+@keyframes hand-scan-capture-ready {
+    0%, 100% { box-shadow: 0 8px 24px rgba(222, 134, 159, 0.38), 0 0 0 0 rgba(222, 134, 159, 0.6); }
+    50% { box-shadow: 0 8px 24px rgba(222, 134, 159, 0.38), 0 0 0 10px rgba(222, 134, 159, 0); }
+}
+
+@keyframes hand-scan-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hand-scan-steps__dot--current,
+    .hand-scan-capture--ready,
+    .hand-scan-capture__fill,
+    .hand-scan-capture__spinner {
+        animation: none !important;
+    }
 }
 
 @media (max-width: 640px) {
+    .hand-scan-fs {
+        --hand-scan-fs-reserved: 240px;
+    }
+
+    /* 세로로 쌓인 두 카메라 높이 기준으로 다시 계산 */
+    .hand-scan-fs__header {
+        --hand-scan-fs-feeds-h: min(100cqw * 16 / 11 + 2px, 100cqh - var(--hand-scan-fs-reserved));
+        width: calc(100% - 88px);
+    }
+
+    .hand-scan-steps__line {
+        width: 8px;
+    }
+
+    .hand-scan-steps__line--hand {
+        width: 16px;
+    }
+
+    .hand-scan-fs__dock {
+        bottom: 14px;
+        width: calc(100% - 32px);
+    }
+
+    .hand-scan-capture {
+        width: 100%;
+    }
+
+    .hand-scan-fs__toast-text {
+        font-size: 1.1rem;
+    }
+
     .hand-scan-fs__feeds {
         grid-template-columns: 1fr;
         grid-template-rows: 1fr 2px 1fr;
@@ -644,11 +1110,6 @@
                 rgba(222, 134, 159, 0.55) 50%,
                 rgba(222, 134, 159, 0.1) 100%
         );
-    }
-
-    .hand-scan-fs__prompt {
-        font-size: 0.85rem;
-        padding: 10px 18px;
     }
 }
 

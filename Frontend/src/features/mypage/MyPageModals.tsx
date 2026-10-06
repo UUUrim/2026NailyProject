@@ -20,6 +20,7 @@ import {
   dateKeyOf,
   formatDateTimeFull,
   formatNavDate,
+  formatTipExtension,
 } from './shared'
 
 type Props = {
@@ -231,6 +232,10 @@ export function MyPageModals({
                       <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>
                       <strong>{shapeLabel}</strong>
                       {shapeEn && <span>{shapeEn}</span>}
+                      <p className="mypage-x__scanx-shape-length">
+                        {printDetailOrder.tipExtensionMm != null && '연장 길이 '}
+                        <b>{formatTipExtension(printDetailOrder.tipExtensionMm)}</b>
+                      </p>
                     </div>
                     <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
                       {SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId] ? (
@@ -246,7 +251,9 @@ export function MyPageModals({
                       출력 요약
                       <i aria-hidden="true">{Icon.summaryIcon}</i>
                     </span>
-                    {shapeLabel} 쉐입으로 네일팁 10개(양손) 출력을 신청했어요.
+                    {printDetailOrder.tipExtensionMm != null
+                        ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일팁 10개(양손) 출력을 신청했어요.`
+                        : `${shapeLabel} 쉐입(기본 길이)으로 네일팁 10개(양손) 출력을 신청했어요.`}
                   </p>
 
                   <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">

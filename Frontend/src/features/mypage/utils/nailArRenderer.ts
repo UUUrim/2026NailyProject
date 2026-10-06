@@ -1,47 +1,29 @@
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import type { NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
-import { FINGERS, computeFingerPlacement, type Point } from '@/features/mypage/utils/fingerLandmarks'
+import {
+  clampDesignAspect,
+  computeNailPoses,
+  facingOpacity,
+  type NailPose,
+  type Point,
+  type TrackedHand,
+} from '@/features/mypage/utils/fingerLandmarks'
 
-// How much a fore/aft tilt narrows the far edge of the nail quad, for a basic
-// perspective cue when the hand rotates. Bounded so a noisy depth reading
-// can't invert or flatten it.
-const MAX_TILT_TAPER = 0.32
-
-// Builds the destination quad (tip-left, tip-right, base-right, base-left)
-// the nail image gets warped onto: a rectangle anchored at the cuticle point
-// (baseX, baseY) and extending nailLength toward the fingertip, rotated by
-// angle. Tapered at the tip/base ends by tipTaper/baseTaper to give a
-// foreshortening cue when the finger tilts toward or away from the camera.
-//
-// Local frame: y=0 is the cuticle (anchored at baseX,baseY), y=+nailLength
-// is the fingertip - matches computeFingerPlacement()'s angle convention,
-// where a local point (0, v) rotates to world offset v*(dirX,dirY), i.e.
-// toward the fingertip for v>0.
-function getNailQuad(
-  baseX: number,
-  baseY: number,
-  angle: number,
-  nailWidth: number,
-  nailLength: number,
-  tipTaper: number,
-  baseTaper: number,
-): [Point, Point, Point, Point] {
-  const cos = Math.cos(angle)
-  const sin = Math.sin(angle)
-  const tipHalfW = (nailWidth / 2) * tipTaper
-  const baseHalfW = (nailWidth / 2) * baseTaper
-
-  const local: Point[] = [
-    { x: -tipHalfW, y: nailLength },
-    { x: tipHalfW, y: nailLength },
-    { x: baseHalfW, y: 0 },
-    { x: -baseHalfW, y: 0 },
-  ]
-
-  return local.map((p) => ({
-    x: baseX + p.x * cos - p.y * sin,
-    y: baseY + p.x * sin + p.y * cos,
-  })) as [Point, Point, Point, Point]
+// The destination quad the nail image gets warped onto, in the source image's
+// corner order (top-left, top-right, bottom-right, bottom-left): the nail's
+// flat rectangle in 3D (cuticle edge at pose.origin, extending nailLength
+// along pose.axis, pose.width wide along pose.across), projected onto the
+// screen by dropping depth. The image's top edge is the tip's cuticle end, so
+// it goes on the cuticle edge; its left edge goes on the -across side (see
+// NailPose.across). Projecting the real 3D corners gives the quad the right
+// foreshortening for free when the finger tilts toward the camera or rolls.
+function getNailQuad(pose: NailPose, nailLength: number): [Point, Point, Point, Point] {
+  const { origin, axis, across } = pose
+  const halfW = pose.width / 2
+  const corner = (side: number, along: number): Point => ({
+    x: origin.x + across.x * halfW * side + axis.x * along,
+    y: origin.y + across.y * halfW * side + axis.y * along,
+  })
+  return [corner(-1, 0), corner(1, 0), corner(1, nailLength), corner(-1, nailLength)]
 }
 
 // Solves the 2D affine matrix mapping source triangle -> destination
@@ -106,35 +88,20 @@ function drawImageWarped(ctx: CanvasRenderingContext2D, source: HTMLCanvasElemen
   drawTriangleWarp(ctx, source, [srcTR, srcBR, srcBL], [dstTR, dstBR, dstBL])
 }
 
-function drawFingerNail(
-  ctx: CanvasRenderingContext2D,
-  landmarks: NormalizedLandmark[],
-  finger: (typeof FINGERS)[number],
-  asset: NailDesignAsset,
-  width: number,
-  height: number,
-  mirror: boolean,
-) {
-  const nailAsset = asset.fingerNails[finger.nailIndex]
+function drawFingerNail(ctx: CanvasRenderingContext2D, pose: NailPose, asset: NailDesignAsset) {
+  const nailAsset = asset.fingerNails[pose.finger.nailIndex]
   if (!nailAsset) return
 
-  const placement = computeFingerPlacement(landmarks, finger, width, height, mirror, (segment) =>
-    segment * nailAsset.aspectRatio * 0.85,
-  )
-  if (!placement) return
+  const opacity = facingOpacity(pose.facing)
+  if (opacity <= 0) return
 
-  const { baseX, baseY, angle, width: nailWidth, tilt } = placement
   // Preserve the cutout's own proportions - derive length from the measured
-  // width instead of an independent landmark-based length estimate, so the
-  // design is scaled, never stretched/squashed.
-  const nailLength = nailWidth / nailAsset.aspectRatio
-  const tipTaper = 1 - Math.max(0, tilt) * MAX_TILT_TAPER
-  const baseTaper = 1 - Math.max(0, -tilt) * MAX_TILT_TAPER
-
-  const quad = getNailQuad(baseX, baseY, angle, nailWidth, nailLength, tipTaper, baseTaper)
+  // width, so the design is scaled, never stretched/squashed.
+  const nailLength = pose.width / clampDesignAspect(nailAsset.aspectRatio)
+  const quad = getNailQuad(pose, nailLength)
 
   ctx.save()
-  ctx.globalAlpha = 0.94
+  ctx.globalAlpha = 0.94 * opacity
   // Cast against the nail's own alpha shape (a precise cutout, not a bounding
   // box) so the shadow grounds it on the finger instead of floating.
   ctx.shadowColor = 'rgba(10, 8, 12, 0.35)'
@@ -146,13 +113,13 @@ function drawFingerNail(
 
 export function drawNailOverlays(
   ctx: CanvasRenderingContext2D,
-  landmarks: NormalizedLandmark[],
+  hand: TrackedHand,
   asset: NailDesignAsset,
   width: number,
   height: number,
   mirror: boolean,
 ) {
-  for (const finger of FINGERS) {
-    drawFingerNail(ctx, landmarks, finger, asset, width, height, mirror)
+  for (const pose of computeNailPoses(hand, width, height, mirror)) {
+    drawFingerNail(ctx, pose, asset)
   }
 }

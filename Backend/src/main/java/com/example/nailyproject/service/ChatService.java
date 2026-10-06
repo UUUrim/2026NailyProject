@@ -27,12 +27,14 @@ public class ChatService {
     private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
     private final StyleTrendService styleTrendService;  // 추가
+    private final GptClientService gptClientService;
 
-    @Value("${gemini.api.key}")
-    private String apiKey;
-
-    @Value("${gemini.api.url}")
-    private String apiUrl;
+    // Gemini 설정 - GPT로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // @Value("${gemini.api.key}")
+    // private String apiKey;
+    //
+    // @Value("${gemini.api.url}")
+    // private String apiUrl;
 
 
     private static final List<String> CATEGORIES =
@@ -40,6 +42,10 @@ public class ChatService {
 
     private static final List<String> REQUIRED_FOR_COMPLETION =
             List.of("mood", "designType", "color", "season", "motif", "shape");
+
+    // reply 문장이 "완료/완성"을 암시하는지 감지하는 패턴 (isComplete 모순 감지용 안전장치)
+    private static final java.util.regex.Pattern COMPLETION_PHRASE_PATTERN =
+            java.util.regex.Pattern.compile("완성해|완성됐|완성되었|완료됐|완료되었|준비가?\\s*완료|다\\s*됐어요|다\\s*되었어요");
 
     private static final String SYSTEM_PROMPT_TEMPLATE = """
              당신은 Naily 서비스의 네일 디자인 전문 AI 어시스턴트입니다.
@@ -118,6 +124,26 @@ public class ChatService {
                          "블랙 앤 화이트 조합" -> ["#000000", "#FFFFFF"]
                      color 질문이 아니라면 optionColors는 빈 객체 {}로 두세요.
                    \s
+                     [위임 요청 감지 - 매우 중요]
+                     사용자가 "네가 알아서 정해줘", "유행하는 스타일로 다 정해줘", "니가 골라줘",
+                     "몰라 그냥 알아서 해줘"처럼 - 카테고리 하나가 아니라 "다", "전부", "알아서"처럼
+                     스타일 전체를 AI에게 맡기겠다는 의사를 표현하면, 그 즉시 [아직 안 채워진 필수
+                     카테고리] 중 shape를 제외한 나머지(mood, designType, color, season, motif)를
+                     전부 이번 한 턴에 한꺼번에 결정해서 slotActions로 채우세요. 절대로 그 중 하나씩
+                     차례로 다시 물어보면 안 됩니다 — "디자인 기법은 뭘로 할까요?", "계절은요?"처럼
+                     위임받은 카테고리를 되묻는 reply/nextQuestionTarget은 금지입니다.
+                     - 값을 정할 때는 위에 주어진 트렌드 힌트, 스캔 기반 퍼스널컬러, 그리고 사용자가
+                       이미 이번 대화에서 표현한 선호(예: "톤다운 핑크", "가을 느낌")를 최대한
+                       반영해서, 실제로 요즘 유행하는 조합으로 자연스럽게 정하세요. 사용자가 season을
+                       명시하지 않았다면 season: none으로 채워도 됩니다. motif는 특별히 넣을 게
+                       없다고 판단되면 motif: none으로 채우세요.
+                     - shape는 이 위임 대상에서 제외입니다: 이미 채워져 있지 않다면 위임 요청 이후에도
+                       여전히 물어봐도 됩니다(스캔 추천값이 있으면 그것을 우선 제안). 이미 shape까지
+                       채워져 있었다면 isComplete를 true로 설정하세요.
+                     - 이 경우 reply는 "~로 정해서 진행할게요" 식으로 AI가 이미 알아서 결정했다는
+                       뉘앙스로 쓰고, 방금 정한 mood/designType/color/season/motif를 간단히
+                       요약해서 알려주세요. 사용자에게 다시 하나씩 골라달라고 묻지 마세요.
+
                      [중요]
                      - 확신이 안 서면 억지로 추측해서 반영하지 말고, reply에서 선택지를 주며 되물어보세요.
                      - 부정적 표현("~는 싫어요", "~빼고")은 add_dislike 또는 remove_like로 처리하세요.
@@ -176,14 +202,22 @@ public class ChatService {
                 .filter(cat -> !slots.containsKey(cat) || slots.get(cat).getLiked().isEmpty())
                 .toList();
 
-        //대화 히스토리 Gemini가 이해하는 형식으로 변환
+        //대화 히스토리 - GPT(OpenAI) messages 형식으로 변환
+        // [Gemini 방식 - 주석 처리]
+        // List<ChatMessage> savedMessages = chatMessageRepository.findBySessionOrderBySentAtAsc(session);
+        // List<Map<String, Object>> contents = new ArrayList<>();
+        // for (ChatMessage msg : savedMessages) {
+        //     String role = (msg.getRole() == ChatMessage.MessageRole.user) ? "user" : "model";
+        //     contents.add(Map.of("role", role, "parts", List.of(Map.of("text", msg.getContent()))));
+        // }
+        // contents.add(Map.of("role", "user", "parts", List.of(Map.of("text", userMessage))));
         List<ChatMessage> savedMessages = chatMessageRepository.findBySessionOrderBySentAtAsc(session);
-        List<Map<String, Object>> contents = new ArrayList<>();
+        List<Map<String, Object>> chatMessages = new ArrayList<>();
         for (ChatMessage msg : savedMessages) {
-            String role = (msg.getRole() == ChatMessage.MessageRole.user) ? "user" : "model";
-            contents.add(Map.of("role", role, "parts", List.of(Map.of("text", msg.getContent()))));
+            String role = (msg.getRole() == ChatMessage.MessageRole.user) ? "user" : "assistant";
+            chatMessages.add(Map.of("role", role, "content", msg.getContent()));
         }
-        contents.add(Map.of("role", "user", "parts", List.of(Map.of("text", userMessage))));
+        chatMessages.add(Map.of("role", "user", "content", userMessage));
 
         String slotsJson;
         try {
@@ -244,41 +278,48 @@ public class ChatService {
         String systemPrompt = String.format(
                 SYSTEM_PROMPT_TEMPLATE, scanHint, slotsJson, String.join(", ", emptyRequiredCategories));
 
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("contents", contents);
-        requestBody.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))));
+        // [Gemini 방식 - 주석 처리]
+        // Map<String, Object> requestBody = new HashMap<>();
+        // requestBody.put("contents", contents);
+        // requestBody.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))));
+        //
+        // //Gemini에게 무조건 JSON으로 응답하도록 강제하는 설정
+        // //응답이 중간에 잘리지 않도록 출력 토큰을 넉넉히 확보하고, 간단한 대화라 thinking 예산은 낮춤
+        // requestBody.put("generationConfig", Map.of(
+        //         "responseMimeType", "application/json",
+        //         "maxOutputTokens", 8192,
+        //         "thinkingConfig", Map.of("thinkingLevel", "LOW")
+        // ));
+        //
+        // JsonNode responseNode = callGeminiWithRetry(requestBody);
+        // System.out.println("finishReason: " + responseNode.path("candidates").get(0).path("finishReason").asText());
+        // System.out.println("usageMetadata: " + responseNode.path("usageMetadata"));
+        //
+        // JsonNode partsNode = responseNode.path("candidates").get(0).path("content").path("parts");
+        // System.out.println("parts 개수: " + partsNode.size());
+        // System.out.println("parts 전체: " + partsNode.toString());
+        //
+        // String aiResponseText = "";
+        // if (responseNode != null && responseNode.has("candidates")) {
+        //     aiResponseText = responseNode.path("candidates").get(0)
+        //             .path("content").path("parts").get(0)
+        //             .path("text").asText();
+        //
+        //     if (aiResponseText != null && !aiResponseText.trim().isEmpty()) {
+        //         aiResponseText = aiResponseText.trim();
+        //         if (!aiResponseText.endsWith("}")) {
+        //             aiResponseText += "\n}";
+        //         }
+        //     }
+        // }
 
-        //Gemini에게 무조건 JSON으로 응답하도록 강제하는 설정
-        //응답이 중간에 잘리지 않도록 출력 토큰을 넉넉히 확보하고, 간단한 대화라 thinking 예산은 낮춤
-        requestBody.put("generationConfig", Map.of(
-                "responseMimeType", "application/json",
-                "maxOutputTokens", 8192,
-                "thinkingConfig", Map.of("thinkingLevel", "LOW")
-        ));
-
-        // ↓↓↓ 여기서부터 DB 트랜잭션 없이 Gemini 호출 (재시도로 최대 9초+ 걸릴 수 있는 블로킹 구간)
-        JsonNode responseNode = callGeminiWithRetry(requestBody);
-        //토큰 확인용
-        System.out.println("finishReason: " + responseNode.path("candidates").get(0).path("finishReason").asText());
-        System.out.println("usageMetadata: " + responseNode.path("usageMetadata"));
-
-        JsonNode partsNode = responseNode.path("candidates").get(0).path("content").path("parts");
-        System.out.println("parts 개수: " + partsNode.size());
-        System.out.println("parts 전체: " + partsNode.toString());
-
-
-        String aiResponseText = "";
-        if (responseNode != null && responseNode.has("candidates")) {
-            aiResponseText = responseNode.path("candidates").get(0)
-                    .path("content").path("parts").get(0)
-                    .path("text").asText();
-
-            if (aiResponseText != null && !aiResponseText.trim().isEmpty()) {
-                aiResponseText = aiResponseText.trim();
-                // 텍스트가 닫는 괄호로 끝나지 않으면 강제로 추가
-                if (!aiResponseText.endsWith("}")) {
-                    aiResponseText += "\n}";
-                }
+        // ↓↓↓ 여기서부터 DB 트랜잭션 없이 GPT 호출 (재시도로 최대 9초+ 걸릴 수 있는 블로킹 구간)
+        String aiResponseText = gptClientService.chat(systemPrompt, chatMessages, 8192, true);
+        if (aiResponseText != null && !aiResponseText.trim().isEmpty()) {
+            aiResponseText = aiResponseText.trim();
+            // 텍스트가 닫는 괄호로 끝나지 않으면 강제로 추가
+            if (!aiResponseText.endsWith("}")) {
+                aiResponseText += "\n}";
             }
         }
         // ↑↑↑ 여기까지 트랜잭션 없음. 이제부터 결과 반영은 짧은 트랜잭션(persistChatResult)으로 넘김
@@ -338,6 +379,43 @@ public class ChatService {
             if (resultJson.has("isComplete")) {
                 isComplete = resultJson.get("isComplete").asBoolean();
             }
+
+            // ★ 코드 레벨 안전장치: reply 문장 자체가 완료를 암시하는데 isComplete가
+            // false로 오는 모순도 실제로 재현됐다(슬롯 추적이 카테고리명 표기 차이 등으로
+            // 어긋나 아래 stillEmpty 기반 교정이 못 잡는 경우). reply 텍스트만으로
+            // 완료 여부를 다시 확인해서, 모순되면 isComplete를 강제로 true로 바로잡는다.
+            if (!isComplete && COMPLETION_PHRASE_PATTERN.matcher(reply).find()) {
+                System.err.println("[ChatService] reply가 완료를 암시하는데 isComplete=false라서 강제 교정함: " + reply);
+                isComplete = true;
+                nextQuestionTarget = null;
+            }
+
+            // ★ 코드 레벨 안전장치: 프롬프트 지시만으로는 Gemini가 이미 채워진 카테고리를
+            // 다시 물어보는 경우를 100% 막지 못했다 (실제로 재현된 버그). slotActions를
+            // 반영한 "이후" 상태를 기준으로 nextQuestionTarget이 진짜 안 채워진 카테고리를
+            // 가리키는지 여기서 다시 검증하고, 아니면 강제로 교정한다.
+            if (!isComplete) {
+                List<String> stillEmpty = REQUIRED_FOR_COMPLETION.stream()
+                        .filter(cat -> !slots.containsKey(cat) || slots.get(cat).getLiked().isEmpty())
+                        .toList();
+                boolean targetAlreadyFilled = nextQuestionTarget != null
+                        && !stillEmpty.contains(nextQuestionTarget);
+                if (targetAlreadyFilled && !stillEmpty.isEmpty()) {
+                    System.err.println("[ChatService] Gemini가 이미 채워진 카테고리(" + nextQuestionTarget
+                            + ")를 재질문하려 해서 강제 교정함 -> " + stillEmpty.get(0));
+                    nextQuestionTarget = stillEmpty.get(0);
+                    reply = appendFollowUpQuestion(reply, nextQuestionTarget);
+                    showOptions = true;
+                    options.clear();
+                    options.addAll(defaultOptionsFor(nextQuestionTarget));
+                    optionColors.clear();
+                } else if (targetAlreadyFilled) {
+                    // stillEmpty가 비었는데 isComplete만 false로 잘못 온 경우 - 완료로 정정
+                    isComplete = true;
+                    nextQuestionTarget = null;
+                }
+            }
+
             if (isComplete) {
                 session.updateStatus(DesignSession.SessionStatus.COMPLETED);
             }
@@ -365,6 +443,37 @@ public class ChatService {
                 .optionColors(optionColors)
                 .isComplete(isComplete)
                 .build();
+    }
+
+    // ★ 재질문 방지 안전장치용 헬퍼 - 카테고리별 기본 후속 질문 문구
+    private static final Map<String, String> FALLBACK_QUESTIONS = Map.of(
+            "mood", "혹시 원하시는 분위기(무드)가 있을까요?",
+            "designType", "선호하시는 디자인 기법이 있으신가요?",
+            "color", "어떤 컬러 톤을 원하시나요?",
+            "season", "이번 네일에 어울리는 계절이나 특별한 상황이 있을까요?",
+            "motif", "네일에 넣고 싶은 특별한 모티프가 있으신가요? 없으면 '없음'이라고 말씀해주세요.",
+            "shape", "선호하시는 네일 모양이 있으신가요?"
+    );
+
+    private static final Map<String, List<String>> FALLBACK_OPTIONS = Map.of(
+            "mood", List.of("러블리한 느낌", "시크한 느낌", "큐트한 느낌"),
+            "designType", List.of("글리터", "그라데이션", "마블"),
+            "season", List.of("상관없음", "봄/여름", "가을/겨울"),
+            "shape", List.of("아몬드", "라운드", "스퀘어")
+    );
+
+    /**
+     * 코드 레벨 nextQuestionTarget 교정 시 사용할 안전한 reply. Gemini가 만든 원본 reply는
+     * 이미 틀린 카테고리를 향해 질문하는 문장이라 그대로 재활용하면 혼란을 주므로, 방금
+     * 반영된 내용은 확인해줬다는 짧은 문구 + 올바른 카테고리 질문으로 교체한다.
+     */
+    private String appendFollowUpQuestion(String reply, String category) {
+        String question = FALLBACK_QUESTIONS.getOrDefault(category, "다음으로 어떤 걸 정해볼까요?");
+        return "네, 반영했어요! " + question;
+    }
+
+    private List<String> defaultOptionsFor(String category) {
+        return new ArrayList<>(FALLBACK_OPTIONS.getOrDefault(category, List.of()));
     }
 
     private Map<String, SlotData> loadSlots(String json) {
@@ -399,6 +508,12 @@ public class ChatService {
 
             switch (actionType) {
                 case "add_like" -> {
+                    // 모티프를 "없음"으로 골랐다가 실제 장식(큐빅 등)을 추가로 요청하면 "없음"은 취소된 것
+                    if ("motif".equals(category)
+                            && !value.trim().equalsIgnoreCase("none") && !value.contains("없음")) {
+                        slot.getLiked().removeIf(v -> v != null
+                                && (v.trim().equalsIgnoreCase("none") || v.contains("없음")));
+                    }
                     if (!slot.getLiked().contains(value)) slot.getLiked().add(value);
                     slot.getDisliked().remove(value);
                 }
@@ -412,48 +527,49 @@ public class ChatService {
         }
     }
 
-    /**
-     * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
-     * 그래도 실패하면 프론트가 "로그인 세션 만료"로 오인하지 않도록 IllegalStateException으로 변환.
-     */
-    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
-        WebClient webClient = webClientBuilder.build();
-        int maxAttempts = 3;
-        long backoffMillis = 1500;
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                return webClient.post()
-                        .uri(apiUrl + "?key=" + apiKey.trim())
-                        .bodyValue(requestBody)
-                        .retrieve()
-                        .bodyToMono(JsonNode.class)
-                        .block();
-            } catch (WebClientResponseException e) {
-                int statusCode = e.getStatusCode().value();
-                boolean isRetryable = statusCode == 429 || statusCode == 503; // 429=요청과다, 503=모델 과부하
-                boolean hasAttemptsLeft = attempt < maxAttempts;
-
-                System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
-                        + e.getStatusCode() + " " + e.getResponseBodyAsString());
-
-                if (isRetryable && hasAttemptsLeft) {
-                    try {
-                        Thread.sleep(backoffMillis * attempt); // 1.5초, 3초 ...로 점점 늘려가며 재시도
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
-                    continue;
-                }
-
-                if (isRetryable) {
-                    throw new IllegalStateException("지금 AI 서버가 혼잡해서 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
-                }
-                throw new IllegalStateException("AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
-            }
-        }
-        throw new IllegalStateException("AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
-    }
+    // Gemini 호출 로직 - GPT(GptClientService)로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // /**
+    //  * Gemini 호출. 429(요청 한도 초과)면 잠깐 대기 후 최대 2회 재시도.
+    //  * 그래도 실패하면 프론트가 "로그인 세션 만료"로 오인하지 않도록 IllegalStateException으로 변환.
+    //  */
+    // private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+    //     WebClient webClient = webClientBuilder.build();
+    //     int maxAttempts = 3;
+    //     long backoffMillis = 1500;
+    //
+    //     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+    //         try {
+    //             return webClient.post()
+    //                     .uri(apiUrl + "?key=" + apiKey.trim())
+    //                     .bodyValue(requestBody)
+    //                     .retrieve()
+    //                     .bodyToMono(JsonNode.class)
+    //                     .block();
+    //         } catch (WebClientResponseException e) {
+    //             int statusCode = e.getStatusCode().value();
+    //             boolean isRetryable = statusCode == 429 || statusCode == 503; // 429=요청과다, 503=모델 과부하
+    //             boolean hasAttemptsLeft = attempt < maxAttempts;
+    //
+    //             System.err.println("Gemini API 호출 실패 (시도 " + attempt + "/" + maxAttempts + "): "
+    //                     + e.getStatusCode() + " " + e.getResponseBodyAsString());
+    //
+    //             if (isRetryable && hasAttemptsLeft) {
+    //                 try {
+    //                     Thread.sleep(backoffMillis * attempt); // 1.5초, 3초 ...로 점점 늘려가며 재시도
+    //                 } catch (InterruptedException ie) {
+    //                     Thread.currentThread().interrupt();
+    //                 }
+    //                 continue;
+    //             }
+    //
+    //             if (isRetryable) {
+    //                 throw new IllegalStateException("지금 AI 서버가 혼잡해서 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.");
+    //             }
+    //             throw new IllegalStateException("AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+    //         }
+    //     }
+    //     throw new IllegalStateException("AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.");
+    // }
 
     /**
      * Gemini 응답이 중간에 잘려 JSON 파싱이 실패했을 때, "reply" 필드 값만이라도

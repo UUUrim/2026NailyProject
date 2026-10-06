@@ -88,13 +88,6 @@ public class NailDesign {
     @Column(name = "shared_at")
     private LocalDateTime sharedAt;
 
-    @Column(name = "parts_json", columnDefinition = "JSON")
-    private String partsJson; // {"silver star": ["S3_URL1", ...], "pearl": [...]}
-
-    public void updatePartsJson(String partsJson) {
-        this.partsJson = partsJson;
-    }
-
     public void updateImageUrls(List<String> imageUrls) {
         this.imageUrls = imageUrls;
     }

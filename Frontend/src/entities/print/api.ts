@@ -4,6 +4,7 @@ export interface PrintOrderResponse {
     id: number
     shapeId: string
     shapeLabelKo: string
+    tipExtensionMm?: number | null // 출력 화면에서 설정한 팁 연장 길이(mm). null이면 길이 기록 전 예전 주문
     status: 'QUEUED' | 'MERGING' | 'MERGED' | 'WAITING_IN_QUEUE' | 'PRINTING' | 'COMPLETED' | 'FAILED'
     orderedAt: string // "yyyy. M. d. HH:mm:ss"
     leftScanId: number | null
@@ -18,6 +19,7 @@ export async function createPrintOrder(params: {
     shapeLabelKo: string
     leftScanId?: number | null
     rightScanId?: number | null
+    tipExtensionMm?: number | null
 }): Promise<PrintOrderResponse> {
     const res = await apiClient.post<PrintOrderResponse>('/users/me/prints', params)
     return res.data

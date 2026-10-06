@@ -1649,6 +1649,26 @@
   color: #a08992;
 }
 
+/* 신청한 팁 연장 길이 — 쉐입 이름 아래 작은 핑크 필 */
+.mypage-x__scanx-shape-length {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid #f6cfdc;
+  background: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #a08992;
+}
+
+.mypage-x__scanx-shape-length b {
+  font-weight: 800;
+  color: #c96d88;
+}
+
 .mypage-x__scanx-shape-preview {
   flex-shrink: 0;
   width: 64px;
@@ -2037,6 +2057,13 @@
   font-size: 0.9rem;
   font-weight: 700;
   color: var(--mp-ink);
+}
+
+.mypage-x__print-length {
+  margin: 0.18rem 0 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #a08992;
 }
 
 .mypage-x__item-meta,
@@ -3549,19 +3576,8 @@
   text-align: left;
 }
 
-.mypage-x__modal-design-details .design-result-v2__color-row,
-.mypage-x__modal-design-details .design-result-v2__texture-row,
-.mypage-x__modal-design-details .design-result-v2__charm-row {
+.mypage-x__modal-design-details .design-result-v2__texture-row {
   justify-content: flex-start;
-}
-
-.mypage-x__modal-design-details .design-result-v2__color-item,
-.mypage-x__modal-design-details .design-result-v2__charm-item {
-  align-items: flex-start;
-}
-
-.mypage-x__modal-design-details .design-result-v2__color-hex {
-  text-align: left;
 }
 
 .mypage-x__share-badge {

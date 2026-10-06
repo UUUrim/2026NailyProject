@@ -17,8 +17,8 @@ import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * 채팅으로 수정 요청이 들어오면 Gemini가 prompt + fingerOverrides를 생성하고,
- * fingerOverrides 키를 nail_index(1~5)로 변환해 gen 서버 /inpaint를 호출한다.
+ * 채팅으로 수정 요청이 들어오면 Gemini가 prompt + mask_prompt를 생성하고,
+ * gen 서버 /inpaint로 원본 이미지에서 해당 영역만 재생성한다.
  * 전체 이미지를 새로 만들지 않아서 원본과 분위기가 크게 달라지지 않는다.
  */
 @Service
@@ -35,23 +35,16 @@ public class RefineService {
     private final ObjectMapper objectMapper;
     private final NailDesignService nailDesignService;
     private final NailDetectionService nailDetectionService;
+    private final GptClientService gptClientService;
 
-    @Value("${gemini.api.key}")
-    private String apiKey;
-
-    @Value("${gemini.api.url}")
-    private String apiUrl;
+    // Gemini 설정 - GPT로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // @Value("${gemini.api.key}")
+    // private String apiKey;
+    //
+    // @Value("${gemini.api.url}")
+    // private String apiUrl;
 
     private static final Pattern HEX_PATTERN = Pattern.compile("^#[0-9A-Fa-f]{6}$");
-
-    /** fingerOverrides 키(엄지~새끼 영문명) → nail_index (왼쪽부터 1~5) */
-    private static final Map<String, Integer> FINGER_INDEX = Map.of(
-            "thumb",  1,
-            "index",  2,
-            "middle", 3,
-            "ring",   4,
-            "pinky",  5
-    );
     private static final RestTemplate restTemplate = new RestTemplate();
 
     private static final String SYSTEM_PROMPT_TEMPLATE = """
@@ -67,38 +60,74 @@ public class RefineService {
 
             [핵심 규칙]
             1. prompt
-               - 수정할 손가락 nail tip 하나를 묘사하는 영어 문장.
+               - 수정할 nail tip을 어떻게 바꿀지 묘사하는 영어 문장. targetFingers에 손가락이
+                 여러 개 들어가도 prompt는 하나만 쓰면 됩니다(그 손가락들 전부에 같은 수정
+                 내용이 적용됩니다). 손가락마다 다른 수정이 필요하면 그중 사용자가 명확히
+                 말한 손가락만 targetFingers에 넣으세요.
                - 형식: "A studio product photo of individual {shape}-shaped press-on nail tip nailart,
                  {수정 내용 반영한 묘사}, top-down flat lay view, plain white background,
                  no shadow, no hands, no fingers, no text, no watermark, no reflection, product shot"
                - 원본 프롬프트에서 shape, 베이스 컬러 등 변하지 않는 요소는 그대로 유지.
                - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
-            2. fingerOverrides (필수 — 수정 대상 손가락 반드시 명시)
-               - 키: thumb / index / middle / ring / pinky
-               - 값: 무엇을 어떻게 바꾸는지 영어 한 문장.
-               - 수정 대상 손가락만 포함. 전체 변경이면 5개 모두 포함.
-               - 예: {"middle": "replace 3D heart charm with 3D star charm"}
-                      {"index": "change base color to coral pink"}
-                      {"thumb": "add glitter", "ring": "add glitter"}
-               - [직전 손가락별 플랜]에서 어느 손가락에 뭐가 있는지 확인해서
-                 정확한 손가락을 지정하세요.
+            2. targetFingers - 매우 중요 (수정할 손톱을 정확히 지정하는 핵심 필드)
+               - 값은 "thumb", "index", "middle", "ring", "pinky" 중에서 골라 배열로 담으세요
+                 (왼쪽부터 1~5번째 손톱에 각각 대응: thumb=1, index=2, middle=3, ring=4,
+                 pinky=5 — Java 쪽에서 이 순서대로 번호로 변환해서 gen 서버에 보냅니다).
+               - 사용자가 손가락을 직접 지정한 경우 그대로 사용하세요:
+                 * 이름으로 지정: "엄지" → thumb, "검지"/"둘째" → index, "중지"/"셋째" → middle,
+                   "약지"/"넷째" → ring, "소지"/"새끼"/"다섯째" → pinky
+                 * 번호로 지정(왼쪽부터 1~5): "1번"/"첫번째" → thumb, "2번" → index,
+                   "3번" → middle, "4번" → ring, "5번" → pinky
+                 * 여러 개 지정: "엄지랑 소지" → ["thumb", "pinky"]
+               - 사용자가 직접 지정하지 않았다면, [직전 손가락별 플랜]에서 각 손가락의
+                 description/base_color/parts를 보고 사용자가 말한 특징(색상, 파츠 등)과
+                 일치하는 손가락을 찾아서 넣으세요 (예: "핑크색 손톱 바꿔줘" → 플랜에서
+                 base_color가 핑크 계열인 손가락).
+               - 어느 손가락인지 도저히 판단이 안 서면(예: 설명이 너무 모호하거나 여러
+                 손가락이 동시에 후보인데 구분이 안 될 때) 빈 배열 []로 두세요 — 이 경우
+                 아래 mask_prompt(시각적 탐지 폴백)가 대신 쓰입니다.
 
-            3. slotActions (기존과 동일, 세션 슬롯 업데이트용)
+            3. mask_prompt - targetFingers를 못 정했을 때만 쓰이는 폴백
+               - targetFingers가 비어있지 않으면 gen 서버가 이 필드를 아예 무시하므로,
+                 targetFingers를 확실히 정했다면 mask_prompt는 대충 채워도 되지만 그래도
+                 아래 규칙에 맞게 작성해두세요 (안전망).
+               - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
+               - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
+               - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
+               - mask_prompt는 수정할 대상(제거/교체할 파츠나 요소)을 묘사하세요.
+                 손톱 전체를 묘사하지 말고, 실제로 변경할 부분만 묘사하세요.
+                 예: 캐릭터 얼굴 관련 → "nail tip with character art"
+                     파츠 교체 → "nail tip with bow charm"
+                     색상 변경 → "yellow nail tip"
+               - 형식: "nail tip with {현재 존재하는 특징}"
+
+               - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
+               - 10단어 이내로 작성하세요.
+               - 좋은 예시:
+                 * "nail tip with 3d heart charm" (현재 하트 3d 파츠가 있을 때)
+                 * "nail tip with white base" (현재 흰색일 때)
+                 * "nail tip with glitter" (현재 글리터가 있을 때)
+               - 나쁜 예시 (절대 금지):
+                 * 수정 후 결과물 색상
+                 * "nail tip with previous design" (의미 없음)
+                 * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
+
+
+            4. slotActions (기존과 동일, 세션 슬롯 업데이트용)
                - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
                - 카테고리: mood, designType, color, season, motif, shape
                - color는 반드시 hex(#RRGGBB) 형식.
                - 언급 안 된 카테고리는 넣지 마세요.
-               
+
             [중요 규칙]
-            - 첨부된 이미지가 현재 실제 디자인입니다.
-              텍스트 플랜과 이미지가 다를 수 있으니, 어느 손가락을 수정할지는
-              반드시 이미지를 직접 보고 판단하세요.
             - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만.
             {
                 "prompt": "A studio product photo of individual ...",
+                "targetFingers": ["ring"],
+                "mask_prompt": "nail tip with heart charm",
                 "slotActions": [
                     {"category": "motif", "action": "add_dislike", "value": "heart"}
                 ],
@@ -106,6 +135,8 @@ public class RefineService {
                 "fingerDislikes": {"thumb": ["large heart"]}
             }
             """;
+
+    private static final List<String> FINGER_ORDER = List.of("thumb", "index", "middle", "ring", "pinky");
 
     /**
      * 채팅 수정 요청 처리 메인 메서드.
@@ -128,37 +159,25 @@ public class RefineService {
         String previousPlanJson = prevDesign.getDesignPlan() != null
                 ? prevDesign.getDesignPlan() : "(직전 플랜 없음)";
 
-        // 1. 원본 이미지 먼저 다운로드 — Gemini와 gen 서버 양쪽에 쓰임
-        String originalImageUrl = prevDesign.getImageUrls().get(0);
-        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
-        if (originalImageBytes == null) {
-            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
-        }
-        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
-
-        // 2. Gemini로 prompt + fingerOverrides 생성 → nail_index 추출
-        //    이미지(inline_data) + 텍스트 요청을 함께 보내 실제 디자인 기반으로 판단하게 함
+        // 1. GPT로 prompt + mask_prompt 생성
         String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
-        Map<String, Object> requestBody = Map.of(
-                "contents", List.of(Map.of("role", "user",
-                        "parts", List.of(
-                                Map.of("inline_data", Map.of(
-                                        "mime_type", "image/png",
-                                        "data", originalImageBase64
-                                )),
-                                Map.of("text", message)
-                        ))),
-                "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
-                "generationConfig", Map.of(
-                        "responseMimeType", "application/json",
-                        "maxOutputTokens", 8192,
-                        "thinkingConfig", Map.of("thinkingLevel", "MEDIUM")
-                )
-        );
 
-        JsonNode responseNode = callGeminiWithRetry(requestBody);
-        String aiText = responseNode.path("candidates").get(0)
-                .path("content").path("parts").get(0).path("text").asText();
+        // [Gemini 방식 - 주석 처리]
+        // Map<String, Object> requestBody = Map.of(
+        //         "contents", List.of(Map.of("role", "user",
+        //                 "parts", List.of(Map.of("text", message)))),
+        //         "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
+        //         "generationConfig", Map.of(
+        //                 "responseMimeType", "application/json",
+        //                 "maxOutputTokens", 8192,
+        //                 "thinkingConfig", Map.of("thinkingLevel", "MEDIUM")
+        //         )
+        // );
+        // JsonNode responseNode = callGeminiWithRetry(requestBody);
+        // String aiText = responseNode.path("candidates").get(0)
+        //         .path("content").path("parts").get(0).path("text").asText();
+
+        String aiText = gptClientService.chat(systemPrompt, message, 8192, true);
 
         JsonNode resultJson;
         try {
@@ -167,21 +186,22 @@ public class RefineService {
             System.err.println("수정 요청 JSON 파싱 실패: " + aiText);
             throw new IllegalStateException("수정 내용을 이해하지 못했어요. 다시 말씀해 주세요.");
         }
-// ★ 이 줄 추가9.22
-        System.out.println("[RefineService] Gemini 응답: " + aiText);
+// ★ 이 줄 추가
+        System.out.println("[RefineService] GPT 응답: " + aiText);
 
         String inpaintPrompt = resultJson.path("prompt").asText("");
-        List<Integer> nailIndex = extractNailIndex(resultJson.path("fingerOverrides"));
+        String maskPrompt    = resultJson.path("mask_prompt").asText("");
+        List<Integer> nailIndexes = resolveNailIndexes(resultJson.path("targetFingers"));
 
-// ★ 이 줄 추가9.22 (inpaint)
+// ★ 이 줄 추가
         System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt
-                + " / nail_index: " + nailIndex);
+                + " / targetFingers nailIndexes: " + nailIndexes + " / maskPrompt: " + maskPrompt);
 
-        if (inpaintPrompt.isBlank()) {
-            throw new IllegalStateException("수정할 내용을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
+        if (inpaintPrompt.isBlank() || (nailIndexes.isEmpty() && maskPrompt.isBlank())) {
+            throw new IllegalStateException("수정할 영역을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
         }
 
-        // 3. 슬롯 업데이트 (세션 컨텍스트 유지)
+        // 2. 슬롯 업데이트 (세션 컨텍스트 유지)
         Map<String, SlotData> slots = loadSlots(session.getExtractedPreferences());
         applySlotActions(slots, resultJson.path("slotActions"));
         try {
@@ -193,10 +213,18 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
+        // 3. 원본 이미지 → base64 변환 (S3 URL에서 다운로드)
+        String originalImageUrl = prevDesign.getImageUrls().get(0);
+        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
+        if (originalImageBytes == null) {
+            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
+        }
+        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
+
         // 4. gen 서버 /inpaint 호출 — seed는 원본과 동일해야 퀄리티 유지
         Long seed = prevDesign.getSeed(); // NailDesign에 seed 컬럼 필요
-        String inpaintedBase64 = nailImageService.inpaintNailByIndex(
-                originalImageBase64, inpaintPrompt, nailIndex, seed
+        String inpaintedBase64 = nailImageService.inpaintNail(
+                originalImageBase64, inpaintPrompt, maskPrompt, nailIndexes, seed
         );
 
         // 5. 수정된 이미지 S3 업로드
@@ -228,7 +256,6 @@ public class RefineService {
                 .seed(seed)
                 .build();
         nailDesignRepository.save(newDesign);
-        nailDesignService.triggerPartsDetectionAsync(newDesign);
         session.updateGeneratedPrompt(originalPrompt); // 원본 프롬프트 유지
         designSessionRepository.save(session);
 
@@ -245,6 +272,21 @@ public class RefineService {
                 .details(nailDesignService.buildDetails(newDesign)) // 수정 후 details는 프론트에서 별도 요청
                 .keywords(nailDesignService.extractKeywordsFromSlots(slots, session))
                 .build();
+    }
+
+    /**
+     * Gemini가 준 targetFingers(["thumb", "ring", ...])를 gen 서버가 받는
+     * nail_index(왼쪽부터 1~5) 배열로 변환한다. FINGER_ORDER 순서가 곧 1~5번 대응.
+     * 목록에 없는 값이나 중복은 무시한다.
+     */
+    private List<Integer> resolveNailIndexes(JsonNode targetFingersNode) {
+        if (targetFingersNode == null || !targetFingersNode.isArray()) return List.of();
+        List<Integer> indexes = new ArrayList<>();
+        for (JsonNode fingerNode : targetFingersNode) {
+            int idx = FINGER_ORDER.indexOf(fingerNode.asText("").trim().toLowerCase());
+            if (idx >= 0 && !indexes.contains(idx + 1)) indexes.add(idx + 1);
+        }
+        return indexes;
     }
 
     // -------------------------------------------------------------------------
@@ -281,36 +323,6 @@ public class RefineService {
         }
     }
 
-    /**
-     * Gemini가 반환한 fingerOverrides 키(엄지~새끼 영문명)를
-     * gen 서버 nail_index(1~5)로 변환한다.
-     *
-     * - fingerOverrides가 비어 있으면 전체 5개 손톱([1,2,3,4,5])을 반환.
-     *   (전체 분위기 변경처럼 특정 손가락을 지목하지 않는 요청에 해당)
-     * - 인식되지 않는 키는 조용히 무시한다.
-     * - 결과는 오름차순 정렬(생성 서버 권장).
-     */
-    private List<Integer> extractNailIndex(JsonNode fingerOverridesNode) {
-        if (fingerOverridesNode == null
-                || !fingerOverridesNode.isObject()
-                || fingerOverridesNode.isEmpty()) {
-            return List.of(1, 2, 3, 4, 5);
-        }
-
-        List<Integer> indices = new ArrayList<>();
-        fingerOverridesNode.fieldNames().forEachRemaining(finger -> {
-            Integer idx = FINGER_INDEX.get(finger.toLowerCase());
-            if (idx != null) indices.add(idx);
-        });
-
-        if (indices.isEmpty()) {
-            return List.of(1, 2, 3, 4, 5);
-        }
-
-        Collections.sort(indices);
-        return indices;
-    }
-
     private void mergeFingerOverrides(JsonNode newNode, String existingJson,
                                       java.util.function.Consumer<String> updater) {
         if (newNode == null || !newNode.isObject() || newNode.isEmpty()) return;
@@ -345,28 +357,29 @@ public class RefineService {
         try { updater.accept(objectMapper.writeValueAsString(merged)); } catch (Exception ignored) {}
     }
 
-    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
-        WebClient webClient = webClientBuilder.build();
-        int maxAttempts = 3;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                return webClient.post()
-                        .uri(apiUrl + "?key=" + apiKey.trim())
-                        .bodyValue(requestBody)
-                        .retrieve()
-                        .bodyToMono(JsonNode.class)
-                        .block();
-            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-                int code = e.getStatusCode().value();
-                if ((code == 429 || code == 503) && attempt < maxAttempts) {
-                    try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
-                    continue;
-                }
-                throw new IllegalStateException("AI 서버 오류: " + e.getStatusCode());
-            }
-        }
-        throw new IllegalStateException("AI 응답 실패");
-    }
+    // Gemini 호출 로직 - GPT(GptClientService)로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+    //     WebClient webClient = webClientBuilder.build();
+    //     int maxAttempts = 3;
+    //     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+    //         try {
+    //             return webClient.post()
+    //                     .uri(apiUrl + "?key=" + apiKey.trim())
+    //                     .bodyValue(requestBody)
+    //                     .retrieve()
+    //                     .bodyToMono(JsonNode.class)
+    //                     .block();
+    //         } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+    //             int code = e.getStatusCode().value();
+    //             if ((code == 429 || code == 503) && attempt < maxAttempts) {
+    //                 try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) {
+    //                     Thread.currentThread().interrupt();
+    //                 }
+    //                 continue;
+    //             }
+    //             throw new IllegalStateException("AI 서버 오류: " + e.getStatusCode());
+    //         }
+    //     }
+    //     throw new IllegalStateException("AI 응답 실패");
+    // }
 }

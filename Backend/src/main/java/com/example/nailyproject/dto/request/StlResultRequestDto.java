@@ -9,7 +9,16 @@ import java.util.List;
 @NoArgsConstructor
 public class StlResultRequestDto {
 
-    private List<StlFingerResult> fingers; // 손가락별 STL 결과
+    // 파이썬 STL 생성 파이프라인이 실패하면 {"success": false, "message": ...}만 보낸다.
+    // (예전 버전 호환: success가 아예 없으면 fingers 유무로 판단)
+    private Boolean success;
+    private String message;
+
+    private List<StlFingerResult> fingers; // 손가락별 STL 결과 (이번에 실제로 생성된 손가락만)
+
+    public boolean isFailed() {
+        return Boolean.FALSE.equals(success) || fingers == null || fingers.isEmpty();
+    }
 
     @Getter
     @NoArgsConstructor

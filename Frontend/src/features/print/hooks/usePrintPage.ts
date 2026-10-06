@@ -4,7 +4,7 @@ import { generateStl } from '@/entities/scan/api'
 import { useMyScansQuery } from '@/entities/scan/queries'
 import { createPrintOrder } from '@/entities/print/api'
 import { getMyProfile } from '@/entities/user/api'
-import { getNailShape } from '@/shared/constants/nailShapes'
+import { clampTipExtensionMm, getDefaultTipExtensionMm, getNailShape } from '@/shared/constants/nailShapes'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { useSnapshotRestore } from '@/shared/hooks/useSnapshotRestore'
 import { ApiError } from '@/shared/utils/apiClient'
@@ -29,6 +29,7 @@ export const SESSIONS_PAGE_SIZE = 5
 type PrintPageSnapshot = {
     selectedKey: string | null
     selectedShape: string | null
+    tipExtensionMm: number | null
     printConfirmed: boolean
     sessionPage: number
     printModalStep: 'confirm' | 'done' | null
@@ -62,6 +63,11 @@ export function usePrintPage() {
     )
     const [selectedKey, setSelectedKey] = useState<string | null>(snapshot?.selectedKey ?? null)
     const [selectedShape, setSelectedShape] = useState<string | null>(snapshot?.selectedShape ?? null)
+    // 네일팁 길이(mm) - 쉐입이 바뀌면 그 쉐입의 기본 연장 길이로 다시 맞춘다(아래 handleSelectSession/
+    // handleSelectShape 참고). snapshot이 있으면 사용자가 조절해 둔 값을 그대로 복원한다.
+    const [tipExtensionMm, setTipExtensionMm] = useState<number | null>(
+        snapshot?.tipExtensionMm ?? (snapshot?.selectedShape ? getDefaultTipExtensionMm(snapshot.selectedShape) : null),
+    )
     const [detailSession, setDetailSession] = useState<ScanSession | null>(null)
     const [userName, setUserName] = useState('')
     const [sessionPage, setSessionPage] = useState(snapshot?.sessionPage ?? 1)
@@ -76,12 +82,13 @@ export function usePrintPage() {
         printPageSnapshot = {
             selectedKey,
             selectedShape,
+            tipExtensionMm,
             printConfirmed,
             sessionPage,
             printModalStep,
             detailSessionKey: detailSession?.key ?? null,
         }
-    }, [selectedKey, selectedShape, printConfirmed, sessionPage, printModalStep, detailSession])
+    }, [selectedKey, selectedShape, tipExtensionMm, printConfirmed, sessionPage, printModalStep, detailSession])
 
     // 출력 신청을 완료한 뒤에만 경고한다 — 그 전(기록/쉐입을 고르는 중)에는 언제든 자유롭게
     // 나갈 수 있어야 한다. 뒤로가기는 여기서도 그대로 허용(스냅샷이 복원해줌). 새로고침/탭
@@ -134,8 +141,10 @@ export function usePrintPage() {
             : null
         const initial = preselected ?? sessions[0] ?? null
         if (initial) {
+            const initialShape = initial.recommendedShape ?? initial.shape ?? 'round'
             setSelectedKey(initial.key)
-            setSelectedShape(initial.recommendedShape ?? initial.shape ?? 'round')
+            setSelectedShape(initialShape)
+            setTipExtensionMm(getDefaultTipExtensionMm(initialShape))
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scansQuery.data])
@@ -168,7 +177,23 @@ export function usePrintPage() {
         setSelectedKey(session.key)
         // 기록을 바꾸면 그 기록의 추천 쉐입으로 다시 맞춰준다 (사용자가 이미 직접 고른 경우는 유지해도 되지만,
         // 기록마다 손 형태가 다를 수 있어 추천값으로 리셋하는 편이 안전함)
-        setSelectedShape(session.recommendedShape ?? session.shape ?? 'round')
+        const nextShape = session.recommendedShape ?? session.shape ?? 'round'
+        setSelectedShape(nextShape)
+        setTipExtensionMm(getDefaultTipExtensionMm(nextShape))
+    }
+
+    // 쉐입을 바꾸면 길이도 그 쉐입의 기본 연장 길이로 다시 맞춘다 - 쉐입마다 기본값이 다르고,
+    // 이전 쉐입에서 조절해 둔 mm를 그대로 들고 가면 "왜 갑자기 이 길이지?" 하고 헷갈릴 수 있음.
+    const handleSelectShape = (shapeId: string) => {
+        if (printConfirmed) return
+        setSelectedShape(shapeId)
+        setTipExtensionMm(getDefaultTipExtensionMm(shapeId))
+    }
+
+    // 슬라이더 드래그, −/+ 버튼, "기본값으로" 버튼 모두 최종 mm 값을 그대로 넘긴다
+    const handleSetTipExtension = (valueMm: number) => {
+        if (printConfirmed) return
+        setTipExtensionMm(clampTipExtensionMm(valueMm))
     }
 
     const handleOpenPrintConfirm = () => {
@@ -188,12 +213,13 @@ export function usePrintPage() {
         setSubmitError(null)
         try {
             const { leftScanId, rightScanId } = selectedSession
+            const extensionMm = tipExtensionMm ?? getDefaultTipExtensionMm(selectedShape)
             await Promise.all([
-                leftScanId ? generateStl(leftScanId, selectedShape) : Promise.resolve(),
-                rightScanId ? generateStl(rightScanId, selectedShape) : Promise.resolve(),
+                leftScanId ? generateStl(leftScanId, selectedShape, extensionMm) : Promise.resolve(),
+                rightScanId ? generateStl(rightScanId, selectedShape, extensionMm) : Promise.resolve(),
             ])
             const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
-            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId })
+            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId, tipExtensionMm: extensionMm })
             setPrintConfirmed(true)
             setPrintModalStep('done')
         } catch (e) {
@@ -211,7 +237,9 @@ export function usePrintPage() {
         sessions,
         selectedKey,
         selectedShape,
-        setSelectedShape,
+        tipExtensionMm: tipExtensionMm ?? getDefaultTipExtensionMm(selectedShape),
+        handleSelectShape,
+        handleSetTipExtension,
         detailSession,
         setDetailSession,
         userName,

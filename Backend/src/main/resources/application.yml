@@ -70,7 +70,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: update #원래 있던 건 삭제 후 새로운 걸 넣음 (추후 update로 바꾸기)
+      ddl-auto: update
     show-sql: false
     properties:
       hibernate:
@@ -79,24 +79,15 @@ spring:
 
 jwt:
   secret: ENC(uAYjhPVuUKuxBjz3YEDgK/rxu5UtXbipxkgsDq7rCR2XYZg1U9hS2jxX+oK5PIX+)
-  expiration: 86400000 #24시간
+  expiration: 86400000
 
-#gemini:
-#  api:
-##    key: ENC(f11Gu+eqSDV89d4XdLuuhSgUpmthWA1ZFzmg9oZgvPOmNwjRqrbNyVa5n0uOHLqb)
-#    key: ENC(r7E1eFRjogbReg0hDJoOieJu/7/QBgctrZjI5XTkZFVZYzogIGQdIHsykK2m1fCv1eNSmBWJFzTvtpaWbq1cFQ==)
-#    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
 
-# OpenAI 설정 - ChatService/FingerDesignPlanService/RefineService/TextureExtractService가 전부 GptClientService를 통해 여기 설정을 씀
+
 openai:
   api:
     key: ENC(OmG0ET98u6TYRXZ3lviAnkycXvxSYhJ43nfSW/nRd3FiMomvxjGUI7Eu7Ff29yZZIvXPDaA3wMfkxgrl6a+YkImAm9zDYKV92recZJd7vAreiCpqPmDEWPt4xPBifZmjdUm6NKXu4J05CQlH3ulMPC8HTU3oQeZOOcjsx49jZqfrMp7uHZ3LI4/mB9A0kWeXmLHcfqXXQksT74JGzf4HCJzGLsvKE8GFZoRZXokqUyI=)
     url: https://api.openai.com/v1/chat/completions
     model: gpt-4.1
-    # 아래 둘은 이미지 "생성" 전용(테스트 경로: POST /designs/test-gptimage-generate).
-    # 코드 기본값과 동일해서 생략해도 되지만, 명시적으로 바꾸고 싶으면 여기서 오버라이드.
-    # image-url: https://api.openai.com/v1/images/generations
-    # image-model: gpt-image-2.5-sunburst
 
 cloud:
   aws:
@@ -104,7 +95,7 @@ cloud:
       access-key: ENC(jRZOYDKW6O+5etRT6PeZCVhUzethhP2zK+KNAqo5OIU=)
       secret-key: ENC(5yvNDJbbm6948H0BdfBNy+G8tVX0SZY8gNsrS7JwDxbcpzqREoje0Sq5s2bYqEaekmVf+1WHhzY=)
     s3:
-      bucket: naily-scans #버킷이름
+      bucket: naily-scans
     region:
       static: us-east-1
     stack:
@@ -112,17 +103,14 @@ cloud:
 
 analysis:
   server:
-    # 지금은 Backend도 이 데스크톱에서 로컬로 돌리는 중이라 ngrok 안 거치고 바로 접근.
-    # 클라우드에 Backend를 올릴 때는 아래를 다시 ngrok 주소로 바꿔야 함.
-    url: http://localhost:8003  # 로컬 통합 서버 (scan+printer)
-    # url: https://sermon-friction-unequal.ngrok-free.dev  # 통합 서버 ngrok (배포용)
+    url: http://localhost:8003
+    # url: https://sermon-friction-unequal.ngrok-free.dev
 
 printer:
   server:
     url: https://sermon-friction-unequal.ngrok-free.dev
 
 naily:
-  #  image-provider: comfy
   image-provider: gptimage
   gen-server-url: https://scalded-lard-seduce.ngrok-free.dev     # 생성 서버 (예서 컴퓨터, port 8000)
   detect-server-url: https://armhole-iphone-monitor.ngrok-free.dev  # 검출 서버 (학교 컴퓨터, port 8001)

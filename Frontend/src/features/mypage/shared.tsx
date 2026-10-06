@@ -35,6 +35,12 @@ export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   FAILED: '출력 중 문제가 발생했어요.',
 }
 
+// 출력 신청 시 설정한 팁 연장 길이 표시 — 길이를 기록하기 전에 신청된 예전 주문(null)은
+// 쉐입별 기본 길이로 출력됐으므로 그렇게 표시한다.
+export function formatTipExtension(mm: number | null | undefined): string {
+  return mm != null ? `+${Number(mm).toFixed(1).replace(/\.0$/, '')}mm` : '기본 길이'
+}
+
 // 손 스캔 분석 상태 (네일팁 출력 관련 상태는 출력 이력에서만 표시)
 export const SCAN_STATUS_LABEL: Record<string, string> = {
   READY: '분석 대기 중',

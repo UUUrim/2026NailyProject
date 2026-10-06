@@ -7,6 +7,7 @@ import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { useSnapshotRestore } from '@/shared/hooks/useSnapshotRestore'
 import { ApiError } from '@/shared/utils/apiClient'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
+import { parseTopViewGuide, type TopViewGuide } from '@/features/hand-scan/utils/topViewGuide'
 import {
   buildScanSessions,
   isFullyAnalyzedSession,
@@ -15,6 +16,25 @@ import {
 
 // 스캔 서버 주소 (로컬: http://localhost:8000, 데모: ngrok URL) — 데스크톱 브라우저 기준.
 const SCAN_SERVER_URL = import.meta.env.VITE_SCAN_SERVER_URL ?? 'http://localhost:8000'
+// 촬영 버튼을 누른 뒤 서버 응답(finger_done)이 없을 때 버튼을 다시 풀어주는 시간 —
+// 측면(폰) 고화질 촬영 대기(최대 8초)보다 넉넉하게.
+const CAPTURE_UI_TIMEOUT_MS = 15000
+// "OO 촬영 완료" 안내를 보여주는 시간
+const COMPLETED_NOTICE_MS   = 2600
+
+// 촬영 화면은 브라우저 전체화면(탭·주소창까지 숨김)으로 띄운다 — 페이지 안에서만 꽉 채우면
+// 브라우저 상단 바 높이만큼 카메라가 모니터 가운데보다 아래로 내려가 보이기 때문.
+// 지원하지 않거나(iOS Safari 등) 거부되면 예전처럼 페이지 안 오버레이로만 동작한다.
+function enterBrowserFullscreen() {
+  const root = document.documentElement
+  if (document.fullscreenElement || typeof root.requestFullscreen !== 'function') return
+  root.requestFullscreen().catch(() => { /* 페이지 안 오버레이로 계속 */ })
+}
+
+function exitBrowserFullscreen() {
+  if (!document.fullscreenElement || typeof document.exitFullscreen !== 'function') return
+  document.exitFullscreen().catch(() => { /* 이미 빠져나간 경우 등 — 무시 */ })
+}
 
 function pickLatestCompletedSession(sessions: ScanSession[]): ScanSession | null {
   const completed = sessions.filter(isFullyAnalyzedSession)
@@ -46,7 +66,7 @@ export const HAND_LABELS: Record<HandSide, string> = {
 }
 
 // 왼손 5손가락 → 오른손 5손가락, 총 10단계
-type ScanStep = { hand: HandSide; finger: Finger }
+export type ScanStep = { hand: HandSide; finger: Finger }
 export const STEPS: ScanStep[] = HANDS.flatMap((hand) => FINGERS.map((finger) => ({ hand, finger })))
 
 
@@ -84,9 +104,16 @@ export function useHandScanPage() {
   // 탑뷰 안정성(정확도) 게이지 — 0~1 채움 비율과 촬영 가능 여부(초록).
   const [stabilityRatio, setStabilityRatio] = useState(0)
   const [isStable, setIsStable]             = useState(false)
+  // 탑뷰 손가락/큐티클 가이드 위치 — 게이지와 같은 폴링 응답에 실려 온다.
+  const [topGuide, setTopGuide]             = useState<TopViewGuide | null>(null)
+  // 촬영 버튼을 누른 뒤 서버가 다음 손가락으로 넘어갈 때까지 — 화면 표시와 중복 클릭
+  // 방지용일 뿐, 서버로 보내는 촬영 요청(POST /capture/force)은 예전과 똑같다.
+  const [isCapturing, setIsCapturing]       = useState(false)
+  // 방금 촬영이 끝난 손가락 — 상단에 잠깐 "촬영 완료"를 띄우는 데만 쓴다.
+  const [completedStep, setCompletedStep]   = useState<ScanStep | null>(null)
   // 기본값: 왼쪽(탑뷰)=USB 웹캠 인덱스 0, 오른쪽(사이드/c-curve)=폰(-2).
   // 매번 드롭다운에서 고르지 않아도 되도록 실제로 쓰는 조합을 기본값으로 둠.
-  const [topCameraIdx, setTopCameraIdx]     = useState(2)
+  const [topCameraIdx, setTopCameraIdx]     = useState(0)
   const [sideCameraIdx, setSideCameraIdx]   = useState(-2)
 
   const [currentStepIndex, setCurrentStepIndex] = useState(restored?.currentStepIndex ?? 0)
@@ -109,6 +136,8 @@ export function useHandScanPage() {
   const stepIndexRef  = useRef(currentStepIndex)   // SSE 핸들러 내에서 직접 업데이트
   const scanIdsRef    = useRef(scanIds)
   useEffect(() => { scanIdsRef.current = scanIds }, [scanIds])
+  const captureTimeoutRef = useRef<number | null>(null)
+  const noticeTimeoutRef  = useRef<number | null>(null)
 
   const currentStep   = STEPS[Math.min(currentStepIndex, STEPS.length - 1)] ?? STEPS[0]
   const currentHand   = currentStep.hand
@@ -135,16 +164,37 @@ export function useHandScanPage() {
     setSearchParams({ rescan: '1' }, { replace: true })
   }
 
+  const endCapturing = useCallback(() => {
+    if (captureTimeoutRef.current !== null) {
+      window.clearTimeout(captureTimeoutRef.current)
+      captureTimeoutRef.current = null
+    }
+    setIsCapturing(false)
+  }, [])
+
+  const showCompleted = useCallback((step: ScanStep) => {
+    if (noticeTimeoutRef.current !== null) window.clearTimeout(noticeTimeoutRef.current)
+    setCompletedStep(step)
+    noticeTimeoutRef.current = window.setTimeout(() => {
+      noticeTimeoutRef.current = null
+      setCompletedStep(null)
+    }, COMPLETED_NOTICE_MS)
+  }, [])
+
   // ── 풀스크린 닫기 ─────────────────────────────────────────────
   const handleCloseFullscreen = useCallback(() => {
     sseRef.current?.close()
     sseRef.current = null
+    exitBrowserFullscreen()
     setIsFullscreen(false)
     setStabilityRatio(0)
     setIsStable(false)
-  }, [])
+    setTopGuide(null)
+    endCapturing()
+    setCompletedStep(null)
+  }, [endCapturing])
 
-  // ── 안정성 게이지 폴링: 풀스크린(촬영 중)일 때만 짧은 주기로 조회 ──
+  // ── 안정성 게이지 + 가이드 위치 폴링: 풀스크린(촬영 중)일 때만 짧은 주기로 조회 ──
   useEffect(() => {
     if (!isFullscreen) return
     let cancelled = false
@@ -152,10 +202,11 @@ export function useHandScanPage() {
       try {
         const res = await fetch(`${SCAN_SERVER_URL}/capture/stability`)
         if (!res.ok || cancelled) return
-        const data = (await res.json()) as { ratio?: number; ready?: boolean }
+        const data = (await res.json()) as { ratio?: number; ready?: boolean; guide?: unknown }
         if (cancelled) return
         setStabilityRatio(typeof data.ratio === 'number' ? data.ratio : 0)
         setIsStable(Boolean(data.ready))
+        setTopGuide(parseTopViewGuide(data.guide))
       } catch { /* 폴링 실패는 무시하고 다음 tick에서 재시도 */ }
     }
     void poll()
@@ -176,15 +227,27 @@ export function useHandScanPage() {
           doneCount?: number
         }
 
+        // 서버가 새 손가락 촬영을 시작함 = 이전 촬영 요청은 끝났다 (탑뷰 실패로 건너뛴 경우 포함)
+        if (msg.type === 'finger_start') endCapturing()
+
         if (msg.type === 'finger_done' && msg.finger) {
           const hand: HandSide = stepIndexRef.current < 5 ? 'LEFT' : 'RIGHT'
           setUploadedSteps((prev) => new Set(prev).add(`${hand}-${msg.finger as string}`))
           // ref 직접 업데이트 (useEffect 지연 없이 즉시 반영)
           stepIndexRef.current += 1
           setCurrentStepIndex(stepIndexRef.current)
+          endCapturing()
+          // 다음 손가락 게이지가 이전 손가락의 "촬영 가능"으로 잠깐 보이지 않게 화면 값만 비운다
+          // (다음 폴링이 서버의 실제 값으로 다시 채움).
+          setStabilityRatio(0)
+          setIsStable(false)
+          if ((FINGERS as readonly string[]).includes(msg.finger)) {
+            showCompleted({ hand, finger: msg.finger as Finger })
+          }
         }
 
         if (msg.type === 'capture_complete') {
+          endCapturing()
           const curIdx = stepIndexRef.current
           if (curIdx >= STEPS.length) {
             // 양손 모두 완료 → 결과 페이지로 이동
@@ -215,10 +278,12 @@ export function useHandScanPage() {
 
     es.onerror = () => { /* 브라우저가 자동 재연결 */ }
     sseRef.current = es
-  }, [handleCloseFullscreen])
+  }, [handleCloseFullscreen, endCapturing, showCompleted])
 
   // ── 스캔 시작: scanId 발급 → Spring Boot → 스캔 서버 → SSE 연결
   const handleOpenFullscreen = async () => {
+    // 브라우저 전체화면은 클릭 직후(await 전)에 요청해야 허용된다.
+    enterBrowserFullscreen()
     setCameraError(null)
     setIsUploading(true)
     try {
@@ -239,6 +304,7 @@ export function useHandScanPage() {
       connectSSE()
       setIsFullscreen(true)
     } catch (e) {
+      exitBrowserFullscreen()
       setCameraError(e instanceof ApiError ? e.message : '스캔 시작에 실패했습니다.')
     } finally {
       setIsUploading(false)
@@ -247,9 +313,18 @@ export function useHandScanPage() {
 
   // ── 수동 촬영: 스캔 서버에 force-capture 요청 ────────────────
   const handleCaptureFinger = async () => {
+    if (isCapturing) return
+    setCameraError(null)
+    setIsCapturing(true)
+    // 서버가 finger_done/finger_start를 못 보내는 경우에도 버튼이 영영 잠기지 않게 한다.
+    captureTimeoutRef.current = window.setTimeout(() => {
+      captureTimeoutRef.current = null
+      setIsCapturing(false)
+    }, CAPTURE_UI_TIMEOUT_MS)
     try {
       await fetch(`${SCAN_SERVER_URL}/capture/force`, { method: 'POST' })
     } catch {
+      endCapturing()
       setCameraError('촬영 요청 실패 — 스캔 서버 연결을 확인하세요.')
     }
   }
@@ -263,8 +338,15 @@ export function useHandScanPage() {
     }).catch(() => { /* 무시 */ })
   }
 
-  // ── SSE 정리 ─────────────────────────────────────────────────
-  useEffect(() => { return () => { sseRef.current?.close() } }, [])
+  // ── SSE·타이머·전체화면 정리 (촬영 중에 다른 페이지로 나가도 전체화면이 남지 않게) ──
+  useEffect(() => {
+    return () => {
+      sseRef.current?.close()
+      exitBrowserFullscreen()
+      if (captureTimeoutRef.current !== null) window.clearTimeout(captureTimeoutRef.current)
+      if (noticeTimeoutRef.current !== null) window.clearTimeout(noticeTimeoutRef.current)
+    }
+  }, [])
 
   // ── isDone → 결과 페이지 이동 ─────────────────────────────────
   useEffect(() => {
@@ -313,6 +395,9 @@ export function useHandScanPage() {
     isUploading,
     stabilityRatio,
     isStable,
+    topGuide,
+    isCapturing,
+    completedStep,
     topCameraIdx,
     sideCameraIdx,
     currentStepIndex,

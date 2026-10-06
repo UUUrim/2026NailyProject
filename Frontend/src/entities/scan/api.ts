@@ -90,9 +90,10 @@ export async function getLatestScanResult(): Promise<ScanResultResponse> {
     return res.data
 }
 
-/** POST /scans/{scanId}/generate-stl — STL 생성 요청 */
-export async function generateStl(scanId: number, shape: string): Promise<void> {
-    await apiClient.post(`/scans/${scanId}/generate-stl`, { shape })
+/** POST /scans/{scanId}/generate-stl — STL 생성 요청
+ *  tipExtensionMm을 생략하면 서버(파이썬)가 쉐입별 기본 연장 길이를 그대로 사용한다. */
+export async function generateStl(scanId: number, shape: string, tipExtensionMm?: number): Promise<void> {
+    await apiClient.post(`/scans/${scanId}/generate-stl`, { shape, tipExtensionMm })
 }
 // ─── 마이페이지: 손 스캔 이력 ───────────────────────────────────────────────
 

@@ -1,39 +1,84 @@
 import * as THREE from 'three'
-import type { NormalizedLandmark } from '@mediapipe/tasks-vision'
 import type { NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
-import { FINGERS, anchorCenter, computeFingerPlacement } from '@/features/mypage/utils/fingerLandmarks'
+import {
+  FINGERS,
+  clampDesignAspect,
+  computeNailPoses,
+  facingOpacity,
+  type TrackedHand,
+} from '@/features/mypage/utils/fingerLandmarks'
 import { createFingerTexture, type ShapeTemplate } from '@/features/mypage/utils/nailMeshAsset'
 
 // MediaPipe HandLandmarker is configured for up to two hands elsewhere
 // (numHands: 2) - mirror that here so both hands can show the 3D overlay.
 const MAX_HANDS = 2
 
-// Show the extracted design texture exactly as generated - no scene lighting,
-// no clearcoat/gloss simulation. An earlier version used MeshPhysicalMaterial
-// with directional lights for a glossier look, but the lighting math (and a
-// speculative position offset meant to compensate the 2D renderer's
-// asymmetric anchor) went wrong on a real camera: nails rendered far too
-// dark and visibly misplaced. MeshBasicMaterial ignores lights entirely, so
-// the texture's own colors show through faithfully and predictably.
-function createNailMaterial(): THREE.MeshBasicMaterial {
-  return new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide })
+// The design's own colors are shown as-is at the middle of the nail (an
+// earlier lit MeshPhysicalMaterial rendered nails far too dark on a real
+// camera), with only a gentle falloff where the C-curve wraps away from the
+// viewer and a small soft highlight - just enough shading that the dome reads
+// as curved when the finger rolls, never enough to shift the design's color.
+const NAIL_VERTEX_SHADER = /* glsl */ `
+  varying vec2 vUv;
+  varying vec3 vViewNormal;
+  void main() {
+    vUv = uv;
+    vViewNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const NAIL_FRAGMENT_SHADER = /* glsl */ `
+  uniform sampler2D map;
+  uniform float opacity;
+  varying vec2 vUv;
+  varying vec3 vViewNormal;
+  // View space here is the video canvas: x right, y down, z toward the viewer.
+  const vec3 HIGHLIGHT_DIR = normalize(vec3(-0.25, -0.45, 1.6));
+  void main() {
+    vec4 texel = texture2D(map, vUv);
+    float alpha = texel.a * opacity;
+    if (alpha < 0.01) discard;
+    vec3 n = normalize(vViewNormal);
+    float shade = mix(0.8, 1.0, smoothstep(0.0, 0.8, abs(n.z)));
+    float highlight = pow(max(dot(n, HIGHLIGHT_DIR), 0.0), 60.0) * 0.18;
+    gl_FragColor = vec4(texel.rgb * shade + highlight, alpha);
+    #include <colorspace_fragment>
+  }
+`
+
+function createNailMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: null },
+      opacity: { value: 1 },
+    },
+    vertexShader: NAIL_VERTEX_SHADER,
+    fragmentShader: NAIL_FRAGMENT_SHADER,
+    transparent: true,
+    side: THREE.DoubleSide,
+  })
 }
 
+type FingerTexture = { texture: THREE.CanvasTexture; aspectRatio: number }
+
 // Renders per-shape template meshes (one clone per finger per detected hand)
-// positioned/rotated/scaled from live hand landmarks, textured with the
-// generated design image. Meant to sit in a transparent WebGL <canvas>
-// layered directly on top of the existing 2D video-drawing canvas, so this
-// class only ever draws the nail meshes - the camera feed itself is handled
-// by the caller exactly as it already is for the 2D path.
+// posed from live hand landmarks and textured with that finger's cutout of the
+// generated design image. Meant to sit in a transparent WebGL <canvas> layered
+// directly on top of the 2D video-drawing canvas, so this class only ever
+// draws the nail meshes - the camera feed itself is handled by the caller.
 export class NailArScene {
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
   private camera: THREE.OrthographicCamera
   private template: ShapeTemplate | null = null
-  private materials: THREE.MeshBasicMaterial[] = [] // one per finger, shared across hands
-  private meshGroups: THREE.Mesh[][] = [] // meshGroups[handIndex][fingerIndex]
+  private fingerTextures: Array<FingerTexture | null> = FINGERS.map(() => null)
+  private meshGroups: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>[][] = [] // [handIndex][fingerIndex]
   private width = 0
   private height = 0
+  private readonly basisX = new THREE.Vector3()
+  private readonly basisY = new THREE.Vector3()
+  private readonly basisZ = new THREE.Vector3()
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true })
@@ -41,9 +86,9 @@ export class NailArScene {
 
     // left/right/top/bottom map directly onto video pixel coordinates - top=0
     // so world Y increases downward, matching the canvas/video convention the
-    // 2D renderer and landmark math already use (no extra flipping needed).
-    this.camera = new THREE.OrthographicCamera(0, 1, 0, 1, -1000, 1000)
-    this.camera.position.z = 500
+    // landmark math uses. The camera sits at z=0 looking down -z, so world
+    // +z is toward the viewer; nail depths are a few hundred px either way.
+    this.camera = new THREE.OrthographicCamera(0, 1, 0, 1, -10000, 10000)
   }
 
   setTemplate(template: ShapeTemplate) {
@@ -53,17 +98,21 @@ export class NailArScene {
       for (const mesh of group) {
         this.scene.remove(mesh)
         mesh.geometry.dispose()
+        mesh.material.dispose()
       }
     }
     this.meshGroups = []
 
     for (let h = 0; h < MAX_HANDS; h += 1) {
       const group = FINGERS.map((_finger, fingerIdx) => {
-        const geometry = template.geometry.clone()
-        if (!this.materials[fingerIdx]) {
-          this.materials[fingerIdx] = createNailMaterial()
-        }
-        const mesh = new THREE.Mesh(geometry, this.materials[fingerIdx])
+        const material = createNailMaterial()
+        material.uniforms.map.value = this.fingerTextures[fingerIdx]?.texture ?? null
+        const mesh = new THREE.Mesh(template.geometry.clone(), material)
+        // The pose matrix (a rotation plus non-uniform scale along the
+        // nail's own axes) is written directly each frame - see
+        // updateFromHands.
+        mesh.matrixAutoUpdate = false
+        mesh.frustumCulled = false
         mesh.visible = false
         this.scene.add(mesh)
         return mesh
@@ -73,22 +122,15 @@ export class NailArScene {
   }
 
   setFingerTextures(asset: NailDesignAsset) {
-    // Letterbox each cutout to the mesh's own UV aspect ratio (see
-    // createFingerTexture) so the design never gets stretched to fit - call
-    // setTemplate() first so this ratio is known; falls back to the
-    // cutout's own ratio (i.e. no padding) if called out of order.
-    const targetAspectRatio = this.template ? this.template.naturalWidth / this.template.naturalLength : null
-
     FINGERS.forEach((finger, fingerIdx) => {
+      this.fingerTextures[fingerIdx]?.texture.dispose()
       const nailAsset = asset.fingerNails[finger.nailIndex]
-      if (!nailAsset) return
-      if (!this.materials[fingerIdx]) {
-        this.materials[fingerIdx] = createNailMaterial()
+      this.fingerTextures[fingerIdx] = nailAsset
+        ? { texture: createFingerTexture(nailAsset.canvas), aspectRatio: nailAsset.aspectRatio }
+        : null
+      for (const group of this.meshGroups) {
+        group[fingerIdx].material.uniforms.map.value = this.fingerTextures[fingerIdx]?.texture ?? null
       }
-      const material = this.materials[fingerIdx]
-      material.map?.dispose()
-      material.map = createFingerTexture(nailAsset.canvas, targetAspectRatio ?? nailAsset.aspectRatio)
-      material.needsUpdate = true
     })
   }
 
@@ -104,7 +146,7 @@ export class NailArScene {
     this.renderer.setSize(width, height, false)
   }
 
-  updateFromLandmarks(hands: NormalizedLandmark[][], width: number, height: number, mirror: boolean) {
+  updateFromHands(hands: TrackedHand[], width: number, height: number, mirror: boolean) {
     this.resize(width, height)
 
     for (const group of this.meshGroups) {
@@ -113,39 +155,38 @@ export class NailArScene {
     const template = this.template
     if (!template) return
 
-    hands.slice(0, MAX_HANDS).forEach((landmarks, handIdx) => {
+    hands.slice(0, MAX_HANDS).forEach((hand, handIdx) => {
       const group = this.meshGroups[handIdx]
       if (!group) return
 
-      FINGERS.forEach((finger, fingerIdx) => {
+      for (const pose of computeNailPoses(hand, width, height, mirror)) {
+        const fingerIdx = FINGERS.indexOf(pose.finger)
         const mesh = group[fingerIdx]
-        if (!mesh) return
+        const fingerTexture = this.fingerTextures[fingerIdx]
+        if (!mesh || !fingerTexture) continue
 
-        const placement = computeFingerPlacement(landmarks, finger, width, height, mirror, (segment) =>
-          segment * (template.naturalWidth / template.naturalLength),
-        )
-        if (!placement) return
+        const opacity = facingOpacity(pose.facing)
+        if (opacity <= 0) continue
 
-        // Preserve the template shape's own proportions - scale by the
-        // measured nail width alone (the reliable per-frame landmark
-        // measurement) and derive length from the template's natural aspect
-        // ratio, rather than fitting to two independently-measured
-        // dimensions (which could shrink/distort the shape when they
-        // disagree).
-        const scale = placement.width / template.naturalWidth
-        const renderLength = template.naturalLength * scale
+        // Width comes from the measured hand; length follows the design
+        // cutout's own proportions (the press-on tip as it was generated), so
+        // the cutout fills the UV rect exactly instead of being stretched.
+        const widthScale = pose.width / template.naturalWidth
+        const nailLength = pose.width / clampDesignAspect(fingerTexture.aspectRatio)
+        const lengthScale = nailLength / template.naturalLength
 
-        // loadShapeTemplate() recenters the geometry, so its local Y range
-        // is exactly [-naturalLength/2, +naturalLength/2] with +Y toward the
-        // tip - anchorCenter() places mesh.position (the geometry's own
-        // center) so that the -naturalLength/2 (cuticle) edge lands exactly
-        // on the landmark cuticle point, flat (no fore/aft tilt rotation).
-        const center = anchorCenter(placement, renderLength)
-        mesh.position.set(center.x, center.y, 0)
-        mesh.rotation.set(0, 0, placement.angle)
-        mesh.scale.setScalar(scale)
+        // Local +x (u grows along it) -> pose.across, local +y (cuticle ->
+        // free edge) -> pose.axis, local +z (out of the dome) -> pose.normal.
+        this.basisX.set(pose.across.x, pose.across.y, pose.across.z).multiplyScalar(widthScale)
+        this.basisY.set(pose.axis.x, pose.axis.y, pose.axis.z).multiplyScalar(lengthScale)
+        this.basisZ.set(pose.normal.x, pose.normal.y, pose.normal.z).multiplyScalar(widthScale)
+        mesh.matrix.makeBasis(this.basisX, this.basisY, this.basisZ)
+        mesh.matrix.setPosition(pose.origin.x, pose.origin.y, pose.origin.z)
+        mesh.matrixWorldNeedsUpdate = true
+
+        mesh.material.uniforms.opacity.value = opacity
         mesh.visible = true
-      })
+      }
     })
   }
 
@@ -155,12 +196,12 @@ export class NailArScene {
 
   dispose() {
     for (const group of this.meshGroups) {
-      for (const mesh of group) mesh.geometry.dispose()
+      for (const mesh of group) {
+        mesh.geometry.dispose()
+        mesh.material.dispose()
+      }
     }
-    for (const material of this.materials) {
-      material.map?.dispose()
-      material.dispose()
-    }
+    for (const fingerTexture of this.fingerTextures) fingerTexture?.texture.dispose()
     this.renderer.dispose()
   }
 }
