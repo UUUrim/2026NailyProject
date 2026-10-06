@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { drawNailOverlays } from '@/features/mypage/utils/nailArRenderer'
 import { getHandLandmarker } from '@/features/mypage/utils/handLandmarker'
-import { resetLandmarkSmoothing, smoothLandmarks } from '@/features/mypage/utils/landmarkSmoothing'
+import { HandTracker } from '@/features/mypage/utils/landmarkSmoothing'
 import { prepareNailDesignAsset, type NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
 import { isKnownNailShape, loadShapeTemplate } from '@/features/mypage/utils/nailMeshAsset'
 import { NailArScene } from '@/features/mypage/utils/nailArScene'
@@ -56,6 +56,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
   const sceneRef = useRef<NailArScene | null>(null)
   const modeRef = useRef<RenderMode>('2d')
   const rafRef = useRef<number | null>(null)
+  const trackerRef = useRef(new HandTracker())
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('AR 미리보기를 준비하고 있어요...')
@@ -79,7 +80,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
       video.srcObject = nextStream
       await video.play()
       setSelectedDeviceId(deviceId)
-      setMessage('손을 카메라에 맞춰 네일 디자인을 확인해 보세요.')
+      setMessage('손등이 카메라를 향하게 손을 비춰 네일 디자인을 확인해 보세요.')
     } catch (error) {
       setMessage(getErrorMessage(error, '카메라를 전환할 수 없습니다.'))
     }
@@ -87,10 +88,11 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
 
   useEffect(() => {
     let cancelled = false
+    const tracker = trackerRef.current
 
     const start = async () => {
       try {
-        resetLandmarkSmoothing()
+        tracker.reset()
         setMessage('네일 디자인을 불러오는 중...')
         const asset = await prepareNailDesignAsset(imageUrl, nailTipCropUrls)
         if (cancelled) return
@@ -153,7 +155,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
         }
 
         setStatus('ready')
-        setMessage('손을 카메라에 맞춰 네일 디자인을 확인해 보세요.')
+        setMessage('손등이 카메라를 향하게 손을 비춰 네일 디자인을 확인해 보세요.')
       } catch (error) {
         if (cancelled) return
         streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -176,7 +178,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
       streamRef.current = null
       sceneRef.current?.dispose()
       sceneRef.current = null
-      resetLandmarkSmoothing()
+      tracker.reset()
     }
   }, [imageUrl, shape, nailTipCropUrls])
 
@@ -223,14 +225,14 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
 
       try {
         const landmarker = await getHandLandmarker()
-        const results = landmarker.detectForVideo(video, performance.now())
-        const smoothedHands = smoothLandmarks(results.landmarks)
+        const now = performance.now()
+        const hands = trackerRef.current.update(landmarker.detectForVideo(video, now), now)
         if (modeRef.current === '3d' && sceneRef.current) {
-          sceneRef.current.updateFromLandmarks(smoothedHands, width, height, true)
+          sceneRef.current.updateFromHands(hands, width, height, true)
           sceneRef.current.render()
         } else {
-          for (const landmarks of smoothedHands) {
-            drawNailOverlays(ctx, landmarks, asset, width, height, true)
+          for (const hand of hands) {
+            drawNailOverlays(ctx, hand, asset, width, height, true)
           }
         }
       } catch {
@@ -297,7 +299,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
         </div>
 
         <p className="nail-ar-tryon__hint">
-          생성된 네일 이미지 형태를 따라 손톱 위에 디자인이 올라갑니다.
+          디자인 이미지의 왼쪽부터 엄지·검지·중지·약지·소지 순서로 손톱에 입혀지고, 손톱 크기와 손의 방향에 맞춰 조정됩니다.
         </p>
       </div>
     </div>

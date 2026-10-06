@@ -194,6 +194,55 @@ function lerpColor(a: RgbColor, b: RgbColor, t: number): RgbColor {
 // never be consumed just because one neighboring pixel looked background-ish.
 const BG_COLOR_TOLERANCE = 26
 
+// Soft drop shadows are the one thing that per-pixel test can't call
+// background: they're the backdrop's own color, just darker - and darker than
+// the corner-interpolated estimate predicts, so they stayed foreground and
+// every cutout carried a grey rim (very visible once it's on a finger). They
+// get a second, much narrower pass that a pale nail can't slip through the
+// way it did through the old flood fill: a pixel only qualifies if it IS a
+// darkened copy of the expected backdrop color (same hue/tint, 40-99% of its
+// brightness - pastel or white nails are tinted or brighter and never match),
+// and it's only absorbed when reached from known background through a gentle
+// brightness ramp. Shadows fall off a few levels per pixel; a nail edge, even
+// antialiased, jumps well past SHADOW_MAX_STEP.
+const SHADOW_MIN_RATIO = 0.4
+const SHADOW_MAX_RATIO = 0.99
+const SHADOW_TINT_TOLERANCE = 12
+const SHADOW_MAX_STEP = 9
+
+function isShadowOf(r: number, g: number, b: number, expected: RgbColor): boolean {
+  const ratio = (r + g + b) / Math.max(1, expected.r + expected.g + expected.b)
+  if (ratio < SHADOW_MIN_RATIO || ratio > SHADOW_MAX_RATIO) return false
+  const dr = r - expected.r * ratio
+  const dg = g - expected.g * ratio
+  const db = b - expected.b * ratio
+  return Math.sqrt(dr * dr + dg * dg + db * db) < SHADOW_TINT_TOLERANCE
+}
+
+function absorbShadows(width: number, height: number, data: Uint8ClampedArray, mask: Uint8Array, shadowLike: Uint8Array) {
+  const luminance = (i: number) => (data[i * 4] + data[i * 4 + 1] + data[i * 4 + 2]) / 3
+  const queue = new Int32Array(width * height)
+  let head = 0
+  let tail = 0
+  for (let i = 0; i < mask.length; i += 1) {
+    if (mask[i]) queue[tail++] = i
+  }
+  while (head < tail) {
+    const i = queue[head++]
+    const x = i % width
+    const lum = luminance(i)
+    const visit = (n: number) => {
+      if (mask[n] || !shadowLike[n] || Math.abs(luminance(n) - lum) > SHADOW_MAX_STEP) return
+      mask[n] = 1
+      queue[tail++] = n
+    }
+    if (x > 0) visit(i - 1)
+    if (x < width - 1) visit(i + 1)
+    if (i >= width) visit(i - width)
+    if (i < width * (height - 1)) visit(i + width)
+  }
+}
+
 function computeBackgroundMask(width: number, height: number, data: Uint8ClampedArray): Uint8Array {
   const patch = Math.max(6, Math.floor(Math.min(width, height) * 0.03))
   const topLeft = medianColorInPatch(data, width, height, patch, patch, patch)
@@ -202,6 +251,7 @@ function computeBackgroundMask(width: number, height: number, data: Uint8Clamped
   const bottomRight = medianColorInPatch(data, width, height, width - 1 - patch, height - 1 - patch, patch)
 
   const mask = new Uint8Array(width * height)
+  const shadowLike = new Uint8Array(width * height)
 
   for (let y = 0; y < height; y += 1) {
     const v = height <= 1 ? 0 : y / (height - 1)
@@ -221,9 +271,11 @@ function computeBackgroundMask(width: number, height: number, data: Uint8Clamped
       const dg = data[p + 1] - expected.g
       const db = data[p + 2] - expected.b
       mask[i] = Math.sqrt(dr * dr + dg * dg + db * db) < BG_COLOR_TOLERANCE ? 1 : 0
+      if (!mask[i] && isShadowOf(data[p], data[p + 1], data[p + 2], expected)) shadowLike[i] = 1
     }
   }
 
+  absorbShadows(width, height, data, mask, shadowLike)
   return mask
 }
 
@@ -611,44 +663,334 @@ function extractFingerNails(prepared: PreparedImage): FingerNailAsset[] {
   return splitRowIntoFive(canvas, width, height, null, null, bounds)
 }
 
-// A crop already comes pre-matted (background removed) by the detect
-// server's own segmentation model, so it's used as-is - no background-color
-// guessing, no blob detection, none of extractFingerNails()'s heuristics.
-async function prepareFingerNailFromCrop(cropUrl: string): Promise<FingerNailAsset> {
-  const prepared = await loadPreparedImage(cropUrl)
-  return { canvas: prepared.canvas, aspectRatio: prepared.width / prepared.height }
+// ---------------------------------------------------------------------------
+// Cutout cleanup
+// ---------------------------------------------------------------------------
+
+// Generated tips sit in a "perfectly straight horizontal line", but in
+// practice each one can still lean a few degrees - and a leaning cutout lands
+// on the finger leaning by the same amount. Straighten each tip by its own
+// principal axis, within limits: a near-round cutout has no reliable axis,
+// and a large angle is more likely a bad mask than a tilted tip.
+const STRAIGHTEN_MIN_ANGLE = (1.5 * Math.PI) / 180
+const STRAIGHTEN_MAX_ANGLE = (30 * Math.PI) / 180
+const STRAIGHTEN_MIN_ELONGATION = 1.2
+const TRIM_ALPHA = 8
+
+function readCanvasPixels(canvas: HTMLCanvasElement): Uint8ClampedArray | null {
+  try {
+    return canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data ?? null
+  } catch {
+    return null
+  }
+}
+
+function trimToAlpha(canvas: HTMLCanvasElement, pixels: Uint8ClampedArray): HTMLCanvasElement {
+  const { width, height } = canvas
+  let minX = width
+  let minY = height
+  let maxX = -1
+  let maxY = -1
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (pixels[(y * width + x) * 4 + 3] <= TRIM_ALPHA) continue
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+    }
+  }
+  if (maxX < minX) return canvas
+  if (minX === 0 && minY === 0 && maxX === width - 1 && maxY === height - 1) return canvas
+
+  const w = maxX - minX + 1
+  const h = maxY - minY + 1
+  const trimmed = document.createElement('canvas')
+  trimmed.width = w
+  trimmed.height = h
+  trimmed.getContext('2d')?.drawImage(canvas, minX, minY, w, h, 0, 0, w, h)
+  return trimmed
+}
+
+// The renderers size a nail as "measured width x (width / aspectRatio)" and
+// pin the cutout's top edge to the cuticle, so the cutout must be exactly
+// the nail: no transparent margin (detect-server crops can carry some, and it
+// would both shrink the design and lift it off the cuticle) and upright.
+function normalizeNailCutout(asset: FingerNailAsset): FingerNailAsset {
+  const { canvas } = asset
+  const pixels = readCanvasPixels(canvas)
+  if (!pixels) return asset
+
+  const { width, height } = canvas
+  let mass = 0
+  let sumX = 0
+  let sumY = 0
+  let transparent = 0
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const a = pixels[(y * width + x) * 4 + 3] / 255
+      if (a < 0.1) {
+        transparent += 1
+        continue
+      }
+      mass += a
+      sumX += a * x
+      sumY += a * y
+    }
+  }
+  // Fully opaque = a plain rectangular crop (pixel access failed upstream);
+  // there's no nail shape in it to straighten or trim against.
+  if (mass < 30 || transparent === 0) return asset
+
+  const cx = sumX / mass
+  const cy = sumY / mass
+  let mu20 = 0
+  let mu02 = 0
+  let mu11 = 0
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const a = pixels[(y * width + x) * 4 + 3] / 255
+      if (a < 0.1) continue
+      const dx = x - cx
+      const dy = y - cy
+      mu20 += a * dx * dx
+      mu02 += a * dy * dy
+      mu11 += a * dx * dy
+    }
+  }
+
+  const spread = Math.sqrt(((mu20 - mu02) / 2) ** 2 + mu11 * mu11)
+  const major = (mu20 + mu02) / 2 + spread
+  const minor = (mu20 + mu02) / 2 - spread
+  const elongation = minor > 0 ? Math.sqrt(major / minor) : 0
+  // Major-axis angle from +x (y down); rotating by PI/2 - theta makes it
+  // vertical. The axis has no direction, so fold into (-PI/2, PI/2].
+  const theta = 0.5 * Math.atan2(2 * mu11, mu20 - mu02)
+  let rotation = Math.PI / 2 - theta
+  while (rotation > Math.PI / 2) rotation -= Math.PI
+  while (rotation <= -Math.PI / 2) rotation += Math.PI
+
+  let source = canvas
+  let sourcePixels = pixels
+  if (
+    elongation >= STRAIGHTEN_MIN_ELONGATION &&
+    Math.abs(rotation) >= STRAIGHTEN_MIN_ANGLE &&
+    Math.abs(rotation) <= STRAIGHTEN_MAX_ANGLE
+  ) {
+    const size = Math.ceil(Math.hypot(width, height)) + 2
+    const rotated = document.createElement('canvas')
+    rotated.width = size
+    rotated.height = size
+    const ctx = rotated.getContext('2d')
+    if (ctx) {
+      ctx.translate(size / 2, size / 2)
+      ctx.rotate(rotation)
+      ctx.drawImage(canvas, -cx, -cy)
+      const rotatedPixels = readCanvasPixels(rotated)
+      if (rotatedPixels) {
+        source = rotated
+        sourcePixels = rotatedPixels
+      }
+    }
+  }
+
+  const trimmed = trimToAlpha(source, sourcePixels)
+  return { canvas: trimmed, aspectRatio: trimmed.width / trimmed.height }
+}
+
+// ---------------------------------------------------------------------------
+// Detect-server crops
+// ---------------------------------------------------------------------------
+
+// The detect server returns its nail-tip crops in detection order (whatever
+// order its detector ranked the boxes in), not left to right - so they can't
+// simply be assigned thumb..pinky by index. Each crop is a straight cut-out
+// of the composite image, though, so its position can be recovered by
+// finding where its pixels match the composite, then sorted left to right.
+// Matching runs on downscaled copies; it's a one-off cost when the modal
+// opens.
+const MATCH_MAX_DIM = 200
+const MATCH_MAX_SAMPLES = 320
+const MATCH_MAX_RMS = 30
+
+type PixelGrid = { data: Uint8ClampedArray; width: number; height: number }
+
+function downscalePixels(source: CanvasImageSource, width: number, height: number): Uint8ClampedArray | null {
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  ctx.drawImage(source, 0, 0, width, height)
+  try {
+    return ctx.getImageData(0, 0, width, height).data
+  } catch {
+    return null
+  }
+}
+
+function locateCrop(composite: PixelGrid, scale: number, crop: PreparedImage): ContentBounds | null {
+  if (!crop.data) return null
+  const tw = Math.max(4, Math.round(crop.width * scale))
+  const th = Math.max(4, Math.round(crop.height * scale))
+  if (tw > composite.width || th > composite.height) return null
+  const template = downscalePixels(crop.canvas, tw, th)
+  if (!template) return null
+
+  // Compare only the crop's own (opaque) nail pixels - its matted-out
+  // background says nothing about where it came from.
+  const collect = (minAlpha: number) => {
+    const picked: number[] = []
+    for (let i = 0; i < tw * th; i += 1) {
+      if (template[i * 4 + 3] >= minAlpha) picked.push(i)
+    }
+    return picked
+  }
+  let picked = collect(200)
+  if (picked.length < 16) picked = collect(64)
+  if (picked.length < 16) return null
+
+  const stride = Math.ceil(picked.length / MATCH_MAX_SAMPLES)
+  const count = Math.ceil(picked.length / stride)
+  const offsets = new Int32Array(count)
+  const colors = new Int16Array(count * 3)
+  for (let k = 0; k < count; k += 1) {
+    const i = picked[k * stride]
+    offsets[k] = (Math.floor(i / tw) * composite.width + (i % tw)) * 4
+    colors[k * 3] = template[i * 4]
+    colors[k * 3 + 1] = template[i * 4 + 1]
+    colors[k * 3 + 2] = template[i * 4 + 2]
+  }
+
+  const { data } = composite
+  const errorAt = (x: number, y: number, limit: number) => {
+    const base = (y * composite.width + x) * 4
+    let error = 0
+    for (let k = 0; k < count; k += 1) {
+      const p = base + offsets[k]
+      const dr = data[p] - colors[k * 3]
+      const dg = data[p + 1] - colors[k * 3 + 1]
+      const db = data[p + 2] - colors[k * 3 + 2]
+      error += dr * dr + dg * dg + db * db
+      if (error >= limit) return limit
+    }
+    return error
+  }
+
+  // Coarse pass on every other position, then refine around the best hit.
+  const maxX = composite.width - tw
+  const maxY = composite.height - th
+  let best = Number.POSITIVE_INFINITY
+  let bestX = 0
+  let bestY = 0
+  const search = (x0: number, x1: number, y0: number, y1: number, step: number) => {
+    for (let y = Math.max(0, y0); y <= Math.min(maxY, y1); y += step) {
+      for (let x = Math.max(0, x0); x <= Math.min(maxX, x1); x += step) {
+        const error = errorAt(x, y, best)
+        if (error < best) {
+          best = error
+          bestX = x
+          bestY = y
+        }
+      }
+    }
+  }
+  search(0, maxX, 0, maxY, 2)
+  search(bestX - 2, bestX + 2, bestY - 2, bestY + 2, 1)
+
+  if (Math.sqrt(best / (count * 3)) > MATCH_MAX_RMS) return null
+  return {
+    minX: bestX / scale,
+    minY: bestY / scale,
+    maxX: (bestX + tw) / scale,
+    maxY: (bestY + th) / scale,
+  }
+}
+
+/** The crops as thumb..pinky (left to right in the composite), or null if
+ *  that can't be established. */
+function orderCropsLeftToRight(composite: PreparedImage, crops: PreparedImage[]): PreparedImage[] | null {
+  if (!composite.data) return null
+  const scale = Math.min(1, MATCH_MAX_DIM / Math.max(composite.width, composite.height))
+  const width = Math.max(1, Math.round(composite.width * scale))
+  const height = Math.max(1, Math.round(composite.height * scale))
+  const data = downscalePixels(composite.canvas, width, height)
+  if (!data) return null
+  const grid: PixelGrid = { data, width, height }
+
+  type Located = { crop: PreparedImage; box: ContentBounds; cx: number; cy: number; area: number }
+  const located: Located[] = []
+  for (const crop of crops) {
+    const box = locateCrop(grid, scale, crop)
+    if (!box) continue
+    located.push({
+      crop,
+      box,
+      cx: (box.minX + box.maxX) / 2,
+      cy: (box.minY + box.maxY) / 2,
+      area: (box.maxX - box.minX) * (box.maxY - box.minY),
+    })
+  }
+
+  const containsCenter = (outer: Located, inner: Located) =>
+    inner.cx >= outer.box.minX && inner.cx <= outer.box.maxX && inner.cy >= outer.box.minY && inner.cy <= outer.box.maxY
+
+  // A box holding the centers of two or more other boxes is one detection
+  // that swallowed several tips; a box whose center falls inside a bigger
+  // one is the same tip detected twice.
+  const unique: Located[] = []
+  located
+    .filter((a) => located.filter((b) => b !== a && containsCenter(a, b)).length < 2)
+    .sort((a, b) => b.area - a.area)
+    .forEach((candidate) => {
+      if (!unique.some((kept) => containsCenter(kept, candidate))) unique.push(candidate)
+    })
+
+  if (unique.length < FINGER_COUNT) return null
+  return unique
+    .slice(0, FINGER_COUNT)
+    .sort((a, b) => a.cx - b.cx)
+    .map((entry) => entry.crop)
 }
 
 // nailTipCropUrls (when the backend's detect-server segmentation succeeded at
-// generation time, see NailDesignService.generateDesign) are 5 individually
-// matted nail-tip images, left-to-right matching FINGERS' thumb->pinky
-// nailIndex order - the same order extractFingerNails() already assumes when
-// it sorts blobs by centerX. Prefer these over local segmentation: they come
+// generation time, see NailDesignService.generateDesign) are individually
+// matted nail-tip images. Prefer these over local segmentation: they come
 // from the model actually trained to isolate nail tips, so they hold up on
 // backgrounds/shadows/overlaps that the client-side color-distance heuristic
-// below cannot. Older designs (generated before this existed) simply won't
-// have crops, and any fetch failure here falls back to that heuristic too.
+// above cannot. They're only usable once each one is known to belong to a
+// specific finger, though (see orderCropsLeftToRight) - a crop on the wrong
+// finger is worse than a slightly rougher local cutout on the right one.
+// Older designs (generated before crops existed) simply won't have them.
 export async function prepareNailDesignAsset(
     imageUrl: string,
     nailTipCropUrls?: string[] | null,
 ): Promise<NailDesignAsset> {
-  if (nailTipCropUrls && nailTipCropUrls.length === FINGER_COUNT) {
+  const prepared = await loadPreparedImage(imageUrl)
+
+  if (nailTipCropUrls && nailTipCropUrls.length >= FINGER_COUNT) {
     try {
-      const fingerNails = await Promise.all(nailTipCropUrls.map(prepareFingerNailFromCrop))
-      const image = await loadImageElement(toReadableImageUrl(imageUrl), true).catch(() =>
-          loadImageElement(imageUrl),
-      )
-      return { image, fingerNails }
+      const crops = await Promise.all(nailTipCropUrls.map(loadPreparedImage))
+      // With the composite's pixels unreadable there's no way to check the
+      // crops' positions - and local segmentation needs those same pixels -
+      // so exactly five crops keep their given order as the best available.
+      const ordered =
+        orderCropsLeftToRight(prepared, crops) ?? (crops.length === FINGER_COUNT && !prepared.data ? crops : null)
+      if (ordered) {
+        return {
+          image: prepared.image,
+          fingerNails: ordered.map((crop) =>
+              normalizeNailCutout({ canvas: crop.canvas, aspectRatio: crop.width / crop.height }),
+          ),
+        }
+      }
     } catch {
       // fall through to local segmentation of the composite image
     }
   }
 
-  const prepared = await loadPreparedImage(imageUrl)
-  const fingerNails = extractFingerNails(prepared)
-
   return {
     image: prepared.image,
-    fingerNails,
+    fingerNails: extractFingerNails(prepared).map(normalizeNailCutout),
   }
 }

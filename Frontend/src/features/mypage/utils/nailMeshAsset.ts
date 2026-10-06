@@ -9,10 +9,13 @@ export function isKnownNailShape(value: string | null | undefined): value is Nai
 }
 
 export type ShapeTemplate = {
+  /** Anchored for placement: x centered on 0 (width axis, u grows with +x),
+   *  y from 0 at the cuticle end to naturalLength at the free edge, and z <= 0
+   *  with the top of the dome at z = 0 - so a nail pose's cuticle point on the
+   *  nail surface maps straight onto the local origin. */
   geometry: THREE.BufferGeometry
   /** The template's own natural width/length extent (arbitrary shared unit -
-   *  only the ratio between them matters, used to scale-without-distorting
-   *  onto whatever size is measured from the camera). */
+   *  only ratios matter; the renderer rescales onto the measured nail). */
   naturalWidth: number
   naturalLength: number
 }
@@ -67,78 +70,37 @@ export async function loadShapeTemplate(shape: NailShape): Promise<ShapeTemplate
     if (!box) {
       throw new Error(`네일팁 쉐입 모델(${shape})의 크기를 계산할 수 없습니다.`)
     }
-    const size = new THREE.Vector3()
-    box.getSize(size)
 
-    // export_shape_templates.py builds the geometry in its own local
-    // coordinate frame (X in [0, width], Y in [-cuticleDepth, length], Z the
-    // thin curvature axis) - NOT centered on the origin. Every downstream
-    // placement (nailArScene.ts) treats mesh.position as the nail's visual
-    // center, so recenter once here rather than carrying an off-center
-    // offset through every frame's position/rotation/scale math.
-    const center = new THREE.Vector3()
-    box.getCenter(center)
-    geometry.translate(-center.x, -center.y, -center.z)
+    // export_shape_templates.py builds the shell in nail_exact_stl.py's frame:
+    // X = width (0..w), Y = length (cuticle end at min Y, free edge at max Y),
+    // Z = dome height (the outer surface faces +Z). Its planar UVs follow the
+    // same axes. Move the origin to the cuticle end's centerline on top of the
+    // dome, which is exactly the point a nail pose describes.
+    const naturalWidth = box.max.x - box.min.x
+    const naturalLength = box.max.y - box.min.y
+    geometry.translate(-(box.min.x + box.max.x) / 2, -box.min.y, -box.max.z)
     geometry.computeBoundingBox()
 
-    // Pick the two largest-extent axes as width/length (the shell's
-    // thickness axis is, by construction, the thinnest one) rather than
-    // hardcoding which axis is which - self-adapting if the export script's
-    // axis convention ever changes.
-    const extents = [size.x, size.y, size.z].sort((a, b) => b - a)
-    const [longest, secondLongest] = extents
-
-    return {
-      geometry,
-      naturalWidth: Math.min(longest, secondLongest),
-      naturalLength: Math.max(longest, secondLongest),
-    }
+    return { geometry, naturalWidth, naturalLength }
   })()
 
   templateCache.set(shape, promise)
   return promise
 }
 
-// Wraps an already-prepared per-finger design cutout (from
-// nailDesignAsset.ts's alpha-masked canvases) as a texture for the mesh.
+// Wraps an already-prepared per-finger design cutout (nailDesignAsset.ts) as
+// the mesh's texture. The renderer sizes each mesh to the cutout's own aspect
+// ratio, so the cutout maps onto the UV rect 1:1 - no padding, no stretching,
+// and its cuticle edge lands on the mesh's cuticle edge.
 //
-// The cutout's own width:height ratio (per finger, per design - typically
-// 0.5-0.65 in practice) essentially never matches the template mesh's UV
-// aspect ratio (naturalWidth/naturalLength, fixed per shape). A UV space is
-// just the unit square [0,1]x[0,1] - mapping the cutout onto it directly
-// stretches it to whatever the mesh's ratio happens to be, squashing or
-// widening the design. Instead, letterbox: pad the cutout (transparently) up
-// to a canvas shaped exactly like the mesh's UV rect, at the cutout's own
-// native resolution (a straight pixel copy, no resampling), so the design
-// renders at its true proportions with transparent margin absorbing the
-// mismatch instead of stretching it away.
-export function createFingerTexture(canvas: HTMLCanvasElement, targetAspectRatio: number): THREE.CanvasTexture {
-  const srcAspect = canvas.width / canvas.height
-
-  let outW = canvas.width
-  let outH = canvas.height
-  if (srcAspect > targetAspectRatio) {
-    // Cutout is proportionally wider than the mesh's UV rect - pad height.
-    outH = Math.max(canvas.height, Math.round(canvas.width / targetAspectRatio))
-  } else {
-    // Cutout is proportionally narrower/taller - pad width.
-    outW = Math.max(canvas.width, Math.round(canvas.height * targetAspectRatio))
-  }
-
-  let source: HTMLCanvasElement = canvas
-  if (outW !== canvas.width || outH !== canvas.height) {
-    const padded = document.createElement('canvas')
-    padded.width = outW
-    padded.height = outH
-    const ctx = padded.getContext('2d')
-    if (ctx) {
-      ctx.drawImage(canvas, Math.round((outW - canvas.width) / 2), Math.round((outH - canvas.height) / 2))
-      source = padded
-    }
-  }
-
-  const texture = new THREE.CanvasTexture(source)
+// The design image shows each tip with its cuticle end at the TOP. The
+// template's glTF-exported UVs put v = 1 on the cuticle end and v = 0 on the
+// free edge, and three.js' default flipY samples the image's top row at
+// v = 1 - so the default is exactly right; don't turn flipY off.
+export function createFingerTexture(canvas: HTMLCanvasElement): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 4
   texture.needsUpdate = true
   return texture
 }

@@ -47,7 +47,7 @@ export const CAPTURE_COPY: Record<CaptureStatus, CaptureCopy> = {
     button: '카메라 준비 중',
   },
   place: {
-    title: (target) => `${target}를 가이드에 맞춰 올려주세요`,
+    title: (target) => `${target}를 가이드에 맞춰 넣어주세요`,
     button: '손가락을 올려주세요',
   },
   measuring: {
