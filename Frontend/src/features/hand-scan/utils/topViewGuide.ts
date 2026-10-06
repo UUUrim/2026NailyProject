@@ -30,6 +30,49 @@ export function parseTopViewGuide(raw: unknown): TopViewGuide | null {
   }
 }
 
+/**
+ * 촬영 가능(안정) 상태일 때만 오는 손톱 너비/길이와 위치 — /capture/stability 응답의 `measure`.
+ * W/L은 지금 촬영하면 최종값이 되는 구간 평균, 위치는 스트림 화면 기준 비율(server.py _top_measure).
+ */
+export type TopViewMeasure = {
+  widthMm: number
+  lengthMm: number
+  /** 손톱 가운데 열, 0(왼쪽)~1(오른쪽) */
+  tipX: number
+  /** 손톱 끝 행, 0(위)~1(아래) */
+  tipY: number
+  /** 큐티클 행, 0(위)~1(아래) */
+  cuticleY: number
+  /** 손톱 너비의 절반 — 화면 높이 비율(mmToH와 같은 단위) */
+  halfW: number
+}
+
+export function parseTopViewMeasure(raw: unknown): TopViewMeasure | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const keys = ['widthMm', 'lengthMm', 'tipX', 'tipY', 'cuticleY', 'halfW'] as const
+  if (!keys.every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]))) return null
+  const m = Object.fromEntries(keys.map((k) => [k, r[k] as number])) as TopViewMeasure
+  if (m.widthMm <= 0 || m.lengthMm <= 0 || m.halfW <= 0 || m.cuticleY <= m.tipY) return null
+  return m
+}
+
+/**
+ * 스트림 <img>의 object-fit: cover(가운데 정렬)와 같은 계산으로 프레임 비율 좌표를
+ * w×h 박스의 픽셀 좌표로 옮긴다 — 가이드와 W/L 표시가 실제 영상 위치와 정확히 겹치도록.
+ * scale은 프레임 높이 1에 해당하는 픽셀 수.
+ */
+export function coverMap(w: number, h: number, aspect: number) {
+  const scale = Math.max(w / aspect, h)
+  const offsetX = (w - aspect * scale) / 2
+  const offsetY = (h - scale) / 2
+  return {
+    scale,
+    x: (fracOfWidth: number) => offsetX + fracOfWidth * aspect * scale,
+    y: (fracOfHeight: number) => offsetY + fracOfHeight * scale,
+  }
+}
+
 /** 실루엣 크기용 성인 평균 치수(mm) — 안내용일 뿐 측정에는 쓰이지 않는다. */
 const FINGER_GUIDE_MM: Record<Finger, { finger: number; nailW: number; nailL: number }> = {
   THUMB:  { finger: 20,   nailW: 14,   nailL: 13 },

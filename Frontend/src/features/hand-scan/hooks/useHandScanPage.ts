@@ -7,7 +7,12 @@ import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { useSnapshotRestore } from '@/shared/hooks/useSnapshotRestore'
 import { ApiError } from '@/shared/utils/apiClient'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
-import { parseTopViewGuide, type TopViewGuide } from '@/features/hand-scan/utils/topViewGuide'
+import {
+  parseTopViewGuide,
+  parseTopViewMeasure,
+  type TopViewGuide,
+  type TopViewMeasure,
+} from '@/features/hand-scan/utils/topViewGuide'
 import {
   buildScanSessions,
   isFullyAnalyzedSession,
@@ -21,6 +26,12 @@ const SCAN_SERVER_URL = import.meta.env.VITE_SCAN_SERVER_URL ?? 'http://localhos
 const CAPTURE_UI_TIMEOUT_MS = 15000
 // "OO 촬영 완료" 안내를 보여주는 시간
 const COMPLETED_NOTICE_MS   = 2600
+// 손가락 촬영이 끝난 뒤 "손가락을 빼주세요"를 풀어주는 조건 — 다음 손가락 측정이 시작된 뒤
+// 측정값이 없는 상태(= 매트 위에 손가락 없음)가 이만큼 이어져야 뺐다고 본다. 측정 한 번이
+// 최대 ~0.8초라, 손가락이 아직 있으면 이 안에 측정값이 생겨 다시 기다린다.
+const RELEASE_CONFIRM_MS    = 1000
+// 위 조건이 끝내 안 맞아도(매트에 다른 물체가 계속 잡히는 등) 이 시간이 지나면 풀어준다.
+const SWITCH_MAX_MS         = 8000
 
 // 촬영 화면은 브라우저 전체화면(탭·주소창까지 숨김)으로 띄운다 — 페이지 안에서만 꽉 채우면
 // 브라우저 상단 바 높이만큼 카메라가 모니터 가운데보다 아래로 내려가 보이기 때문.
@@ -106,11 +117,16 @@ export function useHandScanPage() {
   const [isStable, setIsStable]             = useState(false)
   // 탑뷰 손가락/큐티클 가이드 위치 — 게이지와 같은 폴링 응답에 실려 온다.
   const [topGuide, setTopGuide]             = useState<TopViewGuide | null>(null)
+  // 촬영 가능(안정)일 때만 오는 손톱 너비/길이 — 불안정하면 null이라 화면에 안 띄운다.
+  const [liveMeasure, setLiveMeasure]       = useState<TopViewMeasure | null>(null)
   // 촬영 버튼을 누른 뒤 서버가 다음 손가락으로 넘어갈 때까지 — 화면 표시와 중복 클릭
   // 방지용일 뿐, 서버로 보내는 촬영 요청(POST /capture/force)은 예전과 똑같다.
   const [isCapturing, setIsCapturing]       = useState(false)
   // 방금 촬영이 끝난 손가락 — 상단에 잠깐 "촬영 완료"를 띄우는 데만 쓴다.
   const [completedStep, setCompletedStep]   = useState<ScanStep | null>(null)
+  // 손가락 하나를 찍은 직후 손가락을 뺄 때까지 — 서버는 곧바로 다음 손가락 측정을 시작해
+  // 아직 매트 위에 있는 방금 찍은 손가락을 재므로, 그동안의 측정 상태를 화면에 안 보여준다.
+  const [isSwitching, setIsSwitching]       = useState(false)
   // 기본값: 왼쪽(탑뷰)=USB 웹캠 인덱스 0, 오른쪽(사이드/c-curve)=폰(-2).
   // 매번 드롭다운에서 고르지 않아도 되도록 실제로 쓰는 조합을 기본값으로 둠.
   const [topCameraIdx, setTopCameraIdx]     = useState(0)
@@ -138,6 +154,9 @@ export function useHandScanPage() {
   useEffect(() => { scanIdsRef.current = scanIds }, [scanIds])
   const captureTimeoutRef = useRef<number | null>(null)
   const noticeTimeoutRef  = useRef<number | null>(null)
+  // isSwitching 판단용 — startedAt: 손가락 촬영 완료 시각, sawStart: 다음 손가락 측정 시작
+  // (finger_start) 받음, emptySince: 그 뒤 측정값 없음이 시작된 시각
+  const switchRef = useRef<{ startedAt: number; sawStart: boolean; emptySince: number | null } | null>(null)
 
   const currentStep   = STEPS[Math.min(currentStepIndex, STEPS.length - 1)] ?? STEPS[0]
   const currentHand   = currentStep.hand
@@ -172,6 +191,11 @@ export function useHandScanPage() {
     setIsCapturing(false)
   }, [])
 
+  const endSwitching = useCallback(() => {
+    switchRef.current = null
+    setIsSwitching(false)
+  }, [])
+
   const showCompleted = useCallback((step: ScanStep) => {
     if (noticeTimeoutRef.current !== null) window.clearTimeout(noticeTimeoutRef.current)
     setCompletedStep(step)
@@ -190,9 +214,11 @@ export function useHandScanPage() {
     setStabilityRatio(0)
     setIsStable(false)
     setTopGuide(null)
+    setLiveMeasure(null)
     endCapturing()
+    endSwitching()
     setCompletedStep(null)
-  }, [endCapturing])
+  }, [endCapturing, endSwitching])
 
   // ── 안정성 게이지 + 가이드 위치 폴링: 풀스크린(촬영 중)일 때만 짧은 주기로 조회 ──
   useEffect(() => {
@@ -202,17 +228,33 @@ export function useHandScanPage() {
       try {
         const res = await fetch(`${SCAN_SERVER_URL}/capture/stability`)
         if (!res.ok || cancelled) return
-        const data = (await res.json()) as { ratio?: number; ready?: boolean; guide?: unknown }
+        const data = (await res.json()) as { ratio?: number; ready?: boolean; guide?: unknown; measure?: unknown }
         if (cancelled) return
-        setStabilityRatio(typeof data.ratio === 'number' ? data.ratio : 0)
+        const ratio = typeof data.ratio === 'number' ? data.ratio : 0
+        setStabilityRatio(ratio)
         setIsStable(Boolean(data.ready))
         setTopGuide(parseTopViewGuide(data.guide))
+        setLiveMeasure(data.ready ? parseTopViewMeasure(data.measure) : null)
+
+        // "손가락을 빼주세요" 해제: 다음 손가락 측정이 시작된 뒤 측정값 없음이
+        // RELEASE_CONFIRM_MS 동안 이어지면 손가락을 뺀 것으로 본다.
+        const sw = switchRef.current
+        if (sw) {
+          const now = Date.now()
+          if (sw.sawStart && ratio === 0) {
+            sw.emptySince ??= now
+            if (now - sw.emptySince >= RELEASE_CONFIRM_MS) endSwitching()
+          } else {
+            sw.emptySince = null
+          }
+          if (switchRef.current && now - sw.startedAt >= SWITCH_MAX_MS) endSwitching()
+        }
       } catch { /* 폴링 실패는 무시하고 다음 tick에서 재시도 */ }
     }
     void poll()
     const id = window.setInterval(() => void poll(), 150)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [isFullscreen])
+  }, [isFullscreen, endSwitching])
 
   // ── SSE 연결: 스캔 서버 finger_done / capture_complete 수신 ──
   const connectSSE = useCallback(() => {
@@ -228,7 +270,11 @@ export function useHandScanPage() {
         }
 
         // 서버가 새 손가락 촬영을 시작함 = 이전 촬영 요청은 끝났다 (탑뷰 실패로 건너뛴 경우 포함)
-        if (msg.type === 'finger_start') endCapturing()
+        if (msg.type === 'finger_start') {
+          endCapturing()
+          // 이제부터 오는 측정값은 새 손가락 측정 — "손가락을 빼주세요" 해제 판단을 시작한다
+          if (switchRef.current) switchRef.current.sawStart = true
+        }
 
         if (msg.type === 'finger_done' && msg.finger) {
           const hand: HandSide = stepIndexRef.current < 5 ? 'LEFT' : 'RIGHT'
@@ -241,9 +287,13 @@ export function useHandScanPage() {
           // (다음 폴링이 서버의 실제 값으로 다시 채움).
           setStabilityRatio(0)
           setIsStable(false)
+          setLiveMeasure(null)
           if ((FINGERS as readonly string[]).includes(msg.finger)) {
             showCompleted({ hand, finger: msg.finger as Finger })
           }
+          // 손가락을 뺄 때까지 다음 손가락 측정 상태를 가린다 (isSwitching 참고)
+          switchRef.current = { startedAt: Date.now(), sawStart: false, emptySince: null }
+          setIsSwitching(true)
         }
 
         if (msg.type === 'capture_complete') {
@@ -396,7 +446,9 @@ export function useHandScanPage() {
     stabilityRatio,
     isStable,
     topGuide,
+    liveMeasure,
     isCapturing,
+    isSwitching,
     completedStep,
     topCameraIdx,
     sideCameraIdx,

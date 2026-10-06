@@ -104,10 +104,11 @@ from skin_color import recommend_nail_colors, lab_to_rgb_hex      # scan/
 from nail_measurer import (recommend_nail_shape, merge_hand_measurements,  # scan/
                             classify_size_totals)
 
-# 탑뷰 라이브 프리뷰 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정 화면을
-# 웹 스트림에도 그대로 재사용한다. 매 프레임 nail_measurer로 실측정을 돌리되,
-# 자동 촬영은 없음 - 탑뷰/사이드뷰 모두 조작자가 촬영 버튼을 눌러야만 저장된다.
-from nail_live import (MeasureWorker, compose as _live_compose,     # scan/
+# 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
+# 매 프레임 nail_measurer로 실측정을 돌리되, 웹 화면에는 깨끗한 카메라 화면만 보내고
+# 상태·W/L 표시는 프론트가 그린다. 자동 촬영은 없음 - 탑뷰/사이드뷰 모두 조작자가
+# 촬영 버튼을 눌러야만 저장된다.
+from nail_live import (MeasureWorker,                                 # scan/
                         median_result as _live_median_result,
                         MEDIAN_N as _LIVE_MEDIAN_N,
                         stability as _live_stability,
@@ -407,6 +408,9 @@ class _StreamState:
         # 실측 중인 guide_y(원본 프레임 px)와 마지막으로 확인된 시각. 측정이
         # 실제로 쓰는 행이라 있으면 마커 기준 추정보다 항상 우선한다.
         self.live_guide: tuple | None = None
+        # 안정(촬영 가능) 구간의 손톱 W/L 평균 + median 프레임의 손톱 위치(원본 px) —
+        # 화면 표시 전용(_top_measure). 불안정하면 None이라 프론트가 W/L을 안 띄운다.
+        self.live_measure: dict | None = None
         # 탑뷰 측정 정확도 게이지 — 프론트가 /capture/stability로 폴링해서
         # 화면 왼쪽 게이지 바를 채운다. ratio: 0~1 (최근 측정 이력이 얼마나
         # 찼는지), ready: 최근 MEDIAN_N개 측정의 W/L이 서로 합의된 상태
@@ -640,6 +644,24 @@ def _remember_marker(frame: np.ndarray):
     _S.top_view_rect = rect   # 마지막에 — None 여부가 "마커 잡힘" 표시라서
 
 
+def _top_measure() -> dict | None:
+    """안정(촬영 가능) 상태일 때만 손톱 너비/길이와 화면 위치 — 스트림 화면(_top_view_rect
+    창) 기준 비율. widthMm/lengthMm는 지금 촬영하면 최종값이 되는 그 구간 평균이다."""
+    m, rect = _S.live_measure, _S.top_view_rect
+    if m is None or rect is None:
+        return None
+    x0, y0, x1, y1 = rect
+    view_w, view_h = x1 - x0, y1 - y0
+    return {
+        "widthMm":  round(m["width_mm"], 1),
+        "lengthMm": round(m["length_mm"], 1),
+        "tipX":     (m["tip_x"] - x0) / view_w,                  # 손톱 가운데 열, 0~1
+        "tipY":     (m["tip_y"] - y0) / view_h,                  # 손톱 끝 행, 0~1
+        "cuticleY": (m["cuticle_y"] - y0) / view_h,              # 큐티클 행, 0~1
+        "halfW":    m["width_mm"] / m["mpp"] / 2 / view_h,       # 너비 절반, 화면 높이 비율
+    }
+
+
 def _top_guide() -> dict | None:
     """프론트 탑뷰 손가락/큐티클 가이드 위치 — 스트림 화면(_top_view_rect 창) 기준 비율.
 
@@ -702,7 +724,8 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
 def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     """탑뷰 스트리밍 - nail_live.py(로컬 CLI)와 동일한 실시간 측정 미리보기.
 
-    매 프레임 nail_measurer로 실측정을 돌려 폭/길이와 윤곽선을 그려 보여준다.
+    매 프레임 nail_measurer로 실측정을 돌리고, 화면에는 깨끗한 카메라 화면을 보낸다
+    (측정 상태와 안정 시 폭/길이는 프론트가 /capture/stability로 받아 그린다).
     자동 촬영은 없음 - 조작자가 "촬영하기" 버튼(force_capture_top)을 눌러야만
     저장된다. 버튼을 누른 순간 최근 MEDIAN_N개 측정이 서로 합의된 상태였으면
     그 median을, 아니면 그 순간의 단일 프레임을 accept한다 (nail_live.py의
@@ -720,6 +743,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     _S.force_capture_top.clear()
     _S.stability = {"ratio": 0.0, "ready": False}
     _S.live_guide = None
+    _S.live_measure = None
     _S.live_wl.pop((hand, finger), None)
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (실시간 측정)")
@@ -727,21 +751,6 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     accepted = None
     frame = None
     _last_status_print = 0.0
-    # Web display only — smooths over single-frame measurement misses so the
-    # guide line / width-length text don't blink out every time one frame in
-    # the background MeasureWorker fails (finger blur, autofocus hunt, a
-    # frame straddling the guide window). Does NOT touch `history` or the
-    # accept-on-capture logic below, both of which still key off the real,
-    # unsmoothed `result` — this only decides what gets drawn on screen.
-    last_ok_result = None
-    last_ok_t = 0.0
-    # 1.2s was long enough to smooth flicker but also long enough that
-    # pulling the finger out left a stale "ghost" overlay on screen for
-    # over a second, which read as lag - shortened so it still absorbs a
-    # single bad frame (measurement noise, ~0.3-0.8s apart per
-    # nail_live.py's own docs) without holding on to a genuinely-removed
-    # finger for long.
-    HOLD_LAST_OK_SEC = 0.5
     _S.top_capture_busy.set()
     try:
         while True:
@@ -764,6 +773,22 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             # 읽음값의 W/L이 서로 합의(agree)하면 ready=true (초록) — nail_live.py
             # CLI의 auto-capture 조건과 동일한 기준을 재사용한다.
             is_stable, _dw, _dl = _live_stability(history)
+            # 화면 표시용 — 안정(촬영 가능)일 때만 손톱 너비/길이와 위치를 프론트로
+            # 보낸다(_top_measure). W/L은 지금 촬영하면 최종값으로 덮어써질 바로 그
+            # 구간 평균(아래 _S.live_wl과 같은 계산), 위치는 촬영 시 저장될 median
+            # 프레임 기준. 측정·저장에는 쓰지 않는다.
+            if is_stable:
+                med = _live_median_result(history)["data"]
+                _S.live_measure = {
+                    "width_mm":  sum(h["data"]["width_mm"]  for h in history) / len(history),
+                    "length_mm": sum(h["data"]["length_mm"] for h in history) / len(history),
+                    "tip_x":     float(med["_tip_x"]),
+                    "tip_y":     float(med["_tip_y"]),
+                    "cuticle_y": float(med["_cuticle_y"]),
+                    "mpp":       float(med["_mpp"]),
+                }
+            else:
+                _S.live_measure = None
             _S.stability = {
                 "ratio": min(len(history) / _LIVE_MEDIAN_N, 1.0),
                 "ready": is_stable,
@@ -800,16 +825,11 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             if result is not None and result.get("guide_y") is not None:
                 _S.live_guide = (float(result["guide_y"]), now)
 
-            if result is not None and result.get("ok"):
-                last_ok_result, last_ok_t = result, now
-            display_result = result
-            if (result is None or not result.get("ok")) and \
-                    last_ok_result is not None and now - last_ok_t < HOLD_LAST_OK_SEC:
-                display_result = last_ok_result
-
-            _push_frame(_S.top_frame, _live_compose(
-                display_result, frame, history, finger, 0,
-                crop_rect=_S.top_view_rect, show_pip=False))
+            # 웹 화면에는 측정 오버레이(상태 테두리·L/W 글자·폭 표시선)를 굽지 않은
+            # 깨끗한 카메라 화면만 보낸다 — 측정 중/촬영 가능 표시와 안정 상태의
+            # 너비·길이는 프론트가 /capture/stability(ratio·ready·measure)로 그린다.
+            # 측정은 위에서 원본 프레임으로 그대로 돌고 있다.
+            _push_frame(_S.top_frame, _top_view(frame))
 
             if _S.force_capture_top.is_set():
                 _S.force_capture_top.clear()
@@ -850,6 +870,11 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     finally:
         worker.stop()
         _S.live_guide = None
+        _S.live_measure = None
+        # 화면 표시용 게이지도 비운다 — 안 비우면 촬영 직후(측면 사진 저장을 기다리는 동안)
+        # 마지막 "촬영 가능"이 다음 손가락 시작 전까지 남아, 이미 찍은 손가락에 대해
+        # "지금 촬영해 주세요"가 다시 뜰 수 있다. 측정·저장은 history/accepted만 쓴다.
+        _S.stability = {"ratio": 0.0, "ready": False}
         _S.top_capture_busy.clear()
 
     h = accepted["frame"].shape[0]
@@ -1508,9 +1533,10 @@ def capture_status():
 
 @app.get("/capture/stability")
 def capture_stability():
-    """탑뷰 정확도 게이지 + 손가락/큐티클 가이드 위치 조회 — 프론트가 짧은 주기로 폴링.
-    guide는 마커를 아직 못 잡았으면 null (_top_guide 참고)."""
-    return {**_S.stability, "guide": _top_guide()}
+    """탑뷰 정확도 게이지 + 손가락/큐티클 가이드 위치 + 안정 시 손톱 W/L 조회 — 프론트가
+    짧은 주기로 폴링. guide는 마커를 아직 못 잡았으면 null (_top_guide 참고),
+    measure는 촬영 가능(ready) 상태가 아니면 null (_top_measure 참고)."""
+    return {**_S.stability, "guide": _top_guide(), "measure": _top_measure()}
 
 
 # ── 폰 사이드뷰 카메라 ───────────────────────────────────────

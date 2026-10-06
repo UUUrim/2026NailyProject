@@ -284,7 +284,10 @@
     overflow: hidden;
     /* 위: 진행 점·안내, 아래: 촬영 버튼 — 위아래로 절반씩 분배됨 */
     --hand-scan-fs-reserved: 200px;
-    /* 상단 안내를 카메라 위 여백 한가운데 두려고 cq 단위(이 화면 크기 기준)를 쓴다 */
+    /* 카메라 높이 — .hand-scan-fs__feed와 같은 규칙: 폭 절반 × 8/11, 단 화면 높이 - 예약 공간을
+       넘지 않음. 위·아래 여백(= (화면 높이 - 카메라 높이) / 2) 계산에 헤더와 촬영 버튼이 같이 쓴다.
+       cq 단위는 이 값을 쓰는 자식 요소에서 이 화면(컨테이너) 크기 기준으로 계산된다. */
+    --hand-scan-fs-feeds-h: min((50cqw - 1px) * 8 / 11, 100cqh - var(--hand-scan-fs-reserved));
     container-type: size;
 }
 
@@ -501,10 +504,15 @@
     opacity: 0;
 }
 
-.hand-scan-guide--measuring .hand-scan-guide__finger,
-.hand-scan-guide--ready .hand-scan-guide__finger {
+.hand-scan-guide--measuring .hand-scan-guide__finger {
     fill: transparent;
     opacity: 0.35;
+}
+
+/* 안정 상태에선 손톱 위 너비·길이 표시가 잘 보이도록 실루엣을 걷어낸다 */
+.hand-scan-guide--ready .hand-scan-guide__finger {
+    fill: transparent;
+    opacity: 0;
 }
 
 .hand-scan-guide--ready .hand-scan-guide__line-glow {
@@ -718,7 +726,6 @@
    진행 점은 여백 높이의 37% 지점에, 안내 문장은 점 아래 끝과 카메라 위 끝의 정확히 가운데에 둔다.
    카메라 높이는 .hand-scan-fs__feed와 같은 규칙: 폭 절반 × 8/11, 단 화면 높이 - 예약 공간을 넘지 않음 */
 .hand-scan-fs__header {
-    --hand-scan-fs-feeds-h: min((50cqw - 1px) * 8 / 11, 100cqh - var(--hand-scan-fs-reserved));
     --hand-scan-steps-y: 37%;
     --hand-scan-steps-h: 18px;   /* 진행 점 줄 높이 = 가장 큰 점(지금 손가락) 높이 */
     position: absolute;
@@ -878,45 +885,52 @@
 }
 
 /* ── 하단: 촬영 버튼 = 측정 정확도 막대 (CaptureButton) ── */
+/* 카메라 아래 여백의 세로 한가운데 — 여백 높이의 절반(= (화면 높이 - 카메라 높이) / 4) 지점에서
+   조금 더 위로. 촬영 가능 버튼의 초록 빛·그림자가 아래로 14px 치우쳐 퍼져서 수치상 정가운데면
+   눈에는 아래로 처져 보이므로, 그만큼(--hand-scan-dock-lift) 올려 보이는 가운데를 맞춘다. */
 .hand-scan-fs__dock {
+    --hand-scan-dock-lift: 0px;
     position: absolute;
-    bottom: 26px;
+    bottom: calc((100cqh - var(--hand-scan-fs-feeds-h)) / 4 + var(--hand-scan-dock-lift));
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, 50%);
     z-index: 2;
 }
 
-/* 촬영 요청 오류 — 버튼 바로 위에 붙어서 계속 보인다 (버튼 위치는 그대로) */
+/* 촬영 요청 오류 — "촬영 완료"가 뜨는 화면 정가운데에, 다음에 촬영 버튼을 누를 때까지 계속 */
 .hand-scan-fs__error {
     position: absolute;
-    bottom: calc(100% + 12px);
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    z-index: 5;
+    transform: translate(-50%, -50%);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 14px;
     width: max-content;
-    max-width: min(90vw, 480px);
+    max-width: min(90vw, 520px);
     margin: 0;
-    padding: 8px 14px 8px 10px;
-    border-radius: 12px;
-    font-size: 0.88rem;
-    font-weight: 600;
+    padding: 18px 26px 18px 20px;
+    border-radius: 18px;
+    font-size: 1.1rem;
+    font-weight: 700;
     line-height: 1.4;
-    color: #fecaca;
-    background: rgba(127, 29, 29, 0.55);
-    border: 1px solid rgba(248, 113, 113, 0.65);
-    backdrop-filter: blur(8px);
+    color: #fff;
+    background: rgba(28, 10, 10, 0.86);
+    border: 1.5px solid rgba(248, 113, 113, 0.75);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(12px);
+    pointer-events: none;
 }
 
 .hand-scan-fs__error-icon {
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    width: 20px;
-    height: 20px;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
-    font-size: 0.8rem;
+    font-size: 1.2rem;
     font-weight: 800;
     color: #fff;
     background: #ef4444;
@@ -990,21 +1004,31 @@
     border-color: transparent;
 }
 
+/* 촬영 가능 — 초록 버튼이 숨쉬듯 커졌다 작아지고, 넓은 고리가 퍼지며, 빛이 훑고 지나간다 */
 .hand-scan-capture--ready .hand-scan-capture__fill {
-    background: linear-gradient(135deg, #de869f 0%, #c96d88 100%);
+    background: linear-gradient(135deg, #34d399 0%, #16a34a 100%);
 }
 
 .hand-scan-capture--ready {
     cursor: pointer;
-    animation: hand-scan-capture-ready 1.6s ease-in-out infinite;
+    animation: hand-scan-capture-ready 1.2s ease-in-out infinite;
 }
 
-.hand-scan-capture--ready:hover {
-    transform: translateY(-1px);
+.hand-scan-capture--ready::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.45) 50%, transparent 70%);
+    transform: translateX(-100%);
+    animation: hand-scan-capture-shine 1.8s ease-in-out infinite;
 }
 
-.hand-scan-capture--ready:active {
-    transform: translateY(0);
+.hand-scan-capture--ready .hand-scan-capture__label {
+    position: relative;
+    z-index: 1;
+    font-size: 1.12rem;
 }
 
 /* 촬영 중 — 누를 수 없다는 게 바로 보이게 분홍을 빼고 회색 비활성 모양으로 */
@@ -1047,8 +1071,209 @@
 }
 
 @keyframes hand-scan-capture-ready {
-    0%, 100% { box-shadow: 0 8px 24px rgba(222, 134, 159, 0.38), 0 0 0 0 rgba(222, 134, 159, 0.6); }
-    50% { box-shadow: 0 8px 24px rgba(222, 134, 159, 0.38), 0 0 0 10px rgba(222, 134, 159, 0); }
+    0%, 100% { transform: scale(1); box-shadow: 0 10px 28px rgba(34, 197, 94, 0.45), 0 0 0 0 rgba(74, 222, 128, 0.75); }
+    50% { transform: scale(1.07); box-shadow: 0 14px 36px rgba(34, 197, 94, 0.6), 0 0 0 20px rgba(74, 222, 128, 0); }
+}
+
+@keyframes hand-scan-capture-shine {
+    0% { transform: translateX(-100%); }
+    60%, 100% { transform: translateX(100%); }
+}
+
+/* ── 카메라 화면별 측정 상태 (FeedScanState) ── */
+.hand-scan-scan {
+    --scan-color: 222, 134, 159;
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.hand-scan-scan--measuring,
+.hand-scan-scan--unsteady,
+.hand-scan-scan--ready,
+.hand-scan-scan--capturing {
+    opacity: 1;
+}
+
+.hand-scan-scan--unsteady { --scan-color: 251, 191, 36; }
+.hand-scan-scan--ready,
+.hand-scan-scan--capturing { --scan-color: 74, 222, 128; }
+
+.hand-scan-scan__sweep {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 90px;
+    background: linear-gradient(to bottom, transparent, rgba(var(--scan-color), 0.22) 85%, rgba(var(--scan-color), 0.85) 100%);
+    transform: translateY(-100%);
+    display: none;
+}
+
+.hand-scan-scan--measuring .hand-scan-scan__sweep,
+.hand-scan-scan--unsteady .hand-scan-scan__sweep {
+    display: block;
+    animation: hand-scan-sweep 1.8s linear infinite;
+}
+
+.hand-scan-scan__corner {
+    position: absolute;
+    width: 34px;
+    height: 34px;
+    border: 0 solid rgb(var(--scan-color));
+    filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
+}
+
+.hand-scan-scan__corner--tl { top: 14px; left: 14px; border-top-width: 4px; border-left-width: 4px; border-top-left-radius: 10px; }
+.hand-scan-scan__corner--tr { top: 14px; right: 14px; border-top-width: 4px; border-right-width: 4px; border-top-right-radius: 10px; }
+.hand-scan-scan__corner--bl { bottom: 14px; left: 14px; border-bottom-width: 4px; border-left-width: 4px; border-bottom-left-radius: 10px; }
+.hand-scan-scan__corner--br { bottom: 14px; right: 14px; border-bottom-width: 4px; border-right-width: 4px; border-bottom-right-radius: 10px; }
+
+.hand-scan-scan--measuring .hand-scan-scan__corner,
+.hand-scan-scan--unsteady .hand-scan-scan__corner {
+    animation: hand-scan-corner-blink 1s ease-in-out infinite;
+}
+
+/* 안정이 되는 순간 초록 테두리가 한 번 번쩍 */
+.hand-scan-scan--ready {
+    animation: hand-scan-ready-flash 0.9s ease-out 1;
+}
+
+@keyframes hand-scan-sweep {
+    to { transform: translateY(calc(100cqh + 100%)); }
+}
+
+@keyframes hand-scan-corner-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+@keyframes hand-scan-ready-flash {
+    0% { box-shadow: inset 0 0 0 6px rgba(74, 222, 128, 0.95); }
+    100% { box-shadow: inset 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+/* 측정 중 — 카메라 화면 한가운데 상태 배지 */
+.hand-scan-fs__state-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 4;
+    transform: translate(-50%, -50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 22px;
+    border-radius: 999px;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #fff;
+    background: rgba(12, 12, 14, 0.78);
+    border: 2px solid rgba(222, 134, 159, 0.85);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.hand-scan-fs__state-badge--unsteady {
+    border-color: rgba(251, 191, 36, 0.9);
+    color: #fde68a;
+}
+
+.hand-scan-fs__state-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.25);
+    border-top-color: currentColor;
+    animation: hand-scan-spin 0.8s linear infinite;
+}
+
+/* ── 안정 상태 손톱 너비·길이 (TopViewNailMeasure) ── */
+.hand-scan-measure {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.hand-scan-measure__layer {
+    position: absolute;
+    inset: 0;
+    animation: hand-scan-measure-in 0.45s ease-out;
+}
+
+.hand-scan-measure__svg {
+    position: absolute;
+    inset: 0;
+    overflow: visible;
+}
+
+.hand-scan-measure__halo {
+    stroke: rgba(0, 0, 0, 0.6);
+    stroke-width: 6;
+    stroke-linecap: round;
+}
+
+.hand-scan-measure__line {
+    stroke: #4ade80;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+}
+
+.hand-scan-measure__label {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 6px 12px;
+    border-radius: 12px;
+    transform: translateY(-50%);
+    background: rgba(6, 24, 14, 0.8);
+    border: 1.5px solid rgba(74, 222, 128, 0.8);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+}
+
+.hand-scan-measure__name {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #86efac;
+}
+
+.hand-scan-measure__value {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+
+.hand-scan-measure__value small {
+    margin-left: 2px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.hand-scan-measure__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+@keyframes hand-scan-measure-in {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes hand-scan-spin {
@@ -1058,8 +1283,13 @@
 @media (prefers-reduced-motion: reduce) {
     .hand-scan-steps__dot--current,
     .hand-scan-capture--ready,
+    .hand-scan-capture--ready::after,
     .hand-scan-capture__fill,
-    .hand-scan-capture__spinner {
+    .hand-scan-capture__spinner,
+    .hand-scan-scan__sweep,
+    .hand-scan-scan__corner,
+    .hand-scan-fs__state-spinner,
+    .hand-scan-measure__layer {
         animation: none !important;
     }
 }
@@ -1067,11 +1297,11 @@
 @media (max-width: 640px) {
     .hand-scan-fs {
         --hand-scan-fs-reserved: 240px;
+        /* 세로로 쌓인 두 카메라 높이 기준 */
+        --hand-scan-fs-feeds-h: min(100cqw * 16 / 11 + 2px, 100cqh - var(--hand-scan-fs-reserved));
     }
 
-    /* 세로로 쌓인 두 카메라 높이 기준으로 다시 계산 */
     .hand-scan-fs__header {
-        --hand-scan-fs-feeds-h: min(100cqw * 16 / 11 + 2px, 100cqh - var(--hand-scan-fs-reserved));
         width: calc(100% - 88px);
     }
 
@@ -1084,7 +1314,6 @@
     }
 
     .hand-scan-fs__dock {
-        bottom: 14px;
         width: calc(100% - 32px);
     }
 
