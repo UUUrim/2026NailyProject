@@ -308,8 +308,9 @@ public class PrintOrderService {
             return toDto(order);
         }
 
-        // 기존 PRINTING 상태 닫기
-        printOrderRepository.completeAllPrintingByUser(user);  // 추가
+        // 주의: 여기서 기존 PRINTING 주문을 COMPLETED로 닫으면 안 된다. 큐 방식에서는
+        // 앞 주문이 아직 실제로 출력 중인데 새 주문을 신청할 수 있어서, 출력 중인 주문이
+        // 완료로 잘못 바뀐다. 완료/실패는 printer 서버의 /print-result 콜백으로만 반영한다.
 
         // printer 서버의 /print/start는 큐에 작업을 넣기만 하고 즉시 응답한다 (다른 작업이
         // 출력 중이면 그 뒤에서 대기). 그래서 여기서 바로 PRINTING으로 찍으면, 실제로는 큐에서
@@ -399,6 +400,12 @@ public class PrintOrderService {
     }
 
     private PrintOrderResponseDto toDto(PrintOrder order) {
+        Integer queueAhead = null;
+        if (order.getStatus() == PrintOrder.PrintStatus.WAITING_IN_QUEUE) {
+            queueAhead = (int) printOrderRepository.countByStatusInAndIdLessThan(
+                    List.of(PrintOrder.PrintStatus.PRINTING, PrintOrder.PrintStatus.WAITING_IN_QUEUE),
+                    order.getId());
+        }
         return PrintOrderResponseDto.builder()
                 .id(order.getId())
                 .shapeId(order.getShapeId())
@@ -410,6 +417,7 @@ public class PrintOrderService {
                 .rightScanId(order.getRightScanId())
                 .mergedModelUrl(order.getMergedModelUrl())
                 .failReason(order.getFailReason())
+                .queueAhead(queueAhead)
                 .build();
     }
 }

@@ -7,6 +7,10 @@ const STATE_LABEL_KO: Record<string, string> = {
     PREPARE: '준비 중',
     CALIBRATING_EXTRUSION: '필라멘트 보정 중',
     PRINTING: '출력 중',
+    HEATBED_PREHEATING: '베드 예열 중',
+    HEATING_NOZZLE: '노즐 예열 중',
+    AUTO_BED_LEVELING: '베드 레벨링 중',
+    CLEANING_NOZZLE_TIP: '노즐 청소 중',
     PAUSE: '일시정지',
     FINISH: '출력 완료',
     UNKNOWN: '상태 확인 중',
@@ -82,17 +86,11 @@ export function PrinterProgressWidget({ orderId, onComplete }: Props) {
 
     const pct = progress.percentage ?? 0
     const stateLabel = progress.state ? (STATE_LABEL_KO[progress.state] ?? progress.state) : '알 수 없음'
-    const queueSize = (progress as any).queueSize ?? 0  // api 타입 업데이트 전 임시
 
     return (
         <div className="printer-progress">
             <div className="printer-progress__head">
                 <span className="printer-progress__state">{stateLabel}</span>
-                {queueSize > 0 && (                                    // ← 추가
-                    <span className="printer-progress__queue">
-                    앞에 {queueSize}개 대기 중
-                </span>
-                )}
                 <span className="printer-progress__percentage">{pct}%</span>
             </div>
 

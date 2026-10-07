@@ -55,26 +55,26 @@ type Props = {
 }
 
 export function MyPageModals({
-  detailImage,
-  closeDetailImage,
-  handleDetailLikeChange,
-  handleDetailShareChange,
-  handleDetailDeleted,
-  likeModalTarget,
-  setLikeModalTarget,
-  confirmLikeWithFolder,
-  folderToDelete,
-  closeDeleteFolderModal,
-  isBusy,
-  folderDeleteError,
-  confirmDeleteFolder,
-  scanDetailSession,
-  closeScanDetail,
-  printDetailOrder,
-  printDetailScan,
-  isLoadingPrintDetail,
-  closePrintDetail,
-}: Props) {
+                               detailImage,
+                               closeDetailImage,
+                               handleDetailLikeChange,
+                               handleDetailShareChange,
+                               handleDetailDeleted,
+                               likeModalTarget,
+                               setLikeModalTarget,
+                               confirmLikeWithFolder,
+                               folderToDelete,
+                               closeDeleteFolderModal,
+                               isBusy,
+                               folderDeleteError,
+                               confirmDeleteFolder,
+                               scanDetailSession,
+                               closeScanDetail,
+                               printDetailOrder,
+                               printDetailScan,
+                               isLoadingPrintDetail,
+                               closePrintDetail,
+                             }: Props) {
   return (
       <>
         {/* ── 이미지 상세 모달 ───────────────────────────────────────── */}
@@ -206,20 +206,24 @@ export function MyPageModals({
                   subtitle={subtitle}
                   onClose={closePrintDetail}
               >
-                  <section className={`mypage-x__printx-status mypage-x__printx-status--${statusKey}`}>
-                    <div className="mypage-x__printx-status-copy">
-                      <p className="mypage-x__scanx-kicker">진행 상태</p>
-                      <strong>{PRINT_STATUS_LABEL[printDetailOrder.status]}</strong>
-                      <span className={printDetailOrder.status === 'FAILED' ? 'mypage-x__printx-status-fail' : undefined}>
+                <section className={`mypage-x__printx-status mypage-x__printx-status--${statusKey}`}>
+                  <div className="mypage-x__printx-status-copy">
+                    <p className="mypage-x__scanx-kicker">진행 상태</p>
+                    <strong>{PRINT_STATUS_LABEL[printDetailOrder.status]}</strong>
+                    <span className={printDetailOrder.status === 'FAILED' ? 'mypage-x__printx-status-fail' : undefined}>
                         {printDetailOrder.status === 'FAILED' && printDetailOrder.failReason
                             ? printDetailOrder.failReason
-                            : PRINT_STATUS_HINT[printDetailOrder.status]}
+                            : printDetailOrder.status === 'WAITING_IN_QUEUE' && printDetailOrder.queueAhead != null
+                                ? (printDetailOrder.queueAhead > 0
+                                    ? `내 앞에 ${printDetailOrder.queueAhead}개의 출력이 있어요. 끝나는 대로 이어서 시작돼요.`
+                                    : '곧 출력이 시작돼요.')
+                                : PRINT_STATUS_HINT[printDetailOrder.status]}
                       </span>
-                    </div>
-                    <span className={`mypage-x__badge mypage-x__badge--${statusKey}`}>
+                  </div>
+                  <span className={`mypage-x__badge mypage-x__badge--${statusKey}`}>
                       {PRINT_STATUS_LABEL[printDetailOrder.status]}
                     </span>
-                  </section>
+                </section>
 
                 {printDetailOrder.status === 'PRINTING' && (
                     <PrinterProgressWidget
@@ -227,92 +231,92 @@ export function MyPageModals({
                         onComplete={closePrintDetail}
                     />
                 )}
-                  <section className="mypage-x__scanx-shape">
-                    <div className="mypage-x__scanx-shape-copy">
-                      <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>
-                      <strong>{shapeLabel}</strong>
-                      {shapeEn && <span>{shapeEn}</span>}
-                      <p className="mypage-x__scanx-shape-length">
-                        {printDetailOrder.tipExtensionMm != null && '연장 길이 '}
-                        <b>{formatTipExtension(printDetailOrder.tipExtensionMm)}</b>
-                      </p>
-                    </div>
-                    <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
-                      {SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId] ? (
-                          <img src={SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId]} alt="" />
-                      ) : (
-                          Icon.print
-                      )}
-                    </div>
-                  </section>
+                <section className="mypage-x__scanx-shape">
+                  <div className="mypage-x__scanx-shape-copy">
+                    <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>
+                    <strong>{shapeLabel}</strong>
+                    {shapeEn && <span>{shapeEn}</span>}
+                    <p className="mypage-x__scanx-shape-length">
+                      {printDetailOrder.tipExtensionMm != null && '연장 길이 '}
+                      <b>{formatTipExtension(printDetailOrder.tipExtensionMm)}</b>
+                    </p>
+                  </div>
+                  <div className="mypage-x__scanx-shape-preview" aria-hidden="true">
+                    {SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId] ? (
+                        <img src={SHAPE_PREVIEW_IMAGES[printDetailOrder.shapeId]} alt="" />
+                    ) : (
+                        Icon.print
+                    )}
+                  </div>
+                </section>
 
-                  <p className="mypage-x__scanx-comment">
+                <p className="mypage-x__scanx-comment">
                     <span className="mypage-x__scanx-comment-label">
                       출력 요약
                       <i aria-hidden="true">{Icon.summaryIcon}</i>
                     </span>
-                    {printDetailOrder.tipExtensionMm != null
-                        ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일팁 10개(양손) 출력을 신청했어요.`
-                        : `${shapeLabel} 쉐입(기본 길이)으로 네일팁 10개(양손) 출력을 신청했어요.`}
-                  </p>
+                  {printDetailOrder.tipExtensionMm != null
+                      ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일팁 10개(양손) 출력을 신청했어요.`
+                      : `${shapeLabel} 쉐입(기본 길이)으로 네일팁 10개(양손) 출력을 신청했어요.`}
+                </p>
 
-                  <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">
-                    <p className="mypage-x__scanx-section-label">출력에 사용된 손톱 수치</p>
-                    {!hasLinkedScan ? (
-                        <p className="mypage-x__printx-empty-note">
-                          연결된 손 분석 기록이 없어요. 예전에 신청한 건일 수 있어요.
+                <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">
+                  <p className="mypage-x__scanx-section-label">출력에 사용된 손톱 수치</p>
+                  {!hasLinkedScan ? (
+                      <p className="mypage-x__printx-empty-note">
+                        연결된 손 분석 기록이 없어요. 예전에 신청한 건일 수 있어요.
+                      </p>
+                  ) : isLoadingPrintDetail || !printDetailScan ? (
+                      <p className="mypage-x__empty">연결된 손 분석 결과를 불러오는 중...</p>
+                  ) : (
+                      <>
+                        <p className="mypage-x__printx-scan-note">
+                          {formatNavDate(dateKeyOf(printDetailScan.scannedAt))} 손 분석 결과 사용
                         </p>
-                    ) : isLoadingPrintDetail || !printDetailScan ? (
-                        <p className="mypage-x__empty">연결된 손 분석 결과를 불러오는 중...</p>
-                    ) : (
-                        <>
-                          <p className="mypage-x__printx-scan-note">
-                            {formatNavDate(dateKeyOf(printDetailScan.scannedAt))} 손 분석 결과 사용
-                          </p>
-                          <div className="mypage-x__scanx-metric-grid">
-                            <article className="mypage-x__scanx-metric">
-                              <div className="mypage-x__scanx-metric-top">
-                                <div className="mypage-x__scanx-metric-copy">
-                                  <p>길이</p>
-                                  <strong>{printDetailScan.avgLength.toFixed(1)}<em>mm</em></strong>
-                                </div>
-                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.lengthIcon}</span>
+                        <div className="mypage-x__scanx-metric-grid">
+                          <article className="mypage-x__scanx-metric">
+                            <div className="mypage-x__scanx-metric-top">
+                              <div className="mypage-x__scanx-metric-copy">
+                                <p>길이</p>
+                                <strong>{printDetailScan.avgLength.toFixed(1)}<em>mm</em></strong>
                               </div>
-                              <div className="mypage-x__scanx-meter" aria-hidden="true">
-                                <i style={{ width: `${lengthPct}%` }} />
+                              <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.lengthIcon}</span>
+                            </div>
+                            <div className="mypage-x__scanx-meter" aria-hidden="true">
+                              <i style={{ width: `${lengthPct}%` }} />
+                            </div>
+                            <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
+                          </article>
+                          <article className="mypage-x__scanx-metric">
+                            <div className="mypage-x__scanx-metric-top">
+                              <div className="mypage-x__scanx-metric-copy">
+                                <p>너비</p>
+                                <strong>{printDetailScan.avgWidth.toFixed(1)}<em>mm</em></strong>
                               </div>
-                              <span className="mypage-x__scanx-metric-hint">끝에서 큐티클까지</span>
-                            </article>
-                            <article className="mypage-x__scanx-metric">
-                              <div className="mypage-x__scanx-metric-top">
-                                <div className="mypage-x__scanx-metric-copy">
-                                  <p>너비</p>
-                                  <strong>{printDetailScan.avgWidth.toFixed(1)}<em>mm</em></strong>
-                                </div>
-                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.widthIcon}</span>
+                              <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.widthIcon}</span>
+                            </div>
+                            <div className="mypage-x__scanx-meter" aria-hidden="true">
+                              <i style={{ width: `${widthPct}%` }} />
+                            </div>
+                            <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
+                          </article>
+                          <article className="mypage-x__scanx-metric">
+                            <div className="mypage-x__scanx-metric-top">
+                              <div className="mypage-x__scanx-metric-copy">
+                                <p>곡률</p>
+                                <strong>{printDetailScan.avgCurve.toFixed(1)}mm</strong>
                               </div>
-                              <div className="mypage-x__scanx-meter" aria-hidden="true">
-                                <i style={{ width: `${widthPct}%` }} />
-                              </div>
-                              <span className="mypage-x__scanx-metric-hint">최대 너비 평균</span>
-                            </article>
-                            <article className="mypage-x__scanx-metric">
-                              <div className="mypage-x__scanx-metric-top">
-                                <div className="mypage-x__scanx-metric-copy">
-                                  <p>곡률</p>
-                                  <strong>{printDetailScan.avgCurve.toFixed(1)}mm</strong>
-                                </div>
-                                <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.curveIcon}</span>
-                              </div>
-                              <div className="mypage-x__scanx-meter" aria-hidden="true">
-                                <i style={{ width: `${curvePct}%` }} />
-                              </div>
-                              <span className="mypage-x__scanx-metric-hint">C-curve 깊이</span>
-                            </article>
-                          </div>
-                        </>
-                    )}
-                  </section>
+                              <span className="mypage-x__scanx-metric-icon" aria-hidden="true">{Icon.curveIcon}</span>
+                            </div>
+                            <div className="mypage-x__scanx-meter" aria-hidden="true">
+                              <i style={{ width: `${curvePct}%` }} />
+                            </div>
+                            <span className="mypage-x__scanx-metric-hint">C-curve 깊이</span>
+                          </article>
+                        </div>
+                      </>
+                  )}
+                </section>
               </ScanXModalShell>
           )
         })()}

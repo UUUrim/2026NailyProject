@@ -11,6 +11,7 @@ export interface PrintOrderResponse {
     rightScanId: number | null
     mergedModelUrl?: string | null
     failReason?: string | null
+    queueAhead?: number | null // WAITING_IN_QUEUE일 때만: 내 앞에 출력 중/대기 중인 주문 수
 }
 
 /** POST /users/me/prints — 네일팁 출력 신청 기록 */
@@ -42,6 +43,7 @@ export interface PrinterProgress {
     remainingTimeMin: number | null
     nozzleTemp: number | null
     bedTemp: number | null
+    queueSize?: number // 프린터 서버 대기열에 쌓인 (아직 시작 안 한) 작업 수 — 프린터 전체 기준
     message?: string | null // 실패 시 원인
 }
 
