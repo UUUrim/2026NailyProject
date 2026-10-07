@@ -11,21 +11,27 @@ import type { FingerGuidePhase } from '@/features/hand-scan/components/TopViewFi
  * unsteady  : 측정은 다 찼지만 값들이 서로 안 맞음 (손가락이 흔들림)
  * ready     : 연속 측정값이 합의 — 촬영 가능
  * capturing : 촬영 버튼을 눌러 저장 중
+ * switching : 방금 손가락 촬영이 끝나 손가락을 빼기를 기다리는 중 — 서버는 곧바로 다음
+ *             손가락 측정을 시작해서 아직 매트 위에 있는 방금 찍은 손가락을 재므로,
+ *             그 측정값(측정 중/흔들림/촬영 가능)은 화면에 보여주지 않는다.
  */
-export type CaptureStatus = 'camera' | 'place' | 'measuring' | 'unsteady' | 'ready' | 'capturing'
+export type CaptureStatus = 'camera' | 'place' | 'measuring' | 'unsteady' | 'ready' | 'capturing' | 'switching'
 
 export function getCaptureStatus({
   cameraReady,
   ratio,
   stable,
   capturing,
+  switching,
 }: {
   cameraReady: boolean
   ratio: number
   stable: boolean
   capturing: boolean
+  switching: boolean
 }): CaptureStatus {
   if (capturing) return 'capturing'
+  if (switching) return 'switching'
   if (stable) return 'ready'
   // 측정이 돌고 있으면 카메라는 당연히 준비된 것 — guide가 안 와도 측정 상태를 우선한다.
   if (ratio >= 1) return 'unsteady'
@@ -59,19 +65,23 @@ export const CAPTURE_COPY: Record<CaptureStatus, CaptureCopy> = {
     button: '다시 맞추는 중…',
   },
   ready: {
-    title: () => '지금 촬영할 수 있어요',
+    title: () => '지금 촬영해 주세요',
     button: '지금 촬영',
   },
   capturing: {
     title: () => '촬영하고 있어요',
     button: '촬영 중…',
   },
+  switching: {
+    title: () => '손가락을 빼주세요',
+    button: '다음 손가락 준비 중',
+  },
 }
 
 /** 촬영 버튼 안 막대가 차오른 정도(0~1) — 서버 ratio를 그대로, 촬영 가능 이후엔 가득 */
 export function captureFill(status: CaptureStatus, ratio: number): number {
   if (status === 'ready' || status === 'capturing') return 1
-  if (status === 'camera' || status === 'place') return 0
+  if (status === 'camera' || status === 'place' || status === 'switching') return 0
   return Math.min(Math.max(ratio, 0), 1)
 }
 

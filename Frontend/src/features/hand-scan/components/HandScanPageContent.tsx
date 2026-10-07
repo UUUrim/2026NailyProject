@@ -3,6 +3,8 @@ import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { CameraSetupPreview } from '@/features/hand-scan/components/CameraSetupPreview'
 import { TopViewFingerGuide } from '@/features/hand-scan/components/TopViewFingerGuide'
+import { TopViewNailMeasure } from '@/features/hand-scan/components/TopViewNailMeasure'
+import { FeedScanState } from '@/features/hand-scan/components/FeedScanState'
 import { CaptureButton } from '@/features/hand-scan/components/CaptureButton'
 import { ScanProgressDots } from '@/features/hand-scan/components/ScanProgressDots'
 import { CAPTURE_COPY, getCaptureStatus, toGuidePhase } from '@/features/hand-scan/utils/captureStatus'
@@ -38,7 +40,9 @@ export function HandScanPageContent() {
     stabilityRatio,
     isStable,
     topGuide,
+    liveMeasure,
     isCapturing,
+    isSwitching,
     completedStep,
     sideCameraIdx,
     currentStepIndex,
@@ -64,6 +68,7 @@ export function HandScanPageContent() {
     ratio: stabilityRatio,
     stable: isStable,
     capturing: isCapturing,
+    switching: isSwitching,
   })
   const target = `${HAND_LABELS[currentHand]} ${FINGER_LABELS[currentFinger]}`
 
@@ -93,9 +98,15 @@ export function HandScanPageContent() {
                 <TopViewFingerGuide
                     guide={topGuide}
                     finger={currentFinger}
-                    fingerLabel={FINGER_LABELS[currentFinger]}
+                    fingerLabel={`${HAND_LABELS[currentHand]} ${FINGER_LABELS[currentFinger]}`}
                     phase={toGuidePhase(captureStatus)}
                 />
+                {/* 촬영 가능(안정)일 때만 손톱 위에 너비·길이 치수선 */}
+                <TopViewNailMeasure
+                    guide={topGuide}
+                    measure={captureStatus === 'ready' || captureStatus === 'capturing' ? liveMeasure : null}
+                />
+                <FeedScanState status={captureStatus} />
               </div>
 
               <div className="hand-scan-fs__divider" aria-hidden="true" />
@@ -109,8 +120,18 @@ export function HandScanPageContent() {
                         alt="사이드뷰 스캔 피드"
                     />
                 ) : null}
+                <FeedScanState status={captureStatus} />
               </div>
             </div>
+
+            {/* 측정 중(불안정)일 때 카메라 화면 한가운데 상태 표시 — 같은 자리에 뜨는
+                "촬영 완료" 안내·오류와 겹치지 않게, 그것들이 떠 있는 동안은 숨긴다 */}
+            {!completedStep && !cameraError && (captureStatus === 'measuring' || captureStatus === 'unsteady') ? (
+                <div className={`hand-scan-fs__state-badge hand-scan-fs__state-badge--${captureStatus}`} role="status">
+                  <span className="hand-scan-fs__state-spinner" aria-hidden="true" />
+                  {captureStatus === 'measuring' ? '측정 중' : '흔들림 감지 · 다시 측정 중'}
+                </div>
+            ) : null}
 
             <div className="hand-scan-fs__vignette" aria-hidden="true" />
 
@@ -125,8 +146,9 @@ export function HandScanPageContent() {
               </svg>
             </button>
 
-            {/* 촬영 완료 — 화면 가운데 잠깐 떴다 사라진다 (key가 바뀔 때마다 새로 떠서 CSS 애니메이션으로 사라짐) */}
-            {completedStep ? (
+            {/* 촬영 완료 — 화면 가운데 잠깐 떴다 사라진다 (key가 바뀔 때마다 새로 떠서 CSS 애니메이션으로 사라짐).
+                같은 자리에 오류가 떠 있으면 오류가 우선이라 숨긴다. */}
+            {completedStep && !cameraError ? (
                 <div
                     key={`${completedStep.hand}-${completedStep.finger}`}
                     className="hand-scan-fs__toast"
@@ -145,14 +167,16 @@ export function HandScanPageContent() {
                   </span>
                 </div>
             ) : null}
+
+            {/* 촬영 요청 오류 — "촬영 완료"가 뜨는 화면 정가운데에 계속 표시 (다음에 촬영 버튼을 누르면 지워짐) */}
+            {cameraError ? (
+                <p className="hand-scan-fs__error" role="alert">
+                  <span className="hand-scan-fs__error-icon" aria-hidden="true">!</span>
+                  {cameraError}
+                </p>
+            ) : null}
+
             <div className="hand-scan-fs__dock">
-              {/* 촬영 요청 오류 — 버튼 바로 위에 계속 표시 (다음에 촬영 버튼을 누르면 지워짐) */}
-              {cameraError ? (
-                  <p className="hand-scan-fs__error" role="alert">
-                    <span className="hand-scan-fs__error-icon" aria-hidden="true">!</span>
-                    {cameraError}
-                  </p>
-              ) : null}
               <CaptureButton
                   status={captureStatus}
                   ratio={stabilityRatio}
