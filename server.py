@@ -1,7 +1,7 @@
 """
 server.py — Naily 통합 서버 (스캔 + 프린터)
 --------------------------------------------
-스캔 서버(scan/_legacy_server.py, 미사용 레거시)와 프린터 서버(printer/server.py)를 하나로 합쳐
+스캔 서버(scan/server.py)와 프린터 서버(printer/server.py)를 하나로 합쳐
 ngrok 터널 하나만으로 EC2 Spring Boot와 통신한다.
 
 Usage:
@@ -12,15 +12,13 @@ Usage:
     GET  /health
 
   [스캔]
-    POST /analyze/measure     — 스캔 시작 (카메라 촬영 → 측정 → 콜백; measurements.json은 로컬에만 저장)
+    POST /analyze/measure     — 스캔 시작 (카메라 촬영 → 측정 → S3 업로드 → 콜백)
     POST /analyze/stl         — STL 생성 → S3 업로드 → 콜백
-    POST /analyze/measurements/merge-both — 양손 measurements.json 통합 → S3 업로드 → 콜백
     GET  /stream/top          — 탑뷰 MJPEG 스트림 (ArUco 가이드선 포함)
     GET  /stream/side         — 사이드뷰 MJPEG 스트림 (오버레이 없음)
     GET  /status/events       — SSE: 손가락 촬영 진행상황
     POST /capture/force       — 수동 촬영 트리거 (웹 "지금 촬영" 버튼)
     GET  /capture/status      — 현재 촬영 세션 상태
-    GET  /capture/stability   — 탑뷰 정확도 게이지 (ratio/ready)
 
   [폰 사이드뷰 카메라] — CAMERA_SIDE = -2 일 때 물리 웹캠 대신 사용
     GET  /phone/side          — 폰 브라우저에서 여는 카메라 페이지
@@ -97,8 +95,7 @@ from merge_fingers   import merge_hand, merge_both_hands          # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 from skin_color import recommend_nail_colors, lab_to_rgb_hex      # scan/
-from nail_measurer import (recommend_nail_shape, merge_hand_measurements,  # scan/
-                            classify_size_totals)
+from nail_measurer import recommend_nail_shape                    # scan/
 
 # 탑뷰 라이브 프리뷰 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정 화면을
 # 웹 스트림에도 그대로 재사용한다. 매 프레임 nail_measurer로 실측정을 돌리되,
@@ -106,11 +103,7 @@ from nail_measurer import (recommend_nail_shape, merge_hand_measurements,  # sca
 from nail_live import (MeasureWorker, compose as _live_compose,     # scan/
                         median_result as _live_median_result,
                         MEDIAN_N as _LIVE_MEDIAN_N,
-                        stability as _live_stability,
-                        detect_marker_only as _live_detect_marker_only,
-                        guide_line_row as _live_guide_line_row,
-                        guide_line_offset_mm as _live_guide_offset_mm,
-                        marker_mm_per_px as _live_marker_mm_per_px)
+                        detect_marker_only as _live_detect_marker_only)
 
 # ─────────────────────────────────────────────────────────────
 BASE   = _THIS_DIR
@@ -125,33 +118,15 @@ os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
 # ── 카메라 설정 ───────────────────────────────────────────────
 # 이 데스크톱은 물리 웹캠이 C920 하나뿐이고 OpenCV에서 인덱스 0으로 잡힘
 # (인덱스 1은 존재하지 않는 장치라 VideoCapture.open이 예외를 던지고 실패함).
-CAMERA_TOP        = 0   # 탑뷰: USB 웹캠 (C920)
+CAMERA_TOP        = 2    # 탑뷰: USB 웹캠 (C920)
 CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1: 사용 안 함
 ARUCO_SIZE_MM     = 20.0
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
-# 탑뷰 상단 crop 픽셀 (0 = 크롭 없음). 리그 상단 가장자리의 빨간 물체(1080p 기준
-# y≈0~95)가 피부색 임계값을 통과해 손가락으로 오인식되던 문제 - 카메라에서
-# 읽은 직후 잘라내서 라이브 측정/화면/저장 사진이 모두 같은 크롭을 쓴다.
-CROP_TOP_PX       = 120
 # 탑뷰 웹 스트림에서 ArUco 마커를 가리기 위한 왼쪽 crop 설정 (측정용 저장
 # 사진에는 영향 없음 — _capture_top_stream 참고). 마커는 매트에 고정된
 # 위치라 오른쪽 끝 + 여백을 한 번 잡으면 그 finger 촬영 내내 그대로 쓴다.
 MARKER_HIDE_MARGIN_PX      = 40    # 마커 오른쪽 끝에서 추가로 더 잘라낼 여백
-# 손가락 자리의 가로 중심 — 마커 오른쪽 끝에서 손가락 중심까지 거리(mm).
-# 실제 촬영 사진 17장(09-04, 세션 145~149)에서 손가락 중심이 49~64mm,
-# 중앙값 56mm에 놓여 있었다. 박스/매트 배치가 바뀌면 여기만 조정한다.
-FINGER_SLOT_FROM_MARKER_MM = 55.0
-# 화면 창의 가로/세로 비율 — 프론트 .hand-scan-fs__feed의 aspect-ratio(11/8)와
-# 같게 맞춰서 브라우저의 object-fit: cover가 추가로 잘라내지 않게 한다.
-TOP_VIEW_ASPECT            = 11 / 8
-# 큐티클 라인이 화면 높이에서 놓일 위치(위=0, 아래=1). 손끝과 안내 라벨이
-# 들어갈 위쪽 여백을 두면서 손가락이 들어오는 아래쪽도 조금 보이게 한다.
-# 프레임 아래 끝에 막히면 그보다 위에 놓인다.
-TOP_VIEW_CUTICLE_Y         = 0.72
-TOP_VIEW_MIN_W_PX          = 480   # 창이 이보다 좁아지면 예전 방식(마커 왼쪽만 잘라냄)으로
-# 손가락이 잠깐 인식 안 된 한두 측정 사이클 동안 가이드 선이 마커 기준
-# 추정 위치로 튀지 않도록 마지막 실측 guide_y를 유지하는 시간.
-GUIDE_LIVE_HOLD_SEC  = 0.5
+MARKER_HIDE_MIN_VISIBLE_PX = 200   # 잘라내고도 최소한 이만큼은 화면에 남긴다
 
 # ─────────────────────────────────────────────────────────────
 app = FastAPI(title="Naily 통합 서버")
@@ -341,8 +316,9 @@ def _run_slice_and_print(merged_model_url, output_dir, callback_url):
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
-#실제 동작하는 poll_until_complete부분
-def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
+
+def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200,
+                          startup_grace_sec: int = 180):
     """출력 완료될 때까지 폴링, 완료되면 콜백으로 COMPLETED 전송.
 
     FINISH와 IDLE을 똑같이 "완료"로 취급하면, 사용자가 프린터에서 출력을 도중에
@@ -350,21 +326,46 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7
     문제가 있었다. 그래서 IDLE로 돌아간 시점의 진행률(percentage)을 같이 봐서,
     거의 다 찍은 상태(95% 이상)에서 IDLE이면 완료로, 그보다 낮은 진행률에서
     IDLE이면 중간에 취소/중단된 것으로 구분한다.
+
+    #실제 동작하는 poll_until_complete부분
+
+    다만 출력 시작 명령을 보낸 직후에는 프린터가 베드 레벨링/예열 등을 하느라
+    실제로 출력(RUNNING/PREPARE)에 들어가기 전까지 잠깐 IDLE 상태로 남아있을 수
+    있다. 이걸 "0%에서 취소됨"으로 오판하지 않도록, RUNNING/PREPARE 상태를 한
+    번이라도 본 뒤에만 IDLE을 "취소/완료 판정" 대상으로 삼는다. 그 전까지의
+    IDLE은 "아직 준비 중"으로 보고 계속 기다리되, startup_grace_sec을 넘도록
+    끝내 시작도 못 하면(출력 시작 명령 자체가 실패한 경우 등) 실패로 보고한다.
     """
     start = time.time()
     last_percentage = 0
+    has_started = False
     while time.time() - start < timeout:
         time.sleep(interval)
         try:
             status = _fetch_printer_status()
             state = status.get("state", "")
+            upper_state = state.upper()
             pct = status.get("percentage") or 0
             last_percentage = max(last_percentage, pct)
 
-            if "FINISH" in state.upper():
+            if "FINISH" in upper_state:
                 requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
                 return
-            if "IDLE" in state.upper():
+
+            if "RUNNING" in upper_state or "PREPARE" in upper_state:
+                has_started = True
+
+            if "IDLE" in upper_state:
+                if not has_started:
+                    # 아직 예열/레벨링 중이라 진짜 출력 전인 IDLE — 취소가 아니므로 계속 대기
+                    if time.time() - start >= startup_grace_sec:
+                        requests.post(callback_url, json={
+                            "success": False,
+                            "message": f"{startup_grace_sec}초가 지나도 출력이 시작되지 않았습니다. "
+                                       f"프린터 상태를 확인해 주세요."
+                        })
+                        return
+                    continue
                 if last_percentage >= 95:
                     requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
                 else:
@@ -428,34 +429,11 @@ class _StreamState:
         self.active:       bool = False
         self.current_finger: str | None = None
         self.done_fingers: list = []
-        # 탑뷰 웹 스트림에 보낼 화면 창 (x0, y0, x1, y1, 원본 프레임 px) —
-        # 마커는 가리고 손가락 자리를 가운데 둔다(_top_view_rect). 마커가
-        # 처음 잡힐 때 정해지고, idle preview 루프(_top_camera_idle_preview_loop)도
-        # 같은 창을 써서 손가락 사이 대기 화면에서도 마커가 드러나지 않게 한다.
-        # None이면 아직 마커를 못 잡은 것.
-        self.top_view_rect: tuple | None = None
-        # 손가락 자리 가로 중심(원본 프레임 px) — 가이드 실루엣이 놓이는 열.
-        self.finger_slot_x: float = 0.0
-        # 마커를 처음 잡았을 때의 코너 — 손가락이 아직 없을 때도 프론트
-        # 가이드의 큐티클 라인 위치와 실루엣 크기(mm/px)를 계산하는 데 쓴다.
-        self.marker_corners = None
-        # 실측 중인 guide_y(원본 프레임 px)와 마지막으로 확인된 시각. 측정이
-        # 실제로 쓰는 행이라 있으면 마커 기준 추정보다 항상 우선한다.
-        self.live_guide: tuple | None = None
-        # 탑뷰 측정 정확도 게이지 — 프론트가 /capture/stability로 폴링해서
-        # 화면 왼쪽 게이지 바를 채운다. ratio: 0~1 (최근 측정 이력이 얼마나
-        # 찼는지), ready: 최근 MEDIAN_N개 측정의 W/L이 서로 합의된 상태
-        # (nail_live.stability와 동일한 기준) — true일 때만 촬영 버튼 활성화.
-        self.stability: dict = {"ratio": 0.0, "ready": False}
-        # 손가락별 라이브 측정 평균값 — 촬영 순간 게이지를 채운 그 안정 구간
-        # (nail_live.stability가 합의로 판단한 연속 프레임들)의 width_mm/
-        # length_mm 평균을 담아둔다. 키는 (hand, finger) — 왼손/오른손이
-        # 같은 손가락 이름을 쓰므로 섞이지 않게 구분. _measure_one_finger가
-        # 오프라인 재측정 직후 이 값으로 최종 width_mm/length_mm을 덮어써서,
-        # "여러 프레임이 합의한 값"이 실제로 최종 결과에 반영되게 한다 —
-        # 재측정 자체는 사진 한 장짜리 단일 프레임 값이라 라이브 평균보다
-        # 노이즈에 더 취약하기 때문.
-        self.live_wl: dict = {}
+        # 탑뷰 웹 스트림에서 마커를 가리기 위한 왼쪽 crop 폭(px). 마커가
+        # 처음 잡힐 때 _capture_top_stream이 갱신하고, 그 값을 idle preview
+        # 루프(_top_camera_idle_preview_loop)도 같이 참조해서 손가락 사이
+        # 대기 화면에서도 마커가 다시 드러나지 않게 한다.
+        self.marker_hide_x: int = 0
 
 _S = _StreamState()
 
@@ -487,16 +465,9 @@ class PhoneCamera:
         self._full_res        = None
         self._capture_wanted  = threading.Event()
         self._full_res_ready  = threading.Event()
-        self._last_preview_t  = 0.0
 
     def isOpened(self):
         return True
-
-    def is_connected(self, max_age: float = 3.0) -> bool:
-        """폰 카메라 페이지가 최근 max_age초 안에 프리뷰를 보냈는지 - 폰 없이
-        탑뷰만으로 테스트할 때 사이드뷰 고화질 촬영 타임아웃(8초)을 손가락마다
-        기다리지 않고 바로 건너뛰기 위한 판단 기준."""
-        return time.time() - self._last_preview_t < max_age
 
     def read(self):
         with self._lock:
@@ -506,7 +477,6 @@ class PhoneCamera:
     def push_preview(self, frame: np.ndarray):
         with self._lock:
             self._preview = cv2.rotate(frame, self.ROTATE)
-            self._last_preview_t = time.time()
 
     def capture_wanted(self) -> bool:
         return self._capture_wanted.is_set()
@@ -580,10 +550,6 @@ def _get_top_cam() -> cv2.VideoCapture:
         return _top_cam
 
 
-def _crop_top(frame: np.ndarray) -> np.ndarray:
-    return frame[CROP_TOP_PX:, :] if CROP_TOP_PX > 0 else frame
-
-
 def _push_frame(q: _q.Queue, frame: np.ndarray):
     if q.full():
         try: q.get_nowait()
@@ -618,93 +584,6 @@ def _phone_side_idle_preview_loop():
         time.sleep(0.15)
 
 
-def _top_view_rect(frame_w: int, frame_h: int, corners) -> tuple[tuple, float]:
-    """탑뷰 웹 스트림 화면 창 (x0, y0, x1, y1)과 손가락 자리 가로 중심 x.
-
-    예전엔 마커 왼쪽만 잘라내고 나머지를 전부 보여줘서, 화면 중심이 실제
-    손가락 자리보다 한참 오른쪽에 있었다(손가락이 왼쪽으로 치우쳐 보임).
-    이제 손가락 자리(마커 오른쪽 끝 + FINGER_SLOT_FROM_MARKER_MM)를 중심으로
-    좌우 대칭 창을 잡는다 — 왼쪽 끝은 마커를 가리는 선, 오른쪽 끝은 프레임
-    끝을 넘지 않는 한에서 가장 넓게. 세로는 TOP_VIEW_ASPECT에 맞춰 정하고,
-    큐티클 라인이 TOP_VIEW_CUTICLE_Y 높이에 오도록 위치시킨다.
-    """
-    mpp = _live_marker_mm_per_px(corners, ARUCO_SIZE_MM)
-    marker_right = float(corners[:, 0].max())
-    left_limit = marker_right + MARKER_HIDE_MARGIN_PX
-    slot_x = marker_right + FINGER_SLOT_FROM_MARKER_MM / mpp
-    half_w = min(slot_x - left_limit, frame_w - slot_x)
-
-    if half_w * 2 < TOP_VIEW_MIN_W_PX:
-        # 손가락 자리가 마커나 프레임 끝에 너무 붙어 있어 대칭 창이 너무
-        # 작아지는 배치 — 예전처럼 마커 왼쪽만 잘라내고 나머지를 보여준다.
-        x0 = int(min(left_limit, frame_w - TOP_VIEW_MIN_W_PX))
-        return (x0, 0, frame_w, frame_h), (x0 + frame_w) / 2
-
-    view_w = min(half_w * 2, frame_h * TOP_VIEW_ASPECT)
-    view_h = view_w / TOP_VIEW_ASPECT
-    cuticle_y = _live_guide_line_row(corners, slot_x, _live_guide_offset_mm("") / mpp)
-    y0 = min(max(cuticle_y - view_h * TOP_VIEW_CUTICLE_Y, 0.0), frame_h - view_h)
-    x0 = slot_x - view_w / 2
-    rect = (int(round(x0)), int(round(y0)),
-            int(round(x0 + view_w)), int(round(y0 + view_h)))
-    return rect, slot_x
-
-
-def _top_view(frame: np.ndarray) -> np.ndarray:
-    """웹 스트림에 보낼 부분만 잘라낸다 — 마커를 아직 못 잡았으면 원본 그대로."""
-    rect = _S.top_view_rect
-    if rect is None:
-        return frame
-    x0, y0, x1, y1 = rect
-    return frame[y0:y1, x0:x1]
-
-
-def _remember_marker(frame: np.ndarray):
-    """마커를 처음 잡았을 때 한 번만 위치를 기록한다 — 웹 스트림 화면 창과
-    프론트 가이드 계산용 코너/손가락 자리. 마커는 매트에 고정돼 있어 한 번
-    잡히면 세션 내내 안 바뀌므로 이후엔 바로 반환한다."""
-    if _S.top_view_rect is not None:
-        return
-    marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
-    if marker_corners is None:
-        return
-    rect, slot_x = _top_view_rect(frame.shape[1], frame.shape[0], marker_corners)
-    print(f"[Capture] 탑뷰 화면 창: {rect} (손가락 자리 x={slot_x:.0f}px)")
-    _S.marker_corners = marker_corners
-    _S.finger_slot_x = slot_x
-    _S.top_view_rect = rect   # 마지막에 — None 여부가 "마커 잡힘" 표시라서
-
-
-def _top_guide() -> dict | None:
-    """프론트 탑뷰 손가락/큐티클 가이드 위치 — 스트림 화면(_top_view_rect 창) 기준 비율.
-
-    cuticleY는 측정이 실제로 쓰는 guide_y 행 그대로다: 손가락이 잡혀 있으면
-    MeasureWorker의 실측값(EMA 포함), 아니면 같은 함수(guide_line_row)를
-    손가락 자리 열에서 마커만으로 계산한 값. 예전에 스트림에 직접
-    그리던 파란 점선과 같은 위치이고, 그리는 방식만 프론트로 옮겼다.
-    """
-    corners, rect = _S.marker_corners, _S.top_view_rect
-    if corners is None or rect is None:
-        return None
-    x0, y0, x1, y1 = rect
-    view_w, view_h = x1 - x0, y1 - y0
-    mpp = _live_marker_mm_per_px(corners, ARUCO_SIZE_MM)
-
-    live = _S.live_guide
-    if live is not None and time.time() - live[1] < GUIDE_LIVE_HOLD_SEC:
-        guide_y = live[0]
-    else:
-        offset_px = _live_guide_offset_mm(_S.current_finger or "") / mpp
-        guide_y = _live_guide_line_row(corners, _S.finger_slot_x, offset_px)
-
-    return {
-        "aspect":   view_w / view_h,                      # 스트림 화면 가로/세로 비율
-        "cuticleY": (guide_y - y0) / view_h,              # 0(위)~1(아래)
-        "centerX":  (_S.finger_slot_x - x0) / view_w,     # 0(왼쪽)~1(오른쪽)
-        "mmToH":    1.0 / mpp / view_h,                   # 1mm가 화면 높이에서 차지하는 비율
-    }
-
-
 def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.Event):
     """Keeps /stream/top live between per-finger capture windows.
 
@@ -723,18 +602,25 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
         if not _S.top_capture_busy.is_set():
             ret, frame = cap.read()
             if ret:
-                frame = _crop_top(frame)
                 # 세션 시작 직후(_capture_top_stream이 아직 첫 프레임도 못 돌린
                 # 찰나) 이 idle 루프가 먼저 프레임을 밀어넣는 경우, 마커가
-                # 아직 안 잡혀 있어(_S.top_view_rect is None) 그대로 노출된다 —
+                # 아직 안 잡혀 있어(_S.marker_hide_x == 0) 그대로 노출된다 —
                 # 손가락 없이도 되는 가벼운 감지라 여기서도 똑같이 시도해서
-                # 그 틈을 없앤다. 한 번 잡히면 이후로는 추가 비용이 없다.
-                _remember_marker(frame)
-                _push_frame(_S.top_frame, _top_view(frame))
+                # 그 틈을 없앤다. 한 번 잡히면 이후로는 아래 조건이 계속
+                # False라 추가 비용이 없다.
+                if _S.marker_hide_x == 0:
+                    marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+                    if marker_corners is not None:
+                        marker_right_px = int(round(float(marker_corners[:, 0].max())))
+                        _S.marker_hide_x = min(
+                            marker_right_px + MARKER_HIDE_MARGIN_PX,
+                            frame.shape[1] - MARKER_HIDE_MIN_VISIBLE_PX)
+                disp = frame[:, _S.marker_hide_x:] if _S.marker_hide_x > 0 else frame
+                _push_frame(_S.top_frame, disp)
         time.sleep(0.05)
 
 
-def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
+def _capture_top_stream(cap, finger: str, save_path: str) -> bool:
     """탑뷰 스트리밍 - nail_live.py(로컬 CLI)와 동일한 실시간 측정 미리보기.
 
     매 프레임 nail_measurer로 실측정을 돌려 폭/길이와 윤곽선을 그려 보여준다.
@@ -743,9 +629,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     그 median을, 아니면 그 순간의 단일 프레임을 accept한다 (nail_live.py의
     ENTER 키 동작과 동일) - 사이드뷰(force_capture_side)와 같은 원칙.
     """
-    # 큐티클 가이드는 프론트가 /capture/stability의 guide로 직접 그린다 —
-    # 스트림에 점선을 또 구우면 두 줄이 겹쳐 보이므로 여기선 끈다.
-    worker = MeasureWorker(finger, ARUCO_SIZE_MM, draw_guide=False)
+    worker = MeasureWorker(finger, ARUCO_SIZE_MM)
     worker.start()
     history  = deque(maxlen=_LIVE_MEDIAN_N)
     last_t   = 0.0
@@ -753,9 +637,6 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     # the operator's manual button, however long that takes - same as the
     # side/c-curve view.
     _S.force_capture_top.clear()
-    _S.stability = {"ratio": 0.0, "ready": False}
-    _S.live_guide = None
-    _S.live_wl.pop((hand, finger), None)
     _push_event({"type": "finger_start", "finger": finger.upper()})
     print(f"\n  [{finger}] 탑뷰 스트리밍 시작 (실시간 측정)")
 
@@ -783,7 +664,6 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             ret, frame = cap.read()
             if not ret:
                 return False
-            frame = _crop_top(frame)
 
             worker.submit(frame)
             result = worker.latest()
@@ -794,15 +674,6 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
                     history.append(result)
                 else:
                     history.clear()
-
-            # ── 정확도 게이지 갱신: history가 찰수록 ratio가 오르고, MEDIAN_N개
-            # 읽음값의 W/L이 서로 합의(agree)하면 ready=true (초록) — nail_live.py
-            # CLI의 auto-capture 조건과 동일한 기준을 재사용한다.
-            is_stable, _dw, _dl = _live_stability(history)
-            _S.stability = {
-                "ratio": min(len(history) / _LIVE_MEDIAN_N, 1.0),
-                "ready": is_stable,
-            }
 
             # measure_frame silences nail_measurer's own prints (see
             # quiet()), so without this the operator has no way to see
@@ -827,13 +698,13 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             # 마커가 가려지지 않는다 (실제로 확인된 문제). 마커는 매트에
             # 고정돼 있어 한 번 잡히면 세션(손가락 5개) 내내 안 바뀌므로,
             # 이미 잡힌 뒤에는 매 프레임 다시 돌릴 필요가 없다.
-            _remember_marker(frame)
-
-            # 프론트 큐티클 가이드는 측정이 실제로 쓰는 행을 따라가야 한다 —
-            # 손가락이 잡힌 측정 결과가 있는 동안 계속 갱신하고, 끊기면
-            # GUIDE_LIVE_HOLD_SEC 뒤 _top_guide가 마커 기준 추정으로 돌아간다.
-            if result is not None and result.get("guide_y") is not None:
-                _S.live_guide = (float(result["guide_y"]), now)
+            if _S.marker_hide_x == 0:
+                marker_corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+                if marker_corners is not None:
+                    marker_right_px = int(round(float(marker_corners[:, 0].max())))
+                    _S.marker_hide_x = min(
+                        marker_right_px + MARKER_HIDE_MARGIN_PX,
+                        frame.shape[1] - MARKER_HIDE_MIN_VISIBLE_PX)
 
             if result is not None and result.get("ok"):
                 last_ok_result, last_ok_t = result, now
@@ -844,7 +715,7 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
 
             _push_frame(_S.top_frame, _live_compose(
                 display_result, frame, history, finger, 0,
-                crop_rect=_S.top_view_rect, show_pip=False))
+                crop_left_px=_S.marker_hide_x, show_pip=False))
 
             if _S.force_capture_top.is_set():
                 _S.force_capture_top.clear()
@@ -858,33 +729,15 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
                 if len(history) == _LIVE_MEDIAN_N:
                     accepted = _live_median_result(history)
                     print(f"  [{finger}] 탑뷰 수동 촬영 (median of {_LIVE_MEDIAN_N})")
-                    # 게이지를 초록으로 만든 그 합의 구간 자체가 신호 — 사진은
-                    # median 프레임 하나를 저장하지만(자기 자신을 재측정해도
-                    # 같은 값이 나오는 실제 프레임이어야 하므로), 최종 W/L은
-                    # 그 구간 전체의 평균을 쓰는 게 단일 프레임보다 노이즈에
-                    # 덜 흔들린다 — _measure_one_finger가 재측정 직후 이 값으로
-                    # 덮어쓴다.
-                    _S.live_wl[(hand, finger)] = {
-                        "width_mm":  sum(h["data"]["width_mm"]  for h in history) / len(history),
-                        "length_mm": sum(h["data"]["length_mm"] for h in history) / len(history),
-                    }
                 elif result is not None and result["ok"]:
                     accepted = result
                     print(f"  [{finger}] 탑뷰 수동 촬영 (단일 프레임)")
-                    # 합의 구간이 없으니(연속 측정 부족) 평균 낼 것도 없다 —
-                    # 이 한 프레임의 값을 그대로 라이브 값으로 둔다.
-                    _S.live_wl[(hand, finger)] = {
-                        "width_mm":  result["data"]["width_mm"],
-                        "length_mm": result["data"]["length_mm"],
-                    }
                 else:
                     accepted = {"frame": frame}
                     print(f"  [{finger}] 탑뷰 수동 촬영 (측정 실패, 원본 프레임 저장)")
-                    # 라이브 측정 자체가 없었으니 override 없이 재측정 결과를 그대로 쓴다.
                 break
     finally:
         worker.stop()
-        _S.live_guide = None
         _S.top_capture_busy.clear()
 
     h = accepted["frame"].shape[0]
@@ -932,11 +785,6 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
 
             if _S.force_capture_side.is_set():
                 _S.force_capture_side.clear()
-                if is_phone and not cap.is_connected():
-                    # 폰 카메라 페이지가 안 열려있음 - 8초 타임아웃을 기다리지 않고
-                    # 바로 건너뛴다. 탑뷰만으로도 측정은 진행된다 (c-curve만 생략).
-                    print(f"  [{finger}] 폰 사이드뷰 미연결 → 사이드뷰 건너뜀 (탑뷰만 측정)")
-                    return False
                 if is_phone:
                     if ret:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",
@@ -962,7 +810,7 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
         _S.side_capture_busy.clear()
 
 
-def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str, hand: str):
+def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str):
     """탑뷰 + 사이드뷰 동시 캡처. /capture/force 한 번으로 두 카메라 동시 촬영."""
     top_path  = os.path.join(local_dir, f"{finger}_top.jpg")
     side_path = os.path.join(local_dir, f"{finger}_side.jpg")
@@ -971,7 +819,7 @@ def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str, hand: s
     side_result = [False]
 
     def capture_top():
-        top_result[0] = _capture_top_stream(cap_top, finger, top_path, hand)
+        top_result[0] = _capture_top_stream(cap_top, finger, top_path)
 
     def capture_side():
         side_result[0] = _capture_side_stream(cap_side, finger, side_path)
@@ -1020,7 +868,7 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
             _S.force_capture_top.clear()
             _S.force_capture_side.clear()
 
-            top_ok, _ = _capture_finger_both(cap_top, cap_side, finger, local_dir, hand)
+            top_ok, _ = _capture_finger_both(cap_top, cap_side, finger, local_dir)
             if not top_ok:
                 print(f"  [{finger}] 탑뷰 실패 → 건너뜀")
                 continue
@@ -1047,7 +895,7 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
     return local_dir
 
 
-def _measure_one_finger(finger: str, photos_root: str, results_root: str, hand: str):
+def _measure_one_finger(finger: str, photos_root: str, results_root: str):
     top_path   = os.path.join(photos_root, f"{finger}_top.jpg")
     side_path  = os.path.join(photos_root, f"{finger}_side.jpg")
     finger_out = os.path.join(results_root, finger)
@@ -1065,14 +913,6 @@ def _measure_one_finger(finger: str, photos_root: str, results_root: str, hand: 
     if os.path.isfile(side_path):
         cmd += ["--ccurve-top", side_path]
 
-    # 촬영 순간 게이지를 채운 라이브 평균값이 있으면, 재측정(사진 한 장짜리
-    # 단일 프레임)이 내놓는 값 대신 그걸 최종 width_mm/length_mm으로 쓴다 —
-    # 여러 프레임이 합의한 값이 노이즈에 더 강하다는 게 이 override의 취지.
-    live = _S.live_wl.pop((hand, finger), None)
-    if live is not None:
-        cmd += ["--live-width-mm", str(live["width_mm"]),
-                "--live-length-mm", str(live["length_mm"])]
-
     result = subprocess.run(cmd, cwd=_SCAN_DIR, capture_output=True, text=True,
                              encoding="utf-8", errors="replace")
     if result.returncode != 0:
@@ -1089,7 +929,7 @@ def _run_measure_only(userid: str, session: str, hand: str):
     threads = [
         threading.Thread(
             target=_measure_one_finger,
-            args=(finger, photos_root, results_root, hand),
+            args=(finger, photos_root, results_root),
             daemon=True,
         )
         for finger in FINGER_ORDER
@@ -1100,128 +940,55 @@ def _run_measure_only(userid: str, session: str, hand: str):
         t.join()
 
 
-def _merge_hand_results(userid: str, session: str, hand: str) -> str | None:
-    """Combine each finger's own nail_measurements.json (written by its own
-    nail_measurer.py subprocess - see _measure_one_finger) into a single
-    hand-level measurements.json, with a summary recomputed across all of
-    that hand's fingers instead of each finger's own single-finger one.
+def _upload_results(userid: str, session: str, hand: str):
+    """Upload all 5 fingers' results (up to 15 files) to S3 in parallel.
 
-    The per-finger nail_measurements.json files are internal intermediates
-    only (never uploaded, never read by the callback/STL steps) and are
-    removed once merged, so a hand only ever leaves behind one
-    measurements.json.
+    This used to be a plain sequential loop - up to 15 blocking round trips
+    back to back, one file at a time. These are independent uploads to
+    different S3 keys, so there's no ordering requirement between them;
+    running them concurrently turns ~15x(one upload's latency) into
+    ~1x(one upload's latency), which was the single biggest contributor to
+    how long the result screen sat waiting after the last finger.
     """
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    per_finger = {}
+    s3_prefix    = f"results/{userid}/{session}/{hand}"
+    jobs = []
     for finger in FINGER_ORDER:
-        p = os.path.join(results_root, finger, "nail_measurements.json")
-        if os.path.isfile(p):
-            try:
-                with open(p, encoding="utf-8") as f:
-                    per_finger[finger] = json.load(f)
-            except Exception as e:
-                print(f"  [{finger}] measurements 읽기 오류: {e}")
-    if not per_finger:
-        return None
-
-    merged   = merge_hand_measurements(per_finger)
-    out_path = os.path.join(results_root, "measurements.json")
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2, ensure_ascii=False)
-
-    for finger in per_finger:
-        try:
-            os.remove(os.path.join(results_root, finger, "nail_measurements.json"))
-        except Exception:
-            pass
-    return out_path
-
-
-def _run_merge_both_measurements(userid: str, left_session: str, right_session: str,
-                                  callback_url: str):
-    """Combine the left/right hands' local-only measurements.json (each
-    written by _merge_hand_results once that hand's scan finishes) into one
-    both-hands JSON, and upload only that combined file to S3 - mirrors
-    _run_merge_both_hands' left_session_right_session S3 key convention for
-    the merged STL.
-    """
-    try:
-        left_path  = os.path.join(BASE, "results", userid, left_session,  "left",  "measurements.json")
-        right_path = os.path.join(BASE, "results", userid, right_session, "right", "measurements.json")
-        missing = [p for p in (left_path, right_path) if not os.path.isfile(p)]
-        if missing:
-            raise RuntimeError(f"measurements.json 없음: {missing}")
-
-        with open(left_path, encoding="utf-8") as f:
-            left_data = json.load(f)
-        with open(right_path, encoding="utf-8") as f:
-            right_data = json.load(f)
-
-        # 손가락 각각을 지 손가락 평균과 비교해서 5/10개 판정을 다수결로 모으는
-        # 대신, 양손 10개 손톱의 측정값 합계를 아시아 여성 평균 10개 손톱 합계와
-        # 통째로 비교한 "양손 vs 양손" 단일 판정 (팀장 요청) - nail_measurer.
-        # classify_size_totals() 참고.
-        all_nails    = left_data.get("nails", []) + right_data.get("nails", [])
-        both_summary = classify_size_totals(all_nails)
-
-        combined = {"left": left_data, "right": right_data, "summary": both_summary}
-
-        both_dir = os.path.join(BASE, "results", userid, f"{left_session}_{right_session}", "both")
-        os.makedirs(both_dir, exist_ok=True)
-        combined_path = os.path.join(both_dir, "measurements.json")
-        with open(combined_path, "w", encoding="utf-8") as f:
-            json.dump(combined, f, indent=2, ensure_ascii=False)
-
-        s3_key = f"results/{userid}/{left_session}_{right_session}/both/measurements.json"
-        measurements_url = _upload_file(combined_path, s3_key)
-
-        requests.post(callback_url, json={
-            "success":          True,
-            "measurementsUrl":  measurements_url,
-            "overallSize":      both_summary["nail_size"],
-            "widthSize":        both_summary["width_size"],
-            "lengthSize":       both_summary["length_size"],
-            "summaryText":      both_summary["summary_text"],
-        })
-    except Exception as e:
-        requests.post(callback_url, json={"success": False, "message": str(e)})
+        finger_dir = os.path.join(results_root, finger)
+        for fname in [f"{finger}_annotated.jpg", "nail_measurements.json", "profile.json"]:
+            lp = os.path.join(finger_dir, fname)
+            if os.path.isfile(lp):
+                jobs.append((lp, f"{s3_prefix}/{finger}/{fname}"))
+    if not jobs:
+        return
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        list(pool.map(lambda job: _upload_file(*job), jobs))
 
 
 def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     results_root = os.path.join(BASE, "results", userid, session, hand)
-    measurements_path = os.path.join(results_root, "measurements.json")
+    s3_prefix    = f"results/{userid}/{session}/{hand}"
 
     fingers_data = []
     skin_tones   = []
     skin_metrics = []
     sizes        = []
     wl_checks    = []
-    summary_text = ""
 
-    mj = {}
-    if os.path.isfile(measurements_path):
+    for finger in FINGER_ORDER:
+        finger_dir        = os.path.join(results_root, finger)
+        measurements_path = os.path.join(finger_dir, "nail_measurements.json")
+        profile_path      = os.path.join(finger_dir, "profile.json")
+        if not (os.path.exists(measurements_path) and os.path.exists(profile_path)):
+            continue
         try:
             with open(measurements_path, encoding="utf-8") as f:
                 mj = json.load(f)
-        except Exception as e:
-            print(f"  measurements.json 읽기 오류: {e}")
-
-    by_finger    = mj.get("by_finger", {})
-    summary_text = (mj.get("summary") or {}).get("summary_text", "")
-
-    for finger in FINGER_ORDER:
-        fd = by_finger.get(finger)
-        if not fd:
-            continue
-        try:
-            # [레거시] fd["nail_size"]는 이 손가락 하나를 그 손가락 전용 아시아
-            # 여성 평균과 비교한 개별 판정 - sizes에 모아 아래 overall_size를
-            # 만드는 데만 쓴다 (recommend_nail_shape 게이팅용, 계속 필요).
-            # "평균보다 크다/작다/평균이다" 라는 고객 노출용 종합 판정은 더 이상
-            # 이 방식(손가락별 비교 후 다수결)을 쓰지 않고, 양손 스캔이 다 끝난
-            # 뒤 /analyze/measurements/merge-both가 10개 손톱 합계 대 합계로
-            # 다시 계산한다 (nail_measurer.classify_size_totals 참고).
-            nail_size = fd.get("nail_size", "average")
+            fd = mj.get("by_finger", {}).get(finger, {})
+            with open(profile_path, encoding="utf-8") as f:
+                prof = json.load(f)
+            summary   = prof.get("summary") or {}
+            nail_size = summary.get("nail_size", "average")
             skin_tone = fd.get("skin_tone_hex", "")
             if fd.get("wl_ratio_check"):
                 wl_checks.append(fd["wl_ratio_check"])
@@ -1229,7 +996,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             sizes.append(nail_size)
 
             # nail_measurer.py가 손톱판/매니큐어를 피한 밴드에서 뽑아준 LAB
-            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/_legacy_server.py와 동일).
+            # 메트릭 — 있는 손가락만 모아서 나중에 평균낸다 (scan/server.py와 동일).
             if fd.get("skin_L") is not None:
                 skin_metrics.append({
                     "L":          fd["skin_L"],
@@ -1238,9 +1005,15 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
                     "warmness":   fd["skin_warmness"],
                     "saturation": fd["skin_saturation"],
                 })
+            # profile.json fingers 배열에서 이 손가락 데이터 찾기
+            finger_prof = next(
+                (f for f in prof.get("fingers", []) if f.get("finger") == finger),
+                {}
+            )
 
             fingers_data.append({
-                "finger": finger.upper(),
+                "finger":            finger.upper(),
+                "annotatedImageUrl": _s3_url(f"{s3_prefix}/{finger}/{finger}_annotated.jpg"),
                 "measurements": {
                     # 측정 수치
                     "widthMm":           safe_float(fd.get("width_mm")),
@@ -1249,12 +1022,12 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
                     "cCurveMm":          safe_float(fd.get("c_curve_mm")),
                     "arcRadiusMm":       safe_float(fd.get("arc_radius_mm")),
                     "thicknessMm":       safe_float(fd.get("thickness_mm")),
-                    # 논문 기준 비교값
-                    "widthVsAvgMm":  safe_float(fd.get("width_vs_avg_mm")),
-                    "lengthVsAvgMm": safe_float(fd.get("length_vs_avg_mm")),
-                    "widthSize":     fd.get("width_size", "average"),
-                    "lengthSize":    fd.get("length_size", "average"),
-                    "nailSize":      fd.get("nail_size", "average"),
+                    # profile.json 논문 기준 비교값
+                    "widthVsAvgMm":  safe_float(finger_prof.get("width_vs_avg_mm")),
+                    "lengthVsAvgMm": safe_float(finger_prof.get("length_vs_avg_mm")),
+                    "widthSize":     finger_prof.get("width_size", "average"),
+                    "lengthSize":    finger_prof.get("length_size", "average"),
+                    "nailSize":      finger_prof.get("nail_size", "average"),
                 },
                 "size": nail_size,
             })
@@ -1262,9 +1035,6 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
             print(f"  [{finger}] 결과 읽기 오류: {e}")
 
     skin_tone_hex = skin_tones[0] if skin_tones else "#C8A882"
-    # [레거시] 이 손(hand) 5개 손가락의 개별 판정 다수결 - recommend_nail_shape
-    # 게이팅에만 쓴다. 아래 return의 overallSize/summaryText는 이 값 그대로라
-    # 마찬가지로 레거시(잠정값)이고, 최종 종합 판정은 merge-both 콜백에서 온다.
     overall_size  = max(set(sizes), key=sizes.count) if sizes else "average"
     recommended_colors = []
     tone = brightness = saturation = None
@@ -1274,7 +1044,7 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
           f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
 
     # 유효한 손가락들의 LAB 평균으로 피부색/웜쿨/명도/채도/추천컬러 30개를
-    # 한 번에 계산한다 (scan/_legacy_server.py의 build_callback_data와 동일한 방식).
+    # 한 번에 계산한다 (scan/server.py의 build_callback_data와 동일한 방식).
     if skin_metrics:
         avg_L    = sum(m["L"] for m in skin_metrics) / len(skin_metrics)
         avg_a    = sum(m["a"] for m in skin_metrics) / len(skin_metrics)
@@ -1295,11 +1065,25 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     else:
         print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
+    # summary_text: 왼손 profile.json summary에서 가져옴
+    summary_text = ""
+    for finger in FINGER_ORDER:
+        profile_path = os.path.join(results_root, finger, "profile.json")
+        if os.path.exists(profile_path):
+            try:
+                with open(profile_path, encoding="utf-8") as f:
+                    _p = json.load(f)
+                summary_text = _p.get("summary", {}).get("summary_text", "")
+                if summary_text:
+                    break
+            except Exception:
+                pass
+
     return {
         "shape":             recommended_shape,
         "skinToneHex":       skin_tone_hex,
-        "overallSize":       overall_size,  # [레거시] 잠정값 - 최종은 merge-both 콜백 참고
-        "summaryText":       summary_text,  # [레거시] 잠정값 - 최종은 merge-both 콜백 참고
+        "overallSize":       overall_size,
+        "summaryText":       summary_text,
         "recommendedColors": recommended_colors,
         "tone":              tone,
         "brightness":        brightness,
@@ -1317,10 +1101,7 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
         def _background_measure():
             try:
                 _run_measure_only(userid, session, hand)
-                # 왼손/오른손 각각의 measurements.json은 로컬에만 남기고, S3에는
-                # /analyze/measurements/merge-both가 두 손 다 끝난 뒤 하나로
-                # 합친 결과만 올린다.
-                _merge_hand_results(userid, session, hand)
+                _upload_results(userid, session, hand)
                 data = _build_callback_data(userid, session, hand)
                 requests.post(callback_url, json=data)
                 print(f"[Pipeline] 콜백 완료: {hand}")
@@ -1335,70 +1116,36 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
 
-def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, callback_url: str,
-                          tip_extension_mm: float | None = None):
-    """손가락별로 "내 실측 손톱 길이 + 연장 길이(tip_extension_mm)"짜리 STL을 만들어 S3에 올린다.
-    tip_extension_mm이 None이면 nail_exact_stl.py가 쉐입별 기본값(TIP_EXTENSION_DEFAULT_MM)을 쓴다."""
+def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, callback_url: str):
     try:
         results_root = os.path.join(BASE, "results", userid, session, hand)
         stl_dir      = os.path.join(results_root, "stl")
         os.makedirs(stl_dir, exist_ok=True)
         s3_prefix    = f"results/{userid}/{session}/{hand}"
 
-        mp = os.path.join(results_root, "measurements.json")
-        if not os.path.isfile(mp):
-            raise RuntimeError(f"measurements.json 없음: {mp}")
-        with open(mp, encoding="utf-8") as f:
-            available_fingers = set(json.load(f).get("by_finger", {}))
-
-        ext_label = f"+{tip_extension_mm}mm" if tip_extension_mm is not None else "쉐입 기본값"
-        print(f"[STL] {userid}/{session}/{hand} shape={shape} 연장 길이={ext_label}")
-
-        succeeded = []
         for finger in FINGER_ORDER:
-            if finger not in available_fingers:
+            mp = os.path.join(results_root, finger, "nail_measurements.json")
+            if not os.path.isfile(mp):
                 continue
-            # STL 파일명엔 길이가 안 들어가서(nail_{finger}_{shape}.stl) 이전 출력 때 만든 파일과
-            # 이름이 같다. 이번 생성이 실패했을 때 예전 길이의 파일이 남아 있다가 업로드·출력되지
-            # 않도록, 먼저 지우고 새로 만든다.
-            out_path = os.path.join(stl_dir, f"nail_{finger}_{shape}.stl")
-            if os.path.isfile(out_path):
-                os.remove(out_path)
-
-            cmd = [
+            stl_result = subprocess.run([
                 sys.executable, os.path.join(_SCAN_DIR, "nail_exact_stl.py"),
                 "--input", mp, "--shape", shape, "--finger", finger, "--output", stl_dir,
-            ]
-            if tip_extension_mm is not None:
-                cmd += ["--tip-extension", str(tip_extension_mm)]
-            stl_result = subprocess.run(cmd, cwd=_SCAN_DIR, capture_output=True, text=True,
-                                        encoding="utf-8", errors="replace")
-            if stl_result.returncode != 0 or not os.path.isfile(out_path):
+            ], cwd=_SCAN_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if stl_result.returncode != 0:
                 print(f"  [{finger}] STL 생성 실패: {stl_result.stderr[-500:]}")
             else:
                 print(f"  [{finger}] STL 생성 완료")
-                succeeded.append(finger)
 
-        fingers_data = []
-        for finger in FINGER_ORDER:
-            s3_key = f"{s3_prefix}/stl/nail_{finger}_{shape}.stl"
-            if finger in succeeded:
-                _upload_file(os.path.join(stl_dir, f"nail_{finger}_{shape}.stl"), s3_key)
-                fingers_data.append({"finger": finger.upper(), "stlUrl": _s3_url(s3_key)})
-            else:
-                # 이번에 못 만든 손가락은 S3에 남아 있을 수 있는 예전 길이의 STL을 지운다 - 안 그러면
-                # 병합 단계가 그 파일을 그대로 받아서 사용자가 고른 길이와 다른 팁이 출력된다.
-                # 지우면 병합 단계에서 "빠진 손가락(missing)"으로 정상 처리된다.
-                try:
-                    _s3_client().delete_object(Bucket=BUCKET, Key=s3_key)
-                except Exception as e:
-                    print(f"  [{finger}] 이전 STL 삭제 실패: {e}")
+        from s3_upload import upload_folder
+        upload_folder(stl_dir, f"{s3_prefix}/stl")
 
-        if not succeeded:
-            raise RuntimeError("STL을 하나도 생성하지 못했습니다.")
-        requests.post(callback_url, json={"success": True, "fingers": fingers_data})
+        fingers_data = [
+            {"finger": f.upper(),
+             "stlUrl": _s3_url(f"{s3_prefix}/stl/nail_{f}_{shape}.stl")}
+            for f in FINGER_ORDER
+        ]
+        requests.post(callback_url, json={"fingers": fingers_data})
     except Exception as e:
-        print(f"[STL] 오류: {e}")
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
 
@@ -1411,9 +1158,6 @@ class MeasureRequest(BaseModel):
 
 class StlRequest(BaseModel):
     userid: str; session: str; hand: str; shape: str; callbackUrl: str
-    # 출력 화면에서 사용자가 설정한 팁 연장 길이(mm). 없으면 쉐입별 기본값을 쓴다.
-    # (이 필드가 없으면 pydantic이 Spring이 보낸 값을 조용히 버린다)
-    tip_extension_mm: float | None = None
 
 class MergeOneHandRequest(BaseModel):
     userid: str; session: str; hand: str
@@ -1424,9 +1168,6 @@ class MergeBothHandsRequest(BaseModel):
     userid: str; leftSession: str; rightSession: str
     leftShapes: dict[str, str]; rightShapes: dict[str, str]
     callbackUrl: str; printCallbackUrl: str | None = None
-
-class MergeBothMeasurementsRequest(BaseModel):
-    userid: str; leftSession: str; rightSession: str; callbackUrl: str
 
 class StartPrintRequest(BaseModel):
     mergedModelUrl: str; outputDir: str; callbackUrl: str
@@ -1463,21 +1204,10 @@ def analyze_measure(request: MeasureRequest):
 def analyze_stl(request: StlRequest):
     threading.Thread(
         target=_run_stl_and_callback,
-        args=(request.userid, request.session, request.hand, request.shape, request.callbackUrl,
-              request.tip_extension_mm),
+        args=(request.userid, request.session, request.hand, request.shape, request.callbackUrl),
         daemon=True,
     ).start()
     return {"status": "started", "message": "STL 생성이 시작되었습니다."}
-
-
-@app.post("/analyze/measurements/merge-both")
-def analyze_measurements_merge_both(request: MergeBothMeasurementsRequest):
-    threading.Thread(
-        target=_run_merge_both_measurements,
-        args=(request.userid, request.leftSession, request.rightSession, request.callbackUrl),
-        daemon=True,
-    ).start()
-    return {"status": "started", "message": "양손 측정 결과 통합이 시작되었습니다."}
 
 
 def _placeholder_jpeg(text: str = "") -> bytes:
@@ -1545,13 +1275,6 @@ def capture_force():
 @app.get("/capture/status")
 def capture_status():
     return {"active": _S.active, "currentFinger": _S.current_finger, "doneFinger": _S.done_fingers}
-
-
-@app.get("/capture/stability")
-def capture_stability():
-    """탑뷰 정확도 게이지 + 손가락/큐티클 가이드 위치 조회 — 프론트가 짧은 주기로 폴링.
-    guide는 마커를 아직 못 잡았으면 null (_top_guide 참고)."""
-    return {**_S.stability, "guide": _top_guide()}
 
 
 # ── 폰 사이드뷰 카메라 ───────────────────────────────────────
