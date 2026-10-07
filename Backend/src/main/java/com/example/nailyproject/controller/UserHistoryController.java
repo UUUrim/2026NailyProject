@@ -5,15 +5,11 @@ import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
 import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
-import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.entity.HandScan;
-import com.example.nailyproject.entity.ScanImg;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.HandScanRepository;
-import com.example.nailyproject.repository.ScanImgRepository;
 import com.example.nailyproject.service.PrintOrderService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.nailyproject.service.ScanResultFileService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,9 +31,8 @@ import java.util.stream.Collectors;
 public class UserHistoryController {
 
     private final HandScanRepository handScanRepository;
-    private final ScanImgRepository scanImgRepository;
     private final PrintOrderService printOrderService;
-    private final ObjectMapper objectMapper;
+    private final ScanResultFileService scanResultFileService;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
@@ -52,22 +47,23 @@ public class UserHistoryController {
 
         List<ScanHistoryItemDto> data = scans.stream()
                 .map(scan -> {
-                    FingerAverages averages = computeFingerAverages(scan);
+                    // 분석 값은 로컬 양손 최종 measurements.json에서 온다 (파일이 아직 없으면 비어 있음).
+                    ScanResultFileService.ScanAnalysis a = scanResultFileService.analysisFor(scan).orElse(null);
                     return ScanHistoryItemDto.builder()
                             .scanId(scan.getId())
                             .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
                             .status(scan.getStatus() != null ? scan.getStatus().name() : null)
-                            .shape(scan.getShape())
-                            .recommendedShape(scan.getRecommendedShape())
-                            .skinToneHex(scan.getSkinToneHex())
-                            .recommendedColors(ScanResultResponseDto.parseRecommendedColors(scan.getRecommendedColors(), objectMapper))
-                            .tone(scan.getTone())
-                            .warmness(scan.getWarmness())
-                            .brightness(scan.getBrightness())
-                            .saturation(scan.getSaturation())
-                            .avgLengthMm(averages.lengthMm())
-                            .avgWidthMm(averages.widthMm())
-                            .avgCurve(averages.curve())
+                            .shape(a != null ? a.recommendedShape() : null)
+                            .recommendedShape(a != null ? a.recommendedShape() : null)
+                            .skinToneHex(a != null ? a.skinToneHex() : null)
+                            .recommendedColors(a != null ? a.recommendedColors() : List.of())
+                            .tone(a != null ? a.tone() : null)
+                            .warmness(a != null ? a.warmness() : null)
+                            .brightness(a != null ? a.brightness() : null)
+                            .saturation(a != null ? a.saturation() : null)
+                            .avgLengthMm(a != null ? a.avgLengthMm() : null)
+                            .avgWidthMm(a != null ? a.avgWidthMm() : null)
+                            .avgCurve(a != null ? a.avgCurveMm() : null)
                             .scannedAt(scan.getScannedAt() != null ? scan.getScannedAt().format(FORMATTER) : "")
                             .build();
                 })
@@ -139,66 +135,4 @@ public class UserHistoryController {
                 ApiResponse.success(200, "프린터 진행 상황 조회 성공.", data)
         );
     }
-
-    // ── 손가락별 측정값 평균 계산 (마이페이지 손 분석 이력 카드에 표시) ──────────────
-
-    private FingerAverages computeFingerAverages(HandScan scan) {
-        List<ScanImg> images = scanImgRepository.findByHandScan(scan);
-        double lengthSum = 0;
-        double widthSum = 0;
-        double curveSum = 0;
-        int count = 0;
-
-        for (ScanImg img : images) {
-            double[] values = parseMeasurements(img.getMeasurements());
-            if (values == null) continue;
-            lengthSum += values[0];
-            widthSum += values[1];
-            curveSum += values[2];
-            count++;
-        }
-
-        if (count == 0) {
-            return new FingerAverages(null, null, null);
-        }
-        return new FingerAverages(
-                round1(lengthSum / count),
-                round1(widthSum / count),
-                round2(curveSum / count)
-        );
-    }
-
-    private double[] parseMeasurements(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            JsonNode node = objectMapper.readTree(raw);
-            double length = firstNumber(node, "lengthMm", "length");
-            double width = firstNumber(node, "widthMm", "width");
-            // 실제 스캔 파이프라인(scan/server.py)이 내려주는 곡률 필드명은 cCurveMm이다.
-            // cCurve/curve는 과거 목업 데이터 호환용 fallback으로만 남겨둔다.
-            double curve = firstNumber(node, "cCurveMm", "cCurve", "curve");
-            return new double[]{length, width, curve};
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private double firstNumber(JsonNode node, String... keys) {
-        for (String key : keys) {
-            if (node.has(key) && node.get(key).isNumber()) {
-                return node.get(key).asDouble();
-            }
-        }
-        return 0;
-    }
-
-    private Double round1(double value) {
-        return Math.round(value * 10.0) / 10.0;
-    }
-
-    private Double round2(double value) {
-        return Math.round(value * 100.0) / 100.0;
-    }
-
-    private record FingerAverages(Double lengthMm, Double widthMm, Double curve) {}
 }

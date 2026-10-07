@@ -1,21 +1,19 @@
 package com.example.nailyproject.dto.response;
 
 import com.example.nailyproject.entity.HandScan;
-import com.example.nailyproject.entity.ScanImg;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 //사용자의 화면에 분석 결과를 띄워주기 위한 목적
+// 스캔 상태/시각만 DB(HandScan)에서 오고, 분석 값은 로컬 최종 measurements.json에서 채워진다
+// (ScanService.withFileAnalysis). 파일이 아직 없으면 분석 값은 비어 있다.
 
 @Getter
-@Builder
+@Builder(toBuilder = true)
 public class ScanResultResponseDto {
 
     private Long scanId;
@@ -23,7 +21,7 @@ public class ScanResultResponseDto {
     private String status;
 
     // 분석 결과
-    private String shape;
+    private String shape;            // = recommendedShape (프론트 호환용으로 남겨 둔 필드)
     private String recommendedShape;
     private String skinToneHex;
     private List<String> recommendedColors;
@@ -42,65 +40,19 @@ public class ScanResultResponseDto {
     @Builder
     public static class FingerResultDto {
         private String finger;
-        private String imageUrl;
-        private String imageUrlSide;
-        private String stlUrl;
         private String measurements; // JSON 문자열
         private String size;
     }
 
-    public static ScanResultResponseDto from(
-            HandScan handScan,
-            List<ScanImg> scanImages,
-            ObjectMapper objectMapper
-    ) {
-        List<FingerResultDto> fingers = scanImages.stream()
-                .map(img -> FingerResultDto.builder()
-                        .finger(img.getFinger().name())
-                        .imageUrl(img.getImageUrl())
-                        .imageUrlSide(img.getImageUrlSide())
-                        .stlUrl(img.getStlUrl())
-                        .measurements(img.getMeasurements())
-                        .size(img.getSize())
-                        .build())
-                .collect(Collectors.toList());
-
+    /** DB에 있는 값(상태/시각)만 담은 응답 - 분석 값은 비어 있다. */
+    public static ScanResultResponseDto from(HandScan handScan) {
         return ScanResultResponseDto.builder()
                 .scanId(handScan.getId())
                 .handSide(handScan.getHandSide().name())
                 .status(handScan.getStatus().name())
-                .shape(handScan.getShape())
-                .recommendedShape(handScan.getRecommendedShape())
-                .skinToneHex(handScan.getSkinToneHex())
-                .recommendedColors(parseRecommendedColors(handScan.getRecommendedColors(), objectMapper))
-                .tone(handScan.getTone())
-                .warmness(handScan.getWarmness())
-                .brightness(handScan.getBrightness())
-                .saturation(handScan.getSaturation())
-                .overallSize(handScan.getOverallSize())
+                .recommendedColors(Collections.emptyList())
                 .scannedAt(handScan.getScannedAt())
-                .fingers(fingers)
+                .fingers(Collections.emptyList())
                 .build();
-    }
-
-    // ScanHistoryItemDto(마이페이지 목록 조회)도 동일한 JSON 문자열 필드를 파싱해야 해서 공개해 둔다.
-    public static List<String> parseRecommendedColors(String raw, ObjectMapper objectMapper) {
-        if (raw == null || raw.isBlank()) {
-            return Collections.emptyList();
-        }
-        try {
-            return objectMapper.readValue(raw, new TypeReference<List<String>>() {});
-        } catch (Exception ignored) {
-            // List.toString() 형태 "[#AABBCC, #DDEEFF]" 호환
-            String trimmed = raw.trim();
-            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-                trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
-                if (trimmed.isEmpty()) {
-                    return Collections.emptyList();
-                }
-                return List.of(trimmed.split("\\s*,\\s*"));
-            }
-            return Collections.emptyList();
-        }
     }
 }

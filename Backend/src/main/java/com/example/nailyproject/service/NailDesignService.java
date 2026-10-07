@@ -49,6 +49,7 @@ public class NailDesignService {
     private final TextureSwatchService textureSwatchService;
     private final GptClientService gptClientService;
     private final FinishReferenceService finishReferenceService;
+    private final ScanResultFileService scanResultFileService;
     // 색상
 //    private final JsonColorMapper jsonColorMapper;
 
@@ -96,7 +97,8 @@ public class NailDesignService {
                              TextureExtractService textureExtractService,
                              TextureSwatchService textureSwatchService,
                              GptClientService gptClientService,
-                             FinishReferenceService finishReferenceService) {
+                             FinishReferenceService finishReferenceService,
+                             ScanResultFileService scanResultFileService) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -114,6 +116,7 @@ public class NailDesignService {
         this.textureSwatchService = textureSwatchService;
         this.gptClientService = gptClientService;
         this.finishReferenceService = finishReferenceService;
+        this.scanResultFileService = scanResultFileService;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -300,19 +303,17 @@ public class NailDesignService {
         String finalShape;
         if (!shapeLiked.isEmpty()) {
             finalShape = shapeLiked.get(0);
-        } else if (handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
-            finalShape = handScan.getRecommendedShape();
+        } else if (scanRecommendedShape(handScan) != null) {
+            finalShape = scanRecommendedShape(handScan);
         } else {
             finalShape = "round";
         }
 
         List<String> finalDesigns = getLiked(slots, "designType");
         List<String> finalColors  = getLiked(slots, "color");
-        if (finalColors.isEmpty() && handScan.getRecommendedColors() != null) {
-            try {
-                finalColors = objectMapper.readValue(handScan.getRecommendedColors(),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-            } catch (JsonProcessingException ignored) {}
+        if (finalColors.isEmpty()) {
+            List<String> scanColors = scanRecommendedColors(handScan);
+            if (!scanColors.isEmpty()) finalColors = scanColors;
         }
 
         List<String> finalMotifs = getLiked(slots, "motif");
@@ -849,9 +850,8 @@ public class NailDesignService {
         // scan-auto: 쉐입은 "?" 패널에 표시된 스캔 분석 추천 쉐입으로 강제 고정한다.
         // 플랜 생성 LLM이 다른 쉐입을 넣더라도 덮어써서, 최종 프롬프트 / AR 3D 템플릿 /
         // 저장되는 designPlan 이 모두 패널 값과 정확히 일치하도록 한다.
-        if (scanAuto && plan != null && plan.isObject()
-                && handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
-            ((ObjectNode) plan).put("shape", handScan.getRecommendedShape());
+        if (scanAuto && plan != null && plan.isObject() && scanRecommendedShape(handScan) != null) {
+            ((ObjectNode) plan).put("shape", scanRecommendedShape(handScan));
         }
 
         // ★ 시스템 프롬프트 지시(MOTIF_NONE_RESTRICTION)만으로는 GPT가 여전히 pearl
@@ -1129,8 +1129,8 @@ public class NailDesignService {
             return;
         }
 
-        if (getLiked(slots, "shape").isEmpty() && handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank()) {
-            addLiked(slots, "shape", handScan.getRecommendedShape());
+        if (getLiked(slots, "shape").isEmpty() && scanRecommendedShape(handScan) != null) {
+            addLiked(slots, "shape", scanRecommendedShape(handScan));
         }
 
         // ★ color는 GPT에게 "30개 중 골라줘"로 넘기면 안 된다 — 실제로 해보니 GPT가 매번
@@ -1138,19 +1138,16 @@ public class NailDesignService {
         // 팔레트를 넘겨도 첫 번째 색이 항상 똑같이 나오는 문제가 있었다. 대신 여기 Java
         // 쪽에서 팔레트 전체(30개)에서 실제로 무작위로 1~3개를 뽑아 확정해버려서, 매
         // 생성마다 색 조합 자체가 달라지도록 한다.
-        if (getLiked(slots, "color").isEmpty() && handScan.getRecommendedColors() != null) {
-            try {
-                List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                if (!palette.isEmpty()) {
-                    List<String> shuffled = new ArrayList<>(palette);
-                    Collections.shuffle(shuffled);
-                    int count = Math.min(shuffled.size(), 1 + new Random().nextInt(3)); // 1~3개
-                    for (String color : shuffled.subList(0, count)) {
-                        addLiked(slots, "color", color);
-                    }
+        if (getLiked(slots, "color").isEmpty()) {
+            List<String> palette = scanRecommendedColors(handScan);
+            if (!palette.isEmpty()) {
+                List<String> shuffled = new ArrayList<>(palette);
+                Collections.shuffle(shuffled);
+                int count = Math.min(shuffled.size(), 1 + new Random().nextInt(3)); // 1~3개
+                for (String color : shuffled.subList(0, count)) {
+                    addLiked(slots, "color", color);
                 }
-            } catch (JsonProcessingException ignored) {}
+            }
         }
 
         if (getLiked(slots, "mood").isEmpty()) {
@@ -1252,26 +1249,23 @@ public class NailDesignService {
             }
         }
 
-        if (getLiked(slots, "color").isEmpty() && handScan != null && handScan.getRecommendedColors() != null) {
-            try {
-                List<String> palette = objectMapper.readValue(handScan.getRecommendedColors(),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-                if (!palette.isEmpty()) {
-                    // ★ Gemini가 mood로 "의미"를 보고 고르되, top-level color엔 반드시 헥스를 내야 하므로
-                    // "헥스 (이름)" 형태로 같이 준다. 이름은 참고용, 실제 출력은 앞의 헥스를 그대로 복사.
-                    List<String> resolvedNames = colorNameService.resolveColorNames(palette);
-                    List<String> paired = new ArrayList<>();
-                    for (int i = 0; i < palette.size(); i++) {
-                        String hex = palette.get(i).trim();
-                        if (!hex.startsWith("#")) hex = "#" + hex;
-                        String name = i < resolvedNames.size() ? resolvedNames.get(i) : "";
-                        paired.add(hex.toUpperCase() + (name.isBlank() ? "" : " (" + name + ")"));
-                    }
-                    sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, mood와 가장 잘 어울리는 것을 고르고 " +
-                                    "그 앞의 헥스코드를 top-level color 필드에 그대로 사용): ")
-                            .append(String.join(", ", paired)).append("\n");
+        if (getLiked(slots, "color").isEmpty() && handScan != null) {
+            List<String> palette = scanRecommendedColors(handScan);
+            if (!palette.isEmpty()) {
+                // ★ Gemini가 mood로 "의미"를 보고 고르되, top-level color엔 반드시 헥스를 내야 하므로
+                // "헥스 (이름)" 형태로 같이 준다. 이름은 참고용, 실제 출력은 앞의 헥스를 그대로 복사.
+                List<String> resolvedNames = colorNameService.resolveColorNames(palette);
+                List<String> paired = new ArrayList<>();
+                for (int i = 0; i < palette.size(); i++) {
+                    String hex = palette.get(i).trim();
+                    if (!hex.startsWith("#")) hex = "#" + hex;
+                    String name = i < resolvedNames.size() ? resolvedNames.get(i) : "";
+                    paired.add(hex.toUpperCase() + (name.isBlank() ? "" : " (" + name + ")"));
                 }
-            } catch (JsonProcessingException ignored) {}
+                sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, mood와 가장 잘 어울리는 것을 고르고 " +
+                                "그 앞의 헥스코드를 top-level color 필드에 그대로 사용): ")
+                        .append(String.join(", ", paired)).append("\n");
+            }
         }
 
         return sb.toString();
@@ -1351,15 +1345,9 @@ public class NailDesignService {
      * 디자인 타입/모티프는 손톱별 finish·pattern·motif·parts 값에서 모아 보여준다.
      */
     private DesignGenerateResponseDto.ScanAutoReflection buildScanAutoReflection(HandScan handScan, JsonNode plan) {
-        List<String> palette = new ArrayList<>();
-        if (handScan.getRecommendedColors() != null && !handScan.getRecommendedColors().isBlank()) {
-            try {
-                palette = objectMapper.readValue(handScan.getRecommendedColors(),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-            } catch (JsonProcessingException ignored) {}
-        }
+        List<String> palette = scanRecommendedColors(handScan);
 
-        StringBuilder chosen = new StringBuilder(plan.path("color").asText("").toLowerCase());
+        StringBuilder chosen =new StringBuilder(plan.path("color").asText("").toLowerCase());
         for (String f : List.of("thumb", "index", "middle", "ring", "pinky")) {
             chosen.append(' ').append(plan.path(f).path("base_color").asText("").toLowerCase());
         }
@@ -1405,6 +1393,17 @@ public class NailDesignService {
                 .build();
     }
 
+    /** 스캔의 추천 쉐입 - 로컬 최종 measurements.json 값, 없으면 DB 값. 없거나 공백이면 null. */
+    private String scanRecommendedShape(HandScan handScan) {
+        String shape = scanResultFileService.recommendedShape(handScan);
+        return (shape == null || shape.isBlank()) ? null : shape.trim();
+    }
+
+    /** 스캔의 추천 컬러(hex) 목록 - 로컬 최종 measurements.json 값, 없으면 DB 값. 없으면 빈 리스트. */
+    private List<String> scanRecommendedColors(HandScan handScan) {
+        return scanResultFileService.recommendedColors(handScan);
+    }
+
     /** 플랜 필드 값 정리: 공백/none/null 은 null 로. */
     private String cleanPlanValue(String v) {
         if (v == null) return null;
@@ -1425,19 +1424,11 @@ public class NailDesignService {
     private String buildScanAutoConfirmedSummary(HandScan handScan) {
         StringBuilder sb = new StringBuilder();
 
-        String recShape = (handScan.getRecommendedShape() != null && !handScan.getRecommendedShape().isBlank())
-                ? handScan.getRecommendedShape().trim()
-                : "round";
+        String recShape = scanRecommendedShape(handScan) != null ? scanRecommendedShape(handScan) : "round";
         sb.append("shape(스캔 분석 추천 쉐입 - 반드시 이 값을 그대로 사용하고 절대 다른 쉐입으로 바꾸지 마세요): ")
                 .append(recShape).append("\n");
 
-        List<String> palette = new ArrayList<>();
-        if (handScan.getRecommendedColors() != null && !handScan.getRecommendedColors().isBlank()) {
-            try {
-                palette = objectMapper.readValue(handScan.getRecommendedColors(),
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
-            } catch (JsonProcessingException ignored) {}
-        }
+        List<String> palette = scanRecommendedColors(handScan);
         if (!palette.isEmpty()) {
             List<String> names;
             try {

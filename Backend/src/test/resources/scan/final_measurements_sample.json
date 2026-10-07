@@ -1,0 +1,909 @@
+{
+ "schemaVersion": 1,
+ "userId": "7",
+ "leftSession": "10",
+ "rightSession": "11",
+ "scannedAt": "2026-10-07T18:46:26",
+ "summary": {
+  "total_width_mm": 105.3,
+  "total_length_mm": 121.11,
+  "reference_width_mm": 100.72,
+  "reference_length_mm": 114.82,
+  "width_z": 1.71,
+  "length_z": 2.032,
+  "width_size": "larger",
+  "length_size": "much_larger",
+  "nail_size": "larger",
+  "summary_text": "양손 손톱을 전체로 봤을 때 길이는 평균보다 많이 긴 편이고, 너비는 평균보다 넓은 편이에요.",
+  "avg_width_mm": 10.53,
+  "avg_length_mm": 11.91,
+  "avg_c_curve_mm": 2.2,
+  "finger_count": 10
+ },
+ "skin": {
+  "skinToneHex": "#B38E78",
+  "tone": "neutral",
+  "hue": 56.9,
+  "warmness": 56.9,
+  "brightness": 0.618,
+  "saturation": 0.517,
+  "L": 61.84,
+  "a": 11.13,
+  "b": 17.08,
+  "fingerCount": 10,
+  "whiteBalancedFingers": 0
+ },
+ "recommendedColors": [
+  "#C98F95",
+  "#8E4B4F",
+  "#E9BEBE",
+  "#F08C78",
+  "#F6B999",
+  "#E8CDB5",
+  "#D9A22B",
+  "#F6EDA4",
+  "#8E9A4B",
+  "#9CAF88",
+  "#CBD9C0",
+  "#2F5D3A",
+  "#BFE9D6",
+  "#3DAE8C",
+  "#3E9C9C",
+  "#1F5F66",
+  "#BFD9F2",
+  "#6F8FAF",
+  "#4F7CC4",
+  "#1F2F5C",
+  "#9B87D0",
+  "#D8C8EE",
+  "#5B3A7A",
+  "#8A2D5C",
+  "#B48A9B",
+  "#3E2A22",
+  "#A89386",
+  "#D8CFC6",
+  "#F6F1EA",
+  "#1B1B1D"
+ ],
+ "recommendedShape": "square",
+ "left": {
+  "nail_length": "short",
+  "meta": {
+   "nails_detected": 5
+  },
+  "summary": {
+   "avg_width_mm": 10.58,
+   "avg_length_mm": 11.97,
+   "avg_c_curve_mm": 2.2,
+   "width_size": "average",
+   "length_size": "average",
+   "nail_size": "average",
+   "summary_text": "손톱 길이는 평균과 비슷한 편이고, 너비는 평균과 비슷한 편이에요. 평균 C-curve는 2.2mm입니다."
+  },
+  "nails": [
+   {
+    "finger": "thumb",
+    "width_mm": 11.78,
+    "length_mm": 13.71,
+    "corrected_length_mm": 13.91,
+    "c_curve_mm": 2.0,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 63.582647713859686,
+    "skin_a": 10.510138051478844,
+    "skin_b": 16.990870174183883,
+    "skin_warmness": 13.349491064788738,
+    "skin_saturation": 0.5290955783633657
+   },
+   {
+    "finger": "index",
+    "width_mm": 11.47,
+    "length_mm": 12.46,
+    "corrected_length_mm": 12.66,
+    "c_curve_mm": 2.1,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 59.17008485913204,
+    "skin_a": 11.671530207839739,
+    "skin_b": 16.86553413581011,
+    "skin_warmness": 13.662280082457942,
+    "skin_saturation": 0.4901263632010667
+   },
+   {
+    "finger": "middle",
+    "width_mm": 10.57,
+    "length_mm": 12.03,
+    "corrected_length_mm": 12.23,
+    "c_curve_mm": 2.2,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.0,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 60.37257332762272,
+    "skin_a": 11.890541391107845,
+    "skin_b": 17.802854915222966,
+    "skin_warmness": 12.930589983033554,
+    "skin_saturation": 0.4915267516596077
+   },
+   {
+    "finger": "ring",
+    "width_mm": 9.92,
+    "length_mm": 11.36,
+    "corrected_length_mm": 11.56,
+    "c_curve_mm": 2.3,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 61.287225426129275,
+    "skin_a": 10.433198794261227,
+    "skin_b": 16.844233151165433,
+    "skin_warmness": 12.929040787574868,
+    "skin_saturation": 0.5033014999763821
+   },
+   {
+    "finger": "pinky",
+    "width_mm": 9.16,
+    "length_mm": 10.3,
+    "corrected_length_mm": 10.5,
+    "c_curve_mm": 2.4,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 60.398506701545436,
+    "skin_a": 10.461733083081969,
+    "skin_b": 16.437562074675377,
+    "skin_warmness": 13.359603465737734,
+    "skin_saturation": 0.5073868968754291
+   }
+  ],
+  "by_finger": {
+   "thumb": {
+    "finger": "thumb",
+    "width_mm": 11.78,
+    "length_mm": 13.71,
+    "corrected_length_mm": 13.91,
+    "c_curve_mm": 2.0,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 63.582647713859686,
+    "skin_a": 10.510138051478844,
+    "skin_b": 16.990870174183883,
+    "skin_warmness": 13.349491064788738,
+    "skin_saturation": 0.5290955783633657
+   },
+   "index": {
+    "finger": "index",
+    "width_mm": 11.47,
+    "length_mm": 12.46,
+    "corrected_length_mm": 12.66,
+    "c_curve_mm": 2.1,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 59.17008485913204,
+    "skin_a": 11.671530207839739,
+    "skin_b": 16.86553413581011,
+    "skin_warmness": 13.662280082457942,
+    "skin_saturation": 0.4901263632010667
+   },
+   "middle": {
+    "finger": "middle",
+    "width_mm": 10.57,
+    "length_mm": 12.03,
+    "corrected_length_mm": 12.23,
+    "c_curve_mm": 2.2,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.0,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 60.37257332762272,
+    "skin_a": 11.890541391107845,
+    "skin_b": 17.802854915222966,
+    "skin_warmness": 12.930589983033554,
+    "skin_saturation": 0.4915267516596077
+   },
+   "ring": {
+    "finger": "ring",
+    "width_mm": 9.92,
+    "length_mm": 11.36,
+    "corrected_length_mm": 11.56,
+    "c_curve_mm": 2.3,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 61.287225426129275,
+    "skin_a": 10.433198794261227,
+    "skin_b": 16.844233151165433,
+    "skin_warmness": 12.929040787574868,
+    "skin_saturation": 0.5033014999763821
+   },
+   "pinky": {
+    "finger": "pinky",
+    "width_mm": 9.16,
+    "length_mm": 10.3,
+    "corrected_length_mm": 10.5,
+    "c_curve_mm": 2.4,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 60.398506701545436,
+    "skin_a": 10.461733083081969,
+    "skin_b": 16.437562074675377,
+    "skin_warmness": 13.359603465737734,
+    "skin_saturation": 0.5073868968754291
+   }
+  },
+  "mesh_params": {
+   "thumb": {
+    "bounding_box_mm": {
+     "x": 11.78,
+     "y": 0.6,
+     "z": 13.71
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.0,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "index": {
+    "bounding_box_mm": {
+     "x": 11.47,
+     "y": 0.6,
+     "z": 12.46
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.1,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "middle": {
+    "bounding_box_mm": {
+     "x": 10.57,
+     "y": 0.6,
+     "z": 12.03
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.2,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "ring": {
+    "bounding_box_mm": {
+     "x": 9.92,
+     "y": 0.6,
+     "z": 11.36
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.3,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "pinky": {
+    "bounding_box_mm": {
+     "x": 9.16,
+     "y": 0.6,
+     "z": 10.3
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.4,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   }
+  },
+  "session": "10",
+  "missingFingers": [],
+  "fingers": [
+   {
+    "finger": "THUMB",
+    "measurements": {
+     "widthMm": 11.78,
+     "lengthMm": 13.71,
+     "correctedLengthMm": 13.91,
+     "cCurveMm": 2.0,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "INDEX",
+    "measurements": {
+     "widthMm": 11.47,
+     "lengthMm": 12.46,
+     "correctedLengthMm": 12.66,
+     "cCurveMm": 2.1,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "MIDDLE",
+    "measurements": {
+     "widthMm": 10.57,
+     "lengthMm": 12.03,
+     "correctedLengthMm": 12.23,
+     "cCurveMm": 2.2,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "RING",
+    "measurements": {
+     "widthMm": 9.92,
+     "lengthMm": 11.36,
+     "correctedLengthMm": 11.56,
+     "cCurveMm": 2.3,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "PINKY",
+    "measurements": {
+     "widthMm": 9.16,
+     "lengthMm": 10.3,
+     "correctedLengthMm": 10.5,
+     "cCurveMm": 2.4,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   }
+  ]
+ },
+ "right": {
+  "nail_length": "short",
+  "meta": {
+   "nails_detected": 5
+  },
+  "summary": {
+   "avg_width_mm": 10.48,
+   "avg_length_mm": 11.85,
+   "avg_c_curve_mm": 2.2,
+   "width_size": "average",
+   "length_size": "average",
+   "nail_size": "average",
+   "summary_text": "손톱 길이는 평균과 비슷한 편이고, 너비는 평균과 비슷한 편이에요. 평균 C-curve는 2.2mm입니다."
+  },
+  "nails": [
+   {
+    "finger": "thumb",
+    "width_mm": 11.71,
+    "length_mm": 13.7,
+    "corrected_length_mm": 13.9,
+    "c_curve_mm": 2.0,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 62.3387259359146,
+    "skin_a": 11.284588725864891,
+    "skin_b": 16.371812531789434,
+    "skin_warmness": 13.892543412176066,
+    "skin_saturation": 0.5415967917277174
+   },
+   {
+    "finger": "index",
+    "width_mm": 11.07,
+    "length_mm": 12.6,
+    "corrected_length_mm": 12.8,
+    "c_curve_mm": 2.1,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 63.32890644549961,
+    "skin_a": 11.422383539390559,
+    "skin_b": 17.87288117359892,
+    "skin_warmness": 13.322106999961415,
+    "skin_saturation": 0.5398021415964597
+   },
+   {
+    "finger": "middle",
+    "width_mm": 10.7,
+    "length_mm": 11.78,
+    "corrected_length_mm": 11.98,
+    "c_curve_mm": 2.2,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.0,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 62.52548363686136,
+    "skin_a": 11.764958001663715,
+    "skin_b": 17.692394836856625,
+    "skin_warmness": 13.405283820579601,
+    "skin_saturation": 0.5253401354789531
+   },
+   {
+    "finger": "ring",
+    "width_mm": 9.62,
+    "length_mm": 10.95,
+    "corrected_length_mm": 11.15,
+    "c_curve_mm": 2.3,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 63.78442548532582,
+    "skin_a": 10.828627998601549,
+    "skin_b": 16.346014803158102,
+    "skin_warmness": 13.448798761388153,
+    "skin_saturation": 0.5321824457239379
+   },
+   {
+    "finger": "pinky",
+    "width_mm": 9.3,
+    "length_mm": 10.22,
+    "corrected_length_mm": 10.42,
+    "c_curve_mm": 2.4,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 61.63376978026738,
+    "skin_a": 11.016852976499964,
+    "skin_b": 17.55688523000029,
+    "skin_warmness": 13.420938417613145,
+    "skin_saturation": 0.5135953056978536
+   }
+  ],
+  "by_finger": {
+   "thumb": {
+    "finger": "thumb",
+    "width_mm": 11.71,
+    "length_mm": 13.7,
+    "corrected_length_mm": 13.9,
+    "c_curve_mm": 2.0,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 62.3387259359146,
+    "skin_a": 11.284588725864891,
+    "skin_b": 16.371812531789434,
+    "skin_warmness": 13.892543412176066,
+    "skin_saturation": 0.5415967917277174
+   },
+   "index": {
+    "finger": "index",
+    "width_mm": 11.07,
+    "length_mm": 12.6,
+    "corrected_length_mm": 12.8,
+    "c_curve_mm": 2.1,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": -0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 63.32890644549961,
+    "skin_a": 11.422383539390559,
+    "skin_b": 17.87288117359892,
+    "skin_warmness": 13.322106999961415,
+    "skin_saturation": 0.5398021415964597
+   },
+   "middle": {
+    "finger": "middle",
+    "width_mm": 10.7,
+    "length_mm": 11.78,
+    "corrected_length_mm": 11.98,
+    "c_curve_mm": 2.2,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.0,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 62.52548363686136,
+    "skin_a": 11.764958001663715,
+    "skin_b": 17.692394836856625,
+    "skin_warmness": 13.405283820579601,
+    "skin_saturation": 0.5253401354789531
+   },
+   "ring": {
+    "finger": "ring",
+    "width_mm": 9.62,
+    "length_mm": 10.95,
+    "corrected_length_mm": 11.15,
+    "c_curve_mm": 2.3,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.03,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 63.78442548532582,
+    "skin_a": 10.828627998601549,
+    "skin_b": 16.346014803158102,
+    "skin_warmness": 13.448798761388153,
+    "skin_saturation": 0.5321824457239379
+   },
+   "pinky": {
+    "finger": "pinky",
+    "width_mm": 9.3,
+    "length_mm": 10.22,
+    "corrected_length_mm": 10.42,
+    "c_curve_mm": 2.4,
+    "arc_radius_mm": 9.0,
+    "thickness_mm": 0.6,
+    "skin_tone_hex": "#C1A99A",
+    "wl_ratio_check": {
+     "wl_diff": 0.06,
+     "wl_std_dev": 0.08,
+     "flag": "ok"
+    },
+    "width_vs_avg_mm": 0.1,
+    "length_vs_avg_mm": -0.2,
+    "width_size": "average",
+    "length_size": "average",
+    "nail_size": "average",
+    "skin_L": 61.63376978026738,
+    "skin_a": 11.016852976499964,
+    "skin_b": 17.55688523000029,
+    "skin_warmness": 13.420938417613145,
+    "skin_saturation": 0.5135953056978536
+   }
+  },
+  "mesh_params": {
+   "thumb": {
+    "bounding_box_mm": {
+     "x": 11.71,
+     "y": 0.6,
+     "z": 13.7
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.0,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "index": {
+    "bounding_box_mm": {
+     "x": 11.07,
+     "y": 0.6,
+     "z": 12.6
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.1,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "middle": {
+    "bounding_box_mm": {
+     "x": 10.7,
+     "y": 0.6,
+     "z": 11.78
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.2,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "ring": {
+    "bounding_box_mm": {
+     "x": 9.62,
+     "y": 0.6,
+     "z": 10.95
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.3,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   },
+   "pinky": {
+    "bounding_box_mm": {
+     "x": 9.3,
+     "y": 0.6,
+     "z": 10.22
+    },
+    "curvature": {
+     "c_curve_sagitta_mm": 2.4,
+     "arc_radius_mm": 9.0
+    },
+    "skin_tone_hex": "#C1A99A"
+   }
+  },
+  "session": "11",
+  "missingFingers": [],
+  "fingers": [
+   {
+    "finger": "THUMB",
+    "measurements": {
+     "widthMm": 11.71,
+     "lengthMm": 13.7,
+     "correctedLengthMm": 13.9,
+     "cCurveMm": 2.0,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "INDEX",
+    "measurements": {
+     "widthMm": 11.07,
+     "lengthMm": 12.6,
+     "correctedLengthMm": 12.8,
+     "cCurveMm": 2.1,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "MIDDLE",
+    "measurements": {
+     "widthMm": 10.7,
+     "lengthMm": 11.78,
+     "correctedLengthMm": 11.98,
+     "cCurveMm": 2.2,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "RING",
+    "measurements": {
+     "widthMm": 9.62,
+     "lengthMm": 10.95,
+     "correctedLengthMm": 11.15,
+     "cCurveMm": 2.3,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   },
+   {
+    "finger": "PINKY",
+    "measurements": {
+     "widthMm": 9.3,
+     "lengthMm": 10.22,
+     "correctedLengthMm": 10.42,
+     "cCurveMm": 2.4,
+     "arcRadiusMm": 9.0,
+     "thicknessMm": 0.6,
+     "widthVsAvgMm": 0.1,
+     "lengthVsAvgMm": -0.2,
+     "widthSize": "average",
+     "lengthSize": "average",
+     "nailSize": "average"
+    },
+    "size": "average"
+   }
+  ]
+ }
+}

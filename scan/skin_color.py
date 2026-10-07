@@ -85,6 +85,111 @@ def lab_to_rgb_hex(L: float, a: float, b: float) -> str:
 
 
 # =============================================================================
+# 1-b. 마커 흰색 기준 화이트밸런스 보정
+# =============================================================================
+# 박스 조명/카메라의 색 쏠림은 피부에도 똑같이 걸린다. ArUco 마커의 흰 여백은 같은 사진 안에
+# 있는 "진짜 흰색" 기준이라, 그 흰색이 무채색(R=G=B)이 되도록 채널별 이득(gain)을 구해서
+# 피부 분석용 사진에만 적용한다. (원본 사진/측정에는 영향 없음)
+# 흰색이 날아갔거나(포화) 너무 어두우면 기준으로 쓸 수 없으니 보정하지 않는다.
+
+WB_MIN_WHITE_MEAN = 110      # 마커 흰색의 평균 밝기(0~255)가 이보다 어두우면 기준으로 안 씀
+WB_MAX_WHITE_CHANNEL = 247   # 한 채널이라도 이보다 높으면 포화(날아감)로 보고 기준으로 안 씀
+WB_GAIN_MIN, WB_GAIN_MAX = 0.75, 1.30      # 채널 사이 색 보정 이득 한계 (이 범위를 벗어나면 보정 안 함)
+# 보정 후 마커 흰색이 갖게 될 밝기(0~255). 조명이 그때그때 조금 달라도(램프 밝기, 노출) 피부 밝기가
+# "마커 흰색 대비"로 같은 기준이 되게 한다. 이 값은 피부 L*의 절대 크기를 정한다(nail_palette의
+# SKIN_LIGHT_L/SKIN_DARK_L 기준과 같이 본다).
+WB_TARGET_WHITE = 225
+WB_BRIGHTNESS_MIN, WB_BRIGHTNESS_MAX = 0.60, 3.50   # 밝기 정규화 배율 한계 (벗어나면 색 보정만 함)
+# (실측: 낮춘 노출에서 마커 흰색이 세션마다 150~190 -> 배율 1.4~2.2. 흰색 110 미만은 'too_dark'로 어차피 제외)
+WB_MAX_CAST = 0.35           # 흰색 세 채널이 평균에서 이만큼(35%) 넘게 벗어나면 흰색이 아님(가려짐 등)
+_WB_RING_OUTER, _WB_RING_INNER = 1.12, 0.80
+
+
+def _srgb_to_lin(v):
+    v = np.asarray(v, dtype=np.float32) / 255.0
+    return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4)
+
+
+def _lin_to_srgb255(v):
+    v = np.clip(v, 0.0, 1.0)
+    return np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055) * 255.0
+
+
+def marker_white_rgb(image_bgr: np.ndarray, aruco_corners: np.ndarray) -> Optional[np.ndarray]:
+    """마커 바깥 흰 여백에서 가장 밝은 픽셀들의 중앙값(RGB 0~255). 마커가 화면 밖/너무 작으면 None."""
+    pts = np.asarray(aruco_corners, dtype=np.float32).reshape(-1, 2)
+    if pts.shape[0] < 4:
+        return None
+    c = pts.mean(axis=0)
+    outer = np.zeros(image_bgr.shape[:2], np.uint8)
+    inner = np.zeros_like(outer)
+    cv2.fillConvexPoly(outer, ((pts - c) * _WB_RING_OUTER + c).astype(np.int32), 255)
+    cv2.fillConvexPoly(inner, ((pts - c) * _WB_RING_INNER + c).astype(np.int32), 255)
+    ring = cv2.bitwise_and(outer, cv2.bitwise_not(inner))
+    px = image_bgr[ring > 0].astype(np.float32)
+    if px.shape[0] < 200:
+        return None
+    lum = px.mean(axis=1)
+    bright = px[lum >= np.percentile(lum, 60)]          # 여백(흰색)만 남기고 검은 테두리/바깥 매트 제외
+    return np.median(bright, axis=0)[::-1]              # BGR -> RGB
+
+
+def white_balance_to_marker(image_bgr: np.ndarray, aruco_corners: np.ndarray, reference_bgr: np.ndarray = None):
+    """마커 흰색이 무채색이 되도록 보정한 (이미지 BGR uint8, 정보 dict)를 돌려준다.
+
+    보정하지 않은 경우에도 원본 이미지를 그대로 돌려주고, info["applied"]=False와 사유를 담는다.
+    info: {"applied", "reason", "white_rgb", "gain"(RGB), "brightness_scale", "brightness_normalized"}
+
+    reference_bgr : 같은 장면을 더 어둡게 찍어 마커 흰색이 날아가지 않은 사진. 주어지면 흰색(색 쏠림)을
+    그 사진에서 재서 image_bgr에 적용한다. 두 사진의 밝기 단계가 달라서 밝기 정규화는 하지 않는다.
+    (image_bgr은 피부가 덜 어두운 사진이라 마커 흰색은 날아가도 피부는 멀쩡하다.)
+    """
+    info = {"applied": False, "reason": "", "white_rgb": None, "gain": None}
+    if aruco_corners is None:
+        info["reason"] = "no_marker"
+        return image_bgr, info
+    white = marker_white_rgb(reference_bgr if reference_bgr is not None else image_bgr, aruco_corners)
+    if white is None:
+        info["reason"] = "marker_ring_unreadable"
+        return image_bgr, info
+    info["white_rgb"] = [round(float(x), 1) for x in white]
+    if float(white.mean()) < WB_MIN_WHITE_MEAN:
+        info["reason"] = "white_too_dark"
+        return image_bgr, info
+    if float(white.max()) > WB_MAX_WHITE_CHANNEL:
+        info["reason"] = "white_clipped"
+        return image_bgr, info
+    if float(np.max(np.abs(white / white.mean() - 1.0))) > WB_MAX_CAST:
+        info["reason"] = "white_not_neutral_enough"
+        return image_bgr, info
+
+    wl = _srgb_to_lin(white)
+    color_gain = float(wl.mean()) / wl                  # 채널 사이 색 쏠림을 없애는 이득(선형 RGB)
+    if float(color_gain.min()) < WB_GAIN_MIN or float(color_gain.max()) > WB_GAIN_MAX:
+        info["reason"] = "gain_out_of_range"
+        return image_bgr, info
+    # 밝기 정규화: 마커 흰색이 WB_TARGET_WHITE가 되도록 전체 밝기 배율을 곱한다. 배율이 너무 크면
+    # (조명이 너무 어둡거나 너무 밝으면) 믿기 어려우니 색 보정만 하고 밝기는 그대로 둔다.
+    brightness = float(_srgb_to_lin(np.array([WB_TARGET_WHITE] * 3))[0]) / float(wl.mean())
+    info["brightness_scale"] = round(brightness, 3)
+    if reference_bgr is not None or not (WB_BRIGHTNESS_MIN <= brightness <= WB_BRIGHTNESS_MAX):
+        info["brightness_normalized"] = False
+        brightness = 1.0
+    else:
+        info["brightness_normalized"] = True
+    gain = color_gain * brightness
+    info["gain"] = [round(float(g), 4) for g in gain]
+
+    # 채널별 256단계 변환표(LUT)로 한 번에 적용 - 큰 사진에서도 빠르다. LUT는 BGR 순서.
+    levels = np.arange(256, dtype=np.float32)
+    lut = np.zeros((256, 1, 3), np.uint8)
+    for rgb_idx, bgr_idx in ((0, 2), (1, 1), (2, 0)):
+        lut[:, 0, bgr_idx] = np.round(_lin_to_srgb255(_srgb_to_lin(levels) * gain[rgb_idx])).astype(np.uint8)
+    info["applied"] = True
+    return cv2.LUT(image_bgr, lut), info
+
+
+# =============================================================================
 # 2. 피부 속성 추출
 # =============================================================================
 
@@ -178,20 +283,25 @@ def analyze_skin(image_bgr: np.ndarray, mask: np.ndarray,
 
 
 # =============================================================================
-# 3. 네일 컬러 추천 (nail_recommend.py 이식)
+# 3. 톤 판정 + 네일 컬러 추천
 # =============================================================================
+# 톤(웜/쿨/뉴트럴)은 피부 Lab의 색상각 h = atan2(b, a)로 판정한다. 값이 클수록 노란/황금빛(웜),
+# 작을수록 붉은/분홍빛(쿨)이다. 예전에는 b - 0.5a 한 숫자를 다른 카메라/조명에서 맞춘 기준(13.45/12.39)
+# 으로 잘랐는데, 과노출/조명 색 때문에 거의 항상 웜으로 쏠렸다.
+#
+# [임시 기준] 아래 두 값은 사람 한 명(본인 손, 쿨톤이라고 본인이 판단)의 측정값과 동양인 피부 색상각의
+# 일반적인 범위(약 50~65도)를 참고해서 잡은 값이다. 같은 설정(촬영 직후 노출을 낮춘 확인용 사진 + 마커 흰색
+# 보정)으로 잰 이 사람의 색상각은 약 53~54도였고(3회 반복에서 +-1도), 과노출된 원래 사진을 그대로 쓰면
+# 76~77도(웜)로 잘못 나왔다. 톤을 아는 여러 사람을 같은 방식으로 스캔해서 맞춰야 한다. 바꿀 때는 여기 두 줄과
+# Frontend/src/shared/utils/skinTone.ts 의 WARMNESS_*_CUTOFF(같은 값)를 함께 바꾼다.
+TONE_HUE_COOL_MAX = 55.0   # 색상각이 이보다 작으면 쿨
+TONE_HUE_WARM_MIN = 63.0   # 색상각이 이보다 크면 웜 (둘 사이는 뉴트럴)
 
-def lch_to_hex(L: float, C: float, H: float) -> str:
-    h = math.radians(H % 360)
-    return lab_to_rgb_hex(float(L), float(C * math.cos(h)), float(C * math.sin(h)))
-
-
-def hue_diff(h1: float, h2: float) -> float:
-    d = abs(h1 - h2) % 360
-    return min(d, 360 - d)
+# 피부 밝기/채도 구분은 네일 컬러 개수 배분에만 쓴다 (nail_palette.SKIN_*_L 참고)
 
 
 def skin_hue(a: float, b: float) -> float:
+    """피부 Lab의 색상각(도). 0~360."""
     return math.degrees(math.atan2(b, a)) % 360
 
 
@@ -199,246 +309,50 @@ def skin_chroma(a: float, b: float) -> float:
     return math.hypot(a, b)
 
 
-FAMILIES = [
-    ("red",    (346, 15)),
-    ("coral",  (16,  35)),
-    ("orange", (36,  55)),
-    ("yellow", (56,  85)),
-    ("lime",   (86, 115)),
-    ("green",  (116, 155)),
-    ("teal",   (156, 195)),
-    ("mint",   (196, 220)),
-    ("blue",   (221, 255)),
-    ("indigo", (256, 280)),
-    ("purple", (281, 315)),
-    ("pink",   (316, 345)),
-]
-
-
-def get_family(H: float, C: float, L: float) -> str:
-    if C < 6:
-        if L > 85: return "white"
-        elif L < 25: return "black"
-        else: return "gray"
-    H = H % 360
-    for name, (lo, hi) in FAMILIES:
-        if lo <= hi:
-            if lo <= H <= hi: return name
-        else:
-            if H >= lo or H <= hi: return name
-    return "red"
-
-
-def get_sort_hue(H: float, C: float, L: float) -> float:
-    if C < 6: return 999 if L > 85 else 998 if L < 25 else 997
-    return H % 360
-
-
-def hue_to_name(H: float, C: float, L: float) -> str:
-    if C < 6:
-        if L > 85: return "화이트"
-        elif L < 25: return "블랙"
-        else: return "그레이"
-    H = H % 360
-    if L < 35: p = "딥 "
-    elif L > 82: p = "파스텔 "
-    elif C > 35: p = "비비드 "
-    elif C < 15: p = "뮤트 "
-    else: p = ""
-    KO = {
-        "red": "레드", "coral": "코랄", "orange": "오렌지", "yellow": "옐로",
-        "lime": "라임", "green": "그린", "teal": "틸", "mint": "민트",
-        "blue": "블루", "indigo": "인디고", "purple": "퍼플", "pink": "핑크",
-    }
-    return p + KO.get(get_family(H, C, L), "")
-
-
-def harmony_score(
-    skin_L: float, skin_a: float, skin_b: float,
-    skin_warmness: float, skin_sat: float,
-    nail_L: float, nail_C: float, nail_H: float,
-) -> float:
-    s_hue = skin_hue(skin_a, skin_b)
-    score = 0.0
-    H = nail_H % 360
-
-    # ── 1. 명도 대비 ────────────────────────────────────────────────────
-    L_diff = abs(nail_L - skin_L)
-    if 20 <= L_diff <= 45:   score += 30
-    elif 10 <= L_diff < 20:  score += 20
-    elif 45 < L_diff <= 65:  score += 15
-    elif L_diff < 10:        score -= 15
-    else:                    score -= 8
-
-    if nail_L > 82 and nail_C <= 18: score += 12
-    if nail_L < 50 and nail_C >= 15: score += 15
-
-    # ── 2. warmness → hue 편향 ──────────────────────────────────────────
-    warm_dev = (skin_warmness - 13.0) * 8.0
-    nail_is_warm = (H <= 90) or (H >= 330)
-    nail_is_cool = 190 <= H <= 320
-    if nail_is_warm: score += warm_dev
-    if nail_is_cool: score -= warm_dev
-    if skin_warmness > 13.5 and 200 <= H <= 300: score -= 35
-    if skin_warmness < 12.5 and 20 <= H <= 80:   score -= 35
-
-    # ── 3. saturation → preferred_C ─────────────────────────────────────
-    sat_dev = skin_sat - 0.46
-    preferred_C = max(8, min(46, 14 + sat_dev * 200))
-
-    C_diff = abs(nail_C - preferred_C)
-    score += max(0, 35 - C_diff * 2.5)
-
-    if nail_C > preferred_C + 20: score -= 20
-    if nail_C < preferred_C - 20: score -= 15
-
-    # ── 4. 색조 조화 ─────────────────────────────────────────────────────
-    h_diff = hue_diff(nail_H, s_hue)
-    if 140 <= h_diff <= 220: score += 15
-    elif h_diff <= 60:       score += 10
-
-    # ── 5. 실측 보정 (warmness 12.5~14.5 구간) ──────────────────────────
-    if 12.5 <= skin_warmness <= 14.5:
-        if (H >= 320 or H <= 60) and nail_L < 60 and nail_C >= 15: score += 28
-        if nail_L > 82 and nail_C < 15:                             score += 18
-        if 10 <= H <= 50 and 45 <= nail_L <= 70 and 8 <= nail_C <= 18: score += 20
-        if 230 <= H <= 270 and 38 <= nail_L <= 58 and 12 <= nail_C <= 25: score += 22
-        if 14 <= nail_C <= 25 and 55 <= nail_L <= 80:               score -= 18
-
-    return score
-
-
-def generate_candidates(skin_L: float, skin_sat: float) -> list:
-    candidates = []
-    L_levels = [
-        max(12, skin_L - 50),
-        max(18, skin_L - 40),
-        max(25, skin_L - 30),
-        max(35, skin_L - 20),
-        min(96, skin_L + 18),
-        min(94, skin_L + 14),
-    ]
-    if skin_sat >= 0.50:
-        C_levels = [8, 14, 22, 30, 38, 46]
-    elif skin_sat >= 0.43:
-        C_levels = [6, 12, 18, 26, 34]
-    else:
-        C_levels = [4, 8, 14, 20, 28]
-
-    for H in range(0, 360, 4):
-        for L in L_levels:
-            for C in C_levels:
-                candidates.append((L, C, H))
-
-    for L in [8, 15, 25, 45, 60, 75, 88, 94, 97]:
-        for C in [2, 4, 6]:
-            for H in [60, 90, 240, 350]:
-                candidates.append((L, C, H))
-    return candidates
-
-
-def pick_diverse(
-    pool: list,
-    n: int,
-    max_per_family: int = 2,
-    max_achromatic: int = 1,
-    min_hue_gap: float = 22,
-    min_L_gap: float = 10,
-) -> list:
-    picked = []
-    for gap in [min_hue_gap, 18, 14, 10, 6]:
-        picked = []
-        fam_cnt: dict = {}
-        for (s, nL, nC, nH) in pool:
-            fam = get_family(nH, nC, nL)
-            limit = max_achromatic if fam in {"black", "gray", "white"} else max_per_family
-            if fam_cnt.get(fam, 0) >= limit: continue
-            if any(hue_diff(nH, pH) < gap and abs(nL - pL) < min_L_gap
-                   for (_, pL, pC, pH) in picked): continue
-            picked.append((s, nL, nC, nH))
-            fam_cnt[fam] = fam_cnt.get(fam, 0) + 1
-            if len(picked) >= n: break
-        if len(picked) >= n: break
-
-    # 계열/무채색 상한 때문에 n을 못 채웠으면, 개수를 맞추기 위해
-    # 상한을 무시하고 점수 높은 순으로 나머지 자리를 채운다.
-    if len(picked) < n:
-        picked_keys = {(round(nL, 1), round(nC, 1), round(nH, 1)) for (_, nL, nC, nH) in picked}
-        for (s, nL, nC, nH) in pool:
-            key = (round(nL, 1), round(nC, 1), round(nH, 1))
-            if key in picked_keys: continue
-            picked.append((s, nL, nC, nH))
-            picked_keys.add(key)
-            if len(picked) >= n: break
-
-    return picked
-
-
-def sort_by_hue(items: list) -> list:
-    return sorted(items, key=lambda x: get_sort_hue(x[3], x[2], x[1]))
+def tone_from_hue(hue: float) -> str:
+    if hue < TONE_HUE_COOL_MAX:
+        return "cool"
+    if hue > TONE_HUE_WARM_MIN:
+        return "warm"
+    return "neutral"
 
 
 def recommend_nail_colors(
     L: float,
     a: float,
     b: float,
-    warmness: float,
-    saturation: float,
+    warmness: float = None,
+    saturation: float = None,
     n_best: int = 30,
     n_worst: int = 10,
 ) -> dict:
     """
-    피부 LAB 수치에서 베스트 n_best색 + 워스트 n_worst색 반환.
+    피부 Lab에서 톤을 판정하고, 그 톤과 피부 밝기에 맞는 네일 컬러 n_best개 + 안 어울리는 n_worst개를 돌려준다.
+    (warmness, saturation 인자는 예전 호출부 호환용으로 남겨 두며 판정에는 쓰지 않는다.)
 
     Returns:
         {
-            "best":  [{"hex","name","name_ko","score","L","C","H"}, ...],
-            "worst": [{"hex","name","name_ko","score",...}, ...],
-            "skin_summary": {...}
+            "best":  [{"hex","name","name_ko","score","tone","band","L","C","H"}, ...],
+            "worst": [{...}, ...],
+            "skin_summary": {"tone", "skin_hue", "warmness"(=색상각), "chroma", "L"}
         }
     """
-    candidates = generate_candidates(L, saturation)
+    import nail_palette
 
-    scored = sorted(
-        [(harmony_score(L, a, b, warmness, saturation, nL, nC, nH), nL, nC, nH)
-         for (nL, nC, nH) in candidates],
-        key=lambda x: -x[0]
-    )
-
-    best_raw  = sort_by_hue(pick_diverse(scored,       n_best,  max_per_family=2, max_achromatic=1))
-    worst_raw = sort_by_hue(pick_diverse(scored[::-1], n_worst, max_per_family=1, max_achromatic=1))
-
-    def fmt(items):
-        return [{
-            "hex":     lch_to_hex(nL, nC, nH),
-            "name":    hue_to_name(nH, nC, nL),
-            "name_ko": hue_to_name(nH, nC, nL),
-            "score":   round(s, 1),
-            "L": round(nL, 1), "C": round(nC, 1), "H": round(nH, 1),
-        } for (s, nL, nC, nH) in items]
-
-    s_hue = skin_hue(a, b)
-    sat_dev = saturation - 0.46
-    preferred_C = max(8, min(46, 14 + sat_dev * 200))
-
-    # NOTE: tone 임계값(warmness > 13.45 / < 12.39)은 temp/2026NailyProject
-    # 쪽 카메라·조명으로 찍은 5명 샘플에서 뽑은 값이다. scan의 촬영 박스는
-    # 카메라/조명이 다르므로 이 경계가 그대로 맞는다는 보장이 없다 — 이
-    # 박스로 찍은 실측 샘플이 쌓이면 temp/2026NailyProject/color/_calib_run.py
-    # 같은 방식으로 재조정할 것.
+    hue = skin_hue(a, b)
+    tone = tone_from_hue(hue)
     summary = {
-        "tone":        "warm" if warmness > 13.45 else "cool" if warmness < 12.39 else "neutral",
-        "skin_hue":    round(s_hue, 1),
-        "warmness":    warmness,
-        "saturation":  saturation,
-        "preferred_C": round(preferred_C, 1),
+        "tone":       tone,
+        "skin_hue":   round(hue, 1),
+        "warmness":   round(hue, 1),      # 화면의 웜/쿨 슬라이더가 쓰는 값 = 색상각(도)
+        "chroma":     round(skin_chroma(a, b), 1),
+        "L":          round(L, 1),
     }
-
-    return {"best": fmt(best_raw), "worst": fmt(worst_raw), "skin_summary": summary}
-
-
-def get_skin_summary(L, a, b, warmness, saturation) -> dict:
-    return recommend_nail_colors(L, a, b, warmness, saturation)["skin_summary"]
+    return {
+        "best":  nail_palette.pick_palette(tone, L, n_best),
+        "worst": nail_palette.pick_avoid(tone, n_worst),
+        "skin_summary": summary,
+    }
 
 
 # =============================================================================

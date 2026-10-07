@@ -101,6 +101,7 @@ CCURVE_RIGHT_CROP_FRAC  = 0.30
 # ── Skin LAB metrics (brightness/saturation/warmness for color recommendation) ──
 try:
     from skin_color import analyze_skin as _analyze_skin
+    from skin_color import white_balance_to_marker as _white_balance_to_marker
     _SKIN_COLOR_AVAILABLE = True
 except ImportError:
     _SKIN_COLOR_AVAILABLE = False
@@ -1011,7 +1012,9 @@ def measure_top(image: np.ndarray, mpp: float,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
                 finger: str = None,
-                guide_y: int = None, guide_tol_mm: float = 3.0) -> dict:
+                guide_y: int = None, guide_tol_mm: float = 3.0,
+                skin_image: np.ndarray = None,
+                skin_ref_image: np.ndarray = None) -> dict:
     """
     nail_plate_mask : optional uint8 binary mask (255=nail plate).
         When provided, width is measured from the nail plate boundary instead
@@ -1482,7 +1485,27 @@ def measure_top(image: np.ndarray, mpp: float,
 
     # LAB skin metrics for color recommendation (same skin_mask as above,
     # so it shares the nail-plate/polish exclusion the hex sample already has).
-    skin_lab = _analyze_skin(image, skin_mask) if _SKIN_COLOR_AVAILABLE else None
+    # 피부 분석용 사진은 마커의 흰 여백이 무채색이 되도록 화이트밸런스를 맞춘 사본을 쓴다
+    # (조명/카메라 색 쏠림이 피부 톤 판정에 섞이지 않게). 흰색이 날아갔거나 마커를 못 읽으면
+    # 보정 없이 원본 그대로 분석하고, 그 사유를 skin_wb에 남긴다. 측정/윤곽에는 영향 없음.
+    # skin_image가 오면(촬영 직후 노출을 낮춰 찍은 피부 확인용 사진 - scan/skin_snapshot.py) 손가락/피부 밴드
+    # 위치는 이 사진(측정 사진)에서 잡고, 색은 그 사진에서 잰다. 두 사진은 0.3초 간격이라 거의 같은
+    # 자리지만 손가락이 아주 조금 움직였을 수 있어서, 밴드 가장자리를 조금 깎아서 쓴다.
+    skin_src, skin_source, skin_band = image, "top_photo", skin_mask
+    if skin_image is not None and skin_image.shape == image.shape:
+        skin_src, skin_source = skin_image, "skin_photo"
+        eroded = cv2.erode(skin_mask, np.ones((9, 9), np.uint8))
+        if int((eroded > 0).sum()) >= 500:
+            skin_band = eroded
+    skin_wb = None
+    skin_balanced = skin_src
+    if _SKIN_COLOR_AVAILABLE and aruco_corners is not None:
+        ref = skin_ref_image if (skin_ref_image is not None and skin_ref_image.shape == skin_src.shape) else None
+        skin_balanced, skin_wb = _white_balance_to_marker(skin_src, aruco_corners, reference_bgr=ref)
+    if skin_wb is not None:
+        skin_wb["source"] = skin_source
+        skin_wb["white_from_reference"] = bool(ref is not None)
+    skin_lab = _analyze_skin(skin_balanced, skin_band) if _SKIN_COLOR_AVAILABLE else None
 
     # Prefer the MEASURED fold-to-fold width (side-lit photos).  The nail is
     # widest near the free edge and narrows toward the cuticle, so report the
@@ -1516,6 +1539,7 @@ def measure_top(image: np.ndarray, mpp: float,
         "skin_saturation": skin_lab["saturation"] if skin_lab else None,
         "skin_contrast":   skin_lab["contrast"] if skin_lab else None,
         "skin_undertone":  skin_lab["undertone"] if skin_lab else None,
+        "skin_wb":         skin_wb,   # 마커 흰색 보정 정보 {applied, reason, white_rgb, gain}
         "mpp_mm_per_px":   round(float(mpp), 6),
         **cc_data,
         "_nail_half":      nail_half,
@@ -1716,6 +1740,7 @@ def _fallback_measurement(finger: str) -> dict:
         "skin_L": None, "skin_a": None, "skin_b": None, "skin_C": None,
         "skin_warmness": None, "skin_brightness": None,
         "skin_saturation": None, "skin_contrast": None, "skin_undertone": None,
+        "skin_wb":         None,
         "mpp_mm_per_px":   None,
         "c_curve_mm":      c_curve_mm,
         "arc_radius_mm":   arc_radius_mm,
@@ -1756,8 +1781,13 @@ def measure_finger(top_path: str, finger: str,
                    ccurve_path: str = None,
                    ccurve_table_edge: bool = True,
                    live_width_mm: float = None,
-                   live_length_mm: float = None) -> dict:
+                   live_length_mm: float = None,
+                   skin_photo_path: str = None) -> dict:
     """
+    skin_photo_path : optional photo of the same finger taken a moment after
+        top_path with LOWER exposure (so the ArUco marker's white is not
+        clipped). Nail measurement still uses top_path; only the skin colour
+        (tone / palette) is read from this photo. See scan/skin_snapshot.py.
     live_width_mm / live_length_mm : optional override for the measured
         width/length, straight from the live capture-time gauge (the
         average of the consecutive readings that agreed within the
@@ -1790,6 +1820,12 @@ def measure_finger(top_path: str, finger: str,
     os.makedirs(output_dir, exist_ok=True)
     annotated_path = os.path.join(output_dir, f"{finger}_annotated.jpg")
     top_img = cv2.imread(top_path)
+    skin_img = cv2.imread(skin_photo_path) if skin_photo_path and os.path.isfile(skin_photo_path) else None
+    # 확인용 사진 옆에 흰색 기준 사진(<이름>_skin_ref.jpg)이 있으면 같이 쓴다 (scan/skin_snapshot.py)
+    skin_ref_img = None
+    if skin_img is not None:
+        _ref_path = os.path.splitext(skin_photo_path)[0] + "_ref.jpg"
+        skin_ref_img = cv2.imread(_ref_path) if os.path.isfile(_ref_path) else None
 
     # 이 손가락의 측정 파이프라인(ArUco 인식부터 저장까지) 전체를 하나로 감싼다 - 어느
     # 단계에서 실패하든(사진 자체가 이상해서 ArUco/손톱 인식이 안 되거나, W/L 보정이나
@@ -1807,7 +1843,8 @@ def measure_finger(top_path: str, finger: str,
 
         print(f"\n[2/3] Nail measurement + C-curve …")
         data = measure_top(top_img, mpp, finger_mask, bbox,
-                           aruco_corners=aruco_corners, finger=finger)
+                           aruco_corners=aruco_corners, finger=finger,
+                           skin_image=skin_img, skin_ref_image=skin_ref_img)
 
         # ── Override W/L with the live capture-time average, if given ──
         if live_width_mm is not None and live_length_mm is not None:
@@ -2244,6 +2281,9 @@ def main():
                         "background (box) style, not the current table-"
                         "edge style (default: table-edge)")
     p.add_argument("--aruco-size",   type=float, default=20.0)
+    p.add_argument("--skin-photo", default=None,
+                   help="Lower-exposure photo of the same finger used ONLY to read skin colour "
+                        "(single-finger mode only)")
     p.add_argument("--live-width-mm",  type=float, default=None,
                    help="Override width_mm with this live-capture average "
                         "(single-finger mode only)")
@@ -2287,7 +2327,8 @@ def main():
                            ccurve_path=args.ccurve_top,
                            ccurve_table_edge=not args.ccurve_box_style,
                            live_width_mm=args.live_width_mm,
-                           live_length_mm=args.live_length_mm)
+                           live_length_mm=args.live_length_mm,
+                           skin_photo_path=args.skin_photo)
         results.append(r)
 
     payload   = build_merged_payload(results, args.aruco_size)

@@ -1,4 +1,4 @@
-import { apiClient, BASE_URL } from '@/shared/utils/apiClient'
+import { apiClient } from '@/shared/utils/apiClient'
 
 // ─── 응답 타입 (ScanStartResponseDto, ScanResultResponseDto) ─────────────────
 export interface ScanStartResponse {
@@ -7,9 +7,6 @@ export interface ScanStartResponse {
 
 export interface FingerResult {
     finger: string
-    imageUrl: string
-    imageUrlSide: string
-    stlUrl: string
     measurements: string // JSON 문자열
     size: string
 }
@@ -39,38 +36,6 @@ export interface ScanResultResponse {
 export async function startScan(handSide: 'LEFT' | 'RIGHT'): Promise<ScanStartResponse> {
     const res = await apiClient.post<ScanStartResponse>('/scans', { handSide })
     return res.data
-}
-
-/** POST /scans/{scanId}/images?finger=THUMB — 손가락 탑뷰/측면뷰 이미지 2장 업로드 */
-export async function uploadFingerImage(
-    scanId: number,
-    finger: 'THUMB' | 'INDEX' | 'MIDDLE' | 'RING' | 'PINKY',
-    topBlob: Blob,
-    sideBlob: Blob,
-): Promise<{ imageUrlTop: string; imageUrlSide: string }> {
-    const formData = new FormData()
-    formData.append('fileTop', topBlob, `${finger.toLowerCase()}_top.jpg`)
-    formData.append('fileSide', sideBlob, `${finger.toLowerCase()}_side.jpg`)
-
-    // upload()는 Content-Type을 자동으로 multipart로 처리
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${BASE_URL}/scans/${scanId}/images?finger=${finger}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-    })
-
-    const raw = await res.text()
-    let body: { ok?: boolean; message?: string; data?: unknown }
-    try {
-        body = raw ? JSON.parse(raw) : {}
-    } catch {
-        throw new Error(`서버 응답을 처리할 수 없습니다. (status ${res.status})`)
-    }
-    if (!res.ok || !body.ok) {
-        throw new Error(body.message || `이미지 업로드에 실패했습니다. (status ${res.status})`)
-    }
-    return body.data as { imageUrlTop: string; imageUrlSide: string }
 }
 
 /** POST /scans/{scanId}/analyze — 분석 요청 */

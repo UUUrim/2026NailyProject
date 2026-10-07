@@ -96,6 +96,11 @@ printer:
   server:
     url: https://sermon-friction-unequal.ngrok-free.dev
 
+scan:
+  # 스캔 서버(server.py)가 결과를 쓰는 results 폴더 - 양손 최종 measurements.json을 여기서 읽는다.
+  # 기본값은 Backend/ 에서 실행할 때 저장소 루트의 results/ 이다. 다른 위치면 환경변수 SCAN_RESULTS_DIR로 지정.
+  results-dir: ${SCAN_RESULTS_DIR:../results}
+
 naily:
   image-provider: gptimage
   gen-server-url: https://scalded-lard-seduce.ngrok-free.dev

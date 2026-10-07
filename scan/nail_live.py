@@ -336,6 +336,9 @@ def marker_mm_per_px(corners, aruco_size_mm):
 
 GUIDE_Y_SMOOTHING = 0.7  # weight kept from the previous frame's guide_y (EMA)
 
+# 손가락으로 인정하려면 덩어리의 아래 끝이 프레임 아래 끝에서 이 픽셀 안쪽까지 와 있어야 한다.
+FINGER_BOTTOM_MARGIN_PX = 25
+
 
 def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None,
                   draw_guide=True):
@@ -384,6 +387,11 @@ def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None,
             finger_mask, _, bbox = nm.segment_finger(frame, corners)
     except Exception as e:
         result["err"] = str(e).split("\n")[0]
+        return result
+    # 손가락은 항상 화면 아래쪽에서 올라온다. 아래쪽 가장자리에 닿지 않는 피부색 덩어리는
+    # 손가락이 아니라 리그에 붙은 테이프/부품 같은 허공의 물체다(손 없이도 측정값이 잡히던 문제).
+    if bbox[1] + bbox[3] < frame.shape[0] - FINGER_BOTTOM_MARGIN_PX:
+        result["err"] = "No finger detected (blob does not reach the bottom edge)."
         return result
     result["finger_ok"] = True
 
@@ -522,8 +530,41 @@ def hint_bar(view, text):
     return np.vstack([view, bar])
 
 
+def _live_with_annotations(result, live_frame):
+    """라이브 프레임 위에 "마지막 측정이 그린 표시"(손톱 윤곽, W 눈금/숫자 등)만 얹어서 돌려준다.
+
+    result["overlay"]는 측정이 끝난 그 순간의 프레임에 표시를 그려 둔 정지 이미지라서, 그걸 그대로
+    화면에 쓰면 측정 한 번이 끝나는 시간(0.3~0.8초)마다만 화면이 바뀐다(초당 1~3장). 대신 라이브
+    프레임을 바탕으로 쓰고, overlay가 원본 프레임과 달라진 픽셀(= 그려진 표시)만 덮어쓴다.
+    그 픽셀 목록은 측정 결과마다 한 번만 계산해서 result에 보관하므로, 이후 프레임마다 드는 비용은
+    프레임 복사와 작은 영역 대입뿐이다.
+    표시는 마지막 측정 시점의 위치에 그려지므로, 손가락이 움직이면 표시가 잠깐 뒤처질 수 있다.
+    """
+    overlay = result["overlay"]
+    if live_frame.shape != overlay.shape:
+        return overlay                       # 크기가 다르면 합칠 수 없으니 예전 방식으로
+    layer = result.get("_live_layer")
+    if layer is None:
+        mask = np.any(overlay != result["frame"], axis=2)
+        ys = np.flatnonzero(mask.any(axis=1))
+        xs = np.flatnonzero(mask.any(axis=0))
+        if len(ys) == 0:
+            layer = ()
+        else:
+            y0, y1, x0, x1 = ys[0], ys[-1] + 1, xs[0], xs[-1] + 1
+            m = mask[y0:y1, x0:x1]
+            layer = (y0, y1, x0, x1, m, overlay[y0:y1, x0:x1][m])
+        result["_live_layer"] = layer
+    if not layer:
+        return live_frame
+    y0, y1, x0, x1, m, values = layer
+    out = live_frame.copy()
+    out[y0:y1, x0:x1][m] = values
+    return out
+
+
 def compose(result, live_frame, history, finger, n_measured,
-           crop_rect=None, show_pip: bool = True):
+           crop_rect=None, show_pip: bool = True, live_underlay: bool = False):
     """Build the window image: measured overlay + live PiP + status bar.
 
     crop_rect : (x0, y0, x1, y1) window cut out of both the main image and
@@ -535,9 +576,16 @@ def compose(result, live_frame, history, finger, n_measured,
         to a second behind); the web stream turns it off since it isn't a
         second measurement view an operator needs, just a second copy of
         the same marker-adjacent scene.
+    live_underlay : the web stream shows the LIVE frame with only the last
+        measurement's drawn marks (outline, W/L numbers) laid on top, instead
+        of the measured frame itself - so the picture stays at camera frame
+        rate while the numbers are visible (see _live_with_annotations).
     """
     have = result is not None and result.get("ok")
-    base = result["overlay"] if have else live_frame
+    if have and live_underlay:
+        base = _live_with_annotations(result, live_frame)
+    else:
+        base = result["overlay"] if have else live_frame
     if crop_rect is not None:
         x0, y0, x1, y1 = crop_rect
         base = base[y0:y1, x0:x1]
