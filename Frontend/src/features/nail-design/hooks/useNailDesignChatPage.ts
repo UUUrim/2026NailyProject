@@ -7,7 +7,7 @@ import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
 import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
     sendChatMessage,
@@ -1590,7 +1590,7 @@ export function useNailDesignChatPage() {
             return {
                 lengthMm: Number(measurements.lengthMm ?? measurements.length ?? fingerSize.lengthMm),
                 widthMm: Number(measurements.widthMm ?? measurements.width ?? fingerSize.widthMm),
-                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? FALLBACK_C_CURVE_MM),
+                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? fingerSize.cCurveMm),
             }
         })
 

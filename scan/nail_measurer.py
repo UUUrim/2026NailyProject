@@ -137,12 +137,33 @@ NAIL_COLORS = {
 # "middle width" row — the fold-to-fold width at the widest point of the
 # plate, matching our width_mm definition; the paper's separate, narrower
 # "bottom width" near the cuticle is NOT used here).
+#
+# c_curve_mm / c_curve_sd: that paper reports no C-curve directly, so it is
+# converted into our own unit - the sagitta depth h (mm) of the nail's
+# cross-section arc over a chord equal to width_mm (measure_ccurve.py):
+#   h = R - sqrt(R^2 - (W/2)^2)
+#   R = mid-plate radius of curvature from the 3D-scanner study's Table 11
+#       ("중간곡률", left/right average - the method that study found more
+#       precise): thumb 8.38 / index 6.47 / middle 6.76 / ring 6.18 / pinky 5.37mm.
+#       It agrees with the R implied by Yeo et al. Table 4's middle width +
+#       middle curve length (8.26 / 6.03 / 6.29 / 5.70 / 4.88mm).
+#   W = width_mm above (our width definition), not the 3D study's narrower
+#       width - so a nail of average width and average R reads as exactly
+#       average here, consistent with the width baseline.
+# c_curve_sd: Table 11 gives no SD, so it is propagated from Table 4's middle
+# width / middle curve length SDs, assuming a 0.8 correlation between the two
+# (not reported; 0.7-0.9 gives 0.24-0.60mm).
 STANDARD_NAILS = {
-    "thumb":  {"width_mm": 12.60, "width_sd": 0.89, "length_mm": 12.83, "length_sd": 0.80},
-    "index":  {"width_mm":  9.83, "width_sd": 0.87, "length_mm": 11.46, "length_sd": 0.87},
-    "middle": {"width_mm": 10.38, "width_sd": 0.79, "length_mm": 11.81, "length_sd": 1.04},
-    "ring":   {"width_mm":  9.70, "width_sd": 0.88, "length_mm": 11.49, "length_sd": 1.09},
-    "pinky":  {"width_mm":  7.85, "width_sd": 0.80, "length_mm":  9.82, "length_sd": 1.06},
+    "thumb":  {"width_mm": 12.60, "width_sd": 0.89, "length_mm": 12.83, "length_sd": 0.80,
+               "c_curve_mm": 2.85, "c_curve_sd": 0.50},
+    "index":  {"width_mm":  9.83, "width_sd": 0.87, "length_mm": 11.46, "length_sd": 0.87,
+               "c_curve_mm": 2.26, "c_curve_sd": 0.38},
+    "middle": {"width_mm": 10.38, "width_sd": 0.79, "length_mm": 11.81, "length_sd": 1.04,
+               "c_curve_mm": 2.43, "c_curve_sd": 0.36},
+    "ring":   {"width_mm":  9.70, "width_sd": 0.88, "length_mm": 11.49, "length_sd": 1.09,
+               "c_curve_mm": 2.35, "c_curve_sd": 0.34},
+    "pinky":  {"width_mm":  7.85, "width_sd": 0.80, "length_mm":  9.82, "length_sd": 1.06,
+               "c_curve_mm": 1.71, "c_curve_sd": 0.36},
 }
 
 # Classification runs on a z-score = (measured - mean) / SD, so the
@@ -1713,13 +1734,11 @@ def save_annotated(image, data, aruco_corners, finger, save_path):
 
 
 # 측정 실패(ArUco/손톱 인식 실패 등)했을 때 파이프라인 전체가 죽지 않도록 쓰는 대체값.
-# width_mm/length_mm은 STANDARD_NAILS(Yeo et al. 2017, 한국 성인 여성 평균)를 그대로 쓰고,
-# c_curve_mm은 이 기본값을 쓴 뒤, arc_radius_mm은 meta.notes에 적힌 것과 같은 공식
-# (R = w²/(8h) + h/2)으로 그 값들에서 역산한다 — 임의의 숫자가 아니라 대체된 width/c_curve와
-# 항상 기하학적으로 일치하게. ArUco/손톱 인식 전체가 실패했을 때와, 폰(사이드/end-on) C-curve
-# 측정만 실패했을 때(top 인식은 성공, width/length는 그대로 살림) 둘 다 이 값을 쓴다.
-_FALLBACK_C_CURVE_MM       = 1.0
-_FALLBACK_C_CURVE_MM_ENDON = 1.0
+# width_mm/length_mm/c_curve_mm 모두 STANDARD_NAILS의 해당 손가락 평균(한국 성인 여성)을
+# 그대로 쓰고, arc_radius_mm은 meta.notes에 적힌 것과 같은 공식(R = w²/(8h) + h/2)으로
+# 그 값들에서 역산한다 — 임의의 숫자가 아니라 대체된 width/c_curve와 항상 기하학적으로
+# 일치하게. ArUco/손톱 인식 전체가 실패했을 때와, 폰(사이드/end-on) C-curve 측정만
+# 실패했을 때(top 인식은 성공, width/length는 그대로 살림) 둘 다 이 평균 c_curve_mm을 쓴다.
 
 # Was: an end-on (side/phone) c-curve reading at or above this was treated
 # as suspect and replaced with the top-view's own brightness-drop estimate
@@ -1737,7 +1756,7 @@ def _fallback_measurement(finger: str) -> dict:
     std = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])
     width_mm  = std["width_mm"]
     length_mm = std["length_mm"]
-    c_curve_mm = _FALLBACK_C_CURVE_MM
+    c_curve_mm = std["c_curve_mm"]
     arc_radius_mm = round((width_mm ** 2) / (8 * c_curve_mm) + c_curve_mm / 2, 2)
     return {
         "width_mm":        width_mm,
@@ -1882,14 +1901,15 @@ def measure_finger(top_path: str, finger: str,
                       f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
                       f"(debug -> {debug_path})")
             except Exception as e:
+                fallback_cc = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])["c_curve_mm"]
                 print(f"  [C-curve] WARN end-on(폰) 측정 실패 ({e}), "
-                      f"c_curve=1mm 기본값으로 대체")
-                data["c_curve_mm"]    = _FALLBACK_C_CURVE_MM_ENDON
+                      f"c_curve={fallback_cc}mm({finger} 평균)으로 대체")
+                data["c_curve_mm"]    = fallback_cc
                 data["arc_radius_mm"] = round(
-                    (data["width_mm"] ** 2) / (8 * _FALLBACK_C_CURVE_MM_ENDON)
-                    + _FALLBACK_C_CURVE_MM_ENDON / 2, 2,
+                    (data["width_mm"] ** 2) / (8 * fallback_cc) + fallback_cc / 2, 2,
                 )
-                data["_ccurve_method"] = "fallback 1mm (end-on/phone measurement failed)"
+                data["_ccurve_method"] = (f"fallback {finger} average {fallback_cc}mm "
+                                          f"(end-on/phone measurement failed)")
         else:
             data["_ccurve_method"] = "brightness fallback"
             if ccurve_path and not os.path.isfile(ccurve_path):

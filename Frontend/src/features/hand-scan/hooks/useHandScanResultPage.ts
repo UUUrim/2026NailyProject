@@ -6,7 +6,7 @@ import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import type { FingerDetail } from '@/shared/utils/handScanAnalysis'
@@ -346,12 +346,12 @@ export function useHandScanResultPage() {
             ),
 
             // 실제 파이프라인이 내려주는 곡률 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
-            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 일반 손톱 대체값(mm)을 쓴다.
+            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 해당 손가락의 평균 곡률(mm)을 쓴다.
             cCurve: Number(
                 measurements.cCurveMm ??
                 measurements.cCurve ??
                 measurements.curve ??
-                FALLBACK_C_CURVE_MM
+                fingerSize.cCurveMm
             ),
 
             overlay: FINGER_OVERLAYS[index] ?? { x: 50, y: 50 },
