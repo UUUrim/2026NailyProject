@@ -89,6 +89,8 @@ export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, 
     const ratio = valueMm / naturalLengthMm
     const tier = LENGTH_TIERS.find((t) => ratio <= t.maxRatio) ?? LENGTH_TIERS[LENGTH_TIERS.length - 1]
     const totalLengthMm = naturalLengthMm + valueMm
+    // 완성 길이가 지금 손톱의 몇 배인지 - 소수 첫째 자리까지, 2.0처럼 딱 떨어지면 "2배"로 보여 준다
+    const lengthMultiple = Number((totalLengthMm / naturalLengthMm).toFixed(1))
 
     // 손톱이 손가락 끝보다 얼마나 나와 있는지 (스캔 사진 기준) - 미리보기의 "내 손톱 끝" 위치.
     // 손가락 끝을 넘지 않거나(짧은 손톱), 이 측정 전의 예전 스캔이면 0 - 손가락 끝에 그린다.
@@ -141,7 +143,7 @@ export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, 
                     완성 길이 약 <strong>{totalLengthMm.toFixed(1)}mm</strong>
                     <span className="print-length-panel__total-sep" aria-hidden="true">·</span>
                     <span className="print-length-panel__total-ratio">
-                        {hasMeasured ? '지금 내 손톱보다' : '평균 손톱보다'} <strong>{Math.round(ratio * 100)}%</strong> 더 길어요
+                        {hasMeasured ? '지금 내 손톱보다' : '평균 손톱보다'} <strong>{lengthMultiple}배</strong> 더 길어요
                     </span>
                 </p>
 
@@ -214,7 +216,7 @@ export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, 
                 {hasMeasured ? (
                     <span>
                         스캔한 내 손톱 길이<strong>(평균 {Number(measuredLengthMm).toFixed(1)}mm)</strong>에 연장 길이만큼
-                        더해서 출력해요. 미리보기와 길이 단계도 내 손톱 길이에 맞춰 보여 드려요.
+                        더해서 출력해요.
                     </span>
                 ) : (
                     <span>
