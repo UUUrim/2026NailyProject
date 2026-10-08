@@ -132,6 +132,25 @@ export function parseSvgPath(rawD: string, gTransformAttr: string | null): Subpa
 }
 
 /**
+ * 경로가 가로로 차지하는 범위. 베지어 제어점까지 포함하므로 실제 곡선보다 아주 약간 넓을 수 있다
+ * (곡선은 항상 제어점들이 이루는 볼록 껍질 안에 있다). remapNailLength는 X를 바꾸지 않으므로
+ * 길이를 어떻게 바꿔도 이 범위는 같다.
+ */
+export function getPathXExtent(subpaths: Subpath[]): { minX: number; maxX: number } {
+    let minX = Infinity
+    let maxX = -Infinity
+    for (const subpath of subpaths) {
+        for (const seg of subpath) {
+            for (const [x] of seg.points) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+            }
+        }
+    }
+    return { minX, maxX }
+}
+
+/**
  * boundaryY보다 아래(손톱 몸통 대부분 + 손가락)는 좌표를 전혀 건드리지 않고 완전히 고정한다.
  * boundaryY보다 위(둥근/뾰족한 팁 캡)는 X(폭)는 그대로 두고 Y(길이 방향)만 boundaryY에
  * 붙은 채로 scale배 늘이거나 줄인다 - 폭이 안 바뀌니까 "전체 크기가 커진다"는 느낌 없이

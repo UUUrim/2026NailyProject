@@ -49,6 +49,8 @@ public class ScanResultFileService {
             Double avgLengthMm,
             Double avgWidthMm,
             Double avgCurveMm,
+            // 손톱이 손가락 살 끝보다 평균 몇 mm 나와 있는지 (스캔 사진 기준). 이 값이 없던 예전 스캔은 null
+            Double avgFreeEdgeMm,
             List<FingerView> fingers) {}
 
     private record CachedFile(long lastModified, JsonNode root) {}
@@ -170,6 +172,7 @@ public class ScanResultFileService {
                 number(handSummary, "avg_length_mm"),
                 number(handSummary, "avg_width_mm"),
                 number(handSummary, "avg_c_curve_mm"),
+                number(handSummary, "avg_free_edge_mm"),
                 fingers);
     }
 

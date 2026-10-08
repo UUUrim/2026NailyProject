@@ -64,6 +64,7 @@ public class UserHistoryController {
                             .avgLengthMm(a != null ? a.avgLengthMm() : null)
                             .avgWidthMm(a != null ? a.avgWidthMm() : null)
                             .avgCurve(a != null ? a.avgCurveMm() : null)
+                            .avgFreeEdgeMm(a != null ? a.avgFreeEdgeMm() : null)
                             .scannedAt(scan.getScannedAt() != null ? scan.getScannedAt().format(FORMATTER) : "")
                             .build();
                 })

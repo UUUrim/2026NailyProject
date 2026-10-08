@@ -77,6 +77,8 @@ export interface ScanHistoryItem {
     avgLengthMm: number | null
     avgWidthMm: number | null
     avgCurve: number | null
+    // 손톱이 손가락 살 끝보다 평균 몇 mm 나와 있는지 (스캔 사진 기준). 이 측정 전의 예전 스캔은 null
+    avgFreeEdgeMm?: number | null
     scannedAt: string
 }
 

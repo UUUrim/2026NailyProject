@@ -287,6 +287,7 @@ export function PrintPagePreviewContent() {
                         valueMm={tipExtensionMm}
                         onChange={handleSetTipExtension}
                         measuredLengthMm={selectedSession?.avgLengthMm}
+                        measuredFreeEdgeMm={selectedSession?.avgFreeEdgeMm}
                         disabled={printConfirmed}
                     />
                 </section>

@@ -108,6 +108,7 @@ def _fingers_view(by_finger: dict) -> list:
             "measurements": {
                 "widthMm":           _num(fd.get("width_mm")),
                 "lengthMm":          _num(fd.get("length_mm")),
+                "freeEdgeMm":        _num(fd.get("free_edge_mm")),
                 "correctedLengthMm": _num(fd.get("corrected_length_mm")),
                 "cCurveMm":          _num(fd.get("c_curve_mm")),
                 "arcRadiusMm":       _num(fd.get("arc_radius_mm")),
@@ -187,9 +188,12 @@ def build_final_payload(userid: str, left_session: str, left_payloads: dict,
     widths  = [float(n["width_mm"]) for n in all_nails if _num(n.get("width_mm")) is not None]
     lengths = [float(n["length_mm"]) for n in all_nails if _num(n.get("length_mm")) is not None]
     curves  = [float(n["c_curve_mm"]) for n in all_nails if _num(n.get("c_curve_mm")) is not None]
+    # 손톱이 손가락 살 끝보다 얼마나 나와 있는지 - 네일팁 출력 화면의 "내 손톱 끝" 위치에 쓴다
+    free_edges = [float(n["free_edge_mm"]) for n in all_nails if _num(n.get("free_edge_mm")) is not None]
     summary["avg_width_mm"]   = round(sum(widths) / len(widths), 2) if widths else None
     summary["avg_length_mm"]  = round(sum(lengths) / len(lengths), 2) if lengths else None
     summary["avg_c_curve_mm"] = round(sum(curves) / len(curves), 2) if curves else None
+    summary["avg_free_edge_mm"] = round(sum(free_edges) / len(free_edges), 2) if free_edges else None
     summary["finger_count"]   = len(all_nails)
 
     skin, recommended_colors = _skin_and_colors(all_nails)

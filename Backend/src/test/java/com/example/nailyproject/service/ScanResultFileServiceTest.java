@@ -102,6 +102,23 @@ class ScanResultFileServiceTest {
     }
 
     @Test
+    void 손톱이_손가락_끝보다_나온_평균_길이는_손별_요약에서_읽는다() throws Exception {
+        JsonNode root = mapper.readTree(sampleJson);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("left").path("summary")).put("avg_free_edge_mm", 2.6);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("right").path("summary")).put("avg_free_edge_mm", 0.0);
+        putFinal("10_11", mapper.writeValueAsString(root), 1_000_000L);
+
+        assertEquals(2.6, service.analysis(USER, 10).orElseThrow().avgFreeEdgeMm());
+        assertEquals(0.0, service.analysis(USER, 11).orElseThrow().avgFreeEdgeMm());
+    }
+
+    @Test
+    void 손톱_끝_값이_없던_예전_파일이면_null이다() throws IOException {
+        putFinal("10_11", sampleJson, 1_000_000L);   // 샘플은 free edge 측정 전에 만들어진 파일
+        assertNull(service.analysis(USER, 10).orElseThrow().avgFreeEdgeMm());
+    }
+
+    @Test
     void 파일이_없으면_빈_Optional이다() {
         assertTrue(service.analysis(USER, 10).isEmpty());          // 사용자 폴더 자체가 없음
         assertTrue(service.analysis(999, 10).isEmpty());

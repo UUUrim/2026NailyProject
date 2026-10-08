@@ -296,7 +296,6 @@
     vector-effect: non-scaling-stroke;
     opacity: 0.8;
 }
-
 .print-length-panel__legend {
     display: flex;
     flex-direction: column;
@@ -329,7 +328,6 @@
     height: 0;
     border-top: 1.5px dashed #de869f;
 }
-
 .print-length-panel__control {
     display: flex;
     flex-direction: column;
@@ -425,6 +423,33 @@
     font-size: 0.8rem;
     color: #8a727c;
     line-height: 1.5;
+}
+
+/* 내 손톱 + 연장 = 완성 길이, 내 손톱 대비 얼마나 길어지는지 */
+.print-length-panel__total {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.3rem;
+    margin: 0.35rem 0 0;
+    font-size: 0.78rem;
+    color: #8a727c;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+}
+
+.print-length-panel__total strong {
+    color: #c96d88;
+    font-weight: 800;
+}
+
+.print-length-panel__total-sep {
+    color: #d9c3cb;
+}
+
+/* 좁은 화면에서 줄바꿈되더라도 "지금 내 손톱보다 65% 더 길어요"는 한 덩어리로 넘긴다 */
+.print-length-panel__total-ratio {
+    white-space: nowrap;
 }
 
 .print-length-panel__slider-row {

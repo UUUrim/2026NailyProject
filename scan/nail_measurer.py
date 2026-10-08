@@ -1525,10 +1525,17 @@ def measure_top(image: np.ndarray, mpp: float,
     w_mm = round(half_px * 2 * float(mpp), 2)
     l_mm = round(float(length_px) * float(mpp), 2)
 
+    # How far the nail sticks out past the fingertip flesh (fy) in this photo —
+    # the free edge detect_free_edge() found above the finger. length_mm
+    # (cuticle -> tip_y) already includes it. 0 when the nail does not reach
+    # past the fingertip (flush, or cut shorter than the flesh).
+    free_edge_mm = round(float(fy - tip_y) * float(mpp), 2)
+
     return {
         "width_mm":        w_mm,
         "width_source":    "lateral_folds" if lateral else "constant_half",
         "length_mm":       l_mm,
+        "free_edge_mm":    free_edge_mm,
         "skin_tone_hex":   hex_color,
         "skin_L":          skin_lab["L"] if skin_lab else None,
         "skin_a":          skin_lab["a"] if skin_lab else None,
@@ -2160,6 +2167,9 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     avg_length_mm  = round(sum(n["length_mm"] for n in nails) / n_count, 2) if n_count else None
     c_curve_vals   = [n["c_curve_mm"] for n in nails if n.get("c_curve_mm") is not None]
     avg_c_curve_mm = round(sum(c_curve_vals) / len(c_curve_vals), 2) if c_curve_vals else None
+    # Older per-finger files (and the standard-value fallback) have no free_edge_mm.
+    free_edge_vals    = [n["free_edge_mm"] for n in nails if n.get("free_edge_mm") is not None]
+    avg_free_edge_mm  = round(sum(free_edge_vals) / len(free_edge_vals), 2) if free_edge_vals else None
 
     width_size  = _majority([n.get("width_size")  for n in nails])
     length_size = _majority([n.get("length_size") for n in nails])
@@ -2182,6 +2192,7 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
             "avg_width_mm":   avg_width_mm,
             "avg_length_mm":  avg_length_mm,
             "avg_c_curve_mm": avg_c_curve_mm,
+            "avg_free_edge_mm": avg_free_edge_mm,
             "width_size":     width_size,
             "length_size":    length_size,
             "nail_size":      nail_size,
