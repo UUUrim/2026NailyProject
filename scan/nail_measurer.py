@@ -2242,24 +2242,28 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     }
 
 
+# 평균과 이 값(mm)보다 더 차이가 나야 "작음/큼"으로 본다. 측정 오차가 ±1mm 안팎이라
+# (손가락 SD 0.34~0.5mm보다 큼) z-score 판정은 너무 민감해서 mm 구간으로 단순화했다.
+C_CURVE_AVG_BAND_MM = 0.5
+
 _C_CURVE_DESC = {
-    "much_smaller": "평균보다 많이 평평한 편", "smaller": "평균보다 평평한 편",
+    "smaller": "평균보다 평평한 편",
     "average": "평균과 비슷한 편",
-    "larger": "평균보다 둥글게 휜 편", "much_larger": "평균보다 많이 둥글게 휜 편",
+    "larger": "평균보다 둥글게 휜 편",
 }
 
 
 def _classify_c_curve_total(all_nails: list) -> dict:
     """
-    양손 C-curve를 여성 평균(STANDARD_NAILS의 c_curve_mm/c_curve_sd)과 비교한다.
+    양손 C-curve를 여성 평균(STANDARD_NAILS의 c_curve_mm)과 비교해 3단계로 판정한다.
 
-    너비/길이와 같은 방식: C-curve 값이 있는 손가락들의 합계를, 같은 손가락들의
-    기준 평균 합계와 비교해 z-score 하나로 판정한다 (SD는 분산의 합의 제곱근).
-    측정값이 없는 손가락(None)은 사용자 쪽과 기준 쪽 모두에서 뺀다.
-    c_curve_size: much_smaller / smaller / average / larger / much_larger
+    각 손가락의 (측정값 - 그 손가락의 평균)을 구해 평균낸 차이(mm)가
+    -C_CURVE_AVG_BAND_MM ~ +C_CURVE_AVG_BAND_MM 안이면 average, 그보다 작으면 smaller,
+    크면 larger. 측정값이 없는 손가락(None)과 평균 대체값은 계산에서 뺀다.
+    c_curve_size: smaller / average / larger
     (smaller = 평균보다 평평, larger = 평균보다 더 휘어 있음)
     """
-    total, ref_mean, ref_var, used = 0.0, 0.0, 0.0, 0
+    total, ref_mean, used = 0.0, 0.0, 0
     for n in all_nails:
         std = STANDARD_NAILS.get(n.get("finger"))
         # 측정 실패로 손가락 평균이 대신 들어간 값은 판정에서 뺀다 (z가 0 쪽으로 쏠리므로).
@@ -2274,20 +2278,24 @@ def _classify_c_curve_total(all_nails: list) -> dict:
             continue
         total    += v
         ref_mean += std["c_curve_mm"]
-        ref_var  += std["c_curve_sd"] ** 2
         used     += 1
 
     if used == 0:
-        return {"c_curve_size": None, "c_curve_z": None, "total_c_curve_mm": None,
+        return {"c_curve_size": None, "c_curve_diff_mm": None, "avg_c_curve_mm_used": None,
                 "reference_c_curve_mm": None, "c_curve_finger_count": 0,
                 "c_curve_text": None}
 
-    z = (total - ref_mean) / math.sqrt(ref_var)
-    size = _size_category(z)
+    diff = (total - ref_mean) / used   # 손가락당 평균 차이(mm)
+    if diff < -C_CURVE_AVG_BAND_MM:
+        size = "smaller"
+    elif diff > C_CURVE_AVG_BAND_MM:
+        size = "larger"
+    else:
+        size = "average"
     return {
-        "total_c_curve_mm":     round(total, 2),
-        "reference_c_curve_mm": round(ref_mean, 2),
-        "c_curve_z":            round(z, 3),
+        "avg_c_curve_mm_used":  round(total / used, 2),
+        "reference_c_curve_mm": round(ref_mean / used, 2),
+        "c_curve_diff_mm":      round(diff, 2),
         "c_curve_size":         size,
         "c_curve_finger_count": used,
         "c_curve_text": f"양손 C-curve(손톱의 휘어진 정도)는 {_C_CURVE_DESC[size]}이에요.",

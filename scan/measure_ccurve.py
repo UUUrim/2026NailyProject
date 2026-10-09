@@ -44,6 +44,14 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+# De-rotating by the upper/lower centroid offset is OFF: on this rig the silhouette is not
+# symmetric (light-leak slivers beside the fingertip, one-sided shoulders), so the centroid
+# offset reads 8-12 degrees of 'roll' on fingers that sit square to the camera and the rotation
+# then shears the nail arc into a slanted line. The C-curve is a perpendicular-to-chord quantity
+# anyway, so a roll does not need undoing.
+TILT_CORRECTION = False
+
+
 def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     """Threshold separating background b* (border median) from the finger.
 
@@ -97,6 +105,11 @@ def _finger_mask_color(img: np.ndarray):
     ks = max(7, int(0.011 * max(H, W)) | 1)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
     m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k)
+    # The light-leak slivers/triangles behind the finger are warm too and stay glued to
+    # the silhouette; they are much narrower than the fingertip, so a wide opening
+    # removes them while leaving the round fingertip intact.
+    kb = max(21, int(0.045 * max(H, W)) | 1)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kb, kb)))
     n, lbl, st, _ = cv2.connectedComponentsWithStats(m)
     if n <= 1:
         return None
@@ -437,7 +450,7 @@ def measure_ccurve(image_path: str, width_mm: float,
     # circle fit, hook-tip pick) just runs on an already-corrected frame
     # without needing to know tilt ever happened.
     tilt_deg = _compute_tilt_angle(fmask)
-    if abs(tilt_deg) > 1.5:
+    if TILT_CORRECTION and abs(tilt_deg) > 1.5:
         print(f"  [Tilt] finger rolled {tilt_deg:+.1f}°  →  de-rotating crop")
         img = _rotate_image(img, tilt_deg)
         fmask = _rotate_image(fmask, tilt_deg)
