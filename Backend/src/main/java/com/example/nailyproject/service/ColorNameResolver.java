@@ -87,6 +87,14 @@ public class ColorNameResolver {
         return bestName;
     }
 
+    /** 두 hex 색 사이의 가중 RGB 거리. 하나라도 파싱에 실패하면 Double.MAX_VALUE. */
+    public static double distance(String hexA, String hexB) {
+        int[] a = hexToRgb(hexA);
+        int[] b = hexToRgb(hexB);
+        if (a == null || b == null) return Double.MAX_VALUE;
+        return weightedDistance(a, b);
+    }
+
     private static int[] hexToRgb(String hex) {
         if (hex == null) return null;
         try {

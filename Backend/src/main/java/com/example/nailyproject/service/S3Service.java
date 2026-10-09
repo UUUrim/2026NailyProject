@@ -6,7 +6,6 @@ import com.amazonaws.services.s3.model.PutObjectRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,14 +20,6 @@ public class S3Service {
 
     @Value("${cloud.aws.s3.bucket}")
     private String bucket;
-
-    /**
-     * [수정됨] 이미지 업로드 (경로를 외부에서 주입받음)
-     * ScanService에서 만든 s3Key (예: photos/u001/125/right/thumb.jpg) 그대로 업로드합니다.
-     */
-    public String uploadImageWithKey(MultipartFile file, String s3Key) throws IOException {
-        return upload(file.getInputStream(), s3Key, file.getContentType(), file.getSize());
-    }
 
     /**
      * STL 파일 업로드 (이 부분도 나중에 파이썬이 올릴 거면 안 쓰일 수 있지만, 일단 둠 )

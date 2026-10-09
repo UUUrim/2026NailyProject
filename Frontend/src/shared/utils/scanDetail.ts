@@ -22,6 +22,8 @@ export type ScanSession = {
   avgLengthMm: number | null
   avgWidthMm: number | null
   avgCurve: number | null
+  // 손톱이 손가락 살 끝보다 평균 몇 mm 나와 있는지 - 네일팁 출력 화면의 "내 손톱 끝" 위치. 예전 스캔은 null
+  avgFreeEdgeMm?: number | null
 }
 
 export type FingerStat = {
@@ -310,6 +312,7 @@ export function buildScanSessions(scans: ScanHistoryItem[]): ScanSession[] {
       avgLengthMm: avgNullable(left.avgLengthMm, right.avgLengthMm),
       avgWidthMm: avgNullable(left.avgWidthMm, right.avgWidthMm),
       avgCurve: avgNullable(left.avgCurve, right.avgCurve),
+      avgFreeEdgeMm: avgNullable(left.avgFreeEdgeMm, right.avgFreeEdgeMm),
     })
   })
 

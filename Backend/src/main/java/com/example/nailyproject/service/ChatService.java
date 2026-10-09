@@ -28,6 +28,7 @@ public class ChatService {
     private final ObjectMapper objectMapper;
     private final StyleTrendService styleTrendService;  // 추가
     private final GptClientService gptClientService;
+    private final ScanResultFileService scanResultFileService;
 
     // Gemini 설정 - GPT로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
     // @Value("${gemini.api.key}")
@@ -258,17 +259,26 @@ public class ChatService {
                         || scan.getStatus() == HandScan.ScanStatus.COMPLETED)
                 .map(scan -> {
                     StringBuilder hint = new StringBuilder();
-                    if (scan.getRecommendedShape() != null && !scan.getRecommendedShape().isBlank()) {
+                    // 로컬의 양손 최종 measurements.json 값이 있으면 그 값, 없으면 DB 값
+                    String recommendedShape = scanResultFileService.recommendedShape(scan);
+                    List<String> recommendedColors = scanResultFileService.recommendedColors(scan);
+                    if (recommendedShape != null && !recommendedShape.isBlank()) {
                         hint.append("[스캔 기반 추천 쉐입] 이 사용자의 손 스캔 분석 결과 추천 쉐입은 \"")
-                                .append(scan.getRecommendedShape())
+                                .append(recommendedShape)
                                 .append("\"입니다. shape를 물어볼 때는 이 값을 options의 첫 번째 항목으로 반드시 포함하고, ")
                                 .append("그 라벨 끝에 \"(스캔 결과 추천)\"이라고 표시하세요. ")
                                 .append("예: \"almond\"가 추천값이면 options에 \"아몬드 (스캔 결과 추천)\"처럼 만드세요. ")
                                 .append("나머지 1~2개는 대화 맥락과 어울리는 다른 쉐입으로 채우세요.\n");
                     }
-                    if (scan.getRecommendedColors() != null && !scan.getRecommendedColors().isBlank()) {
+                    if (!recommendedColors.isEmpty()) {
+                        String paletteJson;
+                        try {
+                            paletteJson = objectMapper.writeValueAsString(recommendedColors);
+                        } catch (JsonProcessingException e) {
+                            paletteJson = String.valueOf(recommendedColors);
+                        }
                         hint.append("[스캔 기반 퍼스널컬러 팔레트] 이 사용자의 퍼스널컬러 분석 결과 추천 팔레트: ")
-                                .append(scan.getRecommendedColors())
+                                .append(paletteJson)
                                 .append(". color를 물어볼 때는 이 팔레트를 참고해서 후보를 제시하세요.\n");
                     }
                     return hint.toString();

@@ -6,7 +6,7 @@ import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import type { FingerDetail } from '@/shared/utils/handScanAnalysis'
@@ -40,6 +40,16 @@ type FingerMeasurements = {
     cCurveMm?: number
     cCurve?: number
     curve?: number
+}
+
+// 분석 중 뒤로가기를 가로채려고 히스토리에 한 칸 더 쌓는 "가드" 항목 표시
+const ANALYSIS_GUARD_KEY = 'nailyScanAnalysisGuard'
+
+// 가드 항목은 React Router가 쓰는 현재 history.state(usr = { leftScanId, rightScanId })를 그대로
+// 복사해서 쌓는다. 예전엔 state 없이(null) 쌓아서, 분석이 끝난 뒤 네일팁 출력 화면에서 뒤로가기로
+// 이 항목에 돌아오면 scanId가 비어 "손 스캔 결과가 없습니다"가 떴다.
+function pushAnalysisGuardEntry() {
+    window.history.pushState({ ...window.history.state, [ANALYSIS_GUARD_KEY]: true }, '', window.location.href)
 }
 
 // 로그인/로그아웃(계정 전환)이 일어나면 이전 계정의 분석 결과 화면이 다음 계정에게
@@ -187,7 +197,7 @@ export function useHandScanResultPage() {
     useEffect(() => {
         if (!isAnalyzing) return
 
-        window.history.pushState(null, '', window.location.href)
+        pushAnalysisGuardEntry()
 
         const handlePopState = () => {
             const confirmed = window.confirm(LEAVE_DURING_ANALYSIS_WARNING)
@@ -196,12 +206,26 @@ export function useHandScanResultPage() {
                 window.removeEventListener('popstate', handlePopState)
                 window.history.back()
             } else {
-                window.history.pushState(null, '', window.location.href)
+                pushAnalysisGuardEntry()
             }
         }
 
         window.addEventListener('popstate', handlePopState)
         return () => window.removeEventListener('popstate', handlePopState)
+    }, [isAnalyzing])
+
+    // 분석이 끝나면 가드 항목을 걷어낸다 — 남겨두면 결과 화면에서 뒤로가기를 한 번 더 눌러야
+    // 빠져나가진다. 바로 아래 항목은 같은 주소·같은 state의 이 결과 화면이라 화면은 그대로다.
+    // (마운트 직후처럼 분석을 한 적 없는 상태에선 건드리지 않는다)
+    const wasAnalyzingRef = useRef(false)
+    useEffect(() => {
+        if (isAnalyzing) {
+            wasAnalyzingRef.current = true
+            return
+        }
+        if (!wasAnalyzingRef.current) return
+        wasAnalyzingRef.current = false
+        if (window.history.state?.[ANALYSIS_GUARD_KEY]) window.history.back()
     }, [isAnalyzing])
 
     // 분석 결과 상태를 모듈 스코프 스냅샷에 반영해 둔다.
@@ -322,12 +346,12 @@ export function useHandScanResultPage() {
             ),
 
             // 실제 파이프라인이 내려주는 곡률 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
-            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 일반 손톱 대체값(mm)을 쓴다.
+            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 해당 손가락의 평균 곡률(mm)을 쓴다.
             cCurve: Number(
                 measurements.cCurveMm ??
                 measurements.cCurve ??
                 measurements.curve ??
-                FALLBACK_C_CURVE_MM
+                fingerSize.cCurveMm
             ),
 
             overlay: FINGER_OVERLAYS[index] ?? { x: 50, y: 50 },

@@ -53,7 +53,7 @@ public class PrintOrderService {
      * 사용자가 "네일팁 출력하기"를 눌렀을 때 호출.
      * 주문을 QUEUED로 기록한다. 프론트가 이 직전에 호출한 generateStl()은 "STL 생성을
      * 요청했다"는 응답만 즉시 돌려주고 실제 생성은 파이썬 쪽에서 백그라운드로 계속 진행되는
-     * 웹훅 방식이라, 이 시점엔 아직 STL 파일이 S3에 없는 게 보통이다. 그런데도 여기서 바로
+     * 웹훅 방식이라, 이 시점엔 STL 파일이 아직 로컬에 없는 게 보통이다. 그런데도 여기서 바로
      * 병합(requestMerge)을 시작하면 printer 서버가 아직 없는 STL을 다운로드하려다 대부분
      * "측정 실패로 추정"으로 건너뛰는 레이스 컨디션이 생긴다 — 실제로는 측정 실패가 아니라
      * 그냥 아직 안 끝난 것뿐이었음. 그래서 여기서는 바로 병합을 시작하지 않고, 왼손/오른손
@@ -88,7 +88,7 @@ public class PrintOrderService {
 
     /**
      * STL 생성 실패 웹훅(ScanService.receiveStlResult)이 도착했을 때 호출된다. 이 scanId를
-     * 기다리던 QUEUED 출력 주문을 실패 처리한다 — 병합을 시작하면 S3에 남아 있던 예전 STL
+     * 기다리던 QUEUED 출력 주문을 실패 처리한다 — 병합을 시작하면 로컬에 남아 있던 예전 STL
      * (사용자가 이번에 고른 길이가 아닌)이 출력될 수 있으므로 절대 진행하지 않는다.
      */
     public void failWaitingOrdersForScan(Long scanId, String reason) {
@@ -165,8 +165,8 @@ public class PrintOrderService {
     }
 
     /**
-     * printer/server.py의 /print/merge 또는 /print/merge-both를 호출한다.
-     * 양손 scanId가 둘 다 있으면 merge-both, 한쪽만 있으면 merge(한 손)로 나눠서 보낸다.
+     * printer/server.py의 /print/merge-both를 호출한다.
+     * 양손 scanId가 둘 다 있어야 하고, 한쪽만 있으면(한 손 출력) 실패 처리한다.
      */
     private void requestMerge(PrintOrder order) {
         order.updateStatus(PrintOrder.PrintStatus.MERGING);
@@ -180,47 +180,31 @@ public class PrintOrderService {
         // printer 서버에 "출력 결과 콜백 주소"도 같이 넘긴다.
         String printCallbackUrl = backendServerUrl + "/prints/" + order.getId() + "/print-result";
 
-        Map<String, Object> requestBody;
-        String endpoint;
-
-        boolean hasLeft = order.getLeftScanId() != null;
-        boolean hasRight = order.getRightScanId() != null;
+        // 한 손 출력은 지원하지 않는다 - 병합 결과(양손 3MF)만 S3에 올라가고, 한 손용 병합 엔드포인트는 없다.
+        if (order.getLeftScanId() == null || order.getRightScanId() == null) {
+            order.updateStatus(PrintOrder.PrintStatus.FAILED);
+            order.updateFailReason("네일팁 출력은 양손 스캔이 모두 필요합니다. 양손을 스캔한 뒤 다시 신청해 주세요.");
+            printOrderRepository.save(order);
+            return;
+        }
 
         try {
-            if (hasLeft && hasRight) {
-                endpoint = "/print/merge-both";
-                requestBody = Map.of(
-                        "userid", userid,
-                        "leftSession", String.valueOf(order.getLeftScanId()),
-                        "rightSession", String.valueOf(order.getRightScanId()),
-                        "leftShapes", shapes,
-                        "rightShapes", shapes,
-                        "callbackUrl", callbackUrl,
-                        "printCallbackUrl", printCallbackUrl
-                );
-            } else if (hasLeft || hasRight) {
-                endpoint = "/print/merge";
-                requestBody = Map.of(
-                        "userid", userid,
-                        "session", String.valueOf(hasLeft ? order.getLeftScanId() : order.getRightScanId()),
-                        "hand", hasLeft ? "left" : "right",
-                        "shapes", shapes,
-                        "callbackUrl", callbackUrl,
-                        "printCallbackUrl", printCallbackUrl
-                );
-            } else {
-                order.updateStatus(PrintOrder.PrintStatus.FAILED);
-                order.updateFailReason("연결된 손 스캔 정보가 없어 출력할 STL을 찾을 수 없습니다.");
-                printOrderRepository.save(order);
-                return;
-            }
+            Map<String, Object> requestBody = Map.of(
+                    "userid", userid,
+                    "leftSession", String.valueOf(order.getLeftScanId()),
+                    "rightSession", String.valueOf(order.getRightScanId()),
+                    "leftShapes", shapes,
+                    "rightShapes", shapes,
+                    "callbackUrl", callbackUrl,
+                    "printCallbackUrl", printCallbackUrl
+            );
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("ngrok-skip-browser-warning", "true");
             HttpEntity<Map<String, Object>> httpEntity = new HttpEntity<>(requestBody, headers);
 
-            restTemplate.exchange(printerServerUrl + endpoint, HttpMethod.POST, httpEntity, String.class);
+            restTemplate.exchange(printerServerUrl + "/print/merge-both", HttpMethod.POST, httpEntity, String.class);
         } catch (Exception e) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
             order.updateFailReason(describePrinterCallFailure(e, PrinterCallStep.MERGE));

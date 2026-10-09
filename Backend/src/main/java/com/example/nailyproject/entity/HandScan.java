@@ -34,36 +34,10 @@ public class HandScan {
     @Builder.Default
     private ScanStatus status = ScanStatus.READY;
 
-    // 분석 결과
-    @Column(name = "shape", length = 50)
-    private String shape; // 손가락 형태 (almond, round 등) — STL 생성/출력 시 유저가 고른 쉐입으로 덮어써질 수 있음
-
-    // AI가 분석 직후 추천한 쉐입 — updateShape()로 덮어써지지 않고 최초 값을 그대로 보존한다.
-    // (마이페이지/출력 페이지의 "추천" 배지·문구는 반드시 이 필드를 기준으로 표시해야
-    // 출력 신청 후에도 추천 배지가 유저가 고른 쉐입으로 옮겨가지 않는다)
-    @Column(name = "recommended_shape", length = 50)
-    private String recommendedShape;
-
-    @Column(name = "skin_tone_hex", length = 10)
-    private String skinToneHex; // 피부톤 HEX
-
-    @Column(name = "recommended_colors", columnDefinition = "JSON")
-    private String recommendedColors; // 추천 색상 JSON 배열
-
-    @Column(name = "tone", length = 10)
-    private String tone; // 피부 웜/쿨 톤 (warm/cool/neutral)
-
-    @Column(name = "warmness")
-    private Double warmness; // 웜/쿨 연속 스칼라 (LAB b - a*0.5) — tone 범주 판정의 원본 값. 슬라이더 위치용
-
-    @Column(name = "brightness")
-    private Double brightness; // 명도 (0~1)
-
-    @Column(name = "saturation")
-    private Double saturation; // 채도 (0~1)
-
-    @Column(name = "overall_size", length = 20)
-    private String overallSize;
+    // 분석 값(피부톤, 추천 컬러, 추천 쉐입, 치수 등)은 DB에 저장하지 않는다.
+    // 스캔 서버가 만든 로컬 최종 measurements.json을 ScanResultFileService가 읽는다.
+    // (예전 컬럼 shape/recommended_shape/skin_tone_hex/recommended_colors/tone/warmness/
+    //  brightness/saturation/overall_size는 테이블에 남아 있지만 더 이상 읽거나 쓰지 않는다.)
 
     @CreationTimestamp
     @Column(name = "scanned_at", nullable = false, updatable = false)
@@ -91,34 +65,6 @@ public class HandScan {
     // 분석 시작
     public void startAnalyzing() {
         this.status = ScanStatus.ANALYZING;
-    }
-
-    // 분석 결과 저장
-    public void updateAnalysisResult(
-            String shape,
-            String skinToneHex,
-            String recommendedColors,
-            String tone,
-            Double warmness,
-            Double brightness,
-            Double saturation,
-            String overallSize
-    ) {
-        this.shape = shape;
-        this.recommendedShape = shape;
-        this.skinToneHex = skinToneHex;
-        this.recommendedColors = recommendedColors;
-        this.tone = tone;
-        this.warmness = warmness;
-        this.brightness = brightness;
-        this.saturation = saturation;
-        this.overallSize = overallSize;
-        this.status = ScanStatus.MEASURED;
-    }
-
-    //  프론트에서 유저가 쉐입(shape)을 선택했을 때 저장하는 용도
-    public void updateShape(String shape) {
-        this.shape = shape;
     }
 
     // 분석 실패

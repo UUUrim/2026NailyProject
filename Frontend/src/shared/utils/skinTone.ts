@@ -102,12 +102,14 @@ function clampPercent(value: number, min: number, max: number): number {
   return Math.round(Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)))
 }
 
-// scan/skin_color.py의 tone 범주 경계값(warmness 스칼라 기준). 이 두 값 사이가 neutral 구간.
-const WARMNESS_WARM_CUTOFF = 13.45
-const WARMNESS_COOL_CUTOFF = 12.39
+// scan/skin_color.py의 tone 범주 경계값(TONE_HUE_COOL_MAX / TONE_HUE_WARM_MIN과 같은 값).
+// warmness는 피부 Lab 색상각(도, atan2(b, a))이다 - 클수록 노란/웜, 작을수록 붉은/쿨. 이 두 값 사이가 neutral 구간.
+// [임시 기준] 톤을 아는 여러 사람을 스캔해서 맞춘 뒤 skin_color.py와 함께 바꾼다.
+const WARMNESS_WARM_CUTOFF = 63
+const WARMNESS_COOL_CUTOFF = 55
 
 /**
- * 백엔드 warmness 스칼라(LAB b - a*0.5)를 0~100 슬라이더 위치로 변환한다.
+ * 백엔드 warmness(피부 Lab 색상각, 도)를 0~100 슬라이더 위치로 변환한다.
  * neutral 구간 중앙 -> 50%, cool 경계 -> 33%, warm 경계 -> 67%로 맞추고(=라벨과 위치가
  * 서로 어긋나지 않게) 그 바깥은 같은 기울기로 이어지며 0~100에서 잘린다.
  */

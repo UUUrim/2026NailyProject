@@ -23,5 +23,6 @@ public class ScanHistoryItemDto {
     private Double avgLengthMm;
     private Double avgWidthMm;
     private Double avgCurve;
+    private Double avgFreeEdgeMm; // 손톱이 손가락 끝보다 나와 있는 평균 길이(mm) - 출력 화면 "내 손톱 끝" 위치용, 예전 스캔은 null
     private String scannedAt; // yyyy. M. d. HH:mm:ss
 }

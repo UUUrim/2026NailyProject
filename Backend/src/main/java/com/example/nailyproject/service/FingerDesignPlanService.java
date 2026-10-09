@@ -1062,9 +1062,13 @@ public class FingerDesignPlanService {
                     per-finger instruction. In this mode do NOT leave the finger fields empty. Instead,
                     choose 2 to 4 colors that go well together from the "color 후보" palette in the
                     confirmed input, and:
-                    - Write the chosen color combination in the top-level color field, and fill mood and the
-                      base designs / motifs yourself to match the mood of those colors. Never make a
-                      one-color design.
+                    - Write the HEX codes of the chosen colors in the top-level color field, copied exactly
+                      as written in the palette and separated by commas (for example "#E8B4C0, #F5E1D3"),
+                      without the color names in parentheses. In descriptions, name these colors in natural
+                      English as the color rules above require. Only the chosen colors need to appear on
+                      the nails, not the whole palette.
+                    - Fill mood and the base designs / motifs yourself to match the mood of those colors.
+                      Never make a one-color design.
                     - Give at least two fingers different base_color values, and give the remaining fingers
                       different details (finish, gradient, pattern) so the set varies.
                     - Give at least one finger an accent part that fits the colors and mood.

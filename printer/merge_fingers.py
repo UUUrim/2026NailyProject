@@ -1,7 +1,7 @@
 """
 merge_fingers.py
 -----------------
-5개 손가락 STL 파일을 S3에서 받아와서, 기울기와 손가락간 간격을 적용한 뒤
+5개 손가락 STL 파일을 로컬 results 폴더에서 읽어서, 기울기와 손가락간 간격을 적용한 뒤
 하나의 3MF 파일로 병합한다 (Bambu Studio / Orca Slicer가 여전히 손가락별로
 개별 오브젝트로 인식할 수 있도록 오브젝트는 개별로 유지).
 
@@ -27,11 +27,43 @@ import numpy as np
 import zipfile
 import re
 
-from s3_helper import download_finger_stls
-
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 FINGER_ORDER = ["thumb", "index", "middle", "ring", "pinky"]
+
+# 스캔 서버(server.py)가 STL을 만들어 두는 로컬 폴더 - 병합은 S3가 아니라 여기서 바로 읽는다.
+#   results/{userid}/{session}/{hand}/stl/nail_{finger}_{shape}.stl
+# printer/ 의 부모(= server.py가 있는 저장소 루트)의 results/. 다른 위치면 NAILY_RESULTS_DIR로 지정.
+RESULTS_DIR = os.environ.get("NAILY_RESULTS_DIR") or os.path.join(os.path.dirname(BASE), "results")
+
+
+def find_local_finger_stls(userid: str, session: str, hand: str, shapes: dict) -> dict:
+    """
+    한 손(최대 5손가락)의 STL을 로컬 results 폴더에서 찾는다.
+    측정 실패 등으로 일부 손가락 STL이 없을 수 있으므로, 없는 건 건너뛰고 실제로
+    있는 것만 돌려준다 (호출하는 쪽에서 "몇 개가 빠졌는지"를 알려야 한다).
+
+    shapes: {"thumb": "round", "index": "round", ...}
+
+    반환값: {
+        "paths": {"thumb": "로컬경로", ...},   # 실제로 있는 것만
+        "missing": ["ring", "middle"],          # 파일이 없던 손가락들
+    }
+    """
+    stl_dir = os.path.join(RESULTS_DIR, userid, session, hand, "stl")
+    paths = {}
+    missing = []
+    for finger in FINGER_ORDER:
+        shape = shapes.get(finger)
+        if not shape:
+            raise ValueError(f"'{finger}'의 shape가 지정되지 않았습니다. shapes 딕셔너리를 확인하세요.")
+        path = os.path.join(stl_dir, f"nail_{finger}_{shape}.stl")
+        if os.path.isfile(path):
+            paths[finger] = path
+        else:
+            print(f"  [건너뜀] {finger}의 STL 없음 (STL 생성이 아직 안 끝났거나 실패): {path}")
+            missing.append(finger)
+    return {"paths": paths, "missing": missing}
 
 SPACING_MM = 10.0       # 손가락 사이 간격 (mm)
 TILT_DEG = 90.0         # 음수 = 반대 방향으로 기울임 40.0
@@ -124,7 +156,7 @@ def _build_scene(finger_paths: dict, hand_label: str = "", y_offset: float = 0.0
 
 def merge_hand(userid: str, session: str, hand: str, shapes: dict, output_dir: str | None = None) -> dict:
     """
-    한 손(최대 5손가락) STL을 S3에서 받아와 병합한 3MF를 만든다.
+    한 손(최대 5손가락) 로컬 STL을 병합한 3MF를 만든다.
     측정 실패 등으로 일부 손가락이 없어도, 있는 것만으로 병합을 진행한다.
 
     shapes: {"thumb": "round", "index": "round", ...} — 손가락별 쉐입.
@@ -132,18 +164,17 @@ def merge_hand(userid: str, session: str, hand: str, shapes: dict, output_dir: s
 
     반환값: {
         "path": "생성된 3MF 파일의 로컬 경로",
-        "missing": ["빠진 손가락 이름들"],  # 측정 실패 등으로 S3에 아예 없던 것들
+        "missing": ["빠진 손가락 이름들"],  # 측정 실패 등으로 STL 파일이 없던 것들
     }
     """
     if output_dir is None:
         output_dir = os.path.join(BASE, "output", userid, session, hand)
     os.makedirs(output_dir, exist_ok=True)
 
-    stl_download_dir = os.path.join(BASE, "stl", userid, session, hand)
-    print(f"\n[Merge] {userid}/{session}/{hand} 의 STL 다운로드 중...")
-    download_result = download_finger_stls(userid, session, hand, shapes, stl_download_dir)
-    finger_paths = download_result["paths"]
-    missing = download_result["missing"]
+    print(f"\n[Merge] {userid}/{session}/{hand} 의 로컬 STL 확인 중...")
+    stl_result = find_local_finger_stls(userid, session, hand, shapes)
+    finger_paths = stl_result["paths"]
+    missing = stl_result["missing"]
 
     if not finger_paths:
         raise RuntimeError(f"{userid}/{session}/{hand}: STL이 하나도 없어서 병합할 수 없습니다.")
@@ -176,7 +207,7 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
                       left_shapes: dict, right_shapes: dict,
                       output_dir: str | None = None) -> dict:
     """
-    양손(최대 10손가락) STL을 S3에서 받아와 하나의 3MF로 병합한다.
+    양손(최대 10손가락) 로컬 STL을 하나의 3MF로 병합한다.
     왼손은 Y=0 줄에, 오른손은 그보다 ROW_SPACING_MM만큼 떨어진 줄에 배치해서
     두 손이 겹치지 않게 한다.
 
@@ -195,17 +226,14 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
         output_dir = os.path.join(BASE, "output", userid, f"{left_session}_{right_session}", "both")
     os.makedirs(output_dir, exist_ok=True)
 
-    left_dir = os.path.join(BASE, "stl", userid, left_session, "left")
-    right_dir = os.path.join(BASE, "stl", userid, right_session, "right")
-
-    print(f"\n[Merge] {userid}/{left_session} 왼손 STL 다운로드 중...")
-    left_result = download_finger_stls(userid, left_session, "left", left_shapes, left_dir)
+    print(f"\n[Merge] {userid}/{left_session} 왼손 로컬 STL 확인 중...")
+    left_result = find_local_finger_stls(userid, left_session, "left", left_shapes)
     left_paths, missing_left = left_result["paths"], left_result["missing"]
     if missing_left:
         print(f"[Merge] 주의: 왼손 {missing_left} 손가락 STL이 없어서 제외됩니다.")
 
-    print(f"[Merge] {userid}/{right_session} 오른손 STL 다운로드 중...")
-    right_result = download_finger_stls(userid, right_session, "right", right_shapes, right_dir)
+    print(f"[Merge] {userid}/{right_session} 오른손 로컬 STL 확인 중...")
+    right_result = find_local_finger_stls(userid, right_session, "right", right_shapes)
     right_paths, missing_right = right_result["paths"], right_result["missing"]
     if missing_right:
         print(f"[Merge] 주의: 오른손 {missing_right} 손가락 STL이 없어서 제외됩니다.")
