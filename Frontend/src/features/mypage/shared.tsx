@@ -25,6 +25,15 @@ export const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   FAILED: '실패',
 }
 
+// 화면에 보여줄 상태. 병합이 끝났어도(MERGED) 앞에 출력 중/대기 중인 주문이 있으면
+// 사용자 입장에서는 "프린터 대기 중"이므로 그렇게 보여준다 (queueAhead는 백엔드가 계산).
+export function getDisplayPrintStatus(
+    order: Pick<NailTipPrintOrder, 'status' | 'queueAhead'>,
+): NailTipPrintOrder['status'] {
+  if (order.status === 'MERGED' && (order.queueAhead ?? 0) > 0) return 'WAITING_IN_QUEUE'
+  return order.status
+}
+
 export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   QUEUED: '프린터 대기열에 등록되어 있어요.',
   MERGING: '손톱 모델을 하나로 합치고 있어요.',

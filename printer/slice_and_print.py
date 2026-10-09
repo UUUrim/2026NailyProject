@@ -36,7 +36,7 @@ ORCASLICER_PATH = r"C:\Program Files\OrcaSlicer\orca-slicer.exe"
 # 이미 포함된 완결된 프리셋이라 이 문제가 없다.
 _ORCASLICER_RESOURCES = r"C:\Program Files\OrcaSlicer\resources\profiles\BBL"
 PRINT_PROFILE_MACHINE = _ORCASLICER_RESOURCES + r"\machine\Bambu Lab A1 0.2 nozzle.json"
-_BASE_PROCESS_PROFILE = _ORCASLICER_RESOURCES + r"\process\0.06mm Fine @BBL A1 0.2 nozzle.json"
+_BASE_PROCESS_PROFILE = _ORCASLICER_RESOURCES + r"\process\0.10mm High Quality @BBL A1 0.2 nozzle.json"
 PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Translucent @BBL A1 0.2 nozzle.json"
 
 # 네일팁용 서포트 오버라이드. 내장 기본 프로파일엔 이 값들이 아예 없는데, 그러면 CLI가
@@ -45,51 +45,63 @@ PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Transluc
 # GUI에서는 같은 파일로도 죽지 않는 걸 보면 CLI(헤드리스) 전용 버그로 보인다.
 SUPPORT_OVERRIDES = {
     "enable_support": "1",
-    "support_threshold_angle": "30",
-    "brim_type": "outer_only",
-    "brim_width": "5",
-    "curr_bed_type": "Textured PEI Plate",
-    "brim_separation": "0.1",
+    "support_threshold_angle": "30",        # 값이 클수록 서포트가 더 많이 생긴다 → 프로파일 기본값(30) 유지
+    "support_on_build_plate_only": "1",     # 서포트가 네일 곡면 위에 얹히지 않게
+    "support_top_z_distance": "0.16",       # layer_height와 맞춤 (PETG가 너무 붙지 않게)
+    "support_interface_top_layers": "2",    # 접촉면 층 수 최소로 (가볍게)
     "support_type": "tree(auto)",
     "support_style": "tree_slim",
 
+    # 브림/베드 접착 — 세운 상태 + 굴곡이라 베드에 닿는 면이 가는 곡선이라 넓게
+    "brim_type": "outer_only",
+    "brim_width": "6",                      # 5 → 8 → 6 (조금 줄임)
+    "brim_object_gap": "0.05",              # (예전 brim_separation은 Orca에 없는 키라 무시됐음)
+    "curr_bed_type": "Textured PEI Plate",
+    "initial_layer_line_width": "0.28",     # 첫 줄을 넓게 눌러 붙임
+    "initial_layer_speed": ["15"],
+    "initial_layer_infill_speed": ["20"],
+    "initial_layer_acceleration": ["500"],
+
     # 벽/쉘
-    "wall_loops": "5",              # 4 → 5
+    "wall_loops": "3",                      # 5 → 3: 쉘 두께 0.5mm에는 5줄이 들어갈 수 없어 겹쳐 두꺼워짐
     "top_shell_layers": "6",
     "bottom_shell_layers": "3",
+    "detect_thin_wall": "1",                # 얇은 끝부분 누락 방지
 
     # 인필
     "sparse_infill_density": "15%",
     "sparse_infill_pattern": "gyroid",
 
     # 레이어
-    "layer_height": "0.16",         # 0.12 → 0.16 확정
+    "layer_height": "0.16",
 
-    # 시임/속도/Z-hop
-    "seam_position": "back",
-    "seam_slope_type": "external",   # Scarf joint seam - Contour
-    "outer_wall_speed": "30",
-    "inner_wall_speed": "60",
-    "small_perimeter_speed": "20",
-    "top_surface_speed": "25",
-    "slow_down_layer_time": "10",
-    "min_print_speed": "10",
-    "z_hop_type": "1", #노즐이 수직으로 올라갔가 이동하는 방식 (0.2만큼)
+    # 시임/속도/Z-hop (속도·가속도 계열은 공식 프로파일처럼 리스트 형식)
+    # 시임(seam)은 건드리지 않고 프로파일 기본값(aligned)을 쓴다 — back + scarf 조합은 안쪽 끝 마감이 나빴음
+    "outer_wall_speed": ["25"],
+    "inner_wall_speed": ["60"],
+    "small_perimeter_speed": ["20"],
+    "top_surface_speed": ["25"],
+    "overhang_3_4_speed": ["15"],
+    "overhang_4_4_speed": ["10"],
+    "z_hop_type": "1",                      # 노즐이 수직으로 올라갔다 이동하는 방식 (0.2만큼)
     "z_hop": "0.2",
-    "enable_overhang_speed": "1",
+    "enable_overhang_speed": ["1"],
 }
 
 FILAMENT_OVERRIDES = {
     "textured_plate_temp": ["75"],
-    "textured_plate_temp_initial_layer": ["75"],
+    "textured_plate_temp_initial_layer": ["80"],        # 첫 레이어만 한 단계 높게
     "nozzle_temperature": ["230"],
-    "nozzle_temperature_initial_layer": ["230"],
+    "nozzle_temperature_initial_layer": ["235"],
     "filament_retraction_length": ["0.5"],
-    "close_fan_the_first_x_layers": ["3"],
-    "fan_min_speed": ["30"],
-    "fan_max_speed": ["50"],
+    "close_fan_the_first_x_layers": ["4"],
+    "fan_min_speed": ["40"],
+    "fan_max_speed": ["60"],
     "fan_cooling_layer_time": ["15"],
     "slow_down_for_cooling": ["1"],
+    # 아래 둘은 공정(process)이 아니라 필라멘트 키라 여기로 옮김 (공정에 두면 무시됨)
+    "slow_down_layer_time": ["8"],
+    "slow_down_min_speed": ["10"],
 }
 
 
@@ -180,7 +192,7 @@ def slice_3mf(input_3mf_path: str, output_dir: str) -> str:
     return output_path
 
 
-def upload_and_print(gcode_path: str, plate_number: int = 1) -> None:
+def upload_and_print(gcode_path: str, plate_number: int = 1, remote_filename: str | None = None) -> None:
     """
     슬라이싱된 G-code를 프린터에 업로드하고 출력을 시작시킨다.
     bambulabs_api를 사용 (FTP로 업로드 후 MQTT로 출력 명령).
@@ -195,7 +207,7 @@ def upload_and_print(gcode_path: str, plate_number: int = 1) -> None:
         time.sleep(2)
 
         print(f"[Print] 파일 업로드 중: {gcode_path}")
-        remote_filename = os.path.basename(gcode_path)
+        remote_filename = remote_filename or os.path.basename(gcode_path)
         with open(gcode_path, "rb") as f:
             printer.upload_file(f, remote_filename)
 
@@ -207,11 +219,24 @@ def upload_and_print(gcode_path: str, plate_number: int = 1) -> None:
         printer.disconnect()
 
 
+def _remote_filename_for(output_dir: str) -> str:
+    """프린터 저장소에 올릴 파일명을 출력 작업(output_dir)마다 고유하게 만든다.
+
+    예전엔 매번 sliced.gcode.3mf로 올려서, 앞 출력이 진행 중일 때 다음 작업이 같은
+    이름으로 덮어쓸 수 있었다. output_dir은 output/<유저>/<주문ID>처럼 작업마다
+    다르므로 마지막 경로 3개를 이어 붙여 이름으로 쓴다.
+    """
+    parts = [p for p in os.path.normpath(os.path.abspath(output_dir)).replace("\\", "/").split("/") if p]
+    tag = "_".join(parts[-3:])
+    tag = "".join(c if (c.isalnum() or c in "-_") else "_" for c in tag)
+    return f"naily_{tag}.gcode.3mf"
+
+
 def slice_and_send_to_printer(merged_3mf_path: str, output_dir: str) -> str:
     """
     병합된 3MF -> 슬라이싱 -> 프린터 업로드/출력 시작까지 한 번에 처리.
     반환값: 슬라이싱된 gcode 파일 경로 (S3 백업 업로드 등에 재사용 가능).
     """
     gcode_path = slice_3mf(merged_3mf_path, output_dir)
-    upload_and_print(gcode_path)
+    upload_and_print(gcode_path, remote_filename=_remote_filename_for(output_dir))
     return gcode_path

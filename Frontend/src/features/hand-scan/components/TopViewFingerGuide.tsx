@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
 import type { Finger } from '@/features/hand-scan/hooks/useHandScanPage'
-import { buildFingerGuideShape, type TopViewGuide } from '@/features/hand-scan/utils/topViewGuide'
+import { useBoxSize } from '@/features/hand-scan/hooks/useBoxSize'
+import { buildFingerGuideShape, coverMap, type TopViewGuide } from '@/features/hand-scan/utils/topViewGuide'
 
 /** place: 손가락을 놓기 전 / measuring: 손가락 인식돼 측정 중 / ready: 촬영 가능 */
 export type FingerGuidePhase = 'place' | 'measuring' | 'ready'
@@ -26,30 +26,16 @@ const HIDE_BELOW_PX    = 96   // 제목("큐티클 라인")조차 안 들어가�
  * 그래야 큐티클 라인이 측정이 실제로 쓰는 행과 정확히 겹친다.
  */
 export function TopViewFingerGuide({ guide, finger, fingerLabel, phase }: TopViewFingerGuideProps) {
-  const boxRef = useRef<HTMLDivElement | null>(null)
-  const [box, setBox] = useState({ w: 0, h: 0 })
-
-  useEffect(() => {
-    const el = boxRef.current
-    if (!el) return
-    const update = () => setBox({ w: el.clientWidth, h: el.clientHeight })
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  const [boxRef, box] = useBoxSize<HTMLDivElement>()
 
   const canDraw = guide !== null && box.w > 0 && box.h > 0
   let content = null
 
   if (canDraw) {
-    // object-fit: cover — 프레임 높이 1을 기준 단위로 둔 스케일(px)
-    const scale = Math.max(box.w / guide.aspect, box.h)
-    const offsetX = (box.w - guide.aspect * scale) / 2
-    const offsetY = (box.h - scale) / 2
-    const cx = offsetX + guide.centerX * guide.aspect * scale
-    const cy = offsetY + guide.cuticleY * scale
-    const pxPerMm = guide.mmToH * scale
+    const map = coverMap(box.w, box.h, guide.aspect)
+    const cx = map.x(guide.centerX)
+    const cy = map.y(guide.cuticleY)
+    const pxPerMm = guide.mmToH * map.scale
 
     const shape = buildFingerGuideShape(finger, pxPerMm, box.h - cy + 24)
     const lineHalf = shape.halfWidth + LINE_OVERHANG_PX

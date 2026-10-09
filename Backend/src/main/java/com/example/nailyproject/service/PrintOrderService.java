@@ -17,6 +17,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
@@ -128,13 +129,19 @@ public class PrintOrderService {
      * 호출된다. 이 scanId를 기다리던 QUEUED 상태 출력 주문이 있는지 찾아서, 그 주문에 필요한
      * 손(왼손/오른손)의 STL이 전부 끝났으면 그제서야 병합을 시작한다.
      */
+    // 새 트랜잭션(REQUIRES_NEW)으로 실행한다: 웹훅 두 개(왼손/오른손)가 거의 동시에 도착하면 각자
+    // 자기 트랜잭션 안에서 "내 스캔은 COMPLETED, 상대 스캔은 아직 아님"으로만 보여서 둘 다
+    // 병합을 시작하지 않는 경쟁 상태가 있었다. 호출하는 쪽(ScanService)이 자기 트랜잭션을 커밋한
+    // 뒤에 부르고, 여기서는 최신 커밋 상태를 새로 읽는다.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void tryStartMergeForScan(Long scanId) {
         List<PrintOrder> waiting = new java.util.ArrayList<>(
                 printOrderRepository.findByStatusAndLeftScanId(PrintOrder.PrintStatus.QUEUED, scanId));
         waiting.addAll(printOrderRepository.findByStatusAndRightScanId(PrintOrder.PrintStatus.QUEUED, scanId));
 
         for (PrintOrder order : waiting) {
-            if (isReadyToMerge(order)) {
+            // claimForMerge가 1을 돌려준 쪽만 병합을 시작한다 (두 웹훅이 동시에 준비 완료를 봐도 한 번만)
+            if (isReadyToMerge(order) && printOrderRepository.claimForMerge(order.getId()) == 1) {
                 requestMerge(order);
             }
         }
@@ -263,7 +270,12 @@ public class PrintOrderService {
 
         String mergedModelUrl = payload.path("mergedModelUrl").asText(null);
         order.updateMergedModelUrl(mergedModelUrl);
-        order.updateStatus(PrintOrder.PrintStatus.MERGED);
+        // 병합 완료 콜백이 늦게 도착해도, 이미 대기/출력/완료/실패로 넘어간 주문을 MERGED로 되돌리지 않는다.
+        PrintOrder.PrintStatus current = order.getStatus();
+        if (current == PrintOrder.PrintStatus.QUEUED || current == PrintOrder.PrintStatus.MERGING
+                || current == PrintOrder.PrintStatus.MERGED) {
+            order.updateStatus(PrintOrder.PrintStatus.MERGED);
+        }
         printOrderRepository.save(order);
     }
 
@@ -339,10 +351,29 @@ public class PrintOrderService {
         }
 
         String status = payload.path("status").asText("PRINTING");
-        if ("COMPLETED".equals(status)) {
+        if ("WAITING_IN_QUEUE".equals(status)) {
+            // printer 서버가 병합 직후 자동 출력 요청을 큐에 넣었다는 신호 — 앞 출력이 끝나고
+            // 슬라이싱/업로드가 끝나 PRINTING 콜백이 올 때까지 "프린터 대기 중"으로 둔다.
+            // 콜백이 지연돼 PRINTING/완료/실패 콜백보다 늦게 도착하면 상태가 거꾸로 돌아가므로 무시한다.
+            PrintOrder.PrintStatus current = order.getStatus();
+            if (current == PrintOrder.PrintStatus.PRINTING
+                    || current == PrintOrder.PrintStatus.COMPLETED
+                    || current == PrintOrder.PrintStatus.FAILED) {
+                return;
+            }
+            order.updateStatus(PrintOrder.PrintStatus.WAITING_IN_QUEUE);
+        } else if ("COMPLETED".equals(status)) {
             order.updateStatus(PrintOrder.PrintStatus.COMPLETED);
         } else {
             order.updateStatus(PrintOrder.PrintStatus.PRINTING);
+            // 큐 워커는 앞 작업이 끝나야(완료/중단 콜백을 보낸 뒤에야) 다음 작업을 시작한다.
+            // 그런데도 다른 주문이 PRINTING으로 남아 있으면 그 콜백이 유실된 것이므로,
+            // 화면에 "출력 중"이 두 개 뜨지 않게 정리한다.
+            for (PrintOrder stale : printOrderRepository.findByStatusAndIdNot(
+                    PrintOrder.PrintStatus.PRINTING, order.getId())) {
+                stale.updateStatus(PrintOrder.PrintStatus.COMPLETED);
+                printOrderRepository.save(stale);
+            }
         }
         printOrderRepository.save(order);
     }
@@ -401,7 +432,9 @@ public class PrintOrderService {
 
     private PrintOrderResponseDto toDto(PrintOrder order) {
         Integer queueAhead = null;
-        if (order.getStatus() == PrintOrder.PrintStatus.WAITING_IN_QUEUE) {
+        // 병합 직후 자동 출력 흐름에서는 MERGED도 "프린터 차례를 기다리는 중"이라 같이 계산한다.
+        if (order.getStatus() == PrintOrder.PrintStatus.WAITING_IN_QUEUE
+                || order.getStatus() == PrintOrder.PrintStatus.MERGED) {
             queueAhead = (int) printOrderRepository.countByStatusInAndIdLessThan(
                     List.of(PrintOrder.PrintStatus.PRINTING, PrintOrder.PrintStatus.WAITING_IN_QUEUE),
                     order.getId());

@@ -11,7 +11,7 @@ export interface PrintOrderResponse {
     rightScanId: number | null
     mergedModelUrl?: string | null
     failReason?: string | null
-    queueAhead?: number | null // WAITING_IN_QUEUE일 때만: 내 앞에 출력 중/대기 중인 주문 수
+    queueAhead?: number | null // WAITING_IN_QUEUE/MERGED일 때만: 내 앞에 출력 중/대기 중인 주문 수
 }
 
 /** POST /users/me/prints — 네일팁 출력 신청 기록 */

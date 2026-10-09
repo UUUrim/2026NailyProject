@@ -138,3 +138,4 @@ results/
 scan/_warp_NEW_box.jpg
 scan/_warp_OLD_box.jpg
 scan/naily_pipeline.py
+print_queue_state.json
