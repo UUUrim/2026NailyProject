@@ -105,7 +105,7 @@
       <input id="ev" type="range" min="-3" max="3" step="0.1" value="-1" />
     </label>
     <small id="capInfo"></small>
-    <small>화면에서 손가락(손톱 부근)을 탭하면 그 지점으로 초점·노출을 맞춥니다.</small>
+    <small>촬영할 때마다 서버가 손가락 위치를 자동으로 찾아 그 지점에 초점·노출을 맞춥니다. 자동 검출이 안 될 때만 화면에서 손톱 부근을 탭해 둔 지점을 씁니다.</small>
     <button id="applyBtn" type="button">지금 적용</button>
   </div>
   <div id="overlay">
@@ -160,6 +160,7 @@
   let sending        = false;     // true while a preview upload is in flight (no pile-up)
   let pollTimer      = null;
   let busy           = false;     // true while a full-res capture is in flight
+  let autoPoint      = null;      // finger position the desktop server found in the latest preview (no tapping needed)
 
   function loadCfg() {
     try {
@@ -201,6 +202,8 @@
   }
 
   function has(list, v) { return Array.isArray(list) && list.indexOf(v) >= 0; }
+  // focus/metering point: the server's live finger detection if it sent one, else the stored/tapped point
+  function curPoint() { return autoPoint || cfg.point; }
 
   async function applyExposure() {
     // Metering on the (bright) finger instead of the dark box keeps the nail from being blown out,
@@ -208,7 +211,7 @@
     const adv = {};
     if (caps.exposureMode && has(caps.exposureMode, "continuous")) {
       adv.exposureMode = "continuous";
-      adv.pointsOfInterest = [cfg.point];
+      adv.pointsOfInterest = [curPoint()];
     }
     await applyAdv(adv);
     const c = caps.exposureCompensation;
@@ -234,9 +237,9 @@
     // "poi": one-shot autofocus on the finger, then (if possible) lock that distance so the
     // full-resolution photo is taken at the same focus instead of re-focusing on the wall behind.
     if (has(caps.focusMode, "single-shot")) {
-      await applyAdv({ focusMode: "single-shot", pointsOfInterest: [cfg.point] });
+      await applyAdv({ focusMode: "single-shot", pointsOfInterest: [curPoint()] });
     } else if (has(caps.focusMode, "continuous")) {
-      await applyAdv({ focusMode: "continuous", pointsOfInterest: [cfg.point] });
+      await applyAdv({ focusMode: "continuous", pointsOfInterest: [curPoint()] });
     }
     await sleep(FOCUS_SETTLE_MS);
     const st = track.getSettings ? track.getSettings() : {};
@@ -381,6 +384,7 @@
       const r = await fetch("/phone/side/status", { cache: "no-store" });
       const j = await r.json();
       wanted = !!j.capture;
+      if (wanted && j.point && typeof j.point.x === "number" && typeof j.point.y === "number") autoPoint = j.point;
     } catch (e) {
       setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err");
       return;

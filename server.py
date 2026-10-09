@@ -97,9 +97,10 @@ from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
 try:
-    from measure_ccurve import side_edge_blur_px                 # scan/ - 사이드 사진 초점(경계 번짐) 확인용
+    from measure_ccurve import side_edge_blur_px, find_finger_point   # scan/ - 사이드 사진 초점 확인, 손가락 위치 찾기
 except Exception:                                                # 없어도 스캔은 돌아가야 한다
     side_edge_blur_px = None
+    find_finger_point = None
 import skin_snapshot                                             # scan/ - 피부색 확인용 사진 한 장
 
 # 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
@@ -411,6 +412,8 @@ class _StreamState:
         # 재측정 자체는 사진 한 장짜리 단일 프레임 값이라 라이브 평균보다
         # 노이즈에 더 취약하기 때문.
         self.live_wl: dict = {}
+        # 웹 화면(사이드뷰)에 잠깐 띄우는 안내 문구: (text, BGR color, 사라질 시각). 초점 확인 결과용.
+        self.side_note: tuple | None = None
 
 _S = _StreamState()
 
@@ -443,6 +446,8 @@ class PhoneCamera:
         self._capture_wanted  = threading.Event()
         self._full_res_ready  = threading.Event()
         self._last_preview_t  = 0.0
+        self._focus_point      = None
+        self._focus_point_done = False
 
     def isOpened(self):
         return True
@@ -468,7 +473,32 @@ class PhoneCamera:
 
     def request_capture(self):
         self._full_res_ready.clear()
+        self._focus_point = None
+        self._focus_point_done = False
         self._capture_wanted.set()
+
+    def focus_point(self):
+        """촬영 요청 직후 폰에 알려줄 초점/노출 지점 - 최신 프리뷰에서 손가락(손톱) 위치를 찾아
+        폰 카메라 프레임 기준 (0~1) 좌표로 돌려준다. 못 찾으면 None (폰은 저장된 기본 지점을 쓴다).
+        프리뷰는 서버에서 180도 돌려 저장하므로, 폰이 쓰는 원래 프레임 좌표로 되돌린다."""
+        if self._focus_point_done:
+            return self._focus_point
+        self._focus_point_done = True
+        self._focus_point = None
+        if find_finger_point is None:
+            return None
+        with self._lock:
+            frame = None if self._preview is None else self._preview.copy()
+        if frame is None:
+            return None
+        try:
+            pt = find_finger_point(frame)
+        except Exception as e:
+            print(f"[Phone] 손가락 위치 찾기 실패: {e}")
+            return None
+        if pt is not None:
+            self._focus_point = {"x": round(1.0 - pt[0], 4), "y": round(1.0 - pt[1], 4)}
+        return self._focus_point
 
     def push_full_res(self, frame: np.ndarray):
         with self._lock:
@@ -585,7 +615,7 @@ def _phone_side_idle_preview_loop():
         if CAMERA_SIDE == -2 and not _S.side_capture_busy.is_set():
             ret, frame = _phone_cam.read()
             if ret:
-                _push_frame(_S.side_frame, frame)
+                _push_frame(_S.side_frame, _with_side_note(frame))
         time.sleep(0.15)
 
 
@@ -902,6 +932,26 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     return True
 
 
+def _set_side_note(text: str, color, secs: float = 10.0):
+    _S.side_note = (text, color, time.time() + secs)
+
+
+def _with_side_note(frame: np.ndarray) -> np.ndarray:
+    """사이드뷰 웹 화면 아래쪽에 초점 확인 결과를 잠깐 겹쳐 그린다 (콘솔 로그를 못 보는 경우를 위해).
+    cv2.putText의 Hershey 글꼴은 한글이 안 나오므로 영어로만 쓴다."""
+    note = _S.side_note
+    if not note or time.time() > note[2]:
+        return frame
+    text, color, _ = note
+    out = frame.copy()
+    h, w = out.shape[:2]
+    bar = max(34, int(h * 0.05))
+    cv2.rectangle(out, (0, h - bar), (w, h), (0, 0, 0), -1)
+    scale = max(0.5, w / 900.0)
+    cv2.putText(out, text, (10, h - int(bar * 0.3)), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2)
+    return out
+
+
 def _log_side_sharpness(finger: str, img) -> None:
     """저장한 사이드 사진의 손가락 경계가 얼마나 흐린지 로그로 남긴다 (초점 맞추기 피드백용).
     번짐 폭이 작을수록 선명하다: 약 8px 이하 선명 / 8~20px 보통 / 20px 초과 흐림."""
@@ -914,9 +964,16 @@ def _log_side_sharpness(finger: str, img) -> None:
         return
     if b is None:
         print(f"  [{finger}] 사이드뷰 선명도: 손가락 경계를 못 찾음")
+        _set_side_note(f"{finger.upper()}: focus unknown (finger edge not found)", (0, 200, 255))
     else:
         label = "선명" if b <= 8 else ("보통" if b <= 20 else "흐림 - 폰 초점 설정(⚙)을 확인하세요")
         print(f"  [{finger}] 사이드뷰 선명도: 경계 번짐 {b:.0f}px ({label})")
+        if b <= 8:
+            _set_side_note(f"{finger.upper()}: FOCUS OK ({b:.0f}px)", (80, 220, 80))
+        elif b <= 20:
+            _set_side_note(f"{finger.upper()}: focus so-so ({b:.0f}px)", (0, 220, 255))
+        else:
+            _set_side_note(f"{finger.upper()}: BLURRY ({b:.0f}px) - retake / check phone focus", (60, 60, 255))
 
 
 def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
@@ -948,7 +1005,7 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
                             f"[SIDE] {finger.upper()}  |  press CAPTURE on the web page",
                             (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200,200,0), 2)
                 cv2.rectangle(disp, (0,0), (w-1,h-1), (180,180,0), 4)
-                _push_frame(_S.side_frame, disp)
+                _push_frame(_S.side_frame, _with_side_note(disp))
             elif not is_phone:
                 return False
             # is_phone and not ret: 아직 프리뷰가 없다 — 그래도 아래 force
@@ -965,7 +1022,7 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
                     if ret:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",
                                     (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
-                        _push_frame(_S.side_frame, disp)
+                        _push_frame(_S.side_frame, _with_side_note(disp))
                     cap.request_capture()
                     full = cap.capture_full(timeout=8.0)
                     if full is None:
@@ -1495,7 +1552,8 @@ async def phone_side_frame(request: Request):
 
 @app.get("/phone/side/status")
 def phone_side_status():
-    return {"capture": _phone_cam.capture_wanted()}
+    wanted = _phone_cam.capture_wanted()
+    return {"capture": wanted, "point": _phone_cam.focus_point() if wanted else None}
 
 
 @app.post("/phone/side/photo")
