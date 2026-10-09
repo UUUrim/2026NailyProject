@@ -120,6 +120,42 @@ def _finger_mask_color(img: np.ndarray):
     return ((lbl == i) * 255).astype(np.uint8)
 
 
+def side_edge_blur_px(img: np.ndarray, top=0.38, bottom=0.35, left=0.25, right=0.30):
+    """How soft the fingertip edge is in a side photo: the median 10%-90% rise distance (px, at the
+    photo's own resolution) of the brightness step across the finger's upper silhouette, where it
+    borders the dark box wall.
+
+    An in-focus edge rises within a few pixels; a defocused fingertip (autofocus latching onto the
+    wall behind the finger) takes 20-60 px, which is as large as the nail arc itself (20-40 px sag)
+    and is what makes the nail outline unreadable. Used to give feedback while tuning the phone's
+    focus. Returns None if no finger/edge could be measured."""
+    H0, W0 = img.shape[:2]
+    cr = img[int(top * H0):H0 - int(bottom * H0), int(left * W0):W0 - int(right * W0)]
+    m = _finger_mask_color(cr)
+    if m is None:
+        return None
+    g = cv2.GaussianBlur(cv2.cvtColor(cr, cv2.COLOR_BGR2GRAY).astype(np.float32), (0, 0), 1.0)
+    xs = np.nonzero(m.any(axis=0))[0]
+    x0, x1 = xs.min(), xs.max()
+    widths = []
+    for x in range(int(x0 + 0.3 * (x1 - x0)), int(x1 - 0.3 * (x1 - x0)), 5):
+        col = np.nonzero(m[:, x])[0]
+        if col.size == 0:
+            continue
+        t = int(col.min())
+        seg = g[max(0, t - 60):t + 60, x]
+        if seg.size < 100:
+            continue
+        lo, hi = np.percentile(seg[:30], 50), np.percentile(seg[-30:], 50)
+        if hi - lo < 40:
+            continue
+        n = (seg - lo) / (hi - lo)
+        i10, i90 = int(np.argmax(n > 0.1)), int(np.argmax(n > 0.9))
+        if i90 > i10:
+            widths.append(i90 - i10)
+    return float(np.median(widths)) if len(widths) >= 5 else None
+
+
 def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
     """Locate the row where a uniform dark mat/desk-edge begins at the
     bottom of the frame (end-on photo taken with the finger draped over a

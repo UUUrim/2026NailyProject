@@ -96,6 +96,10 @@ from merge_fingers   import merge_both_hands                      # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
+try:
+    from measure_ccurve import side_edge_blur_px                 # scan/ - 사이드 사진 초점(경계 번짐) 확인용
+except Exception:                                                # 없어도 스캔은 돌아가야 한다
+    side_edge_blur_px = None
 import skin_snapshot                                             # scan/ - 피부색 확인용 사진 한 장
 
 # 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
@@ -898,6 +902,23 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     return True
 
 
+def _log_side_sharpness(finger: str, img) -> None:
+    """저장한 사이드 사진의 손가락 경계가 얼마나 흐린지 로그로 남긴다 (초점 맞추기 피드백용).
+    번짐 폭이 작을수록 선명하다: 약 8px 이하 선명 / 8~20px 보통 / 20px 초과 흐림."""
+    if side_edge_blur_px is None or img is None:
+        return
+    try:
+        b = side_edge_blur_px(img)
+    except Exception as e:
+        print(f"  [{finger}] 사이드뷰 선명도 계산 실패: {e}")
+        return
+    if b is None:
+        print(f"  [{finger}] 사이드뷰 선명도: 손가락 경계를 못 찾음")
+    else:
+        label = "선명" if b <= 8 else ("보통" if b <= 20 else "흐림 - 폰 초점 설정(⚙)을 확인하세요")
+        print(f"  [{finger}] 사이드뷰 선명도: 경계 번짐 {b:.0f}px ({label})")
+
+
 def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
     """
     버그였던 부분: 예전 버전은 폰 프리뷰가 한 번도 안 온 상태(ret=False)면
@@ -958,6 +979,7 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
                 else:
                     cv2.imwrite(save_path, frame)
                 print(f"  [{finger}] 사이드뷰 저장: {save_path}")
+                _log_side_sharpness(finger, full if is_phone else frame)
                 return True
 
             time.sleep(0.03 if ret else 0.05)
@@ -1483,6 +1505,28 @@ async def phone_side_photo(request: Request):
     if frame is not None:
         _phone_cam.push_full_res(frame)
     return {"ok": frame is not None}
+
+
+@app.post("/phone/side/caps")
+async def phone_side_caps(request: Request):
+    """폰 카메라 페이지가 보고하는 카메라 지원 기능/현재 설정 (초점·노출 고정이 실제로 먹는지 확인용)."""
+    try:
+        body = await request.json()
+        os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
+        with open(os.path.join(TEST_CAPTURE_DIR, "phone_caps.json"), "w", encoding="utf-8") as f:
+            json.dump(body, f, indent=2, ensure_ascii=False)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/phone/side/caps")
+def phone_side_caps_get():
+    p = os.path.join(TEST_CAPTURE_DIR, "phone_caps.json")
+    if not os.path.isfile(p):
+        return {"ok": False, "message": "아직 폰이 보고한 값이 없습니다."}
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
 
 
 # 디버그용: 폰이 실제로 뭘 보내고 있는지 브라우저/curl로 바로 확인
