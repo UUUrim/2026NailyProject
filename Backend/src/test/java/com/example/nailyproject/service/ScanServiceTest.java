@@ -1,6 +1,7 @@
 package com.example.nailyproject.service;
 
 import com.example.nailyproject.dto.request.ScanResultRequestDto;
+import com.example.nailyproject.dto.request.ScanStartRequestDto;
 import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.User;
@@ -67,6 +68,58 @@ class ScanServiceTest {
         try (InputStream in = getClass().getResourceAsStream("/scan/final_measurements_sample.json")) {
             Files.writeString(dir.resolve("measurements.json"), new String(in.readAllBytes(), StandardCharsets.UTF_8));
         }
+    }
+
+    // ── 스캔 시작: 같은 스캔의 반대 손을 짝으로 기록 ─────────────────────
+
+    private ScanStartRequestDto startRequest(String json) throws IOException {
+        return mapper.readValue(json, ScanStartRequestDto.class);
+    }
+
+    private void saveAs(long id) {
+        when(handScanRepository.save(any())).thenAnswer(inv -> {
+            HandScan s = inv.getArgument(0);
+            return HandScan.builder().id(id).user(s.getUser()).handSide(s.getHandSide())
+                    .status(s.getStatus()).pairedScanId(s.getPairedScanId()).build();
+        });
+    }
+
+    @Test
+    void 짝_없이_시작하면_짝이_없다() throws IOException {
+        saveAs(11L);
+        service.startScan(left.getUser(), startRequest("{\"handSide\":\"LEFT\"}"));
+        assertNull(left.getPairedScanId());
+    }
+
+    @Test
+    void 반대_손을_짝으로_시작하면_서로를_가리킨다() throws IOException {
+        saveAs(11L);
+        service.startScan(left.getUser(), startRequest("{\"handSide\":\"RIGHT\",\"pairedScanId\":10}"));
+        assertEquals(11L, left.getPairedScanId());
+    }
+
+    @Test
+    void 같은_손끼리는_짝이_될_수_없다() throws IOException {
+        saveAs(11L);
+        assertThrows(IllegalArgumentException.class,
+                () -> service.startScan(left.getUser(), startRequest("{\"handSide\":\"LEFT\",\"pairedScanId\":10}")));
+        assertNull(left.getPairedScanId());
+    }
+
+    @Test
+    void 이미_짝이_있는_스캔과는_짝이_될_수_없다() throws IOException {
+        left.pairWith(99L);
+        saveAs(11L);
+        assertThrows(IllegalArgumentException.class,
+                () -> service.startScan(left.getUser(), startRequest("{\"handSide\":\"RIGHT\",\"pairedScanId\":10}")));
+        assertEquals(99L, left.getPairedScanId());
+    }
+
+    @Test
+    void 없는_스캔을_짝으로_지정하면_거부된다() throws IOException {
+        saveAs(11L);
+        assertThrows(IllegalArgumentException.class,
+                () -> service.startScan(left.getUser(), startRequest("{\"handSide\":\"RIGHT\",\"pairedScanId\":555}")));
     }
 
     // ── 상태 콜백 ───────────────────────────────────────────────────────

@@ -46,6 +46,21 @@ public class ScanService {
                 .build();
         HandScan savedScan = handScanRepository.save(handScan);
 
+        // 두 번째 손: 같은 스캔의 반대 손과 서로를 짝으로 기록한다.
+        Long pairedId = request.getPairedScanId();
+        if (pairedId != null) {
+            HandScan partner = handScanRepository.findByIdAndUserId(pairedId, user.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("짝이 될 스캔을 찾을 수 없습니다."));
+            if (partner.getHandSide() == savedScan.getHandSide()) {
+                throw new IllegalArgumentException("같은 손끼리는 짝이 될 수 없습니다.");
+            }
+            if (partner.getPairedScanId() != null) {
+                throw new IllegalArgumentException("이미 다른 스캔과 짝지어진 스캔입니다.");
+            }
+            savedScan.pairWith(partner.getId());
+            partner.pairWith(savedScan.getId());
+        }
+
         return ScanStartResponseDto.builder()
                 .scanId(savedScan.getId())
                 .build();
@@ -63,13 +78,16 @@ public class ScanService {
         handScan.updateStatus(HandScan.ScanStatus.ANALYZING);
 
         // 파이썬 FastAPI로 보낼 데이터 조합
-        Map<String, Object> requestBody = Map.of(
-                "userid", String.valueOf(user.getId()),
-                "session", String.valueOf(scanId),
-                "hand", handScan.getHandSide().name().toLowerCase(),
-                // 웹훅으로 결과 받을 주소 전달
-                "callbackUrl", backendServerUrl + "/scans/" + scanId + "/analyze/result"
-        );
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("userid", String.valueOf(user.getId()));
+        requestBody.put("session", String.valueOf(scanId));
+        requestBody.put("hand", handScan.getHandSide().name().toLowerCase());
+        // 웹훅으로 결과 받을 주소 전달
+        requestBody.put("callbackUrl", backendServerUrl + "/scans/" + scanId + "/analyze/result");
+        // 같은 스캔의 반대 손(있으면). 스캔 서버는 이 짝으로만 양손 최종 measurements.json을 만든다.
+        if (handScan.getPairedScanId() != null) {
+            requestBody.put("pairedSession", String.valueOf(handScan.getPairedScanId()));
+        }
 
         // FastAPI 1번 주소 찌르기 (비동기)
         webClientBuilder.build()
