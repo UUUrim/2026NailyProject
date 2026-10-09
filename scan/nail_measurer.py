@@ -1772,6 +1772,7 @@ def _fallback_measurement(finger: str) -> dict:
         "arc_radius_mm":   arc_radius_mm,
         "thickness_mm":    0.6,  # STL 기본 두께(다른 곳 주석과 동일)
         "_ccurve_method":  "fallback average (measurement failed)",
+        "c_curve_source":  "fallback_average",
         "_is_fallback":    True,
     }
 
@@ -1897,6 +1898,7 @@ def measure_finger(top_path: str, finger: str,
                 data["c_curve_mm"]    = cc["c_curve_mm"]
                 data["arc_radius_mm"] = cc["arc_radius_mm"]
                 data["_ccurve_method"] = "end-on photo"
+                data["c_curve_source"] = "end_on"
                 print(f"  [C-curve] OK end-on  "
                       f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
                       f"(debug -> {debug_path})")
@@ -1910,8 +1912,10 @@ def measure_finger(top_path: str, finger: str,
                 )
                 data["_ccurve_method"] = (f"fallback {finger} average {fallback_cc}mm "
                                           f"(end-on/phone measurement failed)")
+                data["c_curve_source"] = "fallback_average"
         else:
             data["_ccurve_method"] = "brightness fallback"
+            data["c_curve_source"] = "brightness"
             if ccurve_path and not os.path.isfile(ccurve_path):
                 print(f"  [C-curve] WARN ccurve photo not found: {ccurve_path}")
 
@@ -2238,6 +2242,58 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     }
 
 
+_C_CURVE_DESC = {
+    "much_smaller": "평균보다 많이 평평한 편", "smaller": "평균보다 평평한 편",
+    "average": "평균과 비슷한 편",
+    "larger": "평균보다 둥글게 휜 편", "much_larger": "평균보다 많이 둥글게 휜 편",
+}
+
+
+def _classify_c_curve_total(all_nails: list) -> dict:
+    """
+    양손 C-curve를 여성 평균(STANDARD_NAILS의 c_curve_mm/c_curve_sd)과 비교한다.
+
+    너비/길이와 같은 방식: C-curve 값이 있는 손가락들의 합계를, 같은 손가락들의
+    기준 평균 합계와 비교해 z-score 하나로 판정한다 (SD는 분산의 합의 제곱근).
+    측정값이 없는 손가락(None)은 사용자 쪽과 기준 쪽 모두에서 뺀다.
+    c_curve_size: much_smaller / smaller / average / larger / much_larger
+    (smaller = 평균보다 평평, larger = 평균보다 더 휘어 있음)
+    """
+    total, ref_mean, ref_var, used = 0.0, 0.0, 0.0, 0
+    for n in all_nails:
+        std = STANDARD_NAILS.get(n.get("finger"))
+        # 측정 실패로 손가락 평균이 대신 들어간 값은 판정에서 뺀다 (z가 0 쪽으로 쏠리므로).
+        # c_curve_source가 없는 예전 결과 파일은 측정값으로 간주한다.
+        if n.get("c_curve_source") == "fallback_average":
+            continue
+        try:
+            v = float(n.get("c_curve_mm"))
+        except (TypeError, ValueError):
+            continue
+        if std is None or math.isnan(v) or math.isinf(v):
+            continue
+        total    += v
+        ref_mean += std["c_curve_mm"]
+        ref_var  += std["c_curve_sd"] ** 2
+        used     += 1
+
+    if used == 0:
+        return {"c_curve_size": None, "c_curve_z": None, "total_c_curve_mm": None,
+                "reference_c_curve_mm": None, "c_curve_finger_count": 0,
+                "c_curve_text": None}
+
+    z = (total - ref_mean) / math.sqrt(ref_var)
+    size = _size_category(z)
+    return {
+        "total_c_curve_mm":     round(total, 2),
+        "reference_c_curve_mm": round(ref_mean, 2),
+        "c_curve_z":            round(z, 3),
+        "c_curve_size":         size,
+        "c_curve_finger_count": used,
+        "c_curve_text": f"양손 C-curve(손톱의 휘어진 정도)는 {_C_CURVE_DESC[size]}이에요.",
+    }
+
+
 def classify_size_totals(all_nails: list) -> dict:
     """
     Aggregate-vs-aggregate size verdict across BOTH hands (10 fingers).
@@ -2276,7 +2332,10 @@ def classify_size_totals(all_nails: list) -> dict:
     width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
     summary_text = f"양손 손톱을 전체로 봤을 때 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
 
+    c_curve = _classify_c_curve_total(all_nails)
+
     return {
+        **c_curve,
         "total_width_mm":       round(total_width, 2),
         "total_length_mm":      round(total_length, 2),
         "reference_width_mm":   round(std_width_mean, 2),

@@ -77,6 +77,36 @@ def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     return float(B.min() + t / 255.0 * np.ptp(B)), bg_b
 
 
+def _finger_mask_color(img: np.ndarray):
+    """Finger blob by colour: skin (and the nail, which is pale but still warm in
+    b*) vs the grey/black box wall and mat.
+
+    The side photo is a fixed rig - black wall with an arch hole, grey mat - so
+    "warm and not dark" isolates the fingertip without any hand-tuned geometry.
+    Replaces the table-edge column-variance localisation (which found no finger
+    on most photos, and on the one it 'found' cropped to mostly wall) and the
+    histogram-gap split (which found nothing on some fingers).
+
+    Returns the binary mask (largest warm blob) or None when no plausible
+    finger-sized blob exists, so the caller can fall back to the older paths.
+    """
+    H, W = img.shape[:2]
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
+    L, A, B = lab[:, :, 0], lab[:, :, 1] - 128, lab[:, :, 2] - 128
+    m = (((B > 9) | (A > 12)) & (L > 70)).astype(np.uint8) * 255
+    ks = max(7, int(0.011 * max(H, W)) | 1)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k)
+    n, lbl, st, _ = cv2.connectedComponentsWithStats(m)
+    if n <= 1:
+        return None
+    i = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+    area_frac = st[i, cv2.CC_STAT_AREA] / float(H * W)
+    if not (0.01 <= area_frac <= 0.40):
+        return None
+    return ((lbl == i) * 255).astype(np.uint8)
+
+
 def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
     """Locate the row where a uniform dark mat/desk-edge begins at the
     bottom of the frame (end-on photo taken with the finger draped over a
@@ -316,7 +346,10 @@ def measure_ccurve(image_path: str, width_mm: float,
               f"(rows {y0}:{y1}, cols {x0}:{x1} of {W0}x{H0})")
 
     located = False
-    if table_edge:
+    color_mask = _finger_mask_color(img)
+    if color_mask is not None:
+        print("  [Finger] colour mask (warm, non-dark blob) - skipping table-edge search")
+    if table_edge and color_mask is None:
         edge_row = _find_table_edge(img)
         if edge_row is None:
             print("  [Edge] no flat table-edge mat found at the bottom — "
@@ -346,7 +379,9 @@ def measure_ccurve(image_path: str, width_mm: float,
     ks = max(5, int(9 * scale_factor) | 1)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
 
-    if located:
+    if color_mask is not None:
+        mask = color_mask
+    elif located:
         # Already a tight, finger-only crop (see
         # _locate_finger_by_edge_variance's docstring for why) - a plain
         # Otsu split on L* cleanly separates the finger from the table/
@@ -375,9 +410,10 @@ def measure_ccurve(image_path: str, width_mm: float,
         raise RuntimeError("No finger-sized warm region found — "
                            "check that the fingertip is in frame.")
 
-    if located:
-        # Crop is already tight around just the finger - take the largest
-        # blob, no need to guess which one is "the" finger among several.
+    if located or color_mask is not None:
+        # Crop is already tight around just the finger (or the colour mask
+        # already picked the one warm blob) - take the largest blob, no need
+        # to guess which one is "the" finger among several.
         finger_cnt = max(big, key=cv2.contourArea)
     elif table_edge:
         # Whole-frame fallback: the target nail is whichever warm blob
@@ -628,7 +664,10 @@ def measure_ccurve(image_path: str, width_mm: float,
         ov[pulp_mask > 0] = (200, 0, 200)
         ov[band_mask > 0] = (0, 200, 255)
         cv2.addWeighted(ov, 0.35, vis, 0.65, 0, vis)
-        cv2.drawContours(vis, [finger_cnt], -1, (0, 255, 0), 2)
+        # fmask is already de-rotated with img; finger_cnt (taken before the
+        # rotation) would be drawn at the wrong place whenever tilt was corrected.
+        fcnts, _ = cv2.findContours(fmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        cv2.drawContours(vis, fcnts, -1, (0, 255, 0), 2)
 
         for xa, ya, kp in zip(xs, ys, keep):
             cv2.circle(vis, (int(xa), int(ya)), 2,

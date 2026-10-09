@@ -89,14 +89,15 @@
   const startScreen = document.getElementById("startScreen");
   const startBtn    = document.getElementById("startBtn");
 
-  const PREVIEW_MS      = 1000;   // preview upload interval
+  const PREVIEW_MS      = 250;    // minimum gap between preview uploads (next one waits for the previous to finish)
   const POLL_MS         = 400;    // capture-request poll interval
-  const PREVIEW_MAX_W   = 960;    // preview width sent to desktop (~1fps, so this is cheap)
+  const PREVIEW_MAX_W   = 640;    // preview width sent to desktop (small, so it keeps up through ngrok)
 
   let stream        = null;
   let track         = null;
   let imageCapture   = null;
   let previewTimer   = null;
+  let sending        = false;     // true while a preview upload is in flight (no pile-up)
   let pollTimer      = null;
   let busy           = false;     // true while a full-res capture is in flight
 
@@ -152,14 +153,18 @@
   }
 
   function sendPreview() {
+    if (sending) return;
     if (busy) return;
     const c = previewCanvas();
     if (!c) return;
     c.toBlob((blob) => {
       if (!blob) return;
-      fetch("/phone/side/frame", { method: "POST", body: blob })
+      sending = true;
+      fetch("/phone/side/frame", { method: "POST", body: blob,
+            signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined })
         .then(() => setStatus("연결됨 - 라이브 프리뷰 전송 중", "connected"))
-        .catch(() => setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err"));
+        .catch(() => setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err"))
+        .finally(() => { sending = false; });
     }, "image/jpeg", 0.85);
   }
 

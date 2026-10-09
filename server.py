@@ -1433,10 +1433,14 @@ def phone_side_page():
 @app.post("/phone/side/frame")
 async def phone_side_frame(request: Request):
     data = await request.body()
-    frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if frame is not None:
-        _phone_cam.push_preview(frame)
-    return {"ok": frame is not None}
+    # 디코딩 + 180도 회전은 이벤트 루프를 막지 않게 스레드풀에서 (탑뷰 측정이 바쁠 때도 프리뷰가 밀리지 않게)
+    def _decode_and_push():
+        frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is not None:
+            _phone_cam.push_preview(frame)
+        return frame is not None
+    ok = await asyncio.get_running_loop().run_in_executor(None, _decode_and_push)
+    return {"ok": ok}
 
 
 @app.get("/phone/side/status")
