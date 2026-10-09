@@ -127,13 +127,23 @@ SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5}
 WIDTH_FIT_MARGIN_MM = 1.5
 
 # 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
-# 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → L*DOME_CREST_END부터
-# 팁 끝(C*TIP_DOME_FRAC)으로 완만히 줄어드는 렌즈 모양.
-DOME_CREST_START = 0.40
+# 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → 팁 끝(C*TIP_DOME_FRAC)
+# 까지 한 번에 완만히 줄어드는 모양.
+DOME_CREST_START = 0.45
 # 돔 최고 높이 배율(측정/하한 C에 곱함).  1.0이면 C 그대로, 낮출수록 천장이 낮아짐.
-DOME_HEIGHT_SCALE = 0.75
-DOME_CREST_END   = 0.55
-TIP_DOME_FRAC    = 0.2
+DOME_HEIGHT_SCALE = 0.60
+# 큐티클 끝에서 남아 있는 돔 높이 비율(0이면 납작하게 시작).  큐티클 라인도 돔 단면을
+# 따라 둥글게 올라가도록 0이 아닌 값에서 시작한다.
+CUTICLE_DOME_FRAC = 0.7
+# 높이 프로파일을 길이 방향으로 부드럽게 만드는 가우시안 폭(mm, 표준편차).  정점이
+# 뾰족하게 튀어나와 보이는 것을 완화한다.  0이면 평활화 없음.
+CREST_SMOOTH_MM = 3.0
+TIP_DOME_FRAC    = 0.35
+
+# 양 끝(큐티클/팁 끝)에서 껍질 두께가 줄어드는 최소값(mm).  몸통은 --thickness 그대로,
+# 양 끝으로 갈수록 이 값까지 부드럽게 얇아져 바닥 평면으로 스무스하게 떨어진다.
+# 0.2 미만은 프린트가 어려움.  --exact 모드에는 적용하지 않음.
+END_MIN_THICKNESS_MM = 0.2
 
 # 폭 방향 C-curve 하한(mm).  측정값/폴백이 이보다 작으면 이 값으로 올린다.
 # 0이면 하한 없음.  --exact 모드에는 적용하지 않음.
@@ -602,25 +612,60 @@ def generate_stl(params, output_path):
         # Row-wise dome that runs all the way to the free edge.  Each row gets
         # its own arch spanning that row's footprint (edges at z=0), so the
         # dome keeps following the narrowing tip instead of going flat.
-        hw     = (grid_x[:, -1] - grid_x[:, 0]) / 2.0               # (ny,)
-        xc_row = (grid_x[:, -1] + grid_x[:, 0]) / 2.0
+        # Every row uses the FULL nail width as the dome's reference, even
+        # where the footprint is narrower (cuticle arch, tapering tip).  The
+        # footprint just clips one continuous dome surface, so the cuticle
+        # line and the tip edge follow the dome instead of being forced down
+        # to z=0 row by row.
+        hw     = np.full(ny, W / 2.0)
+        xc_row = np.full(ny, x_cen)
         # Lens-shaped height profile along the length: the rim stays on one
         # flat plane (z=0) while the dome's crest rises from the cuticle end,
-        # peaks over the body, and eases down toward the tip (but keeps a
-        # weak dome, TIP_DOME_FRAC*C, right to the free edge).
-        y0, y1, y2 = -CUT_DEPTH, DOME_CREST_START * L, DOME_CREST_END * L
-        up   = np.clip((ys - y0) / max(y1 - y0, 1e-6), 0.0, 1.0)
-        up   = np.sin(up * np.pi / 2.0)   # ease-out: rises at once, flattens at the crest
-        dn   = np.clip((ys - y2) / max(L_total - y2, 1e-6), 0.0, 1.0)
-        dn   = dn * dn * (3.0 - 2.0 * dn)
-        fade = up * (1.0 - (1.0 - TIP_DOME_FRAC) * dn)
+        # peaks once at the crest, then falls in a single gentle quarter-cosine
+        # all the way to the tip (zero slope at the crest, non-zero slope at
+        # the tip, so there is no long flat tail).
+        y0, y1 = -CUT_DEPTH, DOME_CREST_START * L
+
+        def _profiles(yv):
+            # Cuticle side: dome height AND shell thickness both rise
+            # linearly, so the outer line down to the cuticle has a constant
+            # slope (no shoulder).  Tip side: quarter-cosine fall.  The
+            # crest corner between them is rounded by the smoothing below.
+            raw  = (yv - y0) / max(y1 - y0, 1e-6)
+            up   = np.clip(CUTICLE_DOME_FRAC + (1.0 - CUTICLE_DOME_FRAC) * raw, 0.0, 1.0)
+            tail = np.cos(np.clip((yv - y1) / max(L_total - y1, 1e-6), 0.0, 1.0)
+                          * np.pi / 2.0)
+            fade = up * (TIP_DOME_FRAC + (1.0 - TIP_DOME_FRAC) * tail)
+            t_min = min(END_MIN_THICKNESS_MM, THICK)
+            ru = np.clip(raw, 0.0, 1.0)
+            return fade, t_min + (THICK - t_min) * ru * tail
+
+        # Gaussian-smooth both profiles along the length on a fine uniform
+        # grid (rows are unevenly spaced) over a domain extended past both
+        # ends (so the ends keep their slope), then sample at the row positions.
+        ext = 4.0 * max(CREST_SMOOTH_MM, 0.0)
+        yy  = np.linspace(y0 - ext, L_total + ext, 1000)
+        f_fine, t_fine = _profiles(yy)
+        sig = max(CREST_SMOOTH_MM, 0.0) / (yy[1] - yy[0])
+        if sig > 0.5:
+            kx = np.arange(-int(4 * sig), int(4 * sig) + 1)
+            k  = np.exp(-0.5 * (kx / sig) ** 2); k /= k.sum()
+            yc = yy[int(4 * sig): len(yy) - int(4 * sig)]
+            f_fine = np.convolve(f_fine, k, mode="valid")
+            t_fine = np.convolve(t_fine, k, mode="valid")
+        else:
+            yc = yy
+        fade      = np.interp(ys, yc, f_fine)
+        thick_row = np.interp(ys, yc, t_fine)
         C_row  = C * DOME_HEIGHT_SCALE * fade
         # Parabolic cross-section per row (edges at z=0).  Unlike a circular
         # arc it stays valid for any height/width ratio, so the narrow cuticle
         # arch rows can rise smoothly instead of being clamped flat.
         u      = (grid_x - xc_row[:, None]) / np.maximum(hw, 1e-6)[:, None]
         z_bot  = C_row[:, None] * np.maximum(1.0 - u ** 2, 0.0)
-    z_top = z_bot + THICK                          # (ny, nx)  uniform shell
+    if EXACT or C < 0.05 or CUT_CURVE > 1e-6:
+        thick_row = np.full(ny, THICK)
+    z_top = z_bot + thick_row[:, None]             # (ny, nx)  shell
 
     # ── Top perimeter edge rounding ───────────────────────────
     # Applies a fillet where the top surface meets the side walls / tip
