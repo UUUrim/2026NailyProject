@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { generateStl } from '@/entities/scan/api'
-import { useMyScansQuery } from '@/entities/scan/queries'
+import { useMyScanSessionsQuery } from '@/entities/scan/queries'
 import { createPrintOrder } from '@/entities/print/api'
 import { getMyProfile } from '@/entities/user/api'
 import { clampTipExtensionMm, getDefaultTipExtensionMm, getNailShape } from '@/shared/constants/nailShapes'
@@ -10,7 +10,6 @@ import { useSnapshotRestore } from '@/shared/hooks/useSnapshotRestore'
 import { ApiError } from '@/shared/utils/apiClient'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import {
-    buildScanSessions,
     isFullyAnalyzedSession,
     type ScanSession,
 } from '@/shared/utils/scanDetail'
@@ -56,9 +55,9 @@ export function usePrintPage() {
     })
     const wasRestoredRef = useRef(!!snapshot)
 
-    const scansQuery = useMyScansQuery()
+    const scansQuery = useMyScanSessionsQuery()
     const sessions = useMemo(
-        () => buildScanSessions(scansQuery.data ?? []).filter(isFullyAnalyzedSession),
+        () => (scansQuery.data ?? []).filter(isFullyAnalyzedSession),
         [scansQuery.data],
     )
     const [selectedKey, setSelectedKey] = useState<string | null>(snapshot?.selectedKey ?? null)

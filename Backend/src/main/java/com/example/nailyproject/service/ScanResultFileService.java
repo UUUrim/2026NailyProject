@@ -12,6 +12,9 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +56,23 @@ public class ScanResultFileService {
             Double avgFreeEdgeMm,
             List<FingerView> fingers) {}
 
+    /** 양손 최종 measurements.json 하나 = 스캔 한 번. 이력 목록의 한 줄이다. */
+    public record SessionSummary(
+            long leftScanId,
+            long rightScanId,
+            LocalDateTime scannedAt,
+            String skinToneHex,
+            List<String> recommendedColors,
+            String tone,
+            Double warmness,
+            Double brightness,
+            Double saturation,
+            String recommendedShape,
+            Double avgLengthMm,
+            Double avgWidthMm,
+            Double avgCurveMm,
+            Double avgFreeEdgeMm) {}
+
     private record CachedFile(long lastModified, JsonNode root) {}
 
     private static final Pattern PAIR_DIR = Pattern.compile("^(\\d+)_(\\d+)$");
@@ -75,7 +95,29 @@ public class ScanResultFileService {
 
     public Optional<ScanAnalysis> analysisFor(HandScan scan) {
         if (scan == null || scan.getId() == null || scan.getUser() == null) return Optional.empty();
-        return analysis(scan.getUser().getId(), scan.getId());
+        long userId = scan.getUser().getId();
+        Long pairedId = scan.getPairedScanId();
+        if (pairedId != null && scan.getHandSide() != null) {
+            // 짝이 정해진 스캔: 그 짝의 파일만 읽는다 (다른 쌍의 파일이 더 최근이어도 쓰지 않는다).
+            boolean isLeft = scan.getHandSide() == HandScan.HandSide.LEFT;
+            long left = isLeft ? scan.getId() : pairedId;
+            long right = isLeft ? pairedId : scan.getId();
+            return readPairFile(userId, left, right).map(root -> toAnalysis(root, scan.getId()));
+        }
+        // 짝 정보가 없는 예전 스캔 - 이 scanId가 들어간 가장 최근 파일
+        return analysis(userId, scan.getId());
+    }
+
+    private Optional<JsonNode> readPairFile(long userId, long leftScanId, long rightScanId) {
+        Path file = resultsDir.resolve(String.valueOf(userId))
+                .resolve(leftScanId + "_" + rightScanId).resolve("both").resolve("measurements.json");
+        if (!Files.isRegularFile(file)) return Optional.empty();
+        try {
+            return read(file, Files.getLastModifiedTime(file).toMillis());
+        } catch (IOException e) {
+            System.err.println("[ScanResultFile] 파일 시각 조회 실패(" + file + "): " + e.getMessage());
+            return Optional.empty();
+        }
     }
 
     public Optional<ScanAnalysis> analysis(long userId, long scanId) {
@@ -90,6 +132,54 @@ public class ScanResultFileService {
     /** 추천 쉐입 - 최종 JSON의 값. 파일이 없으면 null. */
     public String recommendedShape(HandScan scan) {
         return analysisFor(scan).map(ScanAnalysis::recommendedShape).orElse(null);
+    }
+
+    /**
+     * 이 사용자의 양손 최종 measurements.json을 전부 읽어서 최신순 목록으로 돌려준다.
+     * 이력 목록은 DB의 손 한쪽 기록을 시각으로 짝지어 만들지 않고, 이미 양손이 합쳐진 이 파일을 그대로 쓴다.
+     */
+    public List<SessionSummary> sessions(long userId) {
+        Path userDir = resultsDir.resolve(String.valueOf(userId));
+        List<SessionSummary> out = new ArrayList<>();
+        if (!Files.isDirectory(userDir)) return out;
+        try (DirectoryStream<Path> dirs = Files.newDirectoryStream(userDir)) {
+            for (Path dir : dirs) {
+                Matcher m = PAIR_DIR.matcher(dir.getFileName().toString());
+                if (!m.matches()) continue;
+                Path file = dir.resolve("both").resolve("measurements.json");
+                if (!Files.isRegularFile(file)) continue;
+                long modified = Files.getLastModifiedTime(file).toMillis();
+                Optional<JsonNode> root = read(file, modified);
+                if (root.isEmpty()) continue;
+                out.add(toSession(Long.parseLong(m.group(1)), Long.parseLong(m.group(2)), root.get(), modified));
+            }
+        } catch (IOException e) {
+            System.err.println("[ScanResultFile] 폴더 조회 실패: " + e.getMessage());
+        }
+        out.sort((a, b) -> b.scannedAt().compareTo(a.scannedAt()));
+        return out;
+    }
+
+    private SessionSummary toSession(long left, long right, JsonNode root, long modifiedMillis) {
+        ScanAnalysis a = toAnalysis(root, left);
+        LocalDateTime at;
+        try {
+            at = LocalDateTime.parse(root.path("scannedAt").asText());
+        } catch (RuntimeException e) {
+            at = LocalDateTime.ofInstant(Instant.ofEpochMilli(modifiedMillis), ZoneId.systemDefault());
+        }
+        JsonNode summary = root.path("summary");
+        // 손톱 끝 위치는 손마다 따로 잰 값이라 두 손 평균을 쓴다 (없으면 있는 쪽 값)
+        Double l = number(root.path("left").path("summary"), "avg_free_edge_mm");
+        Double r = number(root.path("right").path("summary"), "avg_free_edge_mm");
+        Double freeEdge;
+        if (l != null && r != null) freeEdge = (l + r) / 2.0;
+        else freeEdge = l != null ? l : r;   // (삼항 한 줄로 쓰면 null인 Double이 double로 풀리며 NPE)
+        return new SessionSummary(left, right, at,
+                a.skinToneHex(), a.recommendedColors(), a.tone(), a.warmness(), a.brightness(), a.saturation(),
+                a.recommendedShape(),
+                number(summary, "avg_length_mm"), number(summary, "avg_width_mm"), number(summary, "avg_c_curve_mm"),
+                freeEdge);
     }
 
     // ── 파일 찾기/읽기 ──────────────────────────────────────────────────

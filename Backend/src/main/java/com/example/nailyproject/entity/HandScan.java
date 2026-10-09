@@ -28,6 +28,13 @@ public class HandScan {
     @Column(name = "hand_side", nullable = false)
     private HandSide handSide;
 
+    // 같은 스캔(한 사람의 양손 촬영)에서 짝으로 찍힌 반대 손의 scanId. 오른손을 시작할 때 프론트가 왼손 scanId를
+    // 넘겨주면 서로를 가리키게 저장한다. 양손 최종 measurements.json은 이 짝으로만 만들고 읽는다
+    // ("가장 최근 반대 손"을 찾아 붙이면 한 손만 찍고 멈춘 기록이나 앞 사람 손이 섞인다).
+    // 짝이 정해지기 전(왼손 단독)이거나 이 필드가 생기기 전에 만든 예전 스캔은 null.
+    @Column(name = "paired_scan_id")
+    private Long pairedScanId;
+
     // 분석 상태
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -59,6 +66,11 @@ public class HandScan {
     // 상태 변경용 범용 메서드
     public void updateStatus(ScanStatus status) {
         this.status = status;
+    }
+
+    // 짝(같은 스캔의 반대 손) 연결
+    public void pairWith(Long otherScanId) {
+        this.pairedScanId = otherScanId;
     }
 
     // 분석 시작

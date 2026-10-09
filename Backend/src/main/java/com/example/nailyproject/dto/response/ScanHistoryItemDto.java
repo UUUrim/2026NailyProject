@@ -10,6 +10,7 @@ import java.util.List;
 @Builder
 public class ScanHistoryItemDto {
     private Long scanId;
+    private Long pairedScanId; // 같은 스캔에서 짝으로 찍은 반대 손의 scanId (예전 스캔/짝 전이면 null)
     private String handSide;
     private String status;
     private String shape;
