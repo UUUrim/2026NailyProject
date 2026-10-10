@@ -1151,15 +1151,34 @@ def _upload_final_measurements_async(local_path: str, userid: str,
     threading.Thread(target=_run, daemon=True).start()
 
 
-def _build_final_measurements_if_ready(userid: str, session: str, hand: str):
-    """한 손의 측정이 끝났을 때 호출 - 반대 손의 측정 결과가 이미 있으면(=10손가락이
-    모이면) 최종 measurements.json을 만든다. 반대 손이 아직이면 아무것도 안 한다.
-    스캔 흐름을 막지 않도록 예외는 여기서 삼킨다."""
+# 손 세션마다 "측정이 끝났는지" 신호. 오른손 측정이 왼손 측정(백그라운드)보다 먼저 끝나는 경우에
+# 짝 손이 끝나기를 잠깐 기다리기 위한 것이다. (이 서버가 시작을 본 세션만 등록된다)
+_MEASURE_DONE: dict = {}
+_MEASURE_DONE_LOCK = threading.Lock()
+PAIR_WAIT_SEC = 180
+
+
+def _measure_done_event(userid: str, session: str) -> threading.Event:
+    with _MEASURE_DONE_LOCK:
+        return _MEASURE_DONE.setdefault((userid, session), threading.Event())
+
+
+def _build_final_measurements_if_ready(userid: str, session: str, hand: str, paired_session: str | None):
+    """한 손의 측정이 끝났을 때 호출 - 스캔 시작 때 정해진 짝 손(paired_session)의 측정 결과가
+    있으면 그 둘로 최종 measurements.json을 만든다. 짝이 정해지지 않았으면(=이 손이 먼저 찍힌 손)
+    아무것도 안 한다. "가장 최근 반대 손"을 찾아 붙이지 않는다 - 한 손만 찍고 멈춘 데이터나 앞 사람
+    손이 다음 사람과 짝지어지는 것을 막기 위해서다. 스캔 흐름을 막지 않도록 예외는 여기서 삼킨다."""
     try:
-        path = final_measurements.maybe_build_for_finished_hand(
-            os.path.join(BASE, "results"), userid, session, hand)
+        if paired_session:
+            with _MEASURE_DONE_LOCK:
+                partner_done = _MEASURE_DONE.get((userid, paired_session))
+            if partner_done is not None and not partner_done.is_set():
+                print(f"[Final] 짝 손(세션 {paired_session})의 측정이 끝나길 기다리는 중 (최대 {PAIR_WAIT_SEC}초)")
+                partner_done.wait(PAIR_WAIT_SEC)
+        path = final_measurements.build_for_pair(
+            os.path.join(BASE, "results"), userid, session, hand, paired_session)
         if path is None:
-            print(f"[Final] {userid}/{session}/{hand}: 반대 손 측정 결과 없음 - 최종 JSON은 아직 안 만듦")
+            print(f"[Final] {userid}/{session}/{hand}: 짝 손이 정해지지 않았거나 측정 결과가 없음 - 최종 JSON은 아직 안 만듦")
             return
         with open(path, encoding="utf-8") as f:
             meta = json.load(f)
@@ -1184,7 +1203,9 @@ def _build_callback_data(userid: str, session: str, hand: str) -> dict:
     return {"success": True, "measuredFingers": len(measured)}
 
 
-def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url: str):
+def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url: str,
+                              paired_session: str | None = None):
+    done_event = _measure_done_event(userid, session)
     try:
         # 1. 캡처 (카메라 사용) — 끝나는 순간 _S.active = False 됨
         _capture_all_fingers(userid, session, hand)
@@ -1192,12 +1213,15 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
         # 2. 측정은 백그라운드로 분리 — 캡처 끝나자마자 다음 손 캡처 가능
         def _background_measure():
             try:
-                _run_measure_only(userid, session, hand)
+                try:
+                    _run_measure_only(userid, session, hand)
+                finally:
+                    done_event.set()     # 오른손이 이 손을 기다리고 있을 수 있다
                 # 손 단위 합치기/분석은 없다 - 손가락별 파일만 쌓이다가, 반대 손도 측정돼 있으면
                 # (=10손가락이 모이면) 양손 최종 measurements.json을 만든다.
                 # 콜백(= Spring 상태 MEASURED)보다 먼저 만들어서, 화면이 "완료"를 본 시점에
                 # 파일이 이미 있도록 한다.
-                _build_final_measurements_if_ready(userid, session, hand)
+                _build_final_measurements_if_ready(userid, session, hand, paired_session)
                 data = _build_callback_data(userid, session, hand)
                 requests.post(callback_url, json=data)
                 print(f"[Pipeline] 콜백 완료: {hand}")
@@ -1208,6 +1232,7 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
         threading.Thread(target=_background_measure, daemon=True).start()
 
     except Exception as e:
+        done_event.set()
         print(f"[Scan] 오류: {e}")
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
@@ -1284,6 +1309,9 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
 
 class MeasureRequest(BaseModel):
     userid: str; session: str; hand: str; callbackUrl: str
+    # 이 손과 같은 스캔에서 찍는 반대 손의 세션(scanId). 오른손처럼 짝이 먼저 정해진 손에만 온다.
+    # 이게 있어야 양손 최종 measurements.json이 만들어진다.
+    pairedSession: str | None = None
 
 class StlRequest(BaseModel):
     userid: str; session: str; hand: str; shape: str; callbackUrl: str
@@ -1323,7 +1351,7 @@ def health():
 def analyze_measure(request: MeasureRequest):
     threading.Thread(
         target=_run_measure_and_callback,
-        args=(request.userid, request.session, request.hand, request.callbackUrl),
+        args=(request.userid, request.session, request.hand, request.callbackUrl, request.pairedSession),
         daemon=True,
     ).start()
     return {"status": "started", "message": "스캔이 시작되었습니다. 카메라 화면을 확인하세요."}

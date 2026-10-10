@@ -5,6 +5,7 @@ import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
 import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
+import com.example.nailyproject.dto.response.ScanSessionDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.HandScanRepository;
@@ -22,7 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 // 마이페이지 '손 분석 결과 이력' / '네일팁 출력 내역' 조회·기록용
 @RestController
@@ -51,6 +55,7 @@ public class UserHistoryController {
                     ScanResultFileService.ScanAnalysis a = scanResultFileService.analysisFor(scan).orElse(null);
                     return ScanHistoryItemDto.builder()
                             .scanId(scan.getId())
+                            .pairedScanId(scan.getPairedScanId())
                             .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
                             .status(scan.getStatus() != null ? scan.getStatus().name() : null)
                             .shape(a != null ? a.recommendedShape() : null)
@@ -73,6 +78,58 @@ public class UserHistoryController {
         return ResponseEntity.ok(
                 ApiResponse.success(200, "손 스캔 이력 조회 성공.", data)
         );
+    }
+
+    /**
+     * 내 손 분석 기록 목록 GET /users/me/scan-sessions
+     * 양손 최종 measurements.json 하나가 한 줄이다. 마이페이지/출력/디자인 채팅이 공통으로 쓴다.
+     * (손 한쪽씩의 DB 기록을 시각으로 짝지어 만들지 않는다)
+     */
+    @GetMapping("/scan-sessions")
+    public ResponseEntity<ApiResponse<List<ScanSessionDto>>> getMyScanSessions(
+            @AuthenticationPrincipal User user) {
+
+        List<ScanSessionDto> data = scanResultFileService.sessions(user.getId()).stream()
+                .map(s -> ScanSessionDto.builder()
+                        .key(s.leftScanId() + "-" + s.rightScanId())
+                        .leftScanId(s.leftScanId())
+                        .rightScanId(s.rightScanId())
+                        .scannedAt(s.scannedAt().format(FORMATTER))
+                        .status(sessionStatus(user, s.leftScanId(), s.rightScanId()))
+                        .shape(s.recommendedShape())
+                        .recommendedShape(s.recommendedShape())
+                        .skinToneHex(s.skinToneHex())
+                        .recommendedColors(s.recommendedColors())
+                        .tone(s.tone())
+                        .warmness(s.warmness())
+                        .brightness(s.brightness())
+                        .saturation(s.saturation())
+                        .avgLengthMm(s.avgLengthMm())
+                        .avgWidthMm(s.avgWidthMm())
+                        .avgCurve(s.avgCurveMm())
+                        .avgFreeEdgeMm(s.avgFreeEdgeMm())
+                        .build())
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(ApiResponse.success(200, "손 분석 기록 조회 성공.", data));
+    }
+
+    private static final List<HandScan.ScanStatus> STATUS_ORDER = List.of(
+            HandScan.ScanStatus.FAILED, HandScan.ScanStatus.READY, HandScan.ScanStatus.ANALYZING,
+            HandScan.ScanStatus.MEASURED, HandScan.ScanStatus.GENERATING_STL, HandScan.ScanStatus.COMPLETED);
+
+    /** 두 손의 DB 상태 중 가장 덜 끝난 것. 파일이 있는데 DB 행이 없으면(예전 데이터) MEASURED. */
+    private String sessionStatus(User user, long leftId, long rightId) {
+        List<HandScan.ScanStatus> statuses = Stream.of(leftId, rightId)
+                .map(id -> handScanRepository.findByIdAndUserId(id, user.getId()))
+                .flatMap(Optional::stream)
+                .map(HandScan::getStatus)
+                .filter(Objects::nonNull)
+                .toList();
+        for (HandScan.ScanStatus s : STATUS_ORDER) {
+            if (statuses.contains(s)) return s.name();
+        }
+        return HandScan.ScanStatus.MEASURED.name();
     }
 
     /**

@@ -15,7 +15,7 @@ measurements.json 하나로 만든다.
 S3 키:      results/{userid}/{left}_{right}/both/measurements.json  (같은 경로)
 
 사용 예:
-    path = maybe_build_for_finished_hand(RESULTS_DIR, userid, session, hand)
+    path = build_for_pair(RESULTS_DIR, userid, session, hand, partner_session)   # 짝 손은 스캔 시작 때 정해진다
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ def _hand_block(session: str, payloads: dict) -> dict:
     return block
 
 
-SKIN_MIN_L, SKIN_MIN_A = 45.0, 8.0     # 이보다 어둡거나 붉은기(a*)가 이보다 적으면 피부가 아니라 바닥으로 본다
+SKIN_MIN_L, SKIN_MAX_L, SKIN_MIN_A = 45.0, 92.0, 8.0   # L이 이 범위 밖(바닥처럼 어둡거나 하얗게 날아감)이거나 붉은기(a*)가 이보다 적으면 피부가 아니다
 
 
 def _skin_and_colors(all_nails: list) -> tuple:
@@ -147,11 +147,13 @@ def _skin_and_colors(all_nails: list) -> tuple:
                if all(_num(n.get(k)) is not None for k in ("skin_L", "skin_a", "skin_b", "skin_saturation"))]
     if not metrics:
         return None, []
-    # 촬영 직후 손이 빠져서 손가락 자리에 바닥(검은 매트)이 찍힌 손가락(L 20대, a<0)은 피부값이 아니다.
-    # 피부로 볼 수 있는 손가락만 평균에 쓴다. (하나도 없으면 그대로 다 쓴다.)
-    plausible = [n for n in metrics if float(n["skin_L"]) >= SKIN_MIN_L and float(n["skin_a"]) >= SKIN_MIN_A]
-    if plausible:
-        metrics = plausible
+    # 촬영 직후 손이 빠져서 손가락 자리에 바닥(검은 매트)이 찍힌 손가락(L 20대, a<0)이나, 노출이 안 먹어서 피부가
+    # 하얗게 날아간 손가락(L 99, a<0)은 피부값이 아니다. 피부로 볼 수 있는 손가락만 평균에 쓰고, 하나도 없으면
+    # 피부 분석을 비워 둔다 (잘못된 톤/추천 컬러를 보여주는 것보다 낫다).
+    metrics = [n for n in metrics
+               if SKIN_MIN_L <= float(n["skin_L"]) <= SKIN_MAX_L and float(n["skin_a"]) >= SKIN_MIN_A]
+    if not metrics:
+        return None, []
 
     def avg(key):
         return sum(float(n[key]) for n in metrics) / len(metrics)
@@ -239,12 +241,18 @@ def write_final_measurements(results_dir: str, userid: str,
     return path
 
 
-def maybe_build_for_finished_hand(results_dir: str, userid: str, session: str, hand: str) -> Optional[str]:
-    """한 손의 측정이 끝났을 때 부른다. 반대 손의 가장 최근 측정 세션이 있으면 그 둘로
-    최종 JSON을 만들고 로컬 경로를 돌려준다. 반대 손이 아직 없으면 아무것도 안 하고 None."""
-    other = "right" if hand == "left" else "left"
-    partner = find_latest_session(results_dir, userid, other)
-    if partner is None:
+def build_for_pair(results_dir: str, userid: str, session: str, hand: str,
+                   partner_session: Optional[str]) -> Optional[str]:
+    """한 손(session, hand)의 측정이 끝났을 때 부른다. 스캔 시작 때 정해진 짝 손(partner_session)의
+    손가락 측정 파일이 있으면 그 둘로 최종 JSON을 만들고 로컬 경로를 돌려준다.
+
+    짝(partner_session)이 없으면 None이다. 디스크에서 "가장 최근 반대 손"을 찾아 붙이지 않는다 -
+    한 손만 찍고 멈춘 데이터나 앞 사람의 손이 다음 사람의 손과 짝지어지기 때문이다.
+    """
+    if not partner_session or str(partner_session) == str(session):
         return None
-    left_session, right_session = (session, partner) if hand == "left" else (partner, session)
+    other = "right" if hand == "left" else "left"
+    if not load_finger_payloads(results_dir, userid, partner_session, other):
+        return None
+    left_session, right_session = (session, partner_session) if hand == "left" else (partner_session, session)
     return write_final_measurements(results_dir, userid, left_session, right_session)

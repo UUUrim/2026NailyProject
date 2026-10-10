@@ -179,6 +179,69 @@ class ScanResultFileServiceTest {
     }
 
     @Test
+    void 짝이_정해진_스캔은_더_최근의_다른_쌍_파일이_있어도_그_짝의_파일만_읽는다() throws IOException {
+        // 오른손 11은 왼손 10과 짝이다. 나중에 다른 사람의 왼손 12가 오른손 11과 잘못 만든 파일(12_11)이 더 최근이어도 무시한다.
+        putFinal("10_11", sampleJson, 1_000_000L);
+        putFinal("12_11", sampleJson.replaceFirst("\"recommendedShape\"\s*:\s*\"[^\"]*\"", "\"recommendedShape\": \"wrong_pair\""), 2_000_000L);
+
+        HandScan right = HandScan.builder()
+                .id(11L)
+                .user(User.builder().id(USER).build())
+                .handSide(HandScan.HandSide.RIGHT)
+                .pairedScanId(10L)
+                .build();
+
+        assertNotEquals("wrong_pair", service.recommendedShape(right));
+        assertNotNull(service.recommendedShape(right));
+        // 짝 정보가 없는 예전 스캔은 예전처럼 가장 최근 파일을 쓴다
+        HandScan legacy = HandScan.builder().id(11L).user(User.builder().id(USER).build()).build();
+        assertEquals("wrong_pair", service.recommendedShape(legacy));
+    }
+
+    @Test
+    void 짝이_정해졌지만_그_짝의_파일이_아직_없으면_다른_파일로_대체하지_않는다() throws IOException {
+        putFinal("12_11", sampleJson, 2_000_000L);
+        HandScan right = HandScan.builder()
+                .id(11L)
+                .user(User.builder().id(USER).build())
+                .handSide(HandScan.HandSide.RIGHT)
+                .pairedScanId(10L)
+                .build();
+
+        assertTrue(service.analysisFor(right).isEmpty());
+    }
+
+    @Test
+    void 이력_목록은_양손_최종_파일_하나가_한_줄이고_최신순이다() throws IOException {
+        // 시각을 다르게 한 두 번째 스캔(12_13)
+        putFinal("10_11", sampleJson, 1_000_000L);
+        putFinal("12_13", sampleJson
+                .replace("\"leftSession\": \"10\"", "\"leftSession\": \"12\"")
+                .replace("\"rightSession\": \"11\"", "\"rightSession\": \"13\"")
+                .replace("2026-10-07T18:46:26", "2026-10-09T15:00:00"), 2_000_000L);
+        // 짝 폴더가 아니거나 both/measurements.json이 없는 폴더는 무시한다
+        Files.createDirectories(results.resolve(String.valueOf(USER)).resolve("14").resolve("left"));
+        Files.createDirectories(results.resolve(String.valueOf(USER)).resolve("14_15"));
+
+        List<ScanResultFileService.SessionSummary> list = service.sessions(USER);
+
+        assertEquals(2, list.size());
+        assertEquals(12L, list.get(0).leftScanId());
+        assertEquals(13L, list.get(0).rightScanId());
+        assertEquals(10L, list.get(1).leftScanId());
+        assertEquals(11L, list.get(1).rightScanId());
+        assertNotNull(list.get(0).recommendedShape());
+        assertNotNull(list.get(0).avgLengthMm());
+        assertEquals(30, list.get(0).recommendedColors().size());
+    }
+
+    @Test
+    void 이력_목록은_다른_사용자_폴더를_읽지_않는다() throws IOException {
+        putFinal("10_11", sampleJson, 1_000_000L);
+        assertTrue(service.sessions(USER + 1).isEmpty());
+    }
+
+    @Test
     void 파일이_없으면_DB로_대체하지_않고_빈_값이다() {
         HandScan scan = HandScan.builder()
                 .id(55L)

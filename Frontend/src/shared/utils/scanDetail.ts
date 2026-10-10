@@ -1,4 +1,4 @@
-import type { ScanHistoryItem, ScanResultResponse } from '@/entities/scan/api'
+import type { ScanResultResponse } from '@/entities/scan/api'
 import { generateSkinTonePalette } from '@/shared/utils/skinTone'
 import { FALLBACK_C_CURVE_MM, FALLBACK_LENGTH_MM, FALLBACK_WIDTH_MM, NAIL_BASELINE } from '@/shared/utils/nailMetrics'
 
@@ -263,58 +263,4 @@ export function isFullyAnalyzedSession(session: ScanSession): boolean {
       session.avgWidthMm != null &&
       session.avgCurve != null
   )
-}
-
-/**
- * 한 번의 촬영에서 나온 왼손/오른손 기록을 하나의 세션으로 묶음.
- * (같은 세션이면 촬영 시각이 서로 가까움 — 90분 이내면 같은 세션으로 판단)
- * 양손 촬영을 모두 마친 경우만 반환.
- */
-export function buildScanSessions(scans: ScanHistoryItem[]): ScanSession[] {
-  const sorted = [...scans].sort(
-      (a, b) => (parseDateFlexible(b.scannedAt)?.getTime() ?? 0) - (parseDateFlexible(a.scannedAt)?.getTime() ?? 0),
-  )
-  const used = new Set<number>()
-  const sessions: ScanSession[] = []
-
-  sorted.forEach((scan, i) => {
-    if (used.has(scan.scanId)) return
-    used.add(scan.scanId)
-
-    const scanTime = parseDateFlexible(scan.scannedAt)?.getTime() ?? 0
-    const partner = sorted.find((other, j) => {
-      if (j === i || used.has(other.scanId) || other.handSide === scan.handSide) return false
-      const otherTime = parseDateFlexible(other.scannedAt)?.getTime() ?? 0
-      return Math.abs(otherTime - scanTime) < 90 * 60 * 1000
-    })
-    // 양손 촬영을 모두 마친 경우만 이력으로 저장·표시
-    if (!partner) return
-    used.add(partner.scanId)
-
-    const left = scan.handSide === 'LEFT' ? scan : partner.handSide === 'LEFT' ? partner : null
-    const right = scan.handSide === 'RIGHT' ? scan : partner.handSide === 'RIGHT' ? partner : null
-    if (!left || !right) return
-
-    sessions.push({
-      key: `${left.scanId}-${right.scanId}`,
-      scannedAt: laterScannedAt(left.scannedAt, right.scannedAt),
-      leftScanId: left.scanId,
-      rightScanId: right.scanId,
-      skinToneHex: left.skinToneHex ?? right.skinToneHex ?? null,
-      tone: left.tone ?? right.tone ?? null,
-      warmness: left.warmness ?? right.warmness ?? null,
-      brightness: left.brightness ?? right.brightness ?? null,
-      saturation: left.saturation ?? right.saturation ?? null,
-      recommendedColors: (left.recommendedColors?.length ? left.recommendedColors : right.recommendedColors) ?? [],
-      shape: left.shape ?? right.shape ?? null,
-      recommendedShape: left.recommendedShape ?? right.recommendedShape ?? null,
-      status: pickAnalysisStatus(left.status, right.status),
-      avgLengthMm: avgNullable(left.avgLengthMm, right.avgLengthMm),
-      avgWidthMm: avgNullable(left.avgWidthMm, right.avgWidthMm),
-      avgCurve: avgNullable(left.avgCurve, right.avgCurve),
-      avgFreeEdgeMm: avgNullable(left.avgFreeEdgeMm, right.avgFreeEdgeMm),
-    })
-  })
-
-  return sessions
 }

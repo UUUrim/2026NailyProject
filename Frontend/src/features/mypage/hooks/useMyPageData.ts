@@ -19,9 +19,9 @@ import {
 } from '@/entities/design/api'
 import { type DesignImageDetailInput } from '@/features/mypage/components/DesignImageDetailModal'
 import { getScanResult } from '@/entities/scan/api'
-import { useMyScansQuery } from '@/entities/scan/queries'
+import { useMyScansQuery, useMyScanSessionsQuery } from '@/entities/scan/queries'
 import { ApiError } from '@/shared/utils/apiClient'
-import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
+import { isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { type LikeModalTarget, buildScanDetail, type ScanDetail } from '@/features/mypage/shared'
 
 const DESIGNS_KEY = ['mypage', 'designs'] as const
@@ -36,6 +36,7 @@ export function useMyPageData() {
   const designsQuery = useQuery({ queryKey: DESIGNS_KEY, queryFn: getMyDesigns })
   const favoritesQuery = useQuery({ queryKey: FAVORITES_KEY, queryFn: getLikedDesigns })
   const scansQuery = useMyScansQuery()
+  const scanSessionsQuery = useMyScanSessionsQuery()
   const printsQuery = useQuery({
     queryKey: PRINTS_KEY,
     queryFn: getMyPrintOrders,
@@ -172,8 +173,8 @@ export function useMyPageData() {
   // 한 번의 촬영에서 나온 왼손/오른손 기록을 하나의 세션으로 묶고, 실제 분석 결과값이
   // 전부 채워진 것만 이력으로 노출한다 (utils/scanDetail — 출력/스캔 페이지와 동일한 기준 사용)
   const scanSessions = useMemo<ScanSession[]>(
-      () => buildScanSessions(scans).filter(isFullyAnalyzedSession),
-      [scans],
+      () => (scanSessionsQuery.data ?? []).filter(isFullyAnalyzedSession),
+      [scanSessionsQuery.data],
   )
 
   // ── 손 분석 세션 상세 모달 ──────

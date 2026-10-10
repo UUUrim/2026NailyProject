@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { startScan, requestAnalyze } from '@/entities/scan/api'
-import { useMyScansQuery } from '@/entities/scan/queries'
+import { useMyScanSessionsQuery } from '@/entities/scan/queries'
 import { useAuth } from '@/shared/hooks/useAuth'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { useSnapshotRestore } from '@/shared/hooks/useSnapshotRestore'
@@ -14,7 +14,6 @@ import {
   type TopViewMeasure,
 } from '@/features/hand-scan/utils/topViewGuide'
 import {
-  buildScanSessions,
   isFullyAnalyzedSession,
   type ScanSession,
 } from '@/shared/utils/scanDetail'
@@ -167,13 +166,13 @@ export function useHandScanPage() {
   // 공유한다 — 게이트를 보여줄지 판단하는 로직 자체(최신 완료 세션이 있으면 'show', 없으면
   // 'pass')는 그대로고, 데이터를 가져오는 방식만 캐시 가능한 쿼리로 바뀐 것.
   const needsRescanGateCheck = !skipRescanGate && isLoggedIn
-  const rescanGateScansQuery = useMyScansQuery({ enabled: needsRescanGateCheck })
+  const rescanGateScansQuery = useMyScanSessionsQuery({ enabled: needsRescanGateCheck })
 
   useEffect(() => {
     if (!needsRescanGateCheck) { setGateStatus('pass'); return }
     if (rescanGateScansQuery.isPending) { setGateStatus('checking'); return }
     if (rescanGateScansQuery.isError) { setGateStatus('pass'); return }
-    const latest = pickLatestCompletedSession(buildScanSessions(rescanGateScansQuery.data))
+    const latest = pickLatestCompletedSession(rescanGateScansQuery.data)
     if (latest) { setLatestCompletedSession(latest); setGateStatus('show') }
     else setGateStatus('pass')
   }, [needsRescanGateCheck, rescanGateScansQuery.isPending, rescanGateScansQuery.isError, rescanGateScansQuery.data])
@@ -309,7 +308,7 @@ export function useHandScanPage() {
               try {
                 let nextScanId = scanIdsRef.current['RIGHT']
                 if (nextScanId === null) {
-                  const data = await startScan('RIGHT')
+                  const data = await startScan('RIGHT', scanIdsRef.current['LEFT'])
                   nextScanId = data.scanId
                   setScanIds((prev) => ({ ...prev, RIGHT: nextScanId }))
                   scanIdsRef.current = { ...scanIdsRef.current, RIGHT: nextScanId }
@@ -345,7 +344,7 @@ export function useHandScanPage() {
 
       let currentScanId = scanIds[currentHand]
       if (currentScanId === null) {
-        const data = await startScan(currentHand)
+        const data = await startScan(currentHand, scanIdsRef.current[currentHand === 'LEFT' ? 'RIGHT' : 'LEFT'])
         currentScanId = data.scanId
         setScanIds((prev) => ({ ...prev, [currentHand]: currentScanId }))
         scanIdsRef.current = { ...scanIdsRef.current, [currentHand]: currentScanId }
