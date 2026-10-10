@@ -831,10 +831,25 @@
 
 /* ── 이미지 그리드 ── */
 
+/* 디자인 이미지는 가로형(3:2)이라 칸이 너무 좁으면 팁이 작아진다 — 최소 폭을 넉넉히 둬서
+   좁은 화면에서도 5열로 쪼개지지 않게 한다. */
 .mypage-x__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 1rem;
+}
+
+/* 열 수 고정 그리드 — 디자인 이력 탭은 4열(한 페이지 16개 = 4행), 타임라인은 3열.
+   칸 폭을 (그리드 폭 - 사이 간격) / 열 수로 잡아 평소엔 정확히 그 열 수로 채우고,
+   그리드가 좁아져 칸이 120px 아래로 내려가면(휴대폰, 타임라인 오른쪽 영역 등)
+   열 수를 줄여서 팁이 너무 작아지지 않게 한다.
+   (-1px: 소수점 반올림으로 마지막 열이 딱 안 들어가 한 열이 줄어드는 걸 막는 여유분) */
+.mypage-x__grid--cols-4 {
+  grid-template-columns: repeat(auto-fill, minmax(max(120px, calc((100% - 3rem) / 4 - 1px)), 1fr));
+}
+
+.mypage-x__grid--cols-3 {
+  grid-template-columns: repeat(auto-fill, minmax(max(120px, calc((100% - 2rem) / 3 - 1px)), 1fr));
 }
 
 .mypage-x__card {
@@ -859,6 +874,7 @@
   padding: 0;
   background: #f7f7f7;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .mypage-x__card-share-badge {
@@ -880,16 +896,18 @@
   pointer-events: none;
 }
 
+/* 생성 이미지(1536x1024)와 같은 3:2 비율 — 정사각형으로 자르면 양 끝(엄지·새끼) 팁이 잘린다 */
 .mypage-x__card-image-btn img {
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 3 / 2;
   object-fit: cover;
   display: block;
   transition: transform 0.3s ease;
 }
 
+/* 확대 폭을 작게 둬서 hover 중에도 양 끝 팁이 잘리지 않게 한다 */
 .mypage-x__card-image-btn:hover img {
-  transform: scale(1.06);
+  transform: scale(1.03);
 }
 
 .mypage-x__card-zoom-hint {
@@ -913,13 +931,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.4rem;
   padding: 0.65rem 0.85rem;
 }
 
+/* 칸이 좁아도 날짜는 한 줄로 두고, 대신 옆 찜 폴더 이름이 말줄임으로 줄어든다 */
 .mypage-x__card-date {
   font-size: 0.72rem;
   color: #a3a3a3;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .mypage-x__heart-btn {
@@ -2767,6 +2788,7 @@
   justify-content: center;
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .mypage-x__page-arrow svg {
@@ -2783,11 +2805,15 @@
   color: var(--mp-pink-deep);
 }
 
+/* 번호가 넘치면 가운데 정렬 때문에 왼쪽 화살표가 화면 밖으로 잘리므로, 공간이 모자라면
+   화살표는 그대로 두고 번호만 줄바꿈한다. */
 .mypage-x__page-numbers {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 0.85rem;
+  gap: 0.6rem 0.85rem;
+  min-width: 0;
 }
 
 .mypage-x__page-num {
@@ -2807,6 +2833,20 @@
 
 .mypage-x__page-num.is-active {
   color: var(--mp-pink-deep);
+}
+
+/* 휴대폰 폭: 번호 10개(11~20처럼 두 자리여도)는 윗줄에 한 줄로, «‹ ›» 화살표는 아랫줄에 모은다 */
+@media (max-width: 520px) {
+  .mypage-x__pagination {
+    flex-wrap: wrap;
+    row-gap: 0.7rem;
+  }
+
+  .mypage-x__page-numbers {
+    order: -1;
+    flex: 1 0 100%;
+    column-gap: 0.45rem;
+  }
 }
 
 .mypage-x__day-nav-date-btn {
@@ -2979,16 +3019,20 @@
   height: 14px;
 }
 
+/* 큰 칸(2fr) 1개 + 작은 칸(1fr) 2개를 세로로 쌓은 구성에서 전체 비율을 9:4로 잡으면
+   큰 칸·작은 칸 모두 디자인 이미지와 같은 3:2가 되어, 어느 칸에서도 팁이 잘리지 않는다. */
 .mypage-x__folder-thumbs {
   display: grid;
   grid-template-columns: 2fr 1fr;
+  /* 이미지 원본 크기가 행 높이를 밀어 올려 9:4가 깨지지 않도록 행/박스를 비율에 고정 */
+  grid-template-rows: minmax(0, 1fr);
   gap: 3px;
-  height: 112px;
+  aspect-ratio: 9 / 4;
+  overflow: hidden;
   background: #f7f2f4;
 }
 
 .mypage-x__folder-thumbs--sm {
-  height: 72px;
   border-radius: 10px;
   overflow: hidden;
 }
@@ -3009,7 +3053,7 @@
 
 .mypage-x__folder-thumb-side {
   display: grid;
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   gap: 3px;
   min-height: 0;
 }
@@ -3103,8 +3147,9 @@
   align-items: center;
   justify-content: center;
   /* 가장자리에 딱 맞춰 채우면 위쪽에만 여백이 없어 보이는 문제가 있어, 사방에
-     동일한 여백을 두는 타일 형태로 어느 쪽에서 봐도 대칭이 되도록 한다. */
-  height: 96px;
+     동일한 여백을 두는 타일 형태로 어느 쪽에서 봐도 대칭이 되도록 한다.
+     높이는 옆 폴더 카드의 썸네일(9:4)과 맞춘다. */
+  aspect-ratio: 9 / 4;
   margin: 0.7rem;
   border-radius: 10px;
   background: #fdf5f8;
@@ -3267,7 +3312,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 72px;
+  /* 옆 폴더 카드의 썸네일(.mypage-x__folder-thumbs--sm, 9:4)과 높이를 맞춘다 */
+  aspect-ratio: 9 / 4;
   border-radius: 10px;
   background: #fdf5f8;
   color: var(--mp-pink);
@@ -3323,11 +3369,12 @@
   display: inline-flex;
   align-items: center;
   max-width: 10rem;
+  min-width: 0;
   border: 1px solid rgba(222, 134, 159, 0.35);
   border-radius: 999px;
   background: #fff7fa;
   overflow: hidden;
-  flex-shrink: 0;
+  flex-shrink: 1;
 }
 
 .mypage-x__like-pill-folder {
@@ -4123,32 +4170,33 @@
   box-shadow: inset 0 0 0 1px rgba(222, 134, 159, 0.25);
 }
 
+/* 디자인 이미지와 같은 3:2 카드로 겹쳐서 팁이 잘리지 않게 한다 */
 .mypage-x__confirm-flow-thumbs img {
   position: absolute;
-  width: 34px;
-  height: 34px;
+  width: 39px;
+  height: 26px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: 6px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
   border: 1.5px solid #fff;
 }
 
 .mypage-x__confirm-flow-thumbs img:nth-child(1) {
-  top: 3px;
+  top: 4px;
   left: 3px;
   z-index: 3;
 }
 
 .mypage-x__confirm-flow-thumbs img:nth-child(2) {
-  top: 9px;
-  left: 12px;
+  top: 13px;
+  left: 6.5px;
   z-index: 2;
   opacity: 0.9;
 }
 
 .mypage-x__confirm-flow-thumbs img:nth-child(3) {
-  top: 15px;
-  left: 21px;
+  top: 22px;
+  left: 10px;
   z-index: 1;
   opacity: 0.75;
 }

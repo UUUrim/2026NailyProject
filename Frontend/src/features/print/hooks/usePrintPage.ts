@@ -145,6 +145,9 @@ export function usePrintPage() {
             setSelectedKey(initial.key)
             setSelectedShape(initialShape)
             setTipExtensionMm(getDefaultTipExtensionMm(initialShape))
+            // 지정해 넘어온 기록이 1페이지 밖(6번째 이후)에 있으면 선택만 되고 화면엔 안 보이므로,
+            // 그 기록이 있는 페이지를 바로 열어 준다.
+            setSessionPage(Math.floor(sessions.indexOf(initial) / SESSIONS_PAGE_SIZE) + 1)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [scansQuery.data])

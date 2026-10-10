@@ -113,7 +113,7 @@ function rasterizeImage(image: HTMLImageElement): PreparedImage {
 
   ctx.drawImage(image, 0, 0, width, height)
 
-  let data: Uint8ClampedArray | null = null
+  let data: Uint8ClampedArray | null
   try {
     data = ctx.getImageData(0, 0, width, height).data
   } catch {

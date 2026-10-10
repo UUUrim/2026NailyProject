@@ -2,28 +2,34 @@ import type { NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
 import {
   clampDesignAspect,
   computeNailPoses,
-  facingOpacity,
+  tipFrame,
+  tipOutline,
+  type NailFit,
   type NailPose,
   type Point,
+  type TipFrame,
   type TrackedHand,
 } from '@/features/mypage/utils/fingerLandmarks'
 
 // The destination quad the nail image gets warped onto, in the source image's
-// corner order (top-left, top-right, bottom-right, bottom-left): the nail's
-// flat rectangle in 3D (cuticle edge at pose.origin, extending nailLength
-// along pose.axis, pose.width wide along pose.across), projected onto the
-// screen by dropping depth. The image's top edge is the tip's cuticle end, so
-// it goes on the cuticle edge; its left edge goes on the -across side (see
-// NailPose.across). Projecting the real 3D corners gives the quad the right
-// foreshortening for free when the finger tilts toward the camera or rolls.
-function getNailQuad(pose: NailPose, nailLength: number): [Point, Point, Point, Point] {
-  const { origin, axis, across } = pose
-  const halfW = pose.width / 2
+// corner order (top-left, top-right, bottom-right, bottom-left): over the
+// outline the 3D tip would have (see tipOutline) - its cuticle edge there,
+// extending frame.length along frame.axis projected onto the screen by
+// dropping depth, so the quad gets the right foreshortening for free when the
+// finger tilts toward the camera. The image's top edge is the tip's cuticle
+// end, so it goes on the cuticle edge; its left edge goes on the -across side
+// (see NailPose.across).
+function getNailQuad(pose: NailPose, frame: TipFrame): [Point, Point, Point, Point] | null {
+  const outline = tipOutline(pose.origin, frame, pose.width)
+  if (!outline) return null
+  const { cuticle, across } = outline
+  const { axis, length } = frame
+  const halfW = outline.width / 2
   const corner = (side: number, along: number): Point => ({
-    x: origin.x + across.x * halfW * side + axis.x * along,
-    y: origin.y + across.y * halfW * side + axis.y * along,
+    x: cuticle.x + across.x * halfW * side + axis.x * along,
+    y: cuticle.y + across.y * halfW * side + axis.y * along,
   })
-  return [corner(-1, 0), corner(1, 0), corner(1, nailLength), corner(-1, nailLength)]
+  return [corner(-1, 0), corner(1, 0), corner(1, length), corner(-1, length)]
 }
 
 // Solves the 2D affine matrix mapping source triangle -> destination
@@ -92,13 +98,16 @@ function drawFingerNail(ctx: CanvasRenderingContext2D, pose: NailPose, asset: Na
   const nailAsset = asset.fingerNails[pose.finger.nailIndex]
   if (!nailAsset) return
 
-  const opacity = facingOpacity(pose.facing)
+  const opacity = pose.opacity
   if (opacity <= 0) return
 
   // Preserve the cutout's own proportions - derive length from the measured
-  // width, so the design is scaled, never stretched/squashed.
-  const nailLength = pose.width / clampDesignAspect(nailAsset.aspectRatio)
-  const quad = getNailQuad(pose, nailLength)
+  // width, so the design is scaled, not stretched/squashed (unless it's too
+  // short to cover the nail at all - see tipFrame).
+  const frame = tipFrame(pose, pose.width / clampDesignAspect(nailAsset.aspectRatio))
+  const nailLength = frame.length
+  const quad = getNailQuad(pose, frame)
+  if (!quad) return
 
   ctx.save()
   ctx.globalAlpha = 0.94 * opacity
@@ -107,6 +116,19 @@ function drawFingerNail(ctx: CanvasRenderingContext2D, pose: NailPose, asset: Na
   ctx.shadowColor = 'rgba(10, 8, 12, 0.35)'
   ctx.shadowBlur = Math.max(2, nailLength * 0.05)
   ctx.shadowOffsetY = nailLength * 0.03
+  if (pose.cutoff) {
+    // Only the side of the cutoff line the free edge is on.
+    const { point, normal } = pose.cutoff
+    const reach = nailLength * 4
+    const side = { x: -normal.y * reach, y: normal.x * reach }
+    ctx.beginPath()
+    ctx.moveTo(point.x - side.x, point.y - side.y)
+    ctx.lineTo(point.x + side.x, point.y + side.y)
+    ctx.lineTo(point.x + side.x + normal.x * reach, point.y + side.y + normal.y * reach)
+    ctx.lineTo(point.x - side.x + normal.x * reach, point.y - side.y + normal.y * reach)
+    ctx.closePath()
+    ctx.clip()
+  }
   drawImageWarped(ctx, nailAsset.canvas, quad)
   ctx.restore()
 }
@@ -118,8 +140,9 @@ export function drawNailOverlays(
   width: number,
   height: number,
   mirror: boolean,
+  fits?: ReadonlyArray<NailFit | null>,
 ) {
-  for (const pose of computeNailPoses(hand, width, height, mirror)) {
+  for (const pose of computeNailPoses(hand, width, height, mirror, fits)) {
     drawFingerNail(ctx, pose, asset)
   }
 }

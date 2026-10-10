@@ -331,6 +331,7 @@ export function TimelineTab() {
                         <ImageGrid
                             items={timelineDesignsOldest}
                             isFavoriteView={false}
+                            gridClassName="mypage-x__grid--cols-3"
                             options={{
                               dateMode: 'time',
                               interactive: true,

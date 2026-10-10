@@ -365,7 +365,8 @@ export function MyPageLayout() {
     }
   }
 
-  const pageSizeForSection = (id: SectionId) => (id === 'designs' || id === 'favorites' ? 12 : 10)
+  // 디자인 이력은 4열 x 4행(16개), 찜은 12개, 나머지 목록은 10개씩
+  const pageSizeForSection = (id: SectionId) => (id === 'designs' ? 16 : id === 'favorites' ? 12 : 10)
 
   const paginate = <T,>(items: T[], id: SectionId) => {
     const size = pageSizeForSection(id)

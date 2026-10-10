@@ -5,6 +5,8 @@ export type Vec3 = { x: number; y: number; z: number }
 
 /** One tracked hand as the AR renderers consume it (see landmarkSmoothing.ts). */
 export type TrackedHand = {
+  /** Stable for as long as HandTracker keeps following the same hand. */
+  id: number
   landmarks: NormalizedLandmark[]
   /** MediaPipe's metric 3D landmarks (meters, camera-aligned axes, origin at
    *  the hand's center) - used for hand scale and as a depth hint. */
@@ -87,6 +89,35 @@ const SURFACE_OFFSET_RATIO = 0.45
 // asks for) instead of risking hiding every nail on a misread.
 const HANDEDNESS_CONFIDENCE = 0.3
 
+// How far a nail tilts toward/away from the camera, for one measured in the
+// image, comes from how short it looks against how wide: a nail facing the
+// camera shows about this length (cuticle to free edge) per drawn tip width.
+// The landmarks' depth can't be trusted for it with the fingers curled toward
+// the camera - on a live claw they tilted the tips so far that they came out
+// about a third too short, squashing the design and baring the nail's free
+// edge below them. Never foreshortened below MIN_FIT_FORESHORTENING.
+const NAIL_LENGTH_RATIO = 1.1
+const MIN_FIT_FORESHORTENING = 0.5
+// A tip is drawn at least this times as long on screen as the nail it covers,
+// stretching its design lengthwise by up to MAX_TIP_STRETCH if it has to.
+const TIP_COVER = 1.03
+const MAX_TIP_STRETCH = 1.25
+
+// The tip templates (public/models/nail-tips, from
+// scan/export_shape_templates.py) curve across as a circular arc of this
+// radius, in nail widths, spanning their whole width - a deep C whose edges
+// sit 0.39 widths below the top of the dome. Turned about its own axis, such
+// a tip narrows on screen and its far side wraps out of sight.
+const TIP_ARC_RADIUS = 0.516
+const TIP_ARC_HALF_ANGLE = Math.asin(0.5 / TIP_ARC_RADIUS)
+// With the back of the hand to the camera the thumbnail faces partly
+// sideways, so it shows narrower than it is. A fitted thumb tip is drawn at
+// the thumbnail's true width, turned until its outline is as narrow as the
+// nail found in the image - so it shows from the side like the nail, its far
+// part cut off, instead of as a shrunken front view. Turned at most this far;
+// a nail narrower still is taken to be smaller than expected.
+const MAX_THUMB_ROLL = (80 * Math.PI) / 180
+
 function sub(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
 }
@@ -116,9 +147,96 @@ function normalize(a: Vec3): Vec3 | null {
   return len > 1e-6 ? scale(a, 1 / len) : null
 }
 
+/** a turned by `angle` about the view (z) axis. */
+function rotateAboutView(a: Vec3, angle: number): Vec3 {
+  const c = Math.cos(angle)
+  const s = Math.sin(angle)
+  return { x: a.x * c - a.y * s, y: a.x * s + a.y * c, z: a.z }
+}
+
+/** Unit vector `a` tilted, keeping its on-screen direction and which way it
+ *  leans in depth, so that its on-screen length is `flat`. */
+function withFlatLength(a: Vec3, flat: number): Vec3 {
+  const onScreen = Math.hypot(a.x, a.y)
+  if (onScreen < 1e-6) return a
+  return {
+    x: (a.x / onScreen) * flat,
+    y: (a.y / onScreen) * flat,
+    z: (a.z >= 0 ? 1 : -1) * Math.sqrt(Math.max(0, 1 - flat * flat)),
+  }
+}
+
+/** a turned by `angle` about unit vector k (right-hand rule). */
+function rotateAbout(a: Vec3, k: Vec3, angle: number): Vec3 {
+  const c = Math.cos(angle)
+  const s = Math.sin(angle)
+  return add(add(scale(a, c), scale(cross(k, a), s)), scale(k, dot(k, a) * (1 - c)))
+}
+
 /** a with its component along unit vector n removed, normalized. */
 function orthogonalize(a: Vec3, n: Vec3): Vec3 | null {
   return normalize(sub(a, scale(n, dot(a, n))))
+}
+
+/**
+ * Where a tip's outline falls on screen across its nail, in nail widths from
+ * the top of its dome along the on-screen direction across it, for a tip
+ * turned `roll` radians about its own axis: from that direction to the
+ * tip's own across, positive when its normal leans that way (that side then
+ * wraps out of sight).
+ */
+function tipSpan(roll: number) {
+  // A point on the arc at angle phi from the top (toward the tip's own
+  // across) lands at R * (sin(phi + roll) - sin(roll)), phi within
+  // +-TIP_ARC_HALF_ANGLE.
+  const first = roll - TIP_ARC_HALF_ANGLE
+  const last = roll + TIP_ARC_HALF_ANGLE
+  const hi = first <= Math.PI / 2 && Math.PI / 2 <= last ? 1 : Math.max(Math.sin(first), Math.sin(last))
+  const lo = first <= -Math.PI / 2 && -Math.PI / 2 <= last ? -1 : Math.min(Math.sin(first), Math.sin(last))
+  const shift = Math.sin(roll)
+  return { lo: TIP_ARC_RADIUS * (lo - shift), hi: TIP_ARC_RADIUS * (hi - shift) }
+}
+
+/** On-screen width of a turned tip's outline, in nail widths (see tipSpan). */
+function tipSpanWidth(roll: number) {
+  const { lo, hi } = tipSpan(roll)
+  return hi - lo
+}
+
+/** A thumbnail's roll and true width (see MAX_THUMB_ROLL), from its
+ *  on-screen width and the width it should have. */
+function thumbRoll(onScreen: number, expected: number) {
+  if (onScreen >= expected) return { angle: 0, width: onScreen }
+  const narrowest = tipSpanWidth(MAX_THUMB_ROLL)
+  if (onScreen <= expected * narrowest) return { angle: MAX_THUMB_ROLL, width: onScreen / narrowest }
+  // The outline narrows steadily as the tip turns: bisect for the angle.
+  let lo = 0
+  let hi = MAX_THUMB_ROLL
+  for (let i = 0; i < 24; i += 1) {
+    const mid = (lo + hi) / 2
+    if (tipSpanWidth(mid) * expected > onScreen) lo = mid
+    else hi = mid
+  }
+  return { angle: (lo + hi) / 2, width: expected }
+}
+
+/**
+ * The on-screen direction across a tip posed along axis/across/normal (a
+ * unit vector on the side `across` points to) and its outline's extent along
+ * it, in nail widths from the top of the dome - null if the tip points
+ * straight at the camera.
+ */
+function tipOutlineSpan(axis: Vec3, across: Vec3, normal: Vec3) {
+  const flat = Math.hypot(axis.x, axis.y)
+  if (flat < 1e-6) return null
+  let dir = { x: -axis.y / flat, y: axis.x / flat }
+  if (dir.x * across.x + dir.y * across.y < 0) dir = { x: -dir.x, y: -dir.y }
+  const roll = Math.atan2(dir.x * normal.x + dir.y * normal.y, dir.x * across.x + dir.y * across.y)
+  return { dir, ...tipSpan(roll) }
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
 }
 
 function median(values: number[]) {
@@ -217,16 +335,62 @@ export type NailPose = {
   normal: Vec3
   /** True nail width in pixels (not foreshortened - the renderers project). */
   width: number
-  /** normal.z: 1 = nail faces the viewer, <= 0 = turned away (palm side). */
+  /** How squarely the landmarks say the nail faces the viewer: 1 = facing,
+   *  <= 0 = turned away (palm side). Drives fading - for a fitted nail even
+   *  though `normal` is then turned to face the viewer. */
   facing: number
+  /** The hand shows its palm side to the camera (the nail is only visible
+   *  because the finger curls toward it). */
+  palmTowardCamera: boolean
+  /** On-screen length of the real nail the tip has to cover, px, if measured
+   *  (NailFit.length) - see tipFrame. */
+  visibleLength: number | null
+  /** Where the tip is cut off before its cuticle end, if anywhere: a line on
+   *  screen (display space) through `point`, the tip hidden on the side
+   *  `normal` (unit, toward the free edge) points away from. */
+  cutoff: { point: Point; normal: Point } | null
+  /** How opaque to draw the tip: by `facing`, or fully while the model sees
+   *  the nail (NailFit.seen). */
+  opacity: number
+}
+
+/** Where a nail actually is in the camera image (see nailFit.ts), overriding
+ *  what the landmarks alone would put there. */
+export type NailFit = {
+  /** Center of the nail's proximal (cuticle) edge, raw camera pixels. */
+  cuticle: Point
+  /** In-plane correction, radians, to the DIP->TIP direction on screen
+   *  (positive turns it from +x toward +y in raw camera pixels). */
+  rotation: number
+  /** How wide the tip should appear on screen, raw camera pixels. */
+  width: number
+  /** How long the nail itself (cuticle to free edge) appears on screen, raw
+   *  camera pixels - known only from a model mask. */
+  length?: number
+  /** The nail's proximal edge on screen as a line, with no part of the nail
+   *  before it - known only from a model mask: how much further along the
+   *  nail it runs per pixel across (across = the nail's direction turned
+   *  +90 degrees, raw camera pixels), and how far along from `cuticle` it
+   *  passes it (px). */
+  cuticleEdge?: { slope: number; offset: number }
+  /** The segmentation model is currently finding this nail - so it's in
+   *  view, whatever the landmarks say about which way it faces. */
+  seen?: boolean
 }
 
 /**
- * Full 3D pose of every nail on one hand, from that frame's landmarks. Shared
- * by the 3D mesh renderer and the 2D canvas-warp fallback so both place, size,
- * orient and hide nails identically.
+ * Full 3D pose of every nail on one hand, from that frame's landmarks -
+ * refined by `fits` (indexed like FINGERS) where the nail was found in the
+ * image. Shared by the 3D mesh renderer and the 2D canvas-warp fallback so
+ * both place, size, orient and hide nails identically.
  */
-export function computeNailPoses(hand: TrackedHand, width: number, height: number, mirror: boolean): NailPose[] {
+export function computeNailPoses(
+  hand: TrackedHand,
+  width: number,
+  height: number,
+  mirror: boolean,
+  fits?: ReadonlyArray<NailFit | null>,
+): NailPose[] {
   if (hand.landmarks.length < 21) return []
   const { points: P, palmLength, depthStep } = handGeometry(hand, width, height)
   if (!(palmLength > 1)) return []
@@ -246,15 +410,23 @@ export function computeNailPoses(hand: TrackedHand, width: number, height: numbe
   } else {
     side = palmNormal.z > 0 ? -1 : 1 // whichever makes the back face the camera
   }
+  // The back-of-hand normal is side * palmNormal; raw z points away from the
+  // camera.
+  const palmTowardCamera = side * palmNormal.z > 0
 
   const poses: NailPose[] = []
 
-  for (const finger of FINGERS) {
+  for (const [fingerIdx, finger] of FINGERS.entries()) {
+    const fit = fits?.[fingerIdx] ?? null
     const dip = P[finger.dip]
     const tipFlat = P[finger.tip]
     const tip = { ...tipFlat, z: dip.z + depthStep(finger.dip, finger.tip, palmLength * finger.distalRatio) }
-    const axis = normalize(sub(tip, dip))
-    if (!axis) continue
+    const segment = normalize(sub(tip, dip))
+    if (!segment) continue
+    // A nail found in the image brings its own on-screen direction - and,
+    // measured from a model mask, how far it tilts toward/away from the
+    // camera (below); otherwise that tilt comes from the landmarks.
+    let axis = fit ? rotateAboutView(segment, fit.rotation) : segment
 
     // A finger only bends about its own sideways axis, so that axis (taken
     // from the knuckle row and made perpendicular to the finger) stays valid
@@ -272,9 +444,70 @@ export function computeNailPoses(hand: TrackedHand, width: number, height: numbe
       normal = add(scale(normal, Math.cos(THUMB_PRONATION)), scale(lateral, Math.sin(THUMB_PRONATION)))
     }
 
-    const nailWidth = palmLength * finger.widthRatio
+    const priorWidth = palmLength * finger.widthRatio
     const cuticleOnAxis = add(dip, scale(sub(tip, dip), finger.cuticleT))
-    const originRaw = add(cuticleOnAxis, scale(normal, nailWidth * SURFACE_OFFSET_RATIO))
+    const surfaceCuticle = add(cuticleOnAxis, scale(normal, priorWidth * SURFACE_OFFSET_RATIO))
+    const facingRaw = -normal.z
+    let nailWidth = priorWidth
+    let originRaw = surfaceCuticle
+    let visibleLength = fit?.length ?? null
+    let cutoffRaw: { point: Point; normal: Point } | null = null
+    if (fit) {
+      // The detected cuticle is exactly where the tip's cuticle end belongs
+      // on screen; only its depth is left to the landmark estimate.
+      originRaw = { x: fit.cuticle.x, y: fit.cuticle.y, z: surfaceCuticle.z }
+      const roll = finger.name === 'thumb' ? thumbRoll(fit.width, priorWidth) : { angle: 0, width: fit.width }
+      if (fit.length !== undefined) {
+        axis = withFlatLength(axis, clamp(fit.length / (roll.width * NAIL_LENGTH_RATIO), MIN_FIT_FORESHORTENING, 1))
+      }
+      // How far a nail rolls about its own axis is the landmarks' least
+      // reliable guess, and a rolled tip's curved outline shifts to one side
+      // of its center line, baring the real nail on the other. So a fitted
+      // tip is drawn unrolled - its width lying in the screen plane, centered
+      // on the fitted line - at exactly the on-screen width it was given.
+      // Only the thumb's is turned, by how much narrower its nail shows than
+      // it is (see MAX_THUMB_ROLL) - and then moved across so its outline is
+      // centered on the fitted line all the same.
+      const flatAcross = normalize({ x: axis.y, y: -axis.x, z: 0 })
+      if (flatAcross) {
+        // A nail found in the image faces the camera, whatever the landmarks
+        // say - drawn facing away, its tip would show mirrored.
+        const across = cross(flatAcross, axis).z <= 0 ? flatAcross : scale(flatAcross, -1)
+        normal = cross(across, axis)
+        if (roll.angle > 0) {
+          // The thumbnail turns away from the index finger (see lateral), so
+          // that side of the tip wraps out of sight: its normal leans there.
+          normal = rotateAbout(normal, axis, (dot(lateral, across) >= 0 ? 1 : -1) * roll.angle)
+        }
+        nailWidth = clamp(roll.width, priorWidth * 0.6, priorWidth * 1.6)
+        const outline = tipOutlineSpan(axis, cross(axis, normal), normal)
+        if (outline) {
+          const middle = ((outline.lo + outline.hi) / 2) * nailWidth
+          originRaw = { ...originRaw, x: originRaw.x - outline.dir.x * middle, y: originRaw.y - outline.dir.y * middle }
+        }
+        // Seen from the side, the thumbnail's cuticle slants across it (see
+        // NailFit.cuticleEdge), lowest toward the middle of the nail turning
+        // out of sight, highest at the near side - where the tip would hang
+        // over the skin. So the tip's cuticle end comes down to that slant's
+        // lowest point under it, and everything before the slant is cut off.
+        if (roll.angle > 0 && outline && fit.cuticleEdge) {
+          const flat = Math.hypot(axis.x, axis.y)
+          const along = { x: axis.x / flat, y: axis.y / flat }
+          const { slope, offset } = fit.cuticleEdge
+          const drop = Math.min(0, offset - (Math.abs(slope) * (outline.hi - outline.lo) * nailWidth) / 2)
+          originRaw = { ...originRaw, x: originRaw.x + along.x * drop, y: originRaw.y + along.y * drop }
+          if (visibleLength !== null) visibleLength -= drop
+          // across = along turned +90 degrees; the edge runs along
+          // across + slope * along, so along - slope * across is its normal.
+          const edgeNormal = { x: along.x + slope * along.y, y: along.y - slope * along.x }
+          const edgeNormalLength = Math.hypot(edgeNormal.x, edgeNormal.y)
+          cutoffRaw = {
+            point: { x: fit.cuticle.x + along.x * offset, y: fit.cuticle.y + along.y * offset },
+            normal: { x: edgeNormal.x / edgeNormalLength, y: edgeNormal.y / edgeNormalLength },
+          }
+        }
+      }
+    }
 
     // Raw camera space -> display space. Mirroring flips x; display z points
     // toward the viewer (raw z points away), so z always flips.
@@ -291,11 +524,60 @@ export function computeNailPoses(hand: TrackedHand, width: number, height: numbe
       across: cross(axisD, normalD),
       normal: normalD,
       width: nailWidth,
-      facing: normalD.z,
+      facing: facingRaw,
+      palmTowardCamera,
+      visibleLength,
+      cutoff: cutoffRaw && {
+        point: { x: mirror ? width - cutoffRaw.point.x : cutoffRaw.point.x, y: cutoffRaw.point.y },
+        normal: { x: cutoffRaw.normal.x * sx, y: cutoffRaw.normal.y },
+      },
+      opacity: fit?.seen ? 1 : facingOpacity(facingRaw),
     })
   }
 
   return poses
+}
+
+export type TipFrame = { axis: Vec3; across: Vec3; normal: Vec3; length: number }
+
+/**
+ * How to draw a tip whose design is `tipLength` long: along the pose's own
+ * axis, across and normal, unless the tip would then fall short of the nail
+ * measured under it (NailPose.visibleLength) and leave its free edge showing
+ * - then tilted toward the screen plane, and if even lying flat it's too
+ * short (a stubby design on a long nail), stretched lengthwise up to
+ * MAX_TIP_STRETCH.
+ */
+export function tipFrame(pose: NailPose, tipLength: number): TipFrame {
+  const unchanged = { axis: pose.axis, across: pose.across, normal: pose.normal, length: tipLength }
+  if (pose.visibleLength === null || !(tipLength > 0)) return unchanged
+  const needed = pose.visibleLength * TIP_COVER
+  if (tipLength * Math.hypot(pose.axis.x, pose.axis.y) >= needed) return unchanged
+  const length = Math.min(Math.max(tipLength, needed), tipLength * MAX_TIP_STRETCH)
+  const axis = withFlatLength(pose.axis, Math.min(1, needed / length))
+  // The whole tip tilts, about the on-screen direction across it - so a
+  // turned one (the thumb's) stays turned as far.
+  const hinge = normalize(cross(pose.axis, axis))
+  if (!hinge) return { ...unchanged, length }
+  const angle = Math.acos(clamp(dot(pose.axis, axis), -1, 1))
+  return { axis, across: rotateAbout(pose.across, hinge, angle), normal: rotateAbout(pose.normal, hinge, angle), length }
+}
+
+/**
+ * Where the 3D tip posed by `frame` from `origin`, `width` wide, shows on
+ * screen - for drawing it flat in its place: its outline's center line at
+ * the cuticle end, the unit direction across it, and how wide it is (px).
+ * Null if the tip points straight at the camera.
+ */
+export function tipOutline(origin: Vec3, frame: TipFrame, width: number): { cuticle: Point; across: Point; width: number } | null {
+  const outline = tipOutlineSpan(frame.axis, frame.across, frame.normal)
+  if (!outline) return null
+  const middle = ((outline.lo + outline.hi) / 2) * width
+  return {
+    cuticle: { x: origin.x + outline.dir.x * middle, y: origin.y + outline.dir.y * middle },
+    across: outline.dir,
+    width: (outline.hi - outline.lo) * width,
+  }
 }
 
 /** 0 when the nail is edge-on or turned away from the viewer, ramping to 1. */
