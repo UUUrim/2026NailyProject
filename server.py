@@ -98,11 +98,12 @@ from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
 try:
-    from measure_ccurve import side_edge_blur_px, find_finger_point, focus_score   # scan/ - 초점 확인, 손가락 위치, 초점 점수
+    from measure_ccurve import side_edge_blur_px, find_finger_point, focus_score, finger_box_norm   # scan/ - 초점 확인, 손가락 위치, 초점 점수
 except Exception:                                                # 없어도 스캔은 돌아가야 한다
     side_edge_blur_px = None
     find_finger_point = None
     focus_score = None
+    finger_box_norm = None
 import skin_snapshot                                             # scan/ - 피부색 확인용 사진 한 장
 
 # 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
@@ -453,6 +454,8 @@ class PhoneCamera:
         self.focus_fd          = None    # 초점 보정으로 정한 수동 초점 거리 (폰이 지원하는 단위 그대로)
         self.calib_run         = None    # 초점 보정 요청 번호 (폰이 status 로 읽어 가면 시작)
         self.calib_scores      = []      # [(fd, score)]
+        self.calib_box         = None    # 보정 동안 모든 프레임에서 선명도를 재는 고정 상자(손가락 위치, 0~1)
+        self.calib_none        = 0       # 선명도를 못 잰 프레임 수
 
     def isOpened(self):
         return True
@@ -1608,7 +1611,18 @@ def phone_side_calibrate():
     """PC 브라우저에서 한 번 열면 폰이 초점 보정(수동 초점 거리를 훑으며 가장 선명한 거리 찾기)을 시작한다.
     손가락 하나를 박스에 평소처럼 넣고 가만히 둔 채로 연다. 약 20~30초 걸린다."""
     _phone_cam.calib_scores = []
+    _phone_cam.calib_none = 0
+    _phone_cam.calib_box = None
+    try:
+        with _phone_cam._lock:
+            prev = None if _phone_cam._preview is None else _phone_cam._preview.copy()
+        if prev is not None and finger_box_norm is not None:
+            # 폰이 보내는 보정 프레임은 서버가 돌리기 전의 원래 방향이므로 상자도 그 방향으로 만든다
+            _phone_cam.calib_box = finger_box_norm(cv2.rotate(prev, cv2.ROTATE_180))
+    except Exception as e:
+        print(f"[Calib] 손가락 상자 찾기 실패: {e}")
     _phone_cam.calib_run = int(time.time())
+    os.makedirs(os.path.join(TEST_CAPTURE_DIR, "calib"), exist_ok=True)
     _set_side_note("FOCUS CALIBRATION requested - keep the finger still", (0, 220, 255), 40)
     return Response(
         "<meta charset='utf-8'><body style='font-family:sans-serif;padding:24px'>"
@@ -1623,12 +1637,20 @@ async def phone_side_calib(request: Request, run: int = 0, fd: float = 0.0):
     if _phone_cam.calib_run is None or run != _phone_cam.calib_run:
         return {"ok": False, "message": "no active calibration"}
     data = await request.body()
+    box = _phone_cam.calib_box
     def _score():
         img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-        return None if (img is None or focus_score is None) else focus_score(img)
+        try:   # 나중에 점수를 다시 계산해 볼 수 있게 프레임을 남긴다
+            with open(os.path.join(TEST_CAPTURE_DIR, "calib", f"{run}_fd{fd:.3f}.jpg"), "wb") as f:
+                f.write(data)
+        except Exception:
+            pass
+        return None if (img is None or focus_score is None) else focus_score(img, box)
     sc = await asyncio.get_running_loop().run_in_executor(None, _score)
     if sc is not None:
         _phone_cam.calib_scores.append((fd, sc))
+    else:
+        _phone_cam.calib_none += 1
     n = len(_phone_cam.calib_scores)
     _set_side_note(f"FOCUS CALIBRATION {n} frames measured", (0, 220, 255), 20)
     return {"ok": True, "score": sc}
@@ -1690,6 +1712,7 @@ def phone_side_debug():
             "phone_screen_text": _phone_poll["txt"], "polls": _phone_poll["n"],
             "preview_age_s": round(now - _phone_cam._last_preview_t, 1) if _phone_cam._last_preview_t else None,
             "calibration_requested": _phone_cam.calib_run, "calibration_frames": len(_phone_cam.calib_scores),
+            "calibration_unscored_frames": _phone_cam.calib_none, "calibration_box": _phone_cam.calib_box,
             "focus_fd": _phone_cam.focus_fd}
 
 

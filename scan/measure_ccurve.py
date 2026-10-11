@@ -178,27 +178,44 @@ def find_finger_point(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65), nail_frac
     return float(cx / w), float(cy / h)
 
 
-def focus_score(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65)):
-    """Sharpness of the fingertip in a (raw, any-resolution) side frame - higher is sharper.
-
-    Mean squared Sobel gradient (Tenengrad) over the finger blob's bounding box. Only meant for comparing
-    frames of the same scene taken at different focus settings (the phone's focus sweep), so the
-    absolute value has no meaning. Returns None if no finger-sized blob is found."""
+def finger_box_norm(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65), pad=0.01):
+    """Bounding box (x0, y0, x1, y1), normalised to the frame, of the fingertip blob in the middle ROI.
+    The focus sweep measures every frame inside this one fixed box (the finger does not move during
+    the sweep), so a dark or very blurry frame can no longer fail to segment and drop out."""
     h, w = frame.shape[:2]
     x0, y0, x1, y1 = int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h)
     if x1 - x0 < 20 or y1 - y0 < 20:
         return None
-    sub = frame[y0:y1, x0:x1]
-    m = _finger_mask_color(sub, min_frac=0.005, open_frac=0.06)
+    m = _finger_mask_color(frame[y0:y1, x0:x1], min_frac=0.005, open_frac=0.06)
     if m is None:
         return None
     ys, xs = np.nonzero(m)
-    pad = 8
-    bx0, bx1 = max(0, xs.min() - pad), min(sub.shape[1], xs.max() + pad)
-    by0, by1 = max(0, ys.min() - pad), min(sub.shape[0], ys.max() + pad)
-    g = cv2.cvtColor(sub[by0:by1, bx0:bx1], cv2.COLOR_BGR2GRAY).astype(np.float32)
+    return (max(0.0, (x0 + xs.min()) / w - pad), max(0.0, (y0 + ys.min()) / h - pad),
+            min(1.0, (x0 + xs.max()) / w + pad), min(1.0, (y0 + ys.max()) / h + pad))
+
+
+def focus_score(frame: np.ndarray, box=None, roi=(0.20, 0.35, 0.80, 0.65)):
+    """Sharpness of the fingertip in a (raw, any-resolution) side frame - higher is sharper.
+
+    Mean squared Sobel gradient divided by the brightness variance inside the box (a contrast-
+    normalised Tenengrad), so a frame that is simply darker or brighter - auto-exposure moves between
+    focus steps - does not look blurrier or sharper. Only meant for comparing frames of the same
+    scene taken at different focus settings. `box` is a normalised (x0, y0, x1, y1) from
+    finger_box_norm(); without it the finger is segmented in every frame (None if not found)."""
+    h, w = frame.shape[:2]
+    if box is None:
+        box = finger_box_norm(frame, roi)
+        if box is None:
+            return None
+    x0, y0, x1, y1 = int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)
+    if x1 - x0 < 10 or y1 - y0 < 10:
+        return None
+    g = cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY).astype(np.float32)
     gx, gy = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
-    return float(np.mean(gx * gx + gy * gy))
+    var = float(g.var())
+    if var < 1.0:
+        return None
+    return float(np.mean(gx * gx + gy * gy) / var)
 
 
 def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
