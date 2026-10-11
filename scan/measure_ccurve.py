@@ -178,6 +178,29 @@ def find_finger_point(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65), nail_frac
     return float(cx / w), float(cy / h)
 
 
+def focus_score(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65)):
+    """Sharpness of the fingertip in a (raw, any-resolution) side frame - higher is sharper.
+
+    Mean squared Sobel gradient (Tenengrad) over the finger blob's bounding box. Only meant for comparing
+    frames of the same scene taken at different focus settings (the phone's focus sweep), so the
+    absolute value has no meaning. Returns None if no finger-sized blob is found."""
+    h, w = frame.shape[:2]
+    x0, y0, x1, y1 = int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h)
+    if x1 - x0 < 20 or y1 - y0 < 20:
+        return None
+    sub = frame[y0:y1, x0:x1]
+    m = _finger_mask_color(sub, min_frac=0.005, open_frac=0.06)
+    if m is None:
+        return None
+    ys, xs = np.nonzero(m)
+    pad = 8
+    bx0, bx1 = max(0, xs.min() - pad), min(sub.shape[1], xs.max() + pad)
+    by0, by1 = max(0, ys.min() - pad), min(sub.shape[0], ys.max() + pad)
+    g = cv2.cvtColor(sub[by0:by1, bx0:bx1], cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gx, gy = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    return float(np.mean(gx * gx + gy * gy))
+
+
 def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
     """Locate the row where a uniform dark mat/desk-edge begins at the
     bottom of the frame (end-on photo taken with the finger draped over a

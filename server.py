@@ -40,6 +40,7 @@ Usage:
 
 import asyncio
 import json
+from datetime import datetime
 import math
 import os
 import queue as _q
@@ -97,10 +98,11 @@ from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
 try:
-    from measure_ccurve import side_edge_blur_px, find_finger_point   # scan/ - 사이드 사진 초점 확인, 손가락 위치 찾기
+    from measure_ccurve import side_edge_blur_px, find_finger_point, focus_score   # scan/ - 초점 확인, 손가락 위치, 초점 점수
 except Exception:                                                # 없어도 스캔은 돌아가야 한다
     side_edge_blur_px = None
     find_finger_point = None
+    focus_score = None
 import skin_snapshot                                             # scan/ - 피부색 확인용 사진 한 장
 
 # 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
@@ -448,6 +450,9 @@ class PhoneCamera:
         self._last_preview_t  = 0.0
         self._focus_point      = None
         self._focus_point_done = False
+        self.focus_fd          = None    # 초점 보정으로 정한 수동 초점 거리 (폰이 지원하는 단위 그대로)
+        self.calib_run         = None    # 초점 보정 요청 번호 (폰이 status 로 읽어 가면 시작)
+        self.calib_scores      = []      # [(fd, score)]
 
     def isOpened(self):
         return True
@@ -1023,14 +1028,19 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",
                                     (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
                         _push_frame(_S.side_frame, _with_side_note(disp))
-                    cap.request_capture()
-                    full = cap.capture_full(timeout=8.0)
+                    full = None
+                    for attempt in (1, 2):
+                        cap.request_capture()
+                        full = cap.capture_full(timeout=15.0)
+                        if full is not None:
+                            break
+                        print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃, {attempt}/2)")
                     if full is None:
-                        print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃) → 프리뷰 프레임으로 대체")
-                        full = frame   # 프리뷰도 한 번도 못 받았으면 여전히 None
-                    if full is None:
-                        print(f"  [{finger}] 사이드뷰 저장 실패 — 폰에서 미리보기/사진 모두 못 받음 "
-                              f"(폰 카메라 페이지가 열려있는지 확인) → 이 손가락 사이드뷰 건너뜀")
+                        # 예전에는 640px 프리뷰를 사이드 사진으로 저장했지만, 프리뷰는 화각이 달라 손가락이
+                        # 측정 영역 밖에 있어서 C-curve 가 엉뚱한 값으로 나왔다 → 저장하지 않고 건너뛴다.
+                        _set_side_note(f"{finger.upper()}: side photo FAILED - skipped (c-curve = fallback)", (60, 60, 255))
+                        print(f"  [{finger}] 고화질 사이드 사진을 못 받음 → 이 손가락 사이드뷰 건너뜀 "
+                              f"(폰 카메라 페이지가 열려있는지/Wi-Fi 확인)")
                         return False
                     cv2.imwrite(save_path, full)
                 else:
@@ -1145,7 +1155,11 @@ def _measure_one_finger(finger: str, photos_root: str, results_root: str, hand: 
         "--aruco-size", str(ARUCO_SIZE_MM), "--output", finger_out,
     ]
     if os.path.isfile(side_path):
-        cmd += ["--ccurve-top", side_path]
+        _sm = cv2.imread(side_path, cv2.IMREAD_REDUCED_COLOR_8)
+        if _sm is not None and _sm.shape[1] * 8 >= 2000:
+            cmd += ["--ccurve-top", side_path]
+        else:
+            print(f"  [{finger}] 사이드 사진이 저해상도라 C-curve 측정에 쓰지 않음")
     # 피부색 확인용 사진(노출을 낮춰 찍은 것)이 있으면 피부색은 거기서 잰다 - 측정은 위 사진으로 한다.
     skin_path = os.path.join(photos_root, f"{finger}_skin.jpg")
     if os.path.isfile(skin_path):
@@ -1553,7 +1567,8 @@ async def phone_side_frame(request: Request):
 @app.get("/phone/side/status")
 def phone_side_status():
     wanted = _phone_cam.capture_wanted()
-    return {"capture": wanted, "point": _phone_cam.focus_point() if wanted else None}
+    return {"capture": wanted, "point": _phone_cam.focus_point() if wanted else None,
+            "calibrate": _phone_cam.calib_run, "fd": _phone_cam.focus_fd}
 
 
 @app.post("/phone/side/photo")
@@ -1563,6 +1578,98 @@ async def phone_side_photo(request: Request):
     if frame is not None:
         _phone_cam.push_full_res(frame)
     return {"ok": frame is not None}
+
+
+FOCUS_FILE = os.path.join(TEST_CAPTURE_DIR, "phone_focus.json")
+
+
+def _load_focus_fd():
+    try:
+        with open(FOCUS_FILE, encoding="utf-8") as f:
+            return json.load(f).get("fd")
+    except Exception:
+        return None
+
+
+_phone_cam.focus_fd = _load_focus_fd()
+
+
+@app.get("/phone/side/calibrate")
+def phone_side_calibrate():
+    """PC 브라우저에서 한 번 열면 폰이 초점 보정(수동 초점 거리를 훑으며 가장 선명한 거리 찾기)을 시작한다.
+    손가락 하나를 박스에 평소처럼 넣고 가만히 둔 채로 연다. 약 20~30초 걸린다."""
+    _phone_cam.calib_scores = []
+    _phone_cam.calib_run = int(time.time())
+    _set_side_note("FOCUS CALIBRATION requested - keep the finger still", (0, 220, 255), 40)
+    return Response(
+        "<meta charset='utf-8'><body style='font-family:sans-serif;padding:24px'>"
+        "<h3>폰 초점 보정을 요청했습니다</h3><p>폰 화면이 켜져 있고 카메라 시작이 눌린 상태여야 합니다. "
+        "손가락을 평소처럼 박스에 넣고 <b>약 30초 동안 가만히</b> 두세요. 진행 상황은 Naily 사이드뷰 화면 아래에 표시됩니다.</p>"
+        "<p>결과 확인: <a href='/phone/side/focus'>/phone/side/focus</a></p></body>", media_type="text/html")
+
+
+@app.post("/phone/side/calib")
+async def phone_side_calib(request: Request, run: int = 0, fd: float = 0.0):
+    """보정 중 폰이 보내는 프레임(해당 초점 거리에서 찍은 것) 한 장의 선명도를 잰다."""
+    if _phone_cam.calib_run is None or run != _phone_cam.calib_run:
+        return {"ok": False, "message": "no active calibration"}
+    data = await request.body()
+    def _score():
+        img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        return None if (img is None or focus_score is None) else focus_score(img)
+    sc = await asyncio.get_running_loop().run_in_executor(None, _score)
+    if sc is not None:
+        _phone_cam.calib_scores.append((fd, sc))
+    n = len(_phone_cam.calib_scores)
+    _set_side_note(f"FOCUS CALIBRATION {n} frames measured", (0, 220, 255), 20)
+    return {"ok": True, "score": sc}
+
+
+@app.post("/phone/side/calib/peek")
+def phone_side_calib_peek(run: int = 0):
+    """거친 훑기가 끝난 뒤, 지금까지 가장 선명했던 거리를 알려준다 (폰이 그 주변을 촘촘히 다시 훑는다)."""
+    if _phone_cam.calib_run is None or run != _phone_cam.calib_run or len(_phone_cam.calib_scores) < 5:
+        return {"best": None}
+    pts = max(_phone_cam.calib_scores, key=lambda p: p[1])
+    return {"best": float(pts[0])}
+
+
+@app.post("/phone/side/calib/done")
+def phone_side_calib_done(run: int = 0):
+    if _phone_cam.calib_run is None or run != _phone_cam.calib_run:
+        return {"ok": False, "best": None}
+    pts = sorted(_phone_cam.calib_scores)
+    _phone_cam.calib_run = None
+    if len(pts) < 5:
+        _set_side_note("FOCUS CALIBRATION FAILED (finger not found in frames)", (60, 60, 255), 30)
+        return {"ok": False, "best": None, "message": "too few usable frames"}
+    fds = np.array([p[0] for p in pts]); sc = np.array([p[1] for p in pts])
+    sm = np.convolve(np.pad(sc, 1, mode="edge"), np.ones(3) / 3.0, mode="valid")     # 3-tap smoothing
+    i = int(np.argmax(sm))
+    prominence = float(sm[i] / max(np.median(sm), 1e-6))
+    edge = i in (0, len(sm) - 1)
+    if prominence < 1.25:
+        _set_side_note(f"FOCUS CALIBRATION: no clear peak ({prominence:.2f}x) - try again", (60, 60, 255), 30)
+        return {"ok": False, "best": None, "prominence": prominence, "message": "no clear sharpness peak"}
+    best = float(fds[i])
+    _phone_cam.focus_fd = best
+    os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
+    with open(FOCUS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"fd": best, "prominence": prominence, "at_edge_of_range": edge,
+                   "scores": [[float(a), float(b)] for a, b in pts],
+                   "at": datetime.now().isoformat(timespec="seconds")}, f, indent=2)
+    _set_side_note(f"FOCUS SET: distance {best:.3f} ({prominence:.1f}x sharper than median)" + (" - AT RANGE EDGE" if edge else ""),
+                   (80, 220, 80) if not edge else (0, 220, 255), 30)
+    return {"ok": True, "best": best, "prominence": prominence, "at_edge_of_range": edge}
+
+
+@app.get("/phone/side/focus")
+def phone_side_focus():
+    try:
+        with open(FOCUS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"fd": None, "message": "아직 초점 보정을 하지 않았습니다 (/phone/side/calibrate)"}
 
 
 @app.post("/phone/side/caps")

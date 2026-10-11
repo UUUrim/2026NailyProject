@@ -38,12 +38,54 @@ KO = {"thumb": "엄지", "index": "검지", "middle": "중지", "ring": "약지"
 ORDER = list(KO)
 
 
+def repeat_check(left_sess: str, right_sess: str, user: str = "1"):
+    """같은 손을 왼손 파트와 오른손 파트에 한 번씩 넣어 스캔했을 때(정답 라벨 없이) 손가락별 C-curve가
+    얼마나 일치하는지 본다. 같은 손가락이면 값이 거의 같아야 하므로, 차이가 곧 측정의 흔들림이다."""
+    print(f"| 손가락 | 폭 왼/오른(mm) | C-curve 왼 | 오른 | 차이 | 출처 왼/오른 | 번짐 왼/오른(px) |")
+    print("|---|---|---|---|---|---|---|")
+    src_ko = {"end_on": "실측", "fallback_average": "평균대체", "brightness": "밝기추정"}
+    diffs = []
+    for f in ORDER:
+        row = {}
+        for h, sess in (("left", left_sess), ("right", right_sess)):
+            rj = os.path.join(BASE, "results", user, sess, h, f, "nail_measurements.json")
+            if not os.path.isfile(rj):
+                row[h] = None
+                continue
+            n = json.load(open(rj, encoding="utf-8"))["nails"][0]
+            img = cv2.imread(os.path.join(BASE, "photos", user, sess, h, f + "_side.jpg"))
+            lowres = img is None or img.shape[1] < 2000
+            blur = None if lowres else side_edge_blur_px(img)
+            row[h] = (n["width_mm"], n["c_curve_mm"], n.get("c_curve_source"), blur, lowres)
+        if not row["left"] or not row["right"]:
+            print(f"| {KO[f]} | 결과 없음 |")
+            continue
+        L, R = row["left"], row["right"]
+        tag = lambda x: ("저해상도(사용 안 함)" if x[4] else src_ko.get(x[2], str(x[2])))
+        ok = L[2] == "end_on" and R[2] == "end_on" and not L[4] and not R[4]
+        d = R[1] - L[1]
+        if ok:
+            diffs.append(abs(d))
+        bl = lambda x: "-" if x[3] is None else f"{x[3]:.0f}"
+        print(f"| {KO[f]} | {L[0]:.2f} / {R[0]:.2f} | {L[1]:.2f} | {R[1]:.2f} | {d:+.2f} | {tag(L)} / {tag(R)} | {bl(L)} / {bl(R)} |")
+    if diffs:
+        print(f"\n실측끼리 비교 {len(diffs)}개: 평균 |차이| {np.mean(diffs):.2f}mm, 최대 {np.max(diffs):.2f}mm "
+              f"(같은 손이라 0에 가까울수록 좋음)")
+    else:
+        print("\n두 손 모두 실측인 손가락이 없어 비교할 수 없습니다.")
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--repeat", nargs=2, metavar=("왼손세션", "오른손세션"),
+                    help="같은 손을 두 파트에 넣어 스캔한 경우: 두 세션의 손가락별 C-curve 일치도 (라벨 불필요)")
     ap.add_argument("sessions", nargs="*", help="평가할 세션 번호 (생략하면 전부)")
     ap.add_argument("--exclude", nargs="*", default=["131/left/index"],
                     help="이상치로 뺄 사진: 세션/손/손가락 (기본: 131/left/index)")
     args = ap.parse_args()
+    if args.repeat:
+        repeat_check(*args.repeat)
+        return
 
     labels = json.load(open(os.path.join(HERE, "ccurve_labels.json"), encoding="utf-8"))["labels"]
     rows = []

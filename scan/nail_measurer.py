@@ -1884,6 +1884,14 @@ def measure_finger(top_path: str, finger: str,
         # ── Override C-curve with end-on measurement if photo is provided ──
         use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
         if use_endon:
+            # A low-resolution side photo (the phone's 640px preview, saved when the full-resolution shot
+            # failed) has a different field of view, so the fixed crop below would miss the finger and the
+            # arc fit would return an arbitrary number. Treat it as "no side photo".
+            _hdr = cv2.imread(ccurve_path, cv2.IMREAD_REDUCED_COLOR_8)
+            if _hdr is None or _hdr.shape[1] * 8 < 2000:
+                print(f"  [C-curve] WARN side photo is low-resolution ({ccurve_path}) - not used")
+                use_endon = False
+        if use_endon:
             print(f"\n  [C-curve] end-on photo: {ccurve_path}")
             debug_path = os.path.join(output_dir, f"{finger}_ccurve_debug.jpg")
             try:

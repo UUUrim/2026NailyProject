@@ -160,6 +160,8 @@
   let sending        = false;     // true while a preview upload is in flight (no pile-up)
   let pollTimer      = null;
   let busy           = false;     // true while a full-res capture is in flight
+  let serverFd       = null;      // manual focus distance found by the desktop's focus calibration
+  let calibrating    = false;
   let autoPoint      = null;      // finger position the desktop server found in the latest preview (no tapping needed)
 
   function loadCfg() {
@@ -221,30 +223,101 @@
     }
   }
 
+  function clampFd(v) {
+    const fd = caps.focusDistance;
+    return fd && typeof fd.min === "number" ? Math.max(fd.min, Math.min(fd.max, v)) : v;
+  }
+
   async function applyFocus() {
-    if (cfg.af === "auto") {
-      await applyAdv({ focusMode: "continuous" });
+    const fd = caps.focusDistance;
+    const canManual = fd && typeof fd.min === "number" && has(caps.focusMode, "manual");
+    // 1) a focus distance measured by the desktop's calibration (sharpest distance for the fingertip) wins
+    if (serverFd != null && canManual) {
+      await applyAdv({ focusMode: "manual", focusDistance: clampFd(serverFd) });
       return;
     }
+    // 2) a distance chosen by hand with the slider
     if (cfg.af === "manual") {
-      const fd = caps.focusDistance;
-      if (fd && typeof fd.min === "number" && has(caps.focusMode, "manual")) {
+      if (canManual) {
         const t = cfg.fd == null ? 0.5 : cfg.fd;
         await applyAdv({ focusMode: "manual", focusDistance: fd.min + (fd.max - fd.min) * t });
       }
       return;
     }
-    // "poi": one-shot autofocus on the finger, then (if possible) lock that distance so the
-    // full-resolution photo is taken at the same focus instead of re-focusing on the wall behind.
+    if (cfg.af === "auto") {
+      if (has(caps.focusMode, "continuous")) await applyAdv({ focusMode: "continuous" });
+      return;
+    }
+    // 3) "poi": one-shot autofocus on the finger. Only possible when the phone exposes autofocus
+    // (many Samsung browsers list "manual" as the ONLY mode - then the phone's own autofocus is left
+    // alone, and the focus calibration is what fixes the distance). Never lock to a distance read back
+    // from getSettings(): on such phones it is out of the allowed range (e.g. 10 vs max 0.61) and
+    // pins the lens to infinity, which blurs the fingertip.
     if (has(caps.focusMode, "single-shot")) {
       await applyAdv({ focusMode: "single-shot", pointsOfInterest: [curPoint()] });
     } else if (has(caps.focusMode, "continuous")) {
       await applyAdv({ focusMode: "continuous", pointsOfInterest: [curPoint()] });
+    } else {
+      return;
     }
     await sleep(FOCUS_SETTLE_MS);
     const st = track.getSettings ? track.getSettings() : {};
-    if (has(caps.focusMode, "manual") && typeof st.focusDistance === "number") {
+    if (canManual && typeof st.focusDistance === "number" && st.focusDistance >= fd.min && st.focusDistance <= fd.max) {
       await applyAdv({ focusMode: "manual", focusDistance: st.focusDistance });
+    }
+  }
+
+  // Focus calibration (started from the PC: open /phone/side/calibrate with a finger in the rig).
+  // Sweeps the manual focus distance across the phone's range, uploads one frame per step, and the
+  // server picks the sharpest fingertip. The result is kept on the server and sent back in /status.
+  async function runCalibration(runId) {
+    calibrating = true; busy = true;
+    try {
+      const fd = caps.focusDistance;
+      if (!(fd && typeof fd.min === "number" && has(caps.focusMode, "manual"))) {
+        setStatus("이 폰은 수동 초점을 지원하지 않아 보정할 수 없습니다", "err");
+        await fetch("/phone/side/calib/done?run=" + runId, { method: "POST" });
+        return;
+      }
+      const N = 14;
+      const sweepStep = async (v, label) => {
+        setStatus("초점 보정 " + label + " (움직이지 마세요)", "warn");
+        await applyAdv({ focusMode: "manual", focusDistance: clampFd(v) });
+        await sleep(900);
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw || !vh) return;
+        const c = document.createElement("canvas");
+        c.width = vw; c.height = vh;
+        c.getContext("2d").drawImage(video, 0, 0, vw, vh);
+        const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.9));
+        if (blob) {
+          try { await fetch("/phone/side/calib?run=" + runId + "&fd=" + clampFd(v), { method: "POST", body: blob }); }
+          catch (e) { /* skip this step */ }
+        }
+      };
+      // pass 1: coarse sweep over the phone's whole focus range
+      for (let i = 0; i < N; i++) await sweepStep(fd.min + (fd.max - fd.min) * (i / (N - 1)), "1/2 " + (i + 1) + "/" + N);
+      // pass 2: fine sweep around the coarse peak (the in-focus zone of a close-up lens is narrow)
+      try {
+        const pk = await (await fetch("/phone/side/calib/peek?run=" + runId, { method: "POST" })).json();
+        if (pk && pk.best != null) {
+          const step = (fd.max - fd.min) / (N - 1), M = 9;
+          for (let j = 0; j < M; j++) await sweepStep(pk.best - step + 2 * step * (j / (M - 1)), "2/2 " + (j + 1) + "/" + M);
+        }
+      } catch (e) { /* the coarse result is still used */ }
+      const r = await fetch("/phone/side/calib/done?run=" + runId, { method: "POST" });
+      const j = await r.json();
+      if (j && j.best != null) {
+        serverFd = j.best;
+        await applyAdv({ focusMode: "manual", focusDistance: clampFd(serverFd) });
+        setStatus("초점 보정 완료: " + Number(j.best).toFixed(3), "connected");
+      } else {
+        setStatus("초점 보정 실패: " + ((j && j.message) || "선명한 지점을 못 찾음"), "err");
+      }
+    } catch (e) {
+      setStatus("초점 보정 오류: " + e.message, "err");
+    } finally {
+      calibrating = false; busy = false;
     }
   }
 
@@ -384,6 +457,8 @@
       const r = await fetch("/phone/side/status", { cache: "no-store" });
       const j = await r.json();
       wanted = !!j.capture;
+      if (typeof j.fd === "number") serverFd = j.fd;
+      if (j.calibrate && !calibrating) { runCalibration(j.calibrate); return; }
       if (wanted && j.point && typeof j.point.x === "number" && typeof j.point.y === "number") autoPoint = j.point;
     } catch (e) {
       setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err");
