@@ -1548,7 +1548,9 @@ def capture_stability():
 
 @app.get("/phone/side")
 def phone_side_page():
-    return FileResponse(os.path.join(BASE, "phone_side.html"))
+    # 폰 브라우저가 예전 페이지를 캐시해 두면 새 기능(초점 보정 등)이 폰에서 안 돌아간다 → 캐시 금지
+    return FileResponse(os.path.join(BASE, "phone_side.html"),
+                        headers={"Cache-Control": "no-store, max-age=0"})
 
 
 @app.post("/phone/side/frame")
@@ -1567,6 +1569,9 @@ async def phone_side_frame(request: Request):
 @app.get("/phone/side/status")
 def phone_side_status():
     wanted = _phone_cam.capture_wanted()
+    # 초점 보정 요청은 3분 안에 폰이 가져가지 않으면 버린다 (나중에 폰을 켰을 때 갑자기 시작되지 않게)
+    if _phone_cam.calib_run is not None and time.time() - _phone_cam.calib_run > 180:
+        _phone_cam.calib_run = None
     return {"capture": wanted, "point": _phone_cam.focus_point() if wanted else None,
             "calibrate": _phone_cam.calib_run, "fd": _phone_cam.focus_fd}
 
