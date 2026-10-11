@@ -141,6 +141,7 @@
   const capInfo     = document.getElementById("capInfo");
   const applyBtn    = document.getElementById("applyBtn");
 
+  const PAGE_VERSION    = "cal3";   // shown in /phone/side/debug so the desktop can tell which page the phone is running
   const PREVIEW_MS      = 250;    // minimum gap between preview uploads (next one waits for the previous to finish)
   const POLL_MS         = 400;    // capture-request poll interval
   const PREVIEW_MAX_W   = 640;    // preview width sent to desktop (small, so it keeps up through ngrok)
@@ -454,7 +455,8 @@
     if (busy) return;
     let wanted = false;
     try {
-      const r = await fetch("/phone/side/status", { cache: "no-store" });
+      const r = await fetch("/phone/side/status?v=" + PAGE_VERSION + "&b=" + (busy ? 1 : 0) + "&c=" + (calibrating ? 1 : 0) +
+                            "&txt=" + encodeURIComponent(statusEl.textContent.slice(0, 60)), { cache: "no-store" });
       const j = await r.json();
       wanted = !!j.capture;
       if (typeof j.fd === "number") serverFd = j.fd;

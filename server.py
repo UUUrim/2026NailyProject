@@ -1566,8 +1566,12 @@ async def phone_side_frame(request: Request):
     return {"ok": ok}
 
 
+_phone_poll = {"t": 0.0, "v": None, "busy": None, "calibrating": None, "txt": None, "n": 0}
+
+
 @app.get("/phone/side/status")
-def phone_side_status():
+def phone_side_status(v: str = "", b: int = -1, c: int = -1, txt: str = ""):
+    _phone_poll.update(t=time.time(), v=v or None, busy=b, calibrating=c, txt=txt or None, n=_phone_poll["n"] + 1)
     wanted = _phone_cam.capture_wanted()
     # 초점 보정 요청은 3분 안에 폰이 가져가지 않으면 버린다 (나중에 폰을 켰을 때 갑자기 시작되지 않게)
     if _phone_cam.calib_run is not None and time.time() - _phone_cam.calib_run > 180:
@@ -1675,6 +1679,18 @@ def phone_side_focus():
             return json.load(f)
     except Exception:
         return {"fd": None, "message": "아직 초점 보정을 하지 않았습니다 (/phone/side/calibrate)"}
+
+
+@app.get("/phone/side/debug")
+def phone_side_debug():
+    """폰 페이지가 마지막으로 서버에 물어본 시각/버전/상태 문구 - 폰 화면을 직접 볼 수 없을 때 진단용."""
+    now = time.time()
+    return {"seconds_since_last_poll": None if not _phone_poll["t"] else round(now - _phone_poll["t"], 1),
+            "page_version": _phone_poll["v"], "phone_busy": _phone_poll["busy"], "phone_calibrating": _phone_poll["calibrating"],
+            "phone_screen_text": _phone_poll["txt"], "polls": _phone_poll["n"],
+            "preview_age_s": round(now - _phone_cam._last_preview_t, 1) if _phone_cam._last_preview_t else None,
+            "calibration_requested": _phone_cam.calib_run, "calibration_frames": len(_phone_cam.calib_scores),
+            "focus_fd": _phone_cam.focus_fd}
 
 
 @app.post("/phone/side/caps")
