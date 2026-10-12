@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -97,6 +99,55 @@ public class ScanService {
                 .retrieve()
                 .bodyToMono(Void.class)
                 .subscribe(); // WebClient가 비동기로 쏘고 바로 잊어버림 (웹훅으로 결과 받을 거니까!)
+    }
+
+    /**
+     * 촬영 취소 POST /scans/{scanId}/cancel
+     * 사용자가 촬영 도중 "다시 촬영해야 한다"는 경고를 확인하고 페이지를 나갔을 때 프론트가 부른다.
+     * 이 손과 짝 손을 실패로 바꾸고, 스캔 서버에 촬영을 멈추고 이 세션들의 측정 결과를 쓰지 말라고 알린다.
+     * 이미 기록으로 확정된 스캔은 건드리지 않는다.
+     */
+    public void cancelScan(User user, Long scanId) {
+        List<HandScan> hands = withPairedScan(user, scanId);
+        if (hands.stream().anyMatch(HandScan::isResultConfirmed)) return;
+
+        hands.forEach(HandScan::failAnalysis);
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("userid", String.valueOf(user.getId()));
+        requestBody.put("sessions", hands.stream().map(h -> String.valueOf(h.getId())).toList());
+
+        webClientBuilder.build()
+                .post()
+                .uri(analysisServerUrl + "/analyze/cancel")
+                .bodyValue(requestBody)
+                .retrieve()
+                .bodyToMono(Void.class)
+                .subscribe();
+    }
+
+    /**
+     * 분석 결과 확정 POST /scans/{scanId}/confirm
+     * 분석 결과 화면에 결과가 뜬 뒤 프론트가 부른다. 이 손과 짝 손을 확정해서 손 분석 기록에 남긴다.
+     * 양손 최종 measurements.json이 없으면(보여 줄 분석 결과가 없으면) 확정하지 않는다.
+     */
+    public void confirmResult(User user, Long scanId) {
+        List<HandScan> hands = withPairedScan(user, scanId);
+        if (scanResultFileService.analysisFor(hands.get(0)).isEmpty()) {
+            throw new IllegalStateException("분석 결과가 아직 없어 기록을 확정할 수 없습니다.");
+        }
+        hands.forEach(HandScan::confirmResult);
+    }
+
+    /** 이 스캔과, 짝 손이 있으면 그 스캔까지 (본인 것만) */
+    private List<HandScan> withPairedScan(User user, Long scanId) {
+        HandScan handScan = handScanRepository.findByIdAndUserId(scanId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("해당 스캔을 찾을 수 없습니다."));
+        List<HandScan> hands = new ArrayList<>(List.of(handScan));
+        if (handScan.getPairedScanId() != null) {
+            handScanRepository.findByIdAndUserId(handScan.getPairedScanId(), user.getId()).ifPresent(hands::add);
+        }
+        return hands;
     }
 
     /**

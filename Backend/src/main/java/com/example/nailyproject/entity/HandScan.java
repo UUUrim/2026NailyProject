@@ -41,6 +41,13 @@ public class HandScan {
     @Builder.Default
     private ScanStatus status = ScanStatus.READY;
 
+    // 손 분석 기록 확정 여부. 분석 결과 화면에 결과가 뜬 뒤 프론트가 확정(POST /scans/{scanId}/confirm)해야
+    // 마이페이지 등의 손 분석 기록에 나온다 - 촬영/분석 도중 나간 스캔은 false로 남아 기록에 안 나온다.
+    // 이 컬럼이 생기기 전의 예전 스캔은 null이며, 이미 기록에 보이던 것이라 확정된 것으로 본다.
+    @Column(name = "result_confirmed")
+    @Builder.Default
+    private Boolean resultConfirmed = false;
+
     // 분석 값(피부톤, 추천 컬러, 추천 쉐입, 치수 등)은 DB에 저장하지 않는다.
     // 스캔 서버가 만든 로컬 최종 measurements.json을 ScanResultFileService가 읽는다.
     // (예전 컬럼 shape/recommended_shape/skin_tone_hex/recommended_colors/tone/warmness/
@@ -72,6 +79,16 @@ public class HandScan {
     // 짝(같은 스캔의 반대 손) 연결
     public void pairWith(Long otherScanId) {
         this.pairedScanId = otherScanId;
+    }
+
+    // 손 분석 기록으로 확정됐는지 (예전 스캔(null)은 확정된 것으로 본다)
+    public boolean isResultConfirmed() {
+        return !Boolean.FALSE.equals(resultConfirmed);
+    }
+
+    // 분석 결과 화면에 결과가 뜬 뒤 기록으로 확정
+    public void confirmResult() {
+        this.resultConfirmed = true;
     }
 
     // 분석 시작

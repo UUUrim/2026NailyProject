@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { FingerDetailModal } from '@/features/hand-scan/components/FingerDetailModal'
+import { RecommendedShapeCard } from '@/features/hand-scan/components/RecommendedShapeCard'
 import { NextStepButton } from '@/shared/components/NextStepButton'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { buildHandScanAnalysis } from '@/shared/utils/handScanAnalysis'
@@ -86,9 +88,11 @@ function SkinToneSlider({
 
 export function HandScanResultPagePreviewContent() {
     const [showFingerModal, setShowFingerModal] = useState(false)
+    const [searchParams] = useSearchParams()
 
     const analysis = buildHandScanAnalysis(MOCK_SKIN_HEX)
-    const recommended = getNailShape(analysis.recommendedShape)
+    // ?shape=stiletto 처럼 넘기면 그 쉐입의 추천 카드로 바꿔서 볼 수 있다
+    const recommended = getNailShape(searchParams.get('shape') ?? '') ?? getNailShape(analysis.recommendedShape)
     const skinToneAnalysis = analyzeSkinTone(analysis.skinToneHex)
     const skinTonePalette = MOCK_PALETTE
 
@@ -116,20 +120,7 @@ export function HandScanResultPagePreviewContent() {
 
             <section className="scan-result-section">
                 <h2>추천 네일 팁 쉐입</h2>
-                {recommended && (
-                    <div className="scan-shape-highlight">
-                        <div className="scan-shape-highlight__body">
-                            <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
-                            <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
-                            <p className="scan-shape-highlight__desc">
-                                네일리 님은 {recommended.description}이 잘 어울려요.
-                            </p>
-                        </div>
-                        <div className="scan-shape-highlight__icon" aria-hidden="true">
-                            <img src={recommended.image} alt="" />
-                        </div>
-                    </div>
-                )}
+                {recommended && <RecommendedShapeCard shape={recommended} userName="네일리" />}
             </section>
 
             <section className="scan-result-section">

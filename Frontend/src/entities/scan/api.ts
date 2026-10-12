@@ -1,4 +1,5 @@
-import { apiClient } from '@/shared/utils/apiClient'
+import { apiClient, BASE_URL } from '@/shared/utils/apiClient'
+import { getToken } from '@/shared/utils/auth'
 import type { ScanSession } from '@/shared/utils/scanDetail'
 
 // ─── 응답 타입 (ScanStartResponseDto, ScanResultResponseDto) ─────────────────
@@ -44,6 +45,23 @@ export async function startScan(handSide: 'LEFT' | 'RIGHT', pairedScanId?: numbe
 /** POST /scans/{scanId}/analyze — 분석 요청 */
 export async function requestAnalyze(scanId: number): Promise<void> {
     await apiClient.post(`/scans/${scanId}/analyze`)
+}
+
+/** POST /scans/{scanId}/confirm — 분석 결과 화면에 결과가 뜬 뒤 손 분석 기록으로 확정 (짝 손도 함께).
+ *  확정된 스캔만 마이페이지 등의 손 분석 기록에 나온다. */
+export async function confirmScanResult(scanId: number): Promise<void> {
+    await apiClient.post(`/scans/${scanId}/confirm`)
+}
+
+/** POST /scans/{scanId}/cancel — 촬영 도중 경고를 확인하고 나갔을 때 스캔 취소 (짝 손도 함께).
+ *  새로고침/탭 닫기로 페이지가 내려가는 중에도 요청이 끝까지 가도록 keepalive로 보내고, 결과는 기다리지 않는다. */
+export function cancelScan(scanId: number): void {
+    const token = getToken()
+    void fetch(`${BASE_URL}/scans/${scanId}/cancel`, {
+        method: 'POST',
+        keepalive: true,
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }).catch(() => { /* 이미 나가는 중이라 알릴 곳이 없다 */ })
 }
 
 /** GET /scans/{scanId} — 스캔 결과 조회 (폴링용) */

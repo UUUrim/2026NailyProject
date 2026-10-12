@@ -309,6 +309,50 @@
   box-shadow: 0 6px 16px rgba(222, 134, 159, 0.14);
 }
 
+.mypage-x__filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(222, 134, 159, 0.28);
+  border-radius: 999px;
+  background: #fff;
+  color: #7a5a66;
+  padding: 0.28rem 0.72rem 0.28rem 0.6rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.mypage-x__filter-chip:hover {
+  border-color: var(--mp-pink);
+  color: var(--mp-pink-deep);
+  box-shadow: 0 6px 16px rgba(222, 134, 159, 0.14);
+}
+
+.mypage-x__filter-chip.is-active {
+  border-color: var(--mp-pink);
+  background: #fff0f4;
+  color: var(--mp-pink-deep);
+}
+
+.mypage-x__filter-chip-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  color: #c9a0ad;
+}
+
+.mypage-x__filter-chip-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mypage-x__filter-chip:hover .mypage-x__filter-chip-icon,
+.mypage-x__filter-chip.is-active .mypage-x__filter-chip-icon {
+  color: currentColor;
+}
+
 .mypage-x__sort-caret {
   display: inline-flex;
   transform: rotate(90deg);
