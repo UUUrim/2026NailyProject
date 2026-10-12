@@ -66,7 +66,7 @@ def find_local_finger_stls(userid: str, session: str, hand: str, shapes: dict) -
     return {"paths": paths, "missing": missing}
 
 SPACING_MM = 10.0       # 손가락 사이 간격 (mm)
-TILT_DEG = 40.0         # 음수 = 반대 방향으로 기울임
+TILT_DEG = 90.0         # 음수 = 반대 방향으로 기울임 40.0
 TILT_AXIS = [1, 0, 0]    # X축 기준 회전 (앞뒤로 기울이고 싶으면 [0,1,0]으로 변경)
 
 ROW_SPACING_MM = 40.0   # 왼손 줄과 오른손 줄 사이 Y축 간격 (손가락 두께+여유를 감안한 값)
@@ -129,6 +129,12 @@ def _build_scene(finger_paths: dict, hand_label: str = "", y_offset: float = 0.0
             point=[0, 0, 0],
         )
         mesh.apply_transform(tilt_matrix)
+#         flip_matrix = trimesh.transformations.rotation_matrix(
+#             angle=np.radians(180),
+#             direction=[1, 0, 0],
+#             point=[0, 0, 0],
+#         )
+#         mesh.apply_transform(flip_matrix)
 
         # 기울인 뒤 빌드 플레이트(Z=0)에 다시 붙이기
         mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
@@ -177,6 +183,16 @@ def merge_hand(userid: str, session: str, hand: str, shapes: dict, output_dir: s
 
     print(f"[Merge] 병합 중 (기울기 {TILT_DEG}°, 간격 {SPACING_MM}mm)...")
     scene = _build_scene(finger_paths)
+
+    # ★ 플레이트 중앙(128mm)으로 이동
+    all_verts = np.vstack([g.vertices for g in scene.geometry.values()])
+    min_x, max_x = all_verts[:, 0].min(), all_verts[:, 0].max()
+    min_y, max_y = all_verts[:, 1].min(), all_verts[:, 1].max()
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+    shift = [128 - center_x, 128 - center_y, 0]
+    for geom in scene.geometry.values():
+        geom.apply_translation(shift)
 
     output_path = os.path.join(output_dir, "hand_merged.3mf")
     scene.export(output_path)
@@ -232,8 +248,11 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
 
     # 음수 좌표 보정 — OrcaSlicer가 재배치하지 않도록
     all_verts = np.vstack([g.vertices for g in scene.geometry.values()])
-    min_x, min_y = all_verts[:, 0].min(), all_verts[:, 1].min()
-    shift = [-min_x + 10, -min_y + 10, 0]
+    min_x, max_x = all_verts[:, 0].min(), all_verts[:, 0].max()
+    min_y, max_y = all_verts[:, 1].min(), all_verts[:, 1].max()
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+    shift = [128 - center_x, 128 - center_y, 0]
     for geom in scene.geometry.values():
         geom.apply_translation(shift)
 

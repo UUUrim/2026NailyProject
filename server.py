@@ -43,6 +43,8 @@ import json
 import math
 import os
 import queue as _q
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -136,6 +138,9 @@ CAMERA_SIDE       = -2      # 사이드/c-curve: 폰 카메라(/phone/side).  -1
 CAMERA_EXPOSURE   = None
 CAMERA_WB_TEMP    = None
 ARUCO_SIZE_MM     = 20.0
+# 네일팁 STL 쉘 두께(mm). 안 넘기면 nail_exact_stl.py 기본값 0.6이 쓰인다. 0.2mm 노즐 선폭(0.22)
+# 기준으로 0.5는 벽 약 2줄 — 더 얇게 하면 PETG 팁이 약해진다.
+NAIL_THICKNESS_MM = 0.5
 CROP_BOTTOM_PX    = 0       # 탑뷰 하단 crop 픽셀 (0 = 크롭 없음; 더 이상 필요하지 않음)
 # 탑뷰 상단 crop 픽셀 (0 = 크롭 없음). 리그 상단 가장자리의 빨간 물체(1080p 기준
 # y≈0~95)가 피부색 임계값을 통과해 손가락으로 오인식되던 문제 - 카메라에서
@@ -250,7 +255,9 @@ def _fetch_printer_status() -> dict:
     if str(p.get_current_state()) == 'UNKNOWN':
             time.sleep(3)  # 처음 연결 시만 대기
     return {
-        "state":            str(p.get_current_state()),
+        "state":            str(p.get_current_state()),   # stg_cur 기반 "단계" (PRINTING/IDLE 등)
+        "gcodeState":       str(p.get_state()),           # gcode_state 기반 (IDLE/PREPARE/RUNNING/PAUSE/FINISH/FAILED)
+        "gcodeFile":        str(p.get_file_name() or ""),
         "percentage":       p.get_percentage(),
         "currentLayer":     p.current_layer_num(),
         "totalLayer":       p.total_layer_num(),
@@ -273,16 +280,34 @@ def _download_3mf_from_url(url: str, local_path: str):
 
 
 def _slice_and_print_local(local_3mf: str, output_dir: str, callback_url: str):
-    try:
-        gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
-        requests.post(callback_url, json={
-            "success": True, "status": "PRINTING", "gcodePath": gcode_path})
+    """병합 직후 자동 출력 요청을 프린트 큐에 넣는다.
 
-        # 완료 감지 폴링
-        _poll_until_complete(callback_url)
+    예전엔 여기서 바로 슬라이싱+업로드+폴링을 해서 큐를 완전히 우회했다. 그 결과 앞 출력이
+    진행 중이어도 다음 주문이 같은 프린터에 동시에 업로드/시작되고, 같은 이름의 파일을 덮어쓰고,
+    둘 다 "출력 중"으로 보였다. 이제 /print/start와 똑같이 큐 워커가 한 번에 하나씩 처리한다.
+
+    주문마다 폴더를 따로 만들고 병합 3MF를 거기로 복사한다: 같은 스캔 조합으로 다시 신청하면
+    병합 결과 파일(hand_merged.3mf 등)이 덮어써지는데, 그 전에 대기 중이던 앞 주문이 새 모델을
+    출력하거나 출력 중 파일이 바뀌는 일을 막기 위해서다.
+    """
+    try:
+        order_id = _order_id_from_callback(callback_url)
+        order_dir = os.path.join(output_dir, f"order_{order_id}")
+        os.makedirs(order_dir, exist_ok=True)
+        job_3mf = os.path.join(order_dir, "input_for_slicing.3mf")
+        shutil.copy2(local_3mf, job_3mf)
+        _enqueue_print_job({"localPath": job_3mf, "outputDir": order_dir, "callbackUrl": callback_url})
+        # 백엔드에 "큐에 들어갔다"를 알려서 화면에 '프린터 대기 중'으로 보이게 한다.
+        # (실제 출력이 시작되면 워커가 PRINTING 콜백을 보낸다)
+        requests.post(callback_url, json={"success": True, "status": "WAITING_IN_QUEUE"})
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
+
+def _order_id_from_callback(callback_url: str) -> str:
+    """콜백 주소(.../prints/<주문ID>/print-result)에서 주문 ID를 꺼낸다. 없으면 시각으로 대체."""
+    m = re.search(r"/prints/(\d+)/", callback_url or "")
+    return m.group(1) if m else time.strftime("t%Y%m%d_%H%M%S")
 
 def _run_merge_both_hands(userid, left_session, right_session,
                            left_shapes, right_shapes, callback_url, print_callback_url=None):
@@ -312,10 +337,11 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7
         except Exception as e:
             print(f"[Poll] 폴링 오류: {e}")
 
-def _run_slice_and_print(merged_model_url, output_dir, callback_url):
+def _run_slice_and_print(merged_model_url, output_dir, callback_url, local_3mf=None):
     try:
-        local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
-        _download_3mf_from_url(merged_model_url, local_3mf)
+        if local_3mf is None:
+            local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
+            _download_3mf_from_url(merged_model_url, local_3mf)
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
 
         # 출력 시작 콜백
@@ -329,19 +355,221 @@ def _run_slice_and_print(merged_model_url, output_dir, callback_url):
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
 
-def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 7200):
-    """출력 완료될 때까지 폴링, 완료되면 콜백으로 COMPLETED 전송"""
+def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 21600,
+                          startup_grace_sec: int = 180, already_started: bool = False):
+    """출력 완료될 때까지 폴링하고, 끝나면 콜백으로 COMPLETED/실패를 보낸다.
+
+    프린터 상태는 두 가지를 같이 본다 (bambulabs_api 소스로 확인한 값).
+      - gcodeState = get_state(): IDLE / PREPARE / RUNNING / PAUSE / FINISH / FAILED
+      - state      = get_current_state() (stg_cur 단계): PRINTING / HEATBED_PREHEATING ... / IDLE
+    예전 코드는 단계(state)에서 RUNNING/PREPARE를 찾아서 영원히 못 찾았고, 그래서
+    출력 중이어도 "시작 안 됨"으로 오판해 180초 뒤 실패 처리했다.
+
+    주의: 직전 작업이 끝난 뒤 gcodeState는 다음 작업이 시작될 때까지 FINISH로 남아 있다.
+    그래서 "시작을 한 번이라도 확인한 뒤"에만 FINISH/FAILED/IDLE을 끝 신호로 인정한다.
+    """
     start = time.time()
+    last_percentage = 0
+    has_started = already_started  # 서버 재시작 후 이어서 폴링할 땐 이미 출력 중이던 작업
+    ACTIVE_GCODE = ("PREPARE", "RUNNING", "PAUSE")
+
+    def _fail(msg):
+        requests.post(callback_url, json={"success": False, "message": msg})
+
     while time.time() - start < timeout:
         time.sleep(interval)
         try:
             status = _fetch_printer_status()
-            state = status.get("state", "")
-            if "FINISH" in state.upper() or "IDLE" in state.upper():
+            stage = str(status.get("state", "")).upper()
+            gcode = str(status.get("gcodeState", "")).upper()
+            pct = status.get("percentage")
+            pct = pct if isinstance(pct, (int, float)) else 0
+            last_percentage = max(last_percentage, pct)
+            print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+
+            stage_active = bool(stage) and "IDLE" not in stage and "UNKNOWN" not in stage
+            if gcode in ACTIVE_GCODE or stage_active:
+                has_started = True
+
+            if not has_started:
+                # 아직 예열/업로드 처리 중이거나 시작 명령이 먹지 않은 상태
+                if time.time() - start >= startup_grace_sec:
+                    _fail(f"{startup_grace_sec}초가 지나도 출력이 시작되지 않았습니다. "
+                          f"프린터 상태를 확인해 주세요. (단계={stage}, gcode={gcode})")
+                    return
+                continue
+
+            if gcode == "FINISH":
                 requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
                 return
+            if gcode == "FAILED":
+                _fail(f"프린터에서 출력이 실패했습니다 (진행률 {last_percentage}%).")
+                return
+            if gcode in ("IDLE", "UNKNOWN") and not stage_active:
+                if last_percentage >= 95:
+                    requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
+                else:
+                    _fail(f"출력이 중간에 취소되거나 중단됐습니다 (진행률 {last_percentage}%에서 중단).")
+                return
+        except Exception as e:
+            print(f"[Poll] 폴링 오류: {e}")  # 연결 끊겨도 폴링 계속
+
+    # 예전엔 timeout이 지나면 아무 콜백도 없이 조용히 끝났다. 그러면 워커가 다음 작업을 바로
+    # 시작해서, 아직 출력 중인 프린터에 새 파일을 올리는 일이 생긴다.
+    try:
+        requests.post(callback_url, json={
+            "success": False,
+            "message": f"출력 상태를 {timeout // 3600}시간이 넘도록 확인하지 못했습니다. 프린터를 확인해 주세요."})
+    except Exception:
+        pass
+
+# ── 프린트 큐 ────────────────────────────────────────────────
+def _wait_until_printer_free(interval: int = 15, max_wait: int = 21600):
+    """프린터가 출력 중(PREPARE/RUNNING/PAUSE)이면 끝날 때까지 기다린다.
+
+    큐 워커는 앞 작업이 끝나야 다음 작업으로 넘어가지만, 앞 작업의 감시가 어떤 이유로든
+    일찍 끝났거나(연결 문제 등), 프린터 화면/Bambu Studio에서 직접 출력을 시작한 경우에도
+    출력 중인 프린터에 새 파일을 올려 덮어쓰지 않도록 시작 직전에 한 번 더 확인한다.
+    프린터에 연결이 안 되는 경우(연속 3회 실패)는 기다리지 않고 진행해서, 업로드 단계의
+    오류가 사용자에게 보고되게 한다.
+    """
+    start = time.time()
+    fails = 0
+    while time.time() - start < max_wait:
+        try:
+            gcode = str(_fetch_printer_status().get("gcodeState", "")).upper()
+            fails = 0
+        except Exception as e:
+            fails += 1
+            print(f"[PrintQueue] 프린터 상태 확인 오류({fails}/3): {e}")
+            if fails >= 3:
+                return
+            time.sleep(interval)
+            continue
+        if gcode not in ("PREPARE", "RUNNING", "PAUSE"):
+            return
+        print(f"[PrintQueue] 프린터가 출력 중입니다(gcode={gcode}) - 끝날 때까지 대기")
+        time.sleep(interval)
+
+# 큐가 메모리에만 있으면 server.py를 재시작할 때 대기 작업이 사라지고, 백엔드에는
+# "프린터 대기 중"으로 영원히 남는다. 그래서 대기 목록과 진행 중인 작업을 JSON 파일에
+# 저장해 두고, 시작할 때 복구한다.
+_print_job_queue: _q.Queue = _q.Queue()
+_PRINT_QUEUE_FILE = os.path.join(BASE, "print_queue_state.json")
+_print_queue_lock = threading.Lock()
+_pending_jobs: list = []          # 대기 중 작업 (큐와 같은 내용을 파일 저장용으로 미러링)
+_current_job: dict | None = None  # 지금 처리 중인 작업
+
+# 앞 출력이 끝나고 다음 출력을 시작하기까지 두는 간격(초). 베드 정리/교체 시간을 주기 위한 것.
+# 환경변수 PRINT_COOLDOWN_SEC로 바꿀 수 있고, 0이면 바로 시작한다.
+PRINT_COOLDOWN_SEC = int(os.environ.get("PRINT_COOLDOWN_SEC", "120"))
+_last_job_finished_at: float = 0.0  # 마지막 작업이 끝난 시각(time.time())
+
+
+def _wait_print_cooldown():
+    """직전 작업이 끝난 뒤 PRINT_COOLDOWN_SEC가 지날 때까지 기다린다."""
+    remain = PRINT_COOLDOWN_SEC - (time.time() - _last_job_finished_at)
+    if remain <= 0:
+        return
+    print(f"[PrintQueue] 다음 출력 시작 전 {int(remain)}초 대기합니다 (출력 간 간격 {PRINT_COOLDOWN_SEC}초)")
+    time.sleep(remain)
+
+
+def _save_print_queue_state():
+    """호출하는 쪽이 _print_queue_lock을 잡고 있어야 한다."""
+    try:
+        tmp = _PRINT_QUEUE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"current": _current_job, "pending": _pending_jobs}, f, ensure_ascii=False)
+        os.replace(tmp, _PRINT_QUEUE_FILE)
+    except Exception as e:
+        print(f"[PrintQueue] 큐 상태 저장 실패: {e}")
+
+
+def _enqueue_print_job(job: dict):
+    with _print_queue_lock:
+        _pending_jobs.append(job)
+        _save_print_queue_state()
+    _print_job_queue.put(job)
+
+
+def _restore_print_queue():
+    """서버 시작 시 저장된 큐를 복구한다."""
+    try:
+        with open(_PRINT_QUEUE_FILE, encoding="utf-8") as f:
+            saved = json.load(f)
+    except FileNotFoundError:
+        return
+    except Exception as e:
+        print(f"[PrintQueue] 저장된 큐를 읽지 못했습니다: {e}")
+        return
+
+    interrupted = saved.get("current")
+    if interrupted:
+        # 재시작 전에 처리 중이던 작업: 프린터가 아직 출력 중이면 폴링만 이어서 하고,
+        # 이미 IDLE이면 (슬라이싱/업로드 도중 끊겼거나 출력이 끝난 경우) 실패로 알린다.
+        try:
+            st = _fetch_printer_status()
+            state = str(st.get("state", "")).upper()
+            gcode = str(st.get("gcodeState", "")).upper()
         except Exception:
-            pass  # 연결 끊겨도 폴링 계속
+            state, gcode = "", ""
+        if gcode in ("PREPARE", "RUNNING", "PAUSE") or (state and "IDLE" not in state and "UNKNOWN" not in state):
+            _enqueue_print_job({**interrupted, "resume": True})
+            print("[PrintQueue] 재시작 전 출력 중이던 작업의 상태 확인을 이어서 합니다.")
+        else:
+            try:
+                requests.post(interrupted["callbackUrl"], json={
+                    "success": False,
+                    "message": "프린터 서버가 재시작되어 출력이 중단됐습니다. 다시 신청해 주세요."})
+            except Exception:
+                pass
+
+    for job in saved.get("pending", []):
+        _pending_jobs.append(job)
+        _print_job_queue.put(job)
+    if saved.get("pending"):
+        print(f"[PrintQueue] 대기 작업 {len(saved['pending'])}개를 복구했습니다.")
+    with _print_queue_lock:
+        _save_print_queue_state()
+
+
+def _print_queue_worker():
+    """한 번에 하나씩 순서대로 처리하는 워커."""
+    global _current_job, _last_job_finished_at
+    _restore_print_queue()
+    while True:
+        job = _print_job_queue.get()
+        callback_url = job["callbackUrl"]
+        # 대기 목록(_pending_jobs)에 남겨 둔 채로 기다린다: 서버가 재시작돼도 복구된다.
+        # (재시작 후 상태 확인만 이어가는 resume 작업은 새 출력이 아니라서 기다리지 않는다)
+        if not job.get("resume"):
+            _wait_print_cooldown()
+        with _print_queue_lock:
+            if job in _pending_jobs:
+                _pending_jobs.remove(job)
+            _current_job = job
+            _save_print_queue_state()
+        try:
+            print(f"[PrintQueue] 출력 시작 (대기 {_print_job_queue.qsize()}개 남음)")
+            if job.get("resume"):
+                _poll_until_complete(callback_url, already_started=True)
+            else:
+                _wait_until_printer_free()
+                _run_slice_and_print(job.get("mergedModelUrl"), job["outputDir"], callback_url,
+                                     local_3mf=job.get("localPath"))
+        except Exception as e:
+            print(f"[PrintQueue] 작업 실패: {e}")
+            try:
+                requests.post(callback_url, json={"success": False, "message": str(e)})
+            except Exception:
+                pass
+        finally:
+            _last_job_finished_at = time.time()
+            with _print_queue_lock:
+                _current_job = None
+                _save_print_queue_state()
+            _print_job_queue.task_done()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1337,6 +1565,7 @@ class StartPrintRequest(BaseModel):
 
 @app.on_event("startup")
 def _startup():
+    threading.Thread(target=_print_queue_worker, daemon=True).start()
     threading.Thread(target=_phone_side_idle_preview_loop, daemon=True).start()
 
 
@@ -1530,7 +1759,11 @@ def test_side_capture():
 @app.get("/print/status")
 def print_status():
     try:
-        return {"success": True, **_fetch_printer_status()}
+        return {
+            "success": True,
+            "queueSize": _print_job_queue.qsize(),  # ← 추가
+            **_fetch_printer_status()
+        }
     except Exception as e:
         return {"success": False, "message": str(e)}
 
@@ -1549,13 +1782,15 @@ def merge_both(request: MergeBothHandsRequest):
 
 @app.post("/print/start")
 def start_print(request: StartPrintRequest):
-    threading.Thread(
-        target=_run_slice_and_print,
-        args=(request.mergedModelUrl, request.outputDir, request.callbackUrl),
-        daemon=True,
-    ).start()
-    return {"status": "started", "message": "슬라이싱 및 출력이 시작되었습니다."}
-
+    _enqueue_print_job({"mergedModelUrl": request.mergedModelUrl,
+                        "outputDir": request.outputDir,
+                        "callbackUrl": request.callbackUrl})
+    waiting = _print_job_queue.qsize() - 1
+    return {
+        "status": "queued",
+        "queuePosition": _print_job_queue.qsize(),
+        "message": f"출력 대기열에 추가되었습니다. (앞에 {waiting}개 대기 중)"
+    }
 
 # ── 카메라 인덱스 설정 (웹 UI에서 카메라 선택용) ─────────────
 @app.get("/camera/config")

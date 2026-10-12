@@ -141,3 +141,4 @@ scan/naily_pipeline.py
 
 # local test output
 sample_dome/
+print_queue_state.json

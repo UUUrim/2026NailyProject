@@ -15,6 +15,14 @@ public class DesignGenerateResponseDto {
     private Details details;
     private List<String> keywords;  // ★ 추가: 슬롯에서 추출한 키워드
 
+    // 채팅 수정 요청(refine)이 실제 수정 요청이 아니거나 이해하지 못해서 이미지를 바꾸지 않았을 때,
+    // 사용자에게 보여줄 안내 메시지. 값이 있으면 imageUrls는 기존(바뀌지 않은) 이미지다. 평소에는 null.
+    private String assistantMessage;
+
+    // assistantMessage와 함께 내려가는 "이렇게 말씀해 보세요" 선택지(클릭하면 그 문장이 수정 요청으로 전송됨).
+    // assistantMessage가 null이면 같이 null.
+    private List<String> assistantOptions;
+
     // 스캔 정보 기반 자동 생성(mode=scan-auto)일 때만 채워진다. 그 외에는 null.
     // 결과 화면 "내 손 분석 정보를 반영했어요"에서 추천 팔레트 중 어떤 색이 쓰였는지,
     // 어떤 무드/디자인 타입이 반영됐는지 보여주는 데 사용한다.

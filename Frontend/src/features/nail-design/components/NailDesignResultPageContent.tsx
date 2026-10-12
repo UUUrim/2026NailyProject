@@ -100,7 +100,8 @@ export function NailDesignResultPageContent() {
         )
     }
 
-    const allKeywords = context ? Array.from(new Set([...context.keywords, ...context.revisionKeywords])) : []
+    // 마지막 결과 이미지에 반영된 키워드만 보여준다 (수정 요청 문장 원문은 칩으로 넣지 않는다)
+    const allKeywords = context ? Array.from(new Set(context.keywords)) : []
 
     // 반영된 추천 컬러 — 웹은 한 줄(DOM 순서 그대로), 모바일 6열 그리드에선 다른 화면들과 같이
     // 열=색상군, 행=명도 단계가 되도록 CSS order로 자리만 바꾼다.
@@ -180,8 +181,7 @@ export function NailDesignResultPageContent() {
                 {context &&
                     (context.handSummary ||
                         context.referenceImageUrl ||
-                        context.keywords.length > 0 ||
-                        context.revisionKeywords.length > 0) && (
+                        context.keywords.length > 0) && (
                         <section className="design-result-v2__origin">
                             <p className="design-result-v2__detail-label">How It Was Made</p>
 

@@ -58,7 +58,7 @@ public class GptClientService {
      *                       지시에만 의존해야 한다.
      */
     public String chat(String systemPrompt, List<Map<String, Object>> messages,
-                        int maxCompletionTokens, boolean jsonObjectMode) {
+                       int maxCompletionTokens, boolean jsonObjectMode) {
         List<Map<String, Object>> fullMessages = new ArrayList<>();
         fullMessages.add(Map.of("role", "system", "content", systemPrompt));
         fullMessages.addAll(messages);
@@ -83,7 +83,7 @@ public class GptClientService {
 
     /** 이미지(base64) + 텍스트를 함께 보내는 호출 (참고 이미지 분석용, 이미지 생성이 아님). */
     public String chatWithImage(String systemPrompt, String userText, String imageBase64,
-                                 String imageMimeType, int maxCompletionTokens, boolean jsonObjectMode) {
+                                String imageMimeType, int maxCompletionTokens, boolean jsonObjectMode) {
         List<Map<String, Object>> content = List.of(
                 Map.of("type", "text", "text", userText),
                 Map.of("type", "image_url", "image_url",
@@ -103,12 +103,24 @@ public class GptClientService {
      * @return base64 인코딩된 PNG 이미지
      */
     public String generateImage(String prompt, String size, String quality) {
+        return generateImage(prompt, size, quality, false);
+    }
+
+    /**
+     * @param transparent true면 background="transparent" + output_format="png"로 알파 채널이 있는 PNG를 요청한다.
+     *                    프롬프트에 흰 배경/그림자 지시가 남아 있으면 모델이 그걸 실제로 그려버리니 프롬프트도 같이 맞춰야 한다.
+     */
+    public String generateImage(String prompt, String size, String quality, boolean transparent) {
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", imageModel);
         requestBody.put("prompt", prompt);
         requestBody.put("size", size);
         requestBody.put("quality", quality);
         requestBody.put("n", 1);
+        if (transparent) {
+            requestBody.put("background", "transparent");
+            requestBody.put("output_format", "png");
+        }
 
         JsonNode responseNode = callWithRetry(requestBody, imageApiUrl);
         JsonNode dataArray = responseNode.path("data");
@@ -126,13 +138,18 @@ public class GptClientService {
      * 레퍼런스 이미지(PNG 바이트)를 함께 보내서 이미지를 생성한다 (images/edits).
      * 레퍼런스는 프롬프트에 적은 역할(예: 광택만 참고)대로만 쓰이도록 프롬프트 쪽에서 제한해야 한다.
      */
-    public String generateImageWithReferences(String prompt, String size, String quality, List<byte[]> references) {
+    public String generateImageWithReferences(String prompt, String size, String quality, List<byte[]> references,
+                                              boolean transparent) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
         builder.part("model", imageModel);
         builder.part("prompt", prompt);
         builder.part("size", size);
         builder.part("quality", quality);
         builder.part("n", "1");
+        if (transparent) {
+            builder.part("background", "transparent");
+            builder.part("output_format", "png");
+        }
         for (byte[] reference : references) {
             builder.part("image[]", new ByteArrayResource(reference))
                     .filename("reference.png")
@@ -147,6 +164,40 @@ public class GptClientService {
         String b64 = dataArray.get(0).path("b64_json").asText(null);
         if (b64 == null || b64.isBlank()) {
             throw new IllegalStateException("이미지 생성 응답에 b64_json이 없습니다: " + responseNode);
+        }
+        return b64;
+    }
+
+    /**
+     * [이미지 "수정" 전용] 원본 이미지 전체 + 수정 지시문을 보내서 수정된 이미지를 base64(PNG)로 받는다
+     * (images/edits). 별도 마스크 없이, 모델이 지시문만 보고 "언급된 부분만" 바꾸고 나머지는 그대로
+     * 유지하는 것에 의존한다 - 그래서 호출하는 쪽(RefineService)이 만드는 editInstruction은
+     * "무엇을 바꿀지"와 "나머지는 정확히 그대로 둘 것"을 한 문장 안에 명시해야 한다.
+     *
+     * @param editInstruction    수정 지시문 (영어, 위치 명시 + "나머지는 그대로" 문구 포함)
+     * @param originalImageBytes 원본 이미지 바이트(PNG)
+     * @param size               예: "1536x1024"
+     * @param quality            "auto"/"low"/"medium"/"high"
+     * @return base64 인코딩된 수정 이미지(PNG)
+     */
+    public String editImage(String editInstruction, byte[] originalImageBytes, String size, String quality) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        builder.part("model", imageModel);
+        builder.part("prompt", editInstruction);
+        builder.part("size", size);
+        builder.part("quality", quality);
+        builder.part("image", new ByteArrayResource(originalImageBytes))
+                .filename("original.png")
+                .contentType(MediaType.IMAGE_PNG);
+
+        JsonNode responseNode = callWithRetry(builder.build(), imageEditApiUrl);
+        JsonNode dataArray = responseNode.path("data");
+        if (!dataArray.isArray() || dataArray.isEmpty()) {
+            throw new IllegalStateException("이미지 수정 응답에 data가 없습니다: " + responseNode);
+        }
+        String b64 = dataArray.get(0).path("b64_json").asText(null);
+        if (b64 == null || b64.isBlank()) {
+            throw new IllegalStateException("이미지 수정 응답에 b64_json이 없습니다: " + responseNode);
         }
         return b64;
     }
