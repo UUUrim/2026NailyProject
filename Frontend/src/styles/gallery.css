@@ -1,0 +1,474 @@
+/* 둘러보기(갤러리) 페이지 — 사용자들이 공유한 디자인 모음 */
+
+.gallery-page {
+  --gl-ink: #2b1e24;
+  --gl-body: #5b4852;
+  --gl-muted: #8f7682;
+  --gl-pink: #de869f;
+  --gl-pink-deep: #b8607c;
+  --gl-line: #f3e3ea;
+  --gl-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --gl-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  color: var(--gl-ink);
+}
+
+/* Toolbar: 정렬 + 개수 */
+
+.gallery-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  scroll-margin-top: 6rem;
+}
+
+.gallery-page__sort {
+  display: inline-flex;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: #fbf3f6;
+  border: 1px solid var(--gl-line);
+}
+
+.gallery-page__sort-btn {
+  padding: 0.45rem 1rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--gl-muted);
+  cursor: pointer;
+  transition:
+    background 0.25s var(--gl-ease),
+    color 0.25s var(--gl-ease),
+    box-shadow 0.25s var(--gl-ease);
+}
+
+.gallery-page__sort-btn:hover {
+  color: var(--gl-pink-deep);
+}
+
+.gallery-page__sort-btn.is-active {
+  background: #ffffff;
+  color: var(--gl-pink-deep);
+  box-shadow: 0 4px 12px -4px rgba(184, 96, 124, 0.35);
+}
+
+.gallery-page__sort-btn:focus-visible,
+.gallery-page__filter:focus-visible,
+.gallery-card__media:focus-visible,
+.gallery-page__state-btn:focus-visible,
+.gallery-page__cta-btn:focus-visible {
+  outline: 2px solid var(--gl-pink);
+  outline-offset: 2px;
+}
+
+.gallery-page__count {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--gl-muted);
+}
+
+.gallery-page__count b {
+  color: var(--gl-ink);
+  font-weight: 700;
+}
+
+/* Filters: 질감 칩 */
+
+.gallery-page__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.gallery-page__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--gl-line);
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--gl-body);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    color 0.2s;
+}
+
+.gallery-page__filter em {
+  font-family: var(--gl-mono);
+  font-size: 0.6875rem;
+  font-style: normal;
+  font-weight: 500;
+  color: var(--gl-muted);
+}
+
+.gallery-page__filter:hover {
+  border-color: #ecc3d1;
+  color: var(--gl-pink-deep);
+}
+
+.gallery-page__filter.is-active {
+  border-color: transparent;
+  background: linear-gradient(135deg, #e793ad, #c97f98);
+  color: #ffffff;
+  box-shadow: 0 8px 18px -10px rgba(184, 96, 124, 0.8);
+}
+
+.gallery-page__filter.is-active em {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.gallery-page__filter-swatch {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px rgba(43, 30, 36, 0.12);
+}
+
+/* Grid */
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid var(--gl-line);
+  background: #ffffff;
+  box-shadow: 0 6px 18px -12px rgba(43, 30, 36, 0.18);
+  transition:
+    transform 0.35s var(--gl-ease),
+    box-shadow 0.35s var(--gl-ease),
+    border-color 0.35s var(--gl-ease);
+}
+
+.gallery-card:hover {
+  transform: translateY(-4px);
+  border-color: #efcfda;
+  box-shadow: 0 22px 40px -24px rgba(184, 96, 124, 0.55);
+}
+
+.gallery-card__media {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  overflow: hidden;
+  background: #f7f1f4;
+  cursor: zoom-in;
+}
+
+/* 생성 이미지(1536x1024)와 같은 3:2 — 양 끝(엄지·새끼) 팁이 잘리지 않는다 */
+.gallery-card__image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  transition: transform 0.5s var(--gl-ease);
+}
+
+.gallery-card__media:hover .gallery-card__image {
+  transform: scale(1.03);
+}
+
+.gallery-card__tags {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  max-width: calc(100% - 3rem);
+}
+
+.gallery-card__tags span {
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--gl-pink-deep);
+  white-space: nowrap;
+}
+
+.gallery-card__saved {
+  position: absolute;
+  right: 0.5rem;
+  top: 0.5rem;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--gl-pink);
+  box-shadow: 0 4px 10px rgba(43, 30, 36, 0.15);
+}
+
+.gallery-card__hint {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 1.25rem 0.65rem 0.55rem;
+  background: linear-gradient(0deg, rgba(43, 30, 36, 0.5), transparent);
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.gallery-card__media:hover .gallery-card__hint {
+  opacity: 1;
+}
+
+.gallery-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.gallery-card__date {
+  font-family: var(--gl-mono);
+  font-size: 0.6875rem;
+  color: var(--gl-muted);
+  white-space: nowrap;
+}
+
+.gallery-card__likes {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--gl-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gallery-card__likes.is-liked {
+  color: var(--gl-pink);
+}
+
+.gallery-card--skeleton {
+  aspect-ratio: 3 / 2.45;
+  border-color: transparent;
+  background: linear-gradient(90deg, #f6eff2 25%, #fbf6f8 37%, #f6eff2 63%) 0 0 / 400% 100%;
+  box-shadow: none;
+  animation: gallery-shimmer 1.4s ease infinite;
+}
+
+.gallery-card--skeleton:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+@keyframes gallery-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* Empty / error */
+
+.gallery-page__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3.5rem 1.5rem;
+  border: 1px dashed #ecc9d6;
+  border-radius: 20px;
+  background: #fffafc;
+  text-align: center;
+}
+
+.gallery-page__state-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.gallery-page__state-desc {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--gl-muted);
+}
+
+.gallery-page__state-btn {
+  margin-top: 0.75rem;
+  padding: 0.6rem 1.25rem;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #de869f, #c77d96);
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gallery-page .mypage-x__pagination {
+  margin-top: 2.25rem;
+}
+
+/* Bottom CTA */
+
+.gallery-page__cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-top: 3.5rem;
+  padding: 2rem 2.25rem;
+  border-radius: 24px;
+  border: 1px solid #f3e1e9;
+  background:
+    radial-gradient(60% 120% at 0% 0%, rgba(255, 196, 215, 0.55) 0%, transparent 70%),
+    radial-gradient(50% 120% at 100% 100%, rgba(227, 210, 255, 0.6) 0%, transparent 70%),
+    radial-gradient(40% 100% at 70% 0%, rgba(210, 243, 231, 0.55) 0%, transparent 70%),
+    #fffafc;
+}
+
+.gallery-page__cta-eyebrow {
+  margin: 0 0 0.4rem;
+  font-family: var(--gl-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gl-pink-deep);
+}
+
+.gallery-page__cta h2 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.25rem, 2.4vw, 1.5rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.gallery-page__cta-copy p:last-child {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--gl-body);
+  word-break: keep-all;
+}
+
+.gallery-page__cta-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1.6rem;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #de869f, #c77d96);
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  box-shadow: 0 12px 28px rgba(222, 134, 159, 0.35);
+  cursor: pointer;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
+}
+
+.gallery-page__cta-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(222, 134, 159, 0.42);
+}
+
+/* Modal: 좋아요 버튼 옆 개수 */
+
+.gallery-modal__like-count {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Responsive */
+
+@media (max-width: 1024px) {
+  .gallery-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .gallery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .gallery-page__filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin-right: -1.5rem;
+    padding-right: 1.5rem;
+    scrollbar-width: none;
+  }
+
+  .gallery-page__filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .gallery-card {
+    border-radius: 14px;
+  }
+
+  .gallery-card__meta {
+    padding: 0.55rem 0.65rem;
+  }
+
+  .gallery-card__tags span:nth-child(2) {
+    display: none;
+  }
+
+  .gallery-page__cta {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery-card,
+  .gallery-card__image {
+    transition: none;
+  }
+
+  .gallery-card--skeleton {
+    animation: none;
+  }
+}

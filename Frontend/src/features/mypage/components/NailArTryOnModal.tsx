@@ -403,19 +403,18 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
               aria-label={isFullscreen ? '전체화면 종료' : '전체화면'}
               title={isFullscreen ? '전체화면 종료' : '전체화면'}
             >
+              {/* 전체화면: 네모 하나 / 전체화면 종료: 겹친 네모 두 개(창 이전 크기로) */}
               <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-                <path
-                  d={
-                    isFullscreen
-                      ? 'M8 3.5V8H3.5M12 3.5V8h4.5M8 16.5V12H3.5M12 16.5V12h4.5'
-                      : 'M3.5 8V3.5H8M16.5 8V3.5H12M3.5 12v4.5H8M16.5 12v4.5H12'
-                  }
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+                <g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  {isFullscreen ? (
+                    <>
+                      <rect x="4.5" y="7.5" width="8" height="8" rx="1.6" />
+                      <path d="M7.5 7.5V6.1a1.6 1.6 0 0 1 1.6-1.6h4.8a1.6 1.6 0 0 1 1.6 1.6v4.8a1.6 1.6 0 0 1-1.6 1.6h-1.4" />
+                    </>
+                  ) : (
+                    <rect x="5" y="5" width="10" height="10" rx="2" />
+                  )}
+                </g>
               </svg>
             </button>
             <button

@@ -899,6 +899,10 @@ public class NailDesignService {
             ((ObjectNode) plan).put("shape", scanRecommendedShape(handScan));
         }
 
+        // 앱이 제공하는 쉐입은 6가지(round/oval/almond/stiletto/ballerina/square)뿐이다. 플랜 LLM이 사진을 보고
+        // "rounded square" 같은 새 이름을 적으면 프롬프트와 AR 3D 템플릿(파일명 매칭)이 어긋나므로, 항상 6가지 중 하나로 정리한다.
+        enforceAppShape(plan, getLiked(slots, "shape"), handScan != null ? scanRecommendedShape(handScan) : null);
+
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
         // 표시가 항상 팔레트 안의 같은 색을 가리키도록 한다.
@@ -1003,7 +1007,7 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
-                .keywords(localizeKeywords(mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
+                .keywords(localizeKeywords(mergeKeywords(referenceSubjectKeyword(plan), mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
                 .build();
     }
@@ -1294,7 +1298,7 @@ public class NailDesignService {
                 .filter(m -> m.getRole() == ChatMessage.MessageRole.user)
                 .map(m -> m.getContent() == null ? "" : m.getContent().trim())
                 .filter(c -> !c.isBlank())
-                .map(c -> c.length() > 300 ? c.substring(0, 300) : c)
+                .map(c -> c.length() > 500 ? c.substring(0, 500) : c) // 선택 요약 + 기타 입력이 함께 오는 메시지가 잘리지 않게 500자
                 .toList();
         if (userMessages.isEmpty()) return "";
         int from = Math.max(0, userMessages.size() - 15);
@@ -2043,7 +2047,7 @@ public class NailDesignService {
     // 키워드 비교용: 의미 없이 붙는 일반 단어는 빼고 비교한다 ("snowman art" == "snowman")
     private static final Set<String> GENERIC_KEYWORD_WORDS = Set.of(
             "art", "charm", "charms", "pattern", "finish", "design", "motif", "decor", "decoration",
-            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect", "mascot", "bead", "beads", "trim");
+            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect", "mascot", "bead", "beads", "trim", "shape", "shapes");
     // 디자인 정보가 없는 막연한 말은 키워드로 보여주지 않는다 (예: "trendy"). 화면에 보이면 한 줄씩 추가.
     private static final Set<String> VAGUE_KEYWORDS = Set.of(
             "trendy", "nice", "beautiful", "pretty", "stylish", "premium", "luxury",
@@ -2058,6 +2062,55 @@ public class NailDesignService {
      * 사진 기반 생성은 슬롯(mood/shape 등)이 거의 비어 있어서 키워드가 3개 안팎으로만 나오던 문제 보완.
      * 여러 손가락에서 많이 쓰인 값을 먼저, 최대 MAX_PLAN_KEYWORDS개.
      */
+    /**
+     * 참고 사진이 뚜렷한 작품/캐릭터/브랜드(예: "나루토")일 때 플랜의 reference_subject(한글 이름)를 맨 앞 키워드로 쓴다.
+     * 화면 표시 전용 라벨이라 이미지 프롬프트에는 들어가지 않는다. 비어 있거나 너무 길면 쓰지 않는다.
+     */
+    private static final List<String> APP_SHAPES =
+            List.of("round", "oval", "almond", "stiletto", "ballerina", "square");
+
+    /** 임의의 쉐입 표기를 앱의 6가지 중 하나로 대응시킨다. 대응할 수 없으면 null. ("rounded square" -> square, "coffin" -> ballerina) */
+    private String mapToAppShape(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim().toLowerCase();
+        if (s.isEmpty()) return null;
+        if (s.contains("stiletto") || s.contains("pointed") || s.contains("sharp")) return "stiletto";
+        if (s.contains("ballerina") || s.contains("coffin")) return "ballerina";
+        if (s.contains("almond")) return "almond";
+        if (s.contains("squoval") || s.contains("oval")) return "oval";
+        if (s.contains("square")) return "square";
+        if (s.contains("round")) return "round";
+        return null;
+    }
+
+    /**
+     * plan.shape를 앱의 6가지 쉐입 중 하나로 고정한다. 우선순위: 사용자가 고른 쉐입(슬롯) > 플랜이 적은 값을 대응시킨 것 >
+     * 스캔 추천 쉐입 > oval.
+     */
+    private void enforceAppShape(JsonNode plan, List<String> slotShapes, String scanShape) {
+        if (plan == null || !plan.isObject()) return;
+        String chosen = null;
+        for (String s : slotShapes) {
+            chosen = mapToAppShape(s);
+            if (chosen != null) break;
+        }
+        if (chosen == null) chosen = mapToAppShape(plan.path("shape").asText(""));
+        if (chosen == null) chosen = mapToAppShape(scanShape);
+        if (chosen == null) chosen = "oval";
+        String current = plan.path("shape").asText("");
+        if (!chosen.equals(current)) {
+            System.out.println("[NailDesignService] plan.shape 보정: '" + current + "' -> '" + chosen + "'");
+        }
+        ((ObjectNode) plan).put("shape", chosen);
+    }
+
+    private List<String> referenceSubjectKeyword(JsonNode plan) {
+        if (plan == null || !plan.isObject()) return List.of();
+        String subject = plan.path("reference_subject").asText("").trim();
+        if (subject.isEmpty() || subject.length() > 20 || "none".equalsIgnoreCase(subject)) return List.of();
+        return List.of(subject);
+    }
+
     private List<String> extractPlanKeywords(JsonNode plan) {
         if (plan == null || !plan.isObject()) return List.of();
         Map<String, Integer> counts = new LinkedHashMap<>();
@@ -2131,12 +2184,13 @@ public class NailDesignService {
             Map.entry("lovely", "러블리"), Map.entry("simple", "심플"), Map.entry("modern", "모던"),
             Map.entry("chic", "시크"), Map.entry("cute", "큐트"), Map.entry("kitsch", "키치"),
             Map.entry("funky", "펑키"), Map.entry("feminine", "페미닌"), Map.entry("elegant", "우아"),
-            Map.entry("pure", "순수"), Map.entry("delicate", "섬세"), Map.entry("glamorous", "글램"),
+            Map.entry("pure", "순수"), Map.entry("delicate", "섬세"), Map.entry("glamorous", "화려"),
             Map.entry("glam", "글램"), Map.entry("romantic", "로맨틱"), Map.entry("soft", "소프트"),
             Map.entry("minimal", "미니멀"), Map.entry("natural", "내추럴"), Map.entry("vintage", "빈티지"),
-            Map.entry("edgy", "엣지"), Map.entry("dark", "다크"), Map.entry("playful", "플레이풀"),
+            Map.entry("dark", "다크"), Map.entry("playful", "유쾌함"),
             Map.entry("sweet", "스위트"), Map.entry("sophisticated", "세련된"), Map.entry("cool", "쿨"),
             Map.entry("y2k", "Y2K"), Map.entry("cozy", "포근한"), Map.entry("warm", "따뜻한"),
+            Map.entry("dreamy", "몽환적"), Map.entry("pastel", "파스텔"),
             // 디자인/마감/패턴
             Map.entry("glitter", "글리터"), Map.entry("gradient", "그라데이션"), Map.entry("cheek", "치크"),
             Map.entry("marble", "마블"), Map.entry("french", "프렌치"), Map.entry("magnetic", "마그네틱"),
@@ -2180,7 +2234,7 @@ public class NailDesignService {
             Map.entry("vivid", "비비드"), Map.entry("dusty", "애쉬"), Map.entry("milky", "밀키"));
 
     // 한글로 옮길 때 뜻이 없어 빼는 단어 ("star motif" -> "별")
-    private static final Set<String> KO_DROP_WORDS = Set.of("motif", "finish", "pattern", "design", "mascot", "trim");
+    private static final Set<String> KO_DROP_WORDS = Set.of("motif", "finish", "pattern", "design", "mascot", "trim", "shape", "shapes");
 
     /** 키워드 하나를 한글로. 사전에 없는 단어가 있거나 이미 한글이면 원문 그대로. */
     private String localizeKeyword(String keyword) {
@@ -2198,12 +2252,23 @@ public class NailDesignService {
         return out.isEmpty() ? k : String.join(" ", out);
     }
 
-    /** 키워드 목록을 한글로 바꾸고, 한글로 바꾼 뒤 같아진 것(예: plaid / check pattern -> 체크)은 하나만 남긴다. */
+    // 한글로 바꾼 뒤에도 남아도 되는 영문 표기 ("3D", "Y2K")
+    private static final java.util.regex.Pattern ALLOWED_LATIN = java.util.regex.Pattern.compile("3D|Y2K");
+
+    /**
+     * 키워드 목록을 한글로 바꾸고, 한글로 바꾼 뒤 같아진 것(예: plaid / check pattern -> 체크)은 하나만 남긴다.
+     * 사전에 없어서 영어가 그대로 남은 키워드는 화면에 영어 단어로 뜨지 않도록 제외한다(서버 로그에는 남긴다 -> 사전에 추가하면 됨).
+     */
     private List<String> localizeKeywords(List<String> keywords) {
         Set<String> seen = new LinkedHashSet<>();
         for (String k : keywords) {
             if (k == null || k.isBlank()) continue;
-            seen.add(localizeKeyword(k));
+            String ko = localizeKeyword(k);
+            if (ALLOWED_LATIN.matcher(ko).replaceAll("").matches(".*[A-Za-z].*")) {
+                System.out.println("[Keyword] 한글 매핑이 없어 키워드에서 제외: '" + k + "' (KO_WORDS/KO_PHRASES에 추가하면 표시됨)");
+                continue;
+            }
+            seen.add(ko);
         }
         return new ArrayList<>(seen);
     }
@@ -2218,7 +2283,8 @@ public class NailDesignService {
         if (planJson != null && !planJson.isBlank()) {
             try { plan = objectMapper.readTree(planJson); } catch (Exception ignored) {}
         }
-        List<String> base = mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan));
+        List<String> base = mergeKeywords(referenceSubjectKeyword(plan),
+                mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)));
         if (plan == null) return localizeKeywords(base);
 
         List<String> removes = new ArrayList<>();

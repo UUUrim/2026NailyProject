@@ -1122,6 +1122,55 @@
     flex-shrink: 0;
 }
 
+/* ── 선택지 "기타" 직접 입력 (분위기/디자인 타입/모티프) ── */
+
+.design-chat__quickreply-note {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.75rem;
+    padding: 0.35rem 0.4rem 0.35rem 0.75rem;
+    border: 1px solid #f2f2f2;
+    border-radius: 12px;
+    background: #fff;
+    cursor: text;
+    transition: border-color 0.15s;
+}
+
+.design-chat__quickreply-note:focus-within {
+    border-color: var(--naily-pink, #de869f);
+}
+
+.design-chat__quickreply-note-label {
+    flex-shrink: 0;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: var(--naily-pink-light, #fdf5f8);
+    color: var(--naily-pink-hover, #d0768f);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.design-chat__quickreply-note-input {
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    color: #1a1a1a;
+}
+
+.design-chat__quickreply-note-input::placeholder {
+    color: #b8b8b8;
+}
+
+.design-chat__quickreply-note-input:disabled {
+    cursor: default;
+}
+
 /* ── 입력창 ── */
 
 .design-chat__inputbar {
@@ -1197,6 +1246,14 @@
 .design-chat__icon-btn:hover {
     background: var(--naily-pink-light, #fdf5f8);
     color: var(--naily-pink, #de869f);
+}
+
+/* 사진 첨부 등 아이콘 버튼 비활성 (전송 버튼은 아래 --send:disabled 스타일을 따로 쓴다) */
+.design-chat__icon-btn:disabled:not(.design-chat__icon-btn--send),
+.design-chat__icon-btn:disabled:not(.design-chat__icon-btn--send):hover {
+    background: none;
+    color: #d6d6d6;
+    cursor: default;
 }
 
 .design-chat__icon-btn--send {

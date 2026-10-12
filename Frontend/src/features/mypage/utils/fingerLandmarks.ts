@@ -22,6 +22,9 @@ export type FingerConfig = {
   name: 'thumb' | 'index' | 'middle' | 'ring' | 'pinky'
   tip: number
   dip: number
+  /** Knuckle at the base of the finger's own line on screen (MCP; see
+   *  steadyTip) - null for the thumb, which bends sideways on screen. */
+  base: number | null
   /** Which cutout of the design image goes on this finger - the design image
    *  lays its five tips out left to right as thumb, index, middle, ring,
    *  pinky, so this is simply the finger's position in that row. */
@@ -43,11 +46,11 @@ export type FingerConfig = {
 }
 
 export const FINGERS: FingerConfig[] = [
-  { name: 'thumb', tip: 4, dip: 3, nailIndex: 0, widthRatio: 0.165, cuticleT: 0.5, distalRatio: 0.26 },
-  { name: 'index', tip: 8, dip: 7, nailIndex: 1, widthRatio: 0.138, cuticleT: 0.52, distalRatio: 0.24 },
-  { name: 'middle', tip: 12, dip: 11, nailIndex: 2, widthRatio: 0.142, cuticleT: 0.52, distalRatio: 0.26 },
-  { name: 'ring', tip: 16, dip: 15, nailIndex: 3, widthRatio: 0.135, cuticleT: 0.52, distalRatio: 0.25 },
-  { name: 'pinky', tip: 20, dip: 19, nailIndex: 4, widthRatio: 0.11, cuticleT: 0.52, distalRatio: 0.21 },
+  { name: 'thumb', tip: 4, dip: 3, base: null, nailIndex: 0, widthRatio: 0.165, cuticleT: 0.5, distalRatio: 0.26 },
+  { name: 'index', tip: 8, dip: 7, base: 5, nailIndex: 1, widthRatio: 0.138, cuticleT: 0.52, distalRatio: 0.24 },
+  { name: 'middle', tip: 12, dip: 11, base: 9, nailIndex: 2, widthRatio: 0.142, cuticleT: 0.52, distalRatio: 0.26 },
+  { name: 'ring', tip: 16, dip: 15, base: 13, nailIndex: 3, widthRatio: 0.135, cuticleT: 0.52, distalRatio: 0.25 },
+  { name: 'pinky', tip: 20, dip: 19, base: 17, nailIndex: 4, widthRatio: 0.11, cuticleT: 0.52, distalRatio: 0.21 },
 ]
 
 const WRIST = 0
@@ -98,6 +101,26 @@ const HANDEDNESS_CONFIDENCE = 0.3
 // edge below them. Never foreshortened below MIN_FIT_FORESHORTENING.
 const NAIL_LENGTH_RATIO = 1.1
 const MIN_FIT_FORESHORTENING = 0.5
+
+// With a fingertip curled toward (or away from) the camera, DIP->TIP is only
+// a few pixels long on screen, and its direction is anyone's guess - in live
+// recordings of the claw (palm to the camera, fingers curled until the nails
+// face it) TIP landed within 0-25 px of DIP, on the knuckle at the top of the
+// curl, pointing every which way, and the tips swayed from side to side
+// while the finger held still. A finger only bends in its own plane, which
+// with the palm or back to the camera shows on screen as the finger's own
+// line (MCP->DIP, long and steady). So once the segment is short, it's turned
+// onto that line - its length, which is how far the fingertip tilts, kept:
+// fully below STEADY_FROM of its true length, not at all above STEADY_TO.
+// Which way along the line is where its nail faces the camera: back toward
+// the palm with the palm to the camera (the fingertip folded down, nail
+// cuticle up and free edge down), on past DIP with the back to it. Not for
+// the thumb, turned on its own axis so that with the palm to the camera it
+// bends sideways on screen for real, nor where the finger's line is shorter
+// than half the fingertip (the whole finger points at the camera).
+const STEADY_FROM = 0.3
+const STEADY_TO = 0.6
+
 // A tip is drawn at least this times as long on screen as the nail it covers,
 // stretching its design lengthwise by up to MAX_TIP_STRETCH if it has to.
 const TIP_COVER = 1.03
@@ -115,7 +138,11 @@ const TIP_ARC_HALF_ANGLE = Math.asin(0.5 / TIP_ARC_RADIUS)
 // the thumbnail's true width, turned until its outline is as narrow as the
 // nail found in the image - so it shows from the side like the nail, its far
 // part cut off, instead of as a shrunken front view. Turned at most this far;
-// a nail narrower still is taken to be smaller than expected.
+// a nail narrower still is taken to be smaller than expected. Not with the
+// palm to the camera: a thumbnail found then is one the thumb, curled across
+// the palm, turns to face the camera - on live recordings it came out 0-15%
+// narrower than expected just by its own shape, and turning the tip for that
+// showed it side-on with its cuticle end cut away.
 const MAX_THUMB_ROLL = (80 * Math.PI) / 180
 
 function sub(a: Vec3, b: Vec3): Vec3 {
@@ -239,6 +266,37 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
 
+/** 0 at or below `from`, 1 at or above `to`, smooth in between. */
+function smoothRamp(value: number, from: number, to: number) {
+  const t = clamp((value - from) / (to - from), 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+/**
+ * The TIP landmark on screen, DIP->TIP turned onto the finger's line while
+ * it's short (see STEADY_FROM); `bone` is the fingertip segment's true
+ * length, px.
+ */
+function steadyTip(image: Vec3[], finger: FingerConfig, bone: number, palmTowardCamera: boolean): Point {
+  const dip = image[finger.dip]
+  const tip = image[finger.tip]
+  if (finger.base === null || !(bone > 0)) return { x: tip.x, y: tip.y }
+  const lineX = dip.x - image[finger.base].x
+  const lineY = dip.y - image[finger.base].y
+  const line = Math.hypot(lineX, lineY)
+  const dx = tip.x - dip.x
+  const dy = tip.y - dip.y
+  const onScreen = Math.hypot(dx, dy)
+  if (line < bone / 2 || !(onScreen > 0)) return { x: tip.x, y: tip.y }
+  const keep = smoothRamp(onScreen / bone, STEADY_FROM, STEADY_TO)
+  const toward = palmTowardCamera ? -1 : 1
+  const mixX = (keep * dx) / onScreen + ((1 - keep) * toward * lineX) / line
+  const mixY = (keep * dy) / onScreen + ((1 - keep) * toward * lineY) / line
+  const mix = Math.hypot(mixX, mixY)
+  if (mix < 1e-3) return { x: tip.x, y: tip.y }
+  return { x: dip.x + (mixX / mix) * onScreen, y: dip.y + (mixY / mix) * onScreen }
+}
+
 function median(values: number[]) {
   const sorted = [...values].sort((a, b) => a - b)
   const mid = sorted.length >> 1
@@ -349,6 +407,10 @@ export type NailPose = {
    *  screen (display space) through `point`, the tip hidden on the side
    *  `normal` (unit, toward the free edge) points away from. */
   cutoff: { point: Point; normal: Point } | null
+  /** The fingertip's TIP landmark on screen (display space) as the pose
+   *  takes it, turned onto the finger's line while DIP->TIP is short (see
+   *  steadyTip) - DIP->here is the direction the nail is placed along. */
+  tip: Point
   /** How opaque to draw the tip: by `facing`, or fully while the model sees
    *  the nail (NailFit.seen). */
   opacity: number
@@ -419,8 +481,9 @@ export function computeNailPoses(
   for (const [fingerIdx, finger] of FINGERS.entries()) {
     const fit = fits?.[fingerIdx] ?? null
     const dip = P[finger.dip]
-    const tipFlat = P[finger.tip]
-    const tip = { ...tipFlat, z: dip.z + depthStep(finger.dip, finger.tip, palmLength * finger.distalRatio) }
+    const bone = palmLength * finger.distalRatio
+    const tipFlat = steadyTip(P, finger, bone, palmTowardCamera)
+    const tip = { ...tipFlat, z: dip.z + depthStep(finger.dip, finger.tip, bone) }
     const segment = normalize(sub(tip, dip))
     if (!segment) continue
     // A nail found in the image brings its own on-screen direction - and,
@@ -456,7 +519,8 @@ export function computeNailPoses(
       // The detected cuticle is exactly where the tip's cuticle end belongs
       // on screen; only its depth is left to the landmark estimate.
       originRaw = { x: fit.cuticle.x, y: fit.cuticle.y, z: surfaceCuticle.z }
-      const roll = finger.name === 'thumb' ? thumbRoll(fit.width, priorWidth) : { angle: 0, width: fit.width }
+      const roll =
+        finger.name === 'thumb' && !palmTowardCamera ? thumbRoll(fit.width, priorWidth) : { angle: 0, width: fit.width }
       if (fit.length !== undefined) {
         axis = withFlatLength(axis, clamp(fit.length / (roll.width * NAIL_LENGTH_RATIO), MIN_FIT_FORESHORTENING, 1))
       }
@@ -531,6 +595,7 @@ export function computeNailPoses(
         point: { x: mirror ? width - cutoffRaw.point.x : cutoffRaw.point.x, y: cutoffRaw.point.y },
         normal: { x: cutoffRaw.normal.x * sx, y: cutoffRaw.normal.y },
       },
+      tip: { x: mirror ? width - tipFlat.x : tipFlat.x, y: tipFlat.y },
       opacity: fit?.seen ? 1 : facingOpacity(facingRaw),
     })
   }

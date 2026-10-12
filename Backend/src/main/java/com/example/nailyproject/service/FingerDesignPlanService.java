@@ -49,6 +49,25 @@ public class FingerDesignPlanService {
         (This rule is only about what you observe in a reference image. It does NOT apply to a
         character the user names in words — see [USER-NAMED CHARACTER].)
 
+        [SHAPE VALUE - VERY IMPORTANT]
+        The top-level "shape" must be EXACTLY one of these six lowercase words, nothing else:
+        round, oval, almond, stiletto, ballerina, square.
+        The app only has these six nail shapes. Never write any other shape name or a combination
+        (for example "rounded square", "squoval", "coffin", "tapered", "medium almond"); write the
+        closest of the six instead (coffin -> ballerina, rounded square -> square). If the confirmed
+        input names a shape, use it. If it does not and a reference image or recommended shape is
+        given, pick the closest of the six.
+
+        [REFERENCE SUBJECT LABEL - DISPLAY ONLY]
+        If a reference image is provided and it clearly shows what it is - the title text on a poster or
+        cover, or an unmistakable fictional work, character, game, brand or famous artwork - write its
+        common Korean name in the top-level "reference_subject" field (for example "나루토",
+        "스파이더맨", "별이 빛나는 밤"): just the name, no description. This is only a label shown to the
+        user on the result screen. NEVER copy it into any description, finish, pattern, motif, parts or
+        color value - the no-proper-names rule above still applies to every design field. Do not guess:
+        if you are not sure, or the image is a real person, a plain photo, a pattern or a texture, use
+        an empty string "". It is always "" when no reference image is provided.
+
         [USER-NAMED CHARACTER - VERY IMPORTANT]
         If the user's request names a specific character or mascot (for example Hachiware or Chiikawa,
         Kuromi, My Melody, Pompompurin, Miffy, Snoopy, Pikachu), they want THAT character on the nail,
@@ -726,11 +745,12 @@ public class FingerDesignPlanService {
         Return JSON only. No markdown, no commentary, no code fences.
         Use exactly this JSON structure:
         {
-          "shape": "...",
+          "shape": "round | oval | almond | stiletto | ballerina | square (exactly one of these six words)",
           "mood": "...",
           "season": "none",
           "surface": "...",
           "color": "...",
+          "reference_subject": "",
           "thumb":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "index":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "middle": { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
@@ -1051,10 +1071,10 @@ public class FingerDesignPlanService {
 
         String description = syrup
                 ? "A " + base + " base in a translucent syrup-gel finish: one single uniform color across the whole nail "
-                        + "from cuticle to tip, with clear gel depth, soft light transmission through the edges, and a "
-                        + "high-gloss shine. No pattern and no decoration."
+                + "from cuticle to tip, with clear gel depth, soft light transmission through the edges, and a "
+                + "high-gloss shine. No pattern and no decoration."
                 : "A " + base + " base in an opaque solid " + (matte ? "matte" : "high-gloss") + " finish: one single even color "
-                        + "across the whole nail from cuticle to tip. No pattern and no decoration.";
+                + "across the whole nail from cuticle to tip. No pattern and no decoration.";
 
         for (String finger : FINGERS) {
             if (!(root.path(finger) instanceof ObjectNode f)) continue;

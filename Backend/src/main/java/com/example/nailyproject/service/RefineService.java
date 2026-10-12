@@ -42,7 +42,8 @@ public class RefineService {
      * 수정 지시문(editInstruction) 생성용 시스템 프롬프트.
      * 디텍션 서버로 영역을 마스킹하지 않고, 원본 이미지 전체 + 이 지시문 하나를
      * gpt-image edit API에 그대로 넘기므로, "무엇을 바꿀지"와 "나머지는 절대 그대로
-     * 둘 것"을 반드시 한 문장 안에 명시적으로 담아야 한다.
+     * 둘 것"을 반드시 한 문장 안에 명시적으로 담아야 한다 — 마스크가 없으니 지시문이
+     * 불명확하면 관련 없는 부분까지 바뀔 위험이 있다.
      */
     private static final String GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE = """
             You write the "edit instruction" (editInstruction) that is sent to an image-editing AI
@@ -66,6 +67,16 @@ public class RefineService {
             %s
 
             [Previous per-finger plan - hint only, may not match the picture]
+            %s
+
+            [Conversation so far - VERY IMPORTANT]
+            The user's new message may refer to earlier turns ("아니 다 없애란 말은 아니었는데", "아까처럼 해줘",
+            "그거 말고", "다시 원래대로"). Read this history to understand what the previous edit changed and
+            what the user means now. The CURRENT image already contains the result of the previous edit.
+            If the user says the previous edit went too far or was not what they meant, bring back PART of what
+            was removed or changed (use the original prompt, the previous plan and the earlier edit
+            instructions below to know what used to be there), in the way the user now describes - do not ask what they meant unless it is truly
+            ambiguous. Treat earlier requests as still valid unless the user takes them back.
             %s
 
             [Finger -> position in the image - VERY IMPORTANT]
@@ -315,7 +326,12 @@ public class RefineService {
 
         // 2. GPT(vision)로 수정 지시문(editInstruction) 생성 - 이전 플랜 텍스트만 보면 실제 그림과 달라서
         //    엉뚱한 손톱을 고르는 문제가 있어, 이미지를 함께 보내 "보이는 대로" 판단하게 한다.
-        String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
+        // 이전 대화(사용자의 수정 요청/답변)와 앞선 수정 지시문(프롬프트) 내역을 텍스트로 GPT에게 같이 보여줘서,
+        // "아니 다 없애란 말은 아니었는데"처럼 앞선 수정을 가리키는 말을 이해하게 한다. (이미지는 현재 이미지 한 장만 보낸다)
+        List<NailDesign> designsInSession = nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(sessionId);
+        String conversationContext = buildConversationContext(session, message, designsInSession, prevDesign);
+        String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE,
+                originalPrompt, previousPlanJson, conversationContext);
         String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
         String aiText = gptClientService.chatWithImage(
                 systemPrompt, message, originalImageBase64, "image/png", 4096, true);
@@ -412,6 +428,53 @@ public class RefineService {
                 .details(nailDesignService.buildDetails(newDesign))
                 .keywords(nailDesignService.extractDesignKeywords(slots, session, nextPlanJson))
                 .build();
+    }
+
+    /**
+     * 프롬프트의 [Conversation so far] 에 넣을 텍스트:
+     *  1) 최근 대화(사용자 요청/챗봇 답변, 현재 메시지 제외) 8개
+     *  2) 이 세션에서 지금까지 이미지 모델에 보낸 수정 지시문(프롬프트) 최근 5개 - 현재 이미지는 이 수정들이 모두 반영된 결과
+     * 둘 다 없으면 "(no earlier turns)".
+     */
+    private String buildConversationContext(DesignSession session, String currentMessage,
+                                            List<NailDesign> designsInSession, NailDesign prevDesign) {
+        StringBuilder sb = new StringBuilder();
+
+        List<ChatMessage> all = chatMessageRepository.findBySessionOrderBySentAtAsc(session);
+        int end = all.size();
+        // 맨 끝은 방금 저장한 현재 사용자 메시지이므로 제외
+        if (end > 0 && all.get(end - 1).getRole() == ChatMessage.MessageRole.user
+                && currentMessage.equals(all.get(end - 1).getContent())) {
+            end--;
+        }
+        int start = Math.max(0, end - 8);
+        for (int i = start; i < end; i++) {
+            ChatMessage m = all.get(i);
+            String c = m.getContent() == null ? "" : m.getContent().replace("\n", " ").trim();
+            if (c.isEmpty()) continue;
+            if (c.length() > 160) c = c.substring(0, 160) + "...";
+            sb.append(m.getRole() == ChatMessage.MessageRole.user ? "user: " : "assistant: ").append(c).append("\n");
+        }
+
+        // 지금까지의 수정 지시문(오래된 것 -> 최근 순). prevDesign(현재 이미지)까지만 포함
+        List<String> editInstructions = new ArrayList<>();
+        for (NailDesign d : designsInSession) {
+            if (d.getAiModel() != null && d.getAiModel().contains("(edit)")
+                    && d.getPromptSummary() != null && !d.getPromptSummary().isBlank()) {
+                editInstructions.add(d.getPromptSummary().trim());
+            }
+            if (d.getId().equals(prevDesign.getId())) break;
+        }
+        if (!editInstructions.isEmpty()) {
+            int from = Math.max(0, editInstructions.size() - 5);
+            sb.append("[Edit instructions already applied to the image, oldest first - the CURRENT image shows the result of all of them]\n");
+            for (int i = from; i < editInstructions.size(); i++) {
+                String ins = editInstructions.get(i);
+                if (ins.length() > 400) ins = ins.substring(0, 400) + "...";
+                sb.append(i + 1).append(") ").append(ins).append("\n");
+            }
+        }
+        return sb.length() == 0 ? "(no earlier turns)" : sb.toString().trim();
     }
 
     /**

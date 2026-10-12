@@ -49,7 +49,22 @@ public class StyleTrendService {
 
         StringBuilder sb = new StringBuilder();
         sb.append("[이번 시즌 트렌드 참고 팔레트 - ").append(season).append("]\n");
-        sb.append("이미지 스타일과 어울린다면 아래 모티프/무드/컬러를 우선적으로 활용하세요.\n\n");
+        sb.append("이미지 스타일과 어울린다면 아래 모티프/무드/컬러를 우선적으로 활용하세요.\n");
+        // 날짜 기준으로 정한 계절이면, 이벤트 소재가 아니라 그 계절 분위기로 추천하게 한다.
+        if (userSeason == null || userSeason.isBlank()) {
+            String label = switch (season) {
+                case "autumn" -> "가을";
+                case "spring" -> "봄";
+                case "summer" -> "여름";
+                case "winter" -> "겨울";
+                default -> null;
+            };
+            if (label != null) {
+                sb.append("지금은 실제로 ").append(label).append("입니다. 사용자가 이벤트(핼러윈, 크리스마스 등)를 직접 말하지 않았다면 ")
+                        .append("이벤트 소재가 아니라 ").append(label).append(" 계절감(그 계절의 컬러, 질감, 무드)을 중심으로 추천하세요.\n");
+            }
+        }
+        sb.append("\n");
 
         // 상위 5개 모티프 + 연관 무드/색상
         sb.append("추천 모티프:\n");
@@ -91,12 +106,14 @@ public class StyleTrendService {
     private String getCurrentSeason() {
         int month = LocalDate.now().getMonthValue();
         if (month == 12) return "christmas";
-        if (month == 10) return "halloween";
+        // 10월을 "halloween"으로 보면 트렌드 힌트가 거미줄/유령/호박/박쥐 같은 핼러윈 소재로만 쏠려서
+        // "요즘 유행하는 네일"을 물어도 핼러윈 맞춤 네일만 나왔다. 실제 계절(가을)로 본다.
+        // (사용자가 계절로 "halloween"을 직접 고른 경우에는 buildTrendHint(userSeason)로 그대로 쓰인다)
         return switch (month) {
-            case 3, 4, 5  -> "spring";
-            case 6, 7, 8  -> "summer";
-            case 9, 11    -> "autumn";
-            default        -> "winter";  // 1, 2월
+            case 3, 4, 5      -> "spring";
+            case 6, 7, 8      -> "summer";
+            case 9, 10, 11    -> "autumn";
+            default            -> "winter";  // 1, 2월
         };
     }
 

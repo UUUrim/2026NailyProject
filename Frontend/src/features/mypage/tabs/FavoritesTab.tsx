@@ -259,7 +259,7 @@ export function FavoritesTab() {
                                 title: '찜한 디자인이 없어요',
                                 description: '마음에 드는 디자인에 ♥를 눌러 모아보세요.',
                                 actionLabel: '디자인 둘러보기',
-                                onAction: () => navigate('/mypage/designs'),
+                                onAction: () => navigate('/gallery'),
                               }}
                               options={{ dateMode: 'date' }}
                               designs={designs}
