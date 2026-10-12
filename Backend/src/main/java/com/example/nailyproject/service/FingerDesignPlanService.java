@@ -970,6 +970,105 @@ public class FingerDesignPlanService {
         limitColorExpressions(plan);
     }
 
+    // ── 원컬러(단색) 세트 ────────────────────────────────────────────────────
+
+    private static final List<String> UNIFORM_KEYWORDS = List.of(
+            "원컬러", "원 컬러", "one color", "one-color", "onecolor", "single color", "single-color",
+            "한 가지 색", "한가지 색", "한 가지 컬러", "한가지 컬러", "단색");
+
+    private static final String UNIFORM_SET_SECTION = """
+
+            [ONE-COLOR SET - HIGHEST PRIORITY, OVERRIDES EVERY RULE ABOVE]
+            The user asked for a one-color set. All five nails are the SAME single color and the SAME
+            color expression (all syrup, or all solid), with the same finish and gloss. No nail has any
+            base design / pattern, motif, part, powder, glitter, magnetic, french tip, cheek blush, gradient
+            or marble. Ignore the rules about variety between nails, "at least three nails must differ",
+            "no two nails may share the same combination", mood-based supporting elements, quiet vs busy
+            nails, and the suggested axis combination. The five descriptions are the same wording apart from
+            the finger. Leave pattern, motif and parts empty on every nail.
+            """;
+
+    // 키워드 뒤/앞에 이런 표현이 붙으면 "원컬러 싫어요/원컬러 말고" 같은 거부로 본다.
+    private static final java.util.regex.Pattern NEGATION_AFTER = java.util.regex.Pattern.compile(
+            "^.{0,12}?(싫|말고|빼|금지|제외|없이|아니|원치|않|마세요|하지 ?마|no\\b|not\\b|don'?t|avoid|never)");
+    private static final java.util.regex.Pattern NEGATION_BEFORE = java.util.regex.Pattern.compile(
+            "(no|not|don'?t|avoid|never|without|안|비|싫은|싫어하는)\\s*$");
+
+    /** 원컬러/단색을 "원한다"고 읽히는 경우만 true. "(피해야 함)" 슬롯 줄과 "원컬러 싫어요/no one color" 같은 부정 표현은 제외한다. */
+    private static boolean isUniformSetRequest(String confirmedInput) {
+        if (confirmedInput == null) return false;
+        for (String line : confirmedInput.toLowerCase().split("\\R")) {
+            if (line.contains("피해야 함")) continue;
+            for (String keyword : UNIFORM_KEYWORDS) {
+                int from = 0;
+                int at;
+                while ((at = line.indexOf(keyword, from)) >= 0) {
+                    String before = line.substring(Math.max(0, at - 12), at);
+                    String after = line.substring(at + keyword.length());
+                    boolean negated = NEGATION_AFTER.matcher(after).find() || NEGATION_BEFORE.matcher(before).find();
+                    if (!negated) return true;
+                    from = at + keyword.length();
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 프롬프트 지시만으로는 GPT가 손톱마다 마블/파우더/프렌치를 섞기 때문에, 원컬러 요청이면 코드로 5개를 같게 맞춘다:
+     * 색 표현(시럽 또는 솔리드)을 하나로 정하고, 패턴/모티프/파츠를 비우고, 설명을 같은 문장으로 다시 쓴다.
+     */
+    private void enforceUniformSet(JsonNode plan, String confirmedInput) {
+        if (!(plan instanceof ObjectNode root)) return;
+        String userInput = confirmedInput == null ? "" : confirmedInput.toLowerCase();
+        boolean matte = root.path("surface").asText("").toLowerCase().contains("matte");
+
+        // 색 표현: 사용자가 말한 쪽, 없으면 손톱 중 가장 많이 쓰인 쪽(시럽 우선), 매트면 솔리드
+        boolean syrup;
+        if (matte) {
+            syrup = false;
+        } else if (userInput.contains("시럽") || userInput.contains("syrup") || userInput.contains("jelly") || userInput.contains("젤리")) {
+            syrup = true;
+        } else if (userInput.contains("솔리드") || userInput.contains("solid") || userInput.contains("불투명")) {
+            syrup = false;
+        } else {
+            int jelly = 0, other = 0;
+            for (String finger : FINGERS) {
+                if ("jelly".equals(colorType(root.path(finger)))) jelly++; else other++;
+            }
+            syrup = jelly >= other;
+        }
+
+        // 베이스 색: 첫 번째로 값이 있는 손톱의 base_color, 없으면 상위 color
+        String base = "";
+        for (String finger : FINGERS) {
+            String b = root.path(finger).path("base_color").asText("").trim();
+            if (!b.isEmpty()) { base = b; break; }
+        }
+        if (base.isEmpty()) base = root.path("color").asText("").trim();
+        base = base.replaceAll("(?i)\\b(base|syrup|jelly|solid|opaque|translucent)\\b", "").replaceAll("\\s+", " ").trim();
+        if (base.isEmpty()) base = "milky white";
+
+        String description = syrup
+                ? "A " + base + " base in a translucent syrup-gel finish: one single uniform color across the whole nail "
+                        + "from cuticle to tip, with clear gel depth, soft light transmission through the edges, and a "
+                        + "high-gloss shine. No pattern and no decoration."
+                : "A " + base + " base in an opaque solid " + (matte ? "matte" : "high-gloss") + " finish: one single even color "
+                        + "across the whole nail from cuticle to tip. No pattern and no decoration.";
+
+        for (String finger : FINGERS) {
+            if (!(root.path(finger) instanceof ObjectNode f)) continue;
+            f.put("description", description);
+            f.put("base_color", base);
+            f.putArray("finish");
+            if (syrup) addToArray(f, "finish", "jelly");
+            f.putArray("pattern");
+            f.putArray("motif");
+            f.putArray("parts");
+        }
+        System.out.println("[FingerDesignPlan] 원컬러 세트로 고정: " + (syrup ? "syrup" : "solid") + " / " + base);
+    }
+
     private String buildVariationLean() {
         java.util.concurrent.ThreadLocalRandom r = java.util.concurrent.ThreadLocalRandom.current();
         List<String> pool = new java.util.ArrayList<>(LEAN_SUPPORTING);
@@ -1072,8 +1171,11 @@ public class FingerDesignPlanService {
         String motifNoneRestriction = hasImage ? "" : MOTIF_NONE_RESTRICTION;
         // ★ 같은 입력이면 GPT가 매번 같은 레시피를 고르는 문제 — 새 디자인(수정/참고이미지 아님)일 때만
         // 요청마다 무작위 "기울기"를 부드러운 제안으로 넘겨 결과가 달라지게 한다.
-        String variationLean = (hasImage || (previousPlanJson != null && !previousPlanJson.isBlank()))
+        // ★ 사용자가 "원컬러/단색"을 요청했으면 손톱별 변주(보조 요소·랜덤 축 조합)를 전부 끄고 5개를 같은 한 색으로 고정한다.
+        boolean uniformSet = !scanAutoMode && isUniformSetRequest(confirmedInputSummary);
+        String variationLean = (uniformSet || hasImage || (previousPlanJson != null && !previousPlanJson.isBlank()))
                 ? "" : buildVariationLean();
+        String uniformSection = uniformSet ? UNIFORM_SET_SECTION : "";
         // ★ 스캔 정보 기반 자동 생성 모드: 사용자 입력이 하나도 없으므로 "지정이 없으면 비운다"는 규칙 대신
         // 추천 팔레트에서 색을 직접 골라 손가락별로 다르게 분산시키도록 지시한다.
         String scanAutoSection = "";
@@ -1099,7 +1201,7 @@ public class FingerDesignPlanService {
                     """;
         }
         String systemPrompt = String.format(SYSTEM_PROMPT, trendHint + variationLean, motifNoneRestriction,
-                editModeSection + scanAutoSection, confirmedInputSummary);
+                editModeSection + scanAutoSection + uniformSection, confirmedInputSummary);
 
         // [Gemini 방식 - 주석 처리]
         // List<Map<String, Object>> parts = new ArrayList<>();
@@ -1147,6 +1249,7 @@ public class FingerDesignPlanService {
         try {
             JsonNode plan = objectMapper.readTree(text);
             enforceCombinationRules(plan, confirmedInputSummary);
+            if (uniformSet) enforceUniformSet(plan, confirmedInputSummary);
             return plan;
         } catch (Exception e) {
             System.err.println("디자인 플랜 JSON 파싱 실패. 원본 응답: " + text);
