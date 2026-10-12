@@ -7,6 +7,21 @@ const MODEL_PATH =
 let landmarker: HandLandmarker | null = null
 let landmarkerPromise: Promise<HandLandmarker> | null = null
 
+// The defaults (0.5 each) lose the "claw" pose - palm toward the camera with
+// the fingertips curled forward so the nails face it. On a real photo of that pose the palm detector scored only 0.05-0.1 and
+// the landmark model's hand presence 0.3-0.5, so the hand was never found
+// (and a tracked hand was dropped the moment the fingers curled). A low palm
+// threshold only proposes candidates; the presence check still rejects
+// non-hands, and HandTracker additionally waits a few frames before trusting
+// a brand-new hand.
+const DETECTION_OPTIONS = {
+  runningMode: 'VIDEO',
+  numHands: 2,
+  minHandDetectionConfidence: 0.05,
+  minHandPresenceConfidence: 0.3,
+  minTrackingConfidence: 0.3,
+} as const
+
 async function createLandmarker(): Promise<HandLandmarker> {
   const vision = await FilesetResolver.forVisionTasks(WASM_PATH)
 
@@ -16,8 +31,7 @@ async function createLandmarker(): Promise<HandLandmarker> {
         modelAssetPath: MODEL_PATH,
         delegate: 'GPU',
       },
-      runningMode: 'VIDEO',
-      numHands: 2,
+      ...DETECTION_OPTIONS,
     })
   } catch {
     return HandLandmarker.createFromOptions(vision, {
@@ -25,8 +39,7 @@ async function createLandmarker(): Promise<HandLandmarker> {
         modelAssetPath: MODEL_PATH,
         delegate: 'CPU',
       },
-      runningMode: 'VIDEO',
-      numHands: 2,
+      ...DETECTION_OPTIONS,
     })
   }
 }

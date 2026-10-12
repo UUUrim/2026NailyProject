@@ -1,7 +1,7 @@
 import { PageHeader } from '@/features/mypage/components/PageHeader'
 import { EmptyState } from '@/features/mypage/components/EmptyState'
 import { PrintOrderRow } from '@/features/mypage/components/PrintOrderRow'
-import { Pagination } from '@/features/mypage/components/Pagination'
+import { Pagination } from '@/shared/components/Pagination'
 import { useMyPageContext } from '../context'
 
 export function PrintsTab() {

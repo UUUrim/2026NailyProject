@@ -8,6 +8,7 @@ import {
     clampTipExtensionMm,
 } from '@/shared/constants/nailShapes'
 import { NailLengthPanel } from '@/features/print/components/NailLengthPanel'
+import { Pagination } from '@/shared/components/Pagination'
 import {
     formatMetricCurve,
     type ScanSession,
@@ -60,13 +61,6 @@ const CheckIcon = (
     <svg viewBox="0 0 24 24" fill="none" width="28" height="28">
         <path d="M5 12.5 10 17.5 19 7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
-)
-
-const ChevronLeftIcon = (
-    <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="m15 6-6 6 6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-)
-const ChevronRightIcon = (
-    <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="m9 6 6 6-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
 )
 
 export function PrintPagePreviewContent() {
@@ -175,41 +169,11 @@ export function PrintPagePreviewContent() {
                             )
                         })}
                     </div>
-                    {sessionTotalPages > 1 && (
-                        <div className="mypage-x__pagination">
-                            <button
-                                type="button"
-                                className="mypage-x__page-arrow"
-                                disabled={sessionCurrentPage <= 1}
-                                onClick={() => setSessionPage((p) => Math.max(1, p - 1))}
-                                aria-label="이전 페이지"
-                            >
-                                {ChevronLeftIcon}
-                            </button>
-                            <div className="mypage-x__page-numbers">
-                                {Array.from({ length: sessionTotalPages }, (_, i) => i + 1).map((pageNum) => (
-                                    <button
-                                        key={pageNum}
-                                        type="button"
-                                        className={`mypage-x__page-num${pageNum === sessionCurrentPage ? ' is-active' : ''}`}
-                                        onClick={() => setSessionPage(pageNum)}
-                                        aria-current={pageNum === sessionCurrentPage ? 'page' : undefined}
-                                    >
-                                        {pageNum}
-                                    </button>
-                                ))}
-                            </div>
-                            <button
-                                type="button"
-                                className="mypage-x__page-arrow"
-                                disabled={sessionCurrentPage >= sessionTotalPages}
-                                onClick={() => setSessionPage((p) => Math.min(sessionTotalPages, p + 1))}
-                                aria-label="다음 페이지"
-                            >
-                                {ChevronRightIcon}
-                            </button>
-                        </div>
-                    )}
+                    <Pagination
+                        currentPage={sessionCurrentPage}
+                        totalPages={sessionTotalPages}
+                        onPageChange={setSessionPage}
+                    />
                 </section>
 
                 <section className="print-page__section">

@@ -86,13 +86,43 @@ for t in ("warm", "cool"):
     check(f"{t} 피부용 후보가 구간마다 충분(밝은 10/중간 12/딥 10 이상)",
           per_band["light"] >= 10 and per_band["mid"] >= 12 and per_band["deep"] >= 10, str(dict(per_band)))
 
-# ── 7) 실제 측정 샘플: 촬영 직후 노출을 낮춘 확인용 사진 + 마커 흰색 보정으로 잰 손가락 피부 ─────
-# (본인 손, 본인이 쿨톤이라고 판단. 같은 손가락을 3번 재서 L 66.8~67.2, a 19.2~19.5, b 26.3~26.9)
-r = sc.recommend_nail_colors(67.0, 19.4, 26.5)
-print(f"\n실측 샘플(L=67.0 a=19.4 b=26.5): 색상각 {r['skin_summary']['skin_hue']}° -> {r['skin_summary']['tone']}")
-print("추천:", ", ".join(e["name"] for e in r["best"]))
-check("실측 샘플(본인 손, 쿨톤이라고 판단)이 쿨로 나옴", r["skin_summary"]["tone"] == "cool", f"{r['skin_summary']['skin_hue']}°")
-check("실측 샘플의 추천 컬러에 웜 색이 없음", all(e["tone"] != "warm" for e in r["best"]))
+# ── 7) 실제 측정 샘플: 촬영 직후 노출을 낮춘 확인용 사진 두 장(피부용 -7 + 흰색 기준 -8) + 마커 흰색 보정 ─────
+# 한 박스에서 서로 다른 사람 3명을 스캔한 최종 피부값 (10손가락 평균). 모두 밝은 피부라서 값이 비슷하다.
+REAL = {
+    "1번(본인, 쿨)":        (74.36, 22.98, 27.38),   # 색상각 50.0
+    "2번(쿨~뉴트럴 경계)":  (74.21, 18.81, 25.98),   # 색상각 54.1
+    "3번(더 붉은 쿨)":      (71.59, 23.49, 24.74),   # 색상각 46.5
+}
+real = {k: sc.recommend_nail_colors(*v) for k, v in REAL.items()}
+for k, r in real.items():
+    print(f"실측 {k}: 색상각 {r['skin_summary']['skin_hue']}° -> {r['skin_summary']['tone']} | 앞6: " + ", ".join(e["name"] for e in r["best"][:6]))
+check("실측 3명 모두 쿨(본인 판단과 같음)", all(r["skin_summary"]["tone"] == "cool" for r in real.values()))
+check("쿨 피부의 추천에 웜 색(웜 정도 0.5 이상)이 없음 - 1번/3번", all(e["warmth"] < 0.5 for k in ("1번(본인, 쿨)", "3번(더 붉은 쿨)") for e in real[k]["best"]))
+
+# 피부값이 비슷해도 추천이 사람마다 달라야 한다 (같은 톤 라벨이어도 똑같은 30색이 나오면 안 됨)
+names = list(real)
+for i in range(len(names)):
+    for j in range(i + 1, len(names)):
+        A = {e["hex"] for e in real[names[i]]["best"]}
+        B = {e["hex"] for e in real[names[j]]["best"]}
+        jac = len(A & B) / len(A | B)
+        A6 = {e["hex"] for e in real[names[i]]["best"][:6]}
+        B6 = {e["hex"] for e in real[names[j]]["best"][:6]}
+        check(f"[{names[i]} vs {names[j]}] 추천 30색이 다름(겹침 70% 미만)", jac < 0.70, f"겹침 {jac:.0%}")
+        check(f"[{names[i]} vs {names[j]}] 화면에 보이는 앞 6색이 다름(겹침 50% 이하)", len(A6 & B6) / len(A6 | B6) <= 0.50)
+
+# 피부값이 아주 조금(색상각 1도, 밝기 0.5) 달라지면 추천도 크게 튀지 않는다 (연속적)
+base_r = sc.recommend_nail_colors(74.0, 22.0, 27.0)
+near_r = sc.recommend_nail_colors(74.5, 21.9, 27.3)
+Ab = {e["hex"] for e in base_r["best"]}; Bb = {e["hex"] for e in near_r["best"]}
+check("피부값이 거의 같으면 추천도 거의 같음(겹침 80% 이상)", len(Ab & Bb) / len(Ab | Bb) >= 0.80, f"겹침 {len(Ab & Bb) / len(Ab | Bb):.0%}")
+
+# 앞쪽 6개가 파스텔/회색 한쪽으로 쏠리지 않고, 비슷한 색이 줄줄이 나오지 않는다
+for k, r in real.items():
+    first = r["best"][:6]
+    check(f"[{k}] 앞 6색에 밝은 색/중간 색/딥 컬러가 섞임", len({e["band"] for e in first}) >= 2 and sum(1 for e in first if e["C"] < 14) <= 2)
+    labs = [(e["L"], e["H"]) for e in first]
+    check(f"[{k}] 앞 6색 hex 중복 없음", len({e["hex"] for e in first}) == 6)
 
 print("\nALL PASS" if not failures else f"\nFAILED {len(failures)}: {failures}")
 sys.exit(1 if failures else 0)

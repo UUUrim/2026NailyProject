@@ -1,6 +1,6 @@
 import { PageHeader } from '@/features/mypage/components/PageHeader'
 import { ImageGrid } from '@/features/mypage/components/ImageGrid'
-import { Pagination } from '@/features/mypage/components/Pagination'
+import { Pagination } from '@/shared/components/Pagination'
 import { useMyPageContext } from '../context'
 
 export function DesignsTab() {
@@ -50,6 +50,7 @@ export function DesignsTab() {
                       <ImageGrid
                           items={slice}
                           isFavoriteView={false}
+                          gridClassName="mypage-x__grid--cols-4"
                           options={{ dateMode: 'date' }}
                           designs={designs}
                           likedKeySet={likedKeySet}

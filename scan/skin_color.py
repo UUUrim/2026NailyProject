@@ -327,7 +327,8 @@ def recommend_nail_colors(
     n_worst: int = 10,
 ) -> dict:
     """
-    피부 Lab에서 톤을 판정하고, 그 톤과 피부 밝기에 맞는 네일 컬러 n_best개 + 안 어울리는 n_worst개를 돌려준다.
+    피부 Lab에서 톤을 판정하고(라벨용), 피부 Lab(밝기/색상각/채도)으로 연속 점수를 매겨서 어울리는 네일 컬러
+    n_best개 + 안 어울리는 n_worst개를 돌려준다. (nail_palette.pick_palette 참고)
     (warmness, saturation 인자는 예전 호출부 호환용으로 남겨 두며 판정에는 쓰지 않는다.)
 
     Returns:
@@ -349,8 +350,8 @@ def recommend_nail_colors(
         "L":          round(L, 1),
     }
     return {
-        "best":  nail_palette.pick_palette(tone, L, n_best),
-        "worst": nail_palette.pick_avoid(tone, n_worst),
+        "best":  nail_palette.pick_palette(tone, L, n_best, skin_a=a, skin_b=b),
+        "worst": nail_palette.pick_avoid(tone, n_worst, skin_L=L, skin_a=a, skin_b=b),
         "skin_summary": summary,
     }
 

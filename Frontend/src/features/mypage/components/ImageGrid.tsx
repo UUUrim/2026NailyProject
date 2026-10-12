@@ -10,6 +10,8 @@ type GridItem = DesignImageResponse | SavedDesignResponse
 type ImageGridProps = {
     items: GridItem[]
     isFavoriteView: boolean
+    /** 열 수를 고정할 때 쓰는 그리드 modifier 클래스 (예: mypage-x__grid--cols-4) */
+    gridClassName?: string
     empty?: { title: string; description: string; actionLabel?: string; onAction?: () => void }
     options?: {
         dateMode?: 'time' | 'date' | 'datetime'
@@ -31,6 +33,7 @@ type ImageGridProps = {
 export const ImageGrid = memo(function ImageGrid({
     items,
     isFavoriteView,
+    gridClassName,
     empty,
     options,
     designs,
@@ -61,7 +64,7 @@ export const ImageGrid = memo(function ImageGrid({
 
     const dateMode = options?.dateMode ?? 'date'
     return (
-        <div className="mypage-x__grid">
+        <div className={`mypage-x__grid${gridClassName ? ` ${gridClassName}` : ''}`}>
             {items.map((item) => {
                 const key = `${item.designId}-${item.imageUrl}`
                 const liked = likedKeySet.has(key)

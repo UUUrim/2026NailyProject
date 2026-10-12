@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PageHeader } from '@/features/mypage/components/PageHeader'
 import { FavBlockToolbar } from '@/features/mypage/components/FavBlockToolbar'
 import { ImageGrid } from '@/features/mypage/components/ImageGrid'
-import { Pagination } from '@/features/mypage/components/Pagination'
+import { Pagination } from '@/shared/components/Pagination'
 import { useMyPageContext } from '../context'
 import { Icon } from '../shared'
 
