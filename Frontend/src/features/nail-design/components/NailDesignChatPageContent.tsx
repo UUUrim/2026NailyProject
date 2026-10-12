@@ -10,7 +10,12 @@ import {
     SHAPE_PREVIEW_IMAGES,
     type PreferenceKey,
 } from '@/shared/constants/designPreferences'
-import { useNailDesignChatPage, QMARK_TOKEN, MENU_OPTIONS } from '@/features/nail-design/hooks/useNailDesignChatPage'
+import {
+    useNailDesignChatPage,
+    QMARK_TOKEN,
+    MENU_OPTIONS,
+    PREFERENCE_NOTE_MAX_LENGTH,
+} from '@/features/nail-design/hooks/useNailDesignChatPage'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
@@ -242,6 +247,13 @@ const ENGLISH_SUBLABEL_STEPS: PreferenceKey[] = ['mood', 'designType', 'motif', 
 function toEnglishTitleCase(value: string): string {
     return value.replace(/\b\w/g, (c) => c.toUpperCase())
 }
+
+// 분위기/디자인 타입/모티프 단계의 "기타" 입력란 안내 문구
+const PREFERENCE_NOTE_PLACEHOLDERS: Partial<Record<PreferenceKey, string>> = {
+    mood: '찾는 분위기가 없다면 직접 적어 주세요 (예: 몽환적인)',
+    designType: '찾는 디자인 타입이 없다면 직접 적어 주세요 (예: 체크 패턴)',
+    motif: '넣고 싶은 모티프가 없다면 직접 적어 주세요 (예: 나비)',
+}
 export function NailDesignChatPageContent() {
     const {
         navigate,
@@ -252,7 +264,13 @@ export function NailDesignChatPageContent() {
         bubbles,
         activeQuickReply,
         isAwaitingGenerateConfirm,
+        isPreferenceInputLocked,
         selectedInQuickReply,
+        freeformSelectedColors,
+        activeNoteStep,
+        activeNote,
+        hasActiveNote,
+        setPreferenceNote,
         preferenceStepIndex,
         selectedPhotoFile,
         selectedPhotoPreviewUrl,
@@ -741,7 +759,7 @@ export function NailDesignChatPageContent() {
                                             <div className="design-chat__color-main">
                                                 <div className="design-chat__color-grid">
                                                     {colorPickerPalette.map((hex, idx) => {
-                                                        const selected = selectedInQuickReply.includes(hex)
+                                                        const selected = freeformSelectedColors.includes(hex)
                                                         return (
                                                             <button
                                                                 key={`${hex}-${idx}`}
@@ -776,9 +794,9 @@ export function NailDesignChatPageContent() {
                                                 </div>
                                             </div>
 
-                                            {selectedInQuickReply.length > 0 && (
+                                            {freeformSelectedColors.length > 0 && (
                                                 <div className="design-chat__color-selected">
-                                                    {selectedInQuickReply.map((hex) => (
+                                                    {freeformSelectedColors.map((hex) => (
                                                         <span key={hex} className="design-chat__color-chip">
                                                             <span className="design-chat__color-chip-swatch" style={{ background: hex }} />
                                                             <button
@@ -798,11 +816,11 @@ export function NailDesignChatPageContent() {
                                                 type="button"
                                                 className="design-chat__quickreply-confirm"
                                                 onClick={handleFreeformColorPickerConfirm}
-                                                disabled={isSending || selectedInQuickReply.length === 0}
-                                                aria-label={`선택한 컬러 ${selectedInQuickReply.length}개로 선택`}
+                                                disabled={isSending || freeformSelectedColors.length === 0}
+                                                aria-label={`선택한 컬러 ${freeformSelectedColors.length}개로 선택`}
                                             >
                                                 <span className="design-chat__quickreply-confirm-swatches" aria-hidden="true">
-                                                    {selectedInQuickReply.map((hex) => (
+                                                    {freeformSelectedColors.map((hex) => (
                                                         <span
                                                             key={hex}
                                                             className="design-chat__quickreply-confirm-swatch"
@@ -891,12 +909,13 @@ export function NailDesignChatPageContent() {
                                                     analysisSummary?.shapeId != null &&
                                                     option.value === analysisSummary.shapeId
 
-                                                // motif 단계에서 "없음"과 다른 모티프는 서로 배타적이므로,
+                                                // motif 단계에서 "없음"과 다른 모티프(기타 입력 포함)는 서로 배타적이므로,
                                                 // 반대쪽이 이미 선택되어 있으면 클릭 자체를 막아 헷갈리지 않게 한다.
                                                 const isMotifMutuallyExclusiveBlocked =
                                                     activeQuickReply.id === 'pref-motif' &&
                                                     !selected &&
-                                                    ((option.value === MOTIF_NONE_VALUE && selectedInQuickReply.length > 0) ||
+                                                    ((option.value === MOTIF_NONE_VALUE &&
+                                                        (selectedInQuickReply.length > 0 || hasActiveNote)) ||
                                                         (option.value !== MOTIF_NONE_VALUE && selectedInQuickReply.includes(MOTIF_NONE_VALUE)))
 
                                                 // 라벨 전체가 hex인지가 아니라, 라벨 안에 hex가 포함되어 있는지로 검사
@@ -1034,6 +1053,33 @@ export function NailDesignChatPageContent() {
                                         </div>
                                     )}
 
+                                    {activeNoteStep && (
+                                        <label className="design-chat__quickreply-note">
+                                            <span className="design-chat__quickreply-note-label">기타 입력</span>
+                                            <input
+                                                type="text"
+                                                className="design-chat__quickreply-note-input"
+                                                value={activeNote}
+                                                maxLength={PREFERENCE_NOTE_MAX_LENGTH}
+                                                placeholder={
+                                                    activeNoteStep === 'motif' && selectedInQuickReply.includes(MOTIF_NONE_VALUE)
+                                                        ? "'없음'을 선택하면 기타 모티프는 적을 수 없어요"
+                                                        : PREFERENCE_NOTE_PLACEHOLDERS[activeNoteStep]
+                                                }
+                                                onChange={(e) => setPreferenceNote(activeNoteStep, e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                                                    e.preventDefault()
+                                                    if (isMultiConfirmVisible && !isSending) confirmPreferenceStep(selectedInQuickReply)
+                                                }}
+                                                disabled={
+                                                    isSending ||
+                                                    (activeNoteStep === 'motif' && selectedInQuickReply.includes(MOTIF_NONE_VALUE))
+                                                }
+                                            />
+                                        </label>
+                                    )}
+
                                     {isMultiConfirmVisible && (
                                         <button
                                             type="button"
@@ -1057,13 +1103,15 @@ export function NailDesignChatPageContent() {
                                                     ))}
                                                 </span>
                                             ) : (
-                                                `${selectedInQuickReply
-                                                    .map(
-                                                        (value) =>
-                                                            activeQuickReply.options.find((o) => o.value === value)?.label ?? value,
-                                                    )
-                                                    .map((label) => `'${label}'`)
-                                                    .join(', ')} `
+                                                `${[
+                                                    ...selectedInQuickReply
+                                                        .map(
+                                                            (value) =>
+                                                                activeQuickReply.options.find((o) => o.value === value)?.label ?? value,
+                                                        )
+                                                        .map((label) => `'${label}'`),
+                                                    ...(hasActiveNote ? ['기타 의견'] : []),
+                                                ].join(', ')} `
                                             )}
                                             선택
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1097,7 +1145,13 @@ export function NailDesignChatPageContent() {
             <textarea
                 ref={textareaRef}
                 className="design-chat__input"
-                placeholder={isAwaitingGenerateConfirm ? '위 버튼 중 하나를 선택해 주세요' : '또는 원하는 디자인 직접 입력'}
+                placeholder={
+                    isPreferenceInputLocked
+                        ? '선택지 기반으로 진행 중이에요. 위 선택지에서 골라 주세요'
+                        : isAwaitingGenerateConfirm
+                          ? '위 버튼 중 하나를 선택해 주세요'
+                          : '또는 원하는 디자인 직접 입력'
+                }
                 value={inputValue}
                 onChange={(e) => {
                     setInputValue(e.target.value)
@@ -1109,7 +1163,7 @@ export function NailDesignChatPageContent() {
                         handleSubmitInput()
                     }
                 }}
-                disabled={isSending || isAwaitingGenerateConfirm}
+                disabled={isSending || isAwaitingGenerateConfirm || isPreferenceInputLocked}
             />
                         <div className="design-chat__inputbar-row">
                             <button
@@ -1127,6 +1181,7 @@ export function NailDesignChatPageContent() {
                                     className="design-chat__icon-btn"
                                     aria-label="사진 첨부"
                                     onClick={() => handleMenuSelect(MENU_OPTIONS[2])}
+                                    disabled={isSending || isPreferenceInputLocked}
                                 >
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                         <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -1137,7 +1192,7 @@ export function NailDesignChatPageContent() {
                                     className="design-chat__icon-btn design-chat__icon-btn--send"
                                     aria-label="전송"
                                     onClick={handleSubmitInput}
-                                    disabled={isSending || isAwaitingGenerateConfirm || !inputValue.trim()}
+                                    disabled={isSending || isAwaitingGenerateConfirm || isPreferenceInputLocked || !inputValue.trim()}
                                 >
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                         <path

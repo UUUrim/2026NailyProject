@@ -20,15 +20,6 @@ export const INITIAL_PREFERENCES: NailDesignPreferences = {
   freeText: '',
 }
 
-export const PREFERENCE_LIMITS: Record<PreferenceKey, number> = {
-  mood: 2,
-  designType: 2,
-  season: 1,
-  motif: 2,
-  shape: 1,
-  color: 2,
-}
-
 export type PreferenceOption = {
   value: string
   label: string
@@ -57,7 +48,7 @@ export const PREFERENCE_OPTIONS: Record<PreferenceKey, PreferenceOption[]> = {
     { value: 'magnetic', label: '마그네틱' },
     { value: 'powder', label: '파우더' },
     { value: 'matte', label: '매트' },
-    { value: 'art', label: '아트' },
+    { value: 'drawing', label: '드로잉' },
   ],
   season: [
     { value: 'spring', label: '봄' },
@@ -131,7 +122,7 @@ export const PREFERENCE_OPTION_INFO: Partial<Record<PreferenceKey, Record<string
     magnetic: { desc: '자석 젤로 오로라 같은 입체적인 빛 무늬를 만드는 디자인.', image: '/images/nail-sample/design-type/magnetic.jpg' },
     powder: { desc: '고운 컬러 파우더를 발라 매트하고 벨벳 같은 광을 내는 디자인.', image: '/images/nail-sample/design-type/powder.jpg' },
     matte: { desc: '광택 없이 무광으로 마무리해 차분한 느낌을 주는 디자인.', image: '/images/nail-sample/design-type/matte.png' },
-    art: { desc: '손그림·스톤 등으로 직접 그림을 그려 넣는 디자인.', image: '/images/nail-sample/design-type/art.png' },
+    drawing: { desc: '손그림·스톤 등으로 직접 그림을 그려 넣는 디자인.', image: '/images/nail-sample/design-type/art.png' },
   },
   motif: {
     star: { desc: '별 모양 포인트로 반짝이는 느낌.', image: '/images/nail-sample/motif/star.png' },
@@ -219,7 +210,7 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     swatchStyle: { background: '#c9a2ad' },
   },
   art: {
-    labelKo: '아트',
+    labelKo: '드로잉',
     swatchStyle: { background: 'linear-gradient(135deg, #de869f 0%, #a98bff 50%, #7cd6d6 100%)' },
   },
   //추가: 백엔드 TextureExtractService 키값과 1:1 매핑
@@ -235,29 +226,4 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     labelKo: '드로잉 아트',
     swatchStyle: { background: 'linear-gradient(135deg, #fff 60%, #f0e6ea 100%)' },
   },
-}
-
-function formatPreferenceValues(key: PreferenceKey, values: string[]): string {
-  if (values.length === 0) return 'not specified'
-  return values
-      .map((value) => PREFERENCE_OPTIONS[key].find((option) => option.value === value)?.label ?? value)
-      .join(', ')
-}
-
-export function buildDesignPrompt(preferences: NailDesignPreferences): string {
-  const lines = [
-    'Create a custom nail tip design with the following preferences:',
-    `mood: ${formatPreferenceValues('mood', preferences.mood)}`,
-    `designType: ${formatPreferenceValues('designType', preferences.designType)}`,
-    `season: ${formatPreferenceValues('season', preferences.season)}`,
-    `motif: ${formatPreferenceValues('motif', preferences.motif)}`,
-    `shape: ${formatPreferenceValues('shape', preferences.shape)}`,
-    `color(HEX): ${preferences.color.join(', ') || 'not specified'}`,
-  ]
-
-  if (preferences.freeText.trim()) {
-    lines.push(`additional notes: ${preferences.freeText.trim()}`)
-  }
-
-  return lines.join('\n')
 }
