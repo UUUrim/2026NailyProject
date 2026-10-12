@@ -103,12 +103,24 @@ public class GptClientService {
      * @return base64 인코딩된 PNG 이미지
      */
     public String generateImage(String prompt, String size, String quality) {
+        return generateImage(prompt, size, quality, false);
+    }
+
+    /**
+     * @param transparent true면 background="transparent" + output_format="png"로 알파 채널이 있는 PNG를 요청한다.
+     *                    프롬프트에 흰 배경/그림자 지시가 남아 있으면 모델이 그걸 실제로 그려버리니 프롬프트도 같이 맞춰야 한다.
+     */
+    public String generateImage(String prompt, String size, String quality, boolean transparent) {
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", imageModel);
         requestBody.put("prompt", prompt);
         requestBody.put("size", size);
         requestBody.put("quality", quality);
         requestBody.put("n", 1);
+        if (transparent) {
+            requestBody.put("background", "transparent");
+            requestBody.put("output_format", "png");
+        }
 
         JsonNode responseNode = callWithRetry(requestBody, imageApiUrl);
         JsonNode dataArray = responseNode.path("data");
@@ -126,13 +138,18 @@ public class GptClientService {
      * 레퍼런스 이미지(PNG 바이트)를 함께 보내서 이미지를 생성한다 (images/edits).
      * 레퍼런스는 프롬프트에 적은 역할(예: 광택만 참고)대로만 쓰이도록 프롬프트 쪽에서 제한해야 한다.
      */
-    public String generateImageWithReferences(String prompt, String size, String quality, List<byte[]> references) {
+    public String generateImageWithReferences(String prompt, String size, String quality, List<byte[]> references,
+                                              boolean transparent) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
         builder.part("model", imageModel);
         builder.part("prompt", prompt);
         builder.part("size", size);
         builder.part("quality", quality);
         builder.part("n", "1");
+        if (transparent) {
+            builder.part("background", "transparent");
+            builder.part("output_format", "png");
+        }
         for (byte[] reference : references) {
             builder.part("image[]", new ByteArrayResource(reference))
                     .filename("reference.png")

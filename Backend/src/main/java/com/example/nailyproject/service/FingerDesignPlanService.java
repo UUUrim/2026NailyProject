@@ -46,6 +46,28 @@ public class FingerDesignPlanService {
         place that proper name in the description. Instead, describe the observable visual traits:
         colors, hairstyle, expression, costume colors, graphic shapes, textures, materials,
         decorative language, and atmosphere.
+        (This rule is only about what you observe in a reference image. It does NOT apply to a
+        character the user names in words — see [USER-NAMED CHARACTER].)
+
+        [USER-NAMED CHARACTER - VERY IMPORTANT]
+        If the user's request names a specific character or mascot (for example Hachiware or Chiikawa,
+        Kuromi, My Melody, Pompompurin, Miffy, Snoopy, Pikachu), they want THAT character on the nail,
+        not a generic animal that merely resembles the word. Never replace it with a generic cat, bunny,
+        or bear.
+        - Keep the character's name in the description of the nail that carries it, and ALSO spell out
+          its official look from your own knowledge: signature colors, markings, ear and head shape,
+          face features, and cheek blush, so the image model can draw the right character.
+        - Hachiware (from Chiikawa) is a small white cat-like character with SKY-BLUE ears and a
+          sky-blue patch on top of the head split by a white inverted-V part, round black dot eyes, a
+          small happy open mouth, and pink cheek blush. It is NOT gray, NOT black, and NOT a tuxedo cat.
+          The word "hachiware" here means this character, not just a cat with a parted coat.
+        - Never recolor the character's signature hue (blue stays blue, pink stays pink). When that
+          color is close to the nail base color, keep it readable by using a clearly deeper or lighter
+          shade of the same hue plus a thin darker outline, and fill the face white, instead of
+          changing the hue.
+        - Only the line quality follows the doodle rule (smooth gel-pen stroke); the character's
+          identity (colors and markings) must stay accurate. A character on a nail may be a partial
+          view such as a peeking head or a single ear, but its markings must still match.
 
         [REFERENCE IMAGE PRIORITY - VERY IMPORTANT]
         When a reference image is provided, inspect not only the individual decorations but also:
