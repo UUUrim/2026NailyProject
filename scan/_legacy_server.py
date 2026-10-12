@@ -593,7 +593,7 @@ def build_callback_data(userid: str, session: str, hand: str) -> dict:
     else:
         print("  [SkinColor] 유효한 피부 LAB 데이터 없음 → 기본값 사용")
 
-    recommended_shape = recommend_nail_shape(wl_checks, overall_size)
+    recommended_shape = recommend_nail_shape(wl_checks)
     print(f"  [Shape] recommended={recommended_shape}  "
           f"(from {len(wl_checks)}손가락 W/L, overall_size={overall_size})")
 
