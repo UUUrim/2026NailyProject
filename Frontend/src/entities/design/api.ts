@@ -301,7 +301,7 @@ export async function deleteSavedFolder(folderId: number): Promise<void> {
 
 // ─── 둘러보기(커뮤니티 갤러리) ─────────────────────────────────────────────────
 
-/** GET /designs/community — 메인페이지 '둘러보기': 전체 사용자가 생성한 디자인 목록 */
+/** GET /designs/community — 둘러보기(갤러리) 페이지: 사용자들이 공유한 디자인 목록 */
 export async function getCommunityDesigns(): Promise<CommunityDesignResponse[]> {
     // 로그인 토큰이 있으면 함께 보내 likedByMe를 받는다 (토큰 없어도 조회는 가능)
     const res = await apiClient.get<CommunityDesignResponse[]>('/designs/community')

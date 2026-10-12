@@ -1,0 +1,1793 @@
+/* Main page — sections below the print hero (intro · 4 steps · showcase)
+   흰 배경 위에 글은 크고 간결하게, 데모는 연한 회색 카드 하나에만 담는다. */
+
+.story {
+  --ink: #1d1a1c;
+  --body: #625b5f;
+  --muted: #a39b9f;
+  --line: #ece8e9;
+  --accent: #de869f;
+  --accent-deep: #c4657f;
+  --accent-soft: #fbeff3;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --gutter: clamp(1.25rem, 5vw, 3rem);
+
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.story .scroll-reveal {
+  transform: translateY(24px);
+}
+
+.story .scroll-reveal.is-visible {
+  transform: none;
+}
+
+.story-br-wide {
+  display: none;
+}
+
+/* ── Shared type ─────────────────────────────────────────── */
+
+.story-kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin: 0 0 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.story-kicker span {
+  display: inline-grid;
+  place-items: center;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent-deep);
+  font-variant-numeric: tabular-nums;
+}
+
+.story-kicker--center {
+  justify-content: center;
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+}
+
+.story-heading {
+  margin: 0 0 1.25rem;
+  font-size: clamp(1.875rem, 3.2vw, 2.875rem);
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: -0.035em;
+  word-break: keep-all;
+}
+
+.story-text {
+  margin: 0;
+  max-width: 27rem;
+  font-size: clamp(0.975rem, 1.1vw, 1.0625rem);
+  line-height: 1.75;
+  color: var(--body);
+  word-break: keep-all;
+}
+
+.story-points {
+  display: grid;
+  gap: 0.75rem;
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.story-points li {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+.story-points svg {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0.1875rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/* ── Intro ───────────────────────────────────────────────── */
+
+.story-intro {
+  display: flex;
+  align-items: center;
+  min-height: 100svh;
+  padding: clamp(3rem, 8svh, 5rem) var(--gutter);
+  text-align: center;
+}
+
+.story-intro__inner {
+  width: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+}
+
+.story-intro__title {
+  margin: 0;
+  font-size: clamp(2.125rem, 4.4vw, 3.75rem);
+  font-weight: 700;
+  line-height: 1.24;
+  letter-spacing: -0.045em;
+  word-break: keep-all;
+}
+
+.story-intro__text {
+  margin: 1.5rem auto 0;
+  max-width: 40rem;
+  font-size: clamp(1rem, 1.2vw, 1.125rem);
+  line-height: 1.75;
+  color: var(--body);
+  word-break: keep-all;
+}
+
+.story-intro__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(1rem, 2.5vw, 2rem);
+  margin: clamp(3rem, 9svh, 5.5rem) 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.story-intro__steps > li > .scroll-reveal {
+  height: 100%;
+}
+
+.story-intro__step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+
+.story-intro__step::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -1px;
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.5s var(--ease);
+}
+
+.story-intro__step:hover::before,
+.story-intro__step:focus-visible::before {
+  transform: scaleX(1);
+}
+
+.story-intro__step:focus-visible {
+  outline: none;
+}
+
+.story-intro__step-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.story-intro__step-icon svg {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.story-intro__step-index {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.story-intro__step strong {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.story-intro__step-text {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--body);
+  word-break: keep-all;
+}
+
+/* ── Feature sections ────────────────────────────────────── */
+
+.story-feature {
+  display: flex;
+  align-items: center;
+  min-height: 100svh;
+  padding: clamp(2.5rem, 7svh, 4.5rem) var(--gutter);
+}
+
+.story-feature__inner {
+  display: grid;
+  grid-template-columns: minmax(0, 4.8fr) minmax(0, 7fr);
+  gap: clamp(2.5rem, 6vw, 6rem);
+  align-items: center;
+  width: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+}
+
+.story-feature--reverse .story-feature__inner {
+  grid-template-columns: minmax(0, 7fr) minmax(0, 4.8fr);
+}
+
+.story-feature--reverse .story-feature__copy {
+  order: 2;
+}
+
+.story-feature__media {
+  min-width: 0;
+}
+
+/* 데모 카드 — 아주 연한 핑크 단색 위에 흰 테두리 · 안쪽 빛 · 핑크 그림자로 유리 질감만 낸다.
+   화면 높이가 낮아도 섹션 안에 다 들어오도록 폭을 화면 높이로도 제한한다 */
+.story-media {
+  position: relative;
+  width: min(100%, calc(76svh * 4 / 3));
+  aspect-ratio: 4 / 3;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: clamp(20px, 2vw, 28px);
+  background: #fef8fa;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 22px rgba(255, 255, 255, 0.7),
+    inset 0 0 0 1px rgba(222, 134, 159, 0.08),
+    0 44px 90px -48px rgba(184, 96, 124, 0.45),
+    0 14px 34px -24px rgba(43, 30, 36, 0.18);
+  container-type: inline-size;
+}
+
+/* 화면 밖에 있는 데모는 반복 애니메이션을 멈춘다 */
+.story-media[data-playing='false'] *,
+.story-media[data-playing='false'] *::before,
+.story-media[data-playing='false'] *::after {
+  animation-play-state: paused !important;
+}
+
+/* Scan — 실제 촬영 화면처럼 흰 화면 하나에 왼쪽 탑뷰 · 오른쪽 곡률 (한 바퀴 7초: 0~55% 측정, 58~96% 완료) */
+
+.scan-demo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6%;
+  padding: 5%;
+}
+
+.scan-demo__feed {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: clamp(10px, 2.4cqw, 16px);
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(222, 134, 159, 0.12),
+    0 12px 28px -18px rgba(120, 50, 80, 0.35);
+}
+
+/* 카메라 한 대의 영역(화면의 왼쪽 절반 / 오른쪽 절반) */
+.scan-demo__view {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+
+/* 그림과 치수선은 같은 상자에 contain/meet으로 맞춰서, 상자 비율과 상관없이 둘 다 가운데에 겹친다.
+   (상자에 aspect-ratio를 주면 그리드 안에서 최소 폭이 그림 비율로 잡혀 한쪽으로 밀린다) */
+.scan-demo__figure {
+  position: relative;
+  width: 84%;
+  height: 76%;
+}
+
+.scan-demo__figure--side {
+  width: 66%;
+  height: 60%;
+}
+
+.scan-demo__figure img,
+.scan-demo__measure {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.scan-demo__figure img {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* 측정이 끝나면 손톱 위에 초록 치수선이 그려진다 */
+.scan-demo__measure {
+  overflow: visible;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.9));
+}
+
+.scan-demo__measure path {
+  fill: none;
+  stroke: #3fc79a;
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  animation: scan-draw 7s var(--ease) infinite;
+}
+
+.scan-demo__measure .scan-demo__measure-late {
+  animation-delay: 0.25s;
+}
+
+.scan-demo__figure--side .scan-demo__measure path {
+  stroke-width: 10;
+}
+
+.scan-demo__beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(222, 134, 159, 0.7);
+  animation: scan-beam 7s linear infinite;
+}
+
+.scan-demo__beam::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  height: 2rem;
+  background: linear-gradient(0deg, rgba(222, 134, 159, 0.16), rgba(222, 134, 159, 0));
+}
+
+/* 네 모서리의 둥근 표시 — 측정 중엔 핑크로 깜빡이고, 완료되면 초록으로 멈춘다 */
+.scan-demo__corner {
+  position: absolute;
+  width: 10%;
+  aspect-ratio: 1;
+  border: 0 solid var(--accent);
+  animation: scan-corner 7s linear infinite;
+}
+
+.scan-demo__corner--tl {
+  top: 6%;
+  left: 8%;
+  border-top-width: 2.5px;
+  border-left-width: 2.5px;
+  border-top-left-radius: 9px;
+}
+
+.scan-demo__corner--tr {
+  top: 6%;
+  right: 8%;
+  border-top-width: 2.5px;
+  border-right-width: 2.5px;
+  border-top-right-radius: 9px;
+}
+
+.scan-demo__corner--bl {
+  bottom: 6%;
+  left: 8%;
+  border-bottom-width: 2.5px;
+  border-left-width: 2.5px;
+  border-bottom-left-radius: 9px;
+}
+
+.scan-demo__corner--br {
+  bottom: 6%;
+  right: 8%;
+  border-bottom-width: 2.5px;
+  border-right-width: 2.5px;
+  border-bottom-right-radius: 9px;
+}
+
+/* 아래 결과 — '측정 중'과 '측정 완료' 알약이 같은 자리에서 번갈아 보인다 */
+.scan-demo__result {
+  display: grid;
+  justify-items: center;
+  font-size: clamp(0.7rem, 2cqw, 0.875rem);
+}
+
+.scan-demo__pill {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.7em 1.2em;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px -12px rgba(29, 26, 28, 0.2);
+  color: var(--body);
+  white-space: nowrap;
+}
+
+.scan-demo__pill--run {
+  gap: 0.6em;
+  font-weight: 700;
+  color: var(--accent-deep);
+  animation: scan-run-pill 7s linear infinite;
+}
+
+.scan-demo__spinner {
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  border: 2px solid rgba(222, 134, 159, 0.25);
+  border-top-color: var(--accent);
+  animation: scan-spin 0.8s linear infinite;
+}
+
+.scan-demo__pill--done {
+  opacity: 0;
+  animation: scan-done-pill 7s linear infinite;
+}
+
+.scan-demo__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-weight: 700;
+  color: #2f9474;
+}
+
+.scan-demo__done svg {
+  width: 1.05em;
+  height: 1.05em;
+}
+
+/* '측정 완료'와 '길이' 사이 정가운데 */
+.scan-demo__divider {
+  width: 1px;
+  height: 1em;
+  margin: 0 1em;
+  background: var(--line);
+}
+
+.scan-demo__values {
+  display: flex;
+  gap: 1em;
+}
+
+.scan-demo__values b {
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+@container (max-width: 400px) {
+  .scan-demo__values {
+    gap: 0.6em;
+  }
+
+  .scan-demo__divider {
+    margin: 0 0.6em;
+  }
+}
+
+/* Print */
+
+@property --print-pct {
+  syntax: '<integer>';
+  inherits: true;
+  initial-value: 0;
+}
+
+.print-demo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6% 7% 7%;
+  animation: print-count 7s linear infinite;
+}
+
+.print-demo__defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.print-demo__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: clamp(0.75rem, 2.1cqw, 0.9375rem);
+}
+
+.print-demo__shape {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.45em 0.95em;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px -10px rgba(29, 26, 28, 0.2);
+  font-weight: 700;
+  animation: story-fade-in 0.5s var(--ease);
+}
+
+.print-demo__shape em {
+  font-size: 0.72em;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.print-demo__percent {
+  font-weight: 600;
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+}
+
+.print-demo__percent::after {
+  counter-reset: pct var(--print-pct);
+  content: counter(pct) '%';
+}
+
+.print-demo__stage {
+  position: relative;
+  flex: 1;
+  margin: 3% 0 4%;
+}
+
+/* 팁 다섯 개의 폭 합이 높이에 비례하므로, 카드가 정사각형이어도 넘치지 않게 높이를 카드 폭으로도 제한한다 */
+.print-demo__build,
+.print-demo__head-track {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 12%;
+  height: min(58%, 28cqw);
+}
+
+.print-demo__build {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4%;
+  animation: print-build 7s linear infinite;
+}
+
+.print-demo__tip {
+  width: auto;
+  height: calc(100% * var(--tip-scale) / 1.2);
+  aspect-ratio: 100 / 190;
+  overflow: visible;
+  filter: drop-shadow(0 6px 8px rgba(196, 101, 127, 0.16));
+}
+
+.print-demo__tip-fill {
+  fill: #f6cbd8;
+  fill-opacity: 0.9;
+}
+
+.print-demo__tip-edge {
+  fill: none;
+  stroke: rgba(196, 101, 127, 0.35);
+  stroke-width: 1.4;
+}
+
+.print-demo__plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 7%;
+  height: 5%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #efe2e8 0%, #f9f3f6 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 10px 18px -12px rgba(120, 50, 80, 0.35);
+}
+
+.print-demo__head-track {
+  pointer-events: none;
+}
+
+/* 기준점 = 노즐 끝 */
+.print-demo__head {
+  position: absolute;
+  z-index: 2;
+  width: 0;
+  height: 0;
+  animation:
+    print-head-y 7s linear infinite,
+    print-head-x 1.2s ease-in-out infinite alternate;
+}
+
+.print-demo__head::before {
+  content: '';
+  position: absolute;
+  left: -4.5cqw;
+  bottom: 2.4cqw;
+  width: 9cqw;
+  height: 5.4cqw;
+  border-radius: 1.2cqw;
+  background: linear-gradient(180deg, #3a3437 0%, #262124 100%);
+  box-shadow: 0 8px 16px -8px rgba(29, 26, 28, 0.5);
+}
+
+.print-demo__head::after {
+  content: '';
+  position: absolute;
+  left: -1.1cqw;
+  top: -1.1cqw;
+  width: 2.2cqw;
+  height: 2.2cqw;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0 20%, rgba(255, 160, 190, 0.85) 40%, rgba(255, 160, 190, 0) 70%);
+  animation: story-blink 0.35s ease-in-out infinite;
+}
+
+.print-demo__nozzle {
+  position: absolute;
+  left: -1.4cqw;
+  bottom: 0;
+  width: 2.8cqw;
+  height: 2.6cqw;
+  background: linear-gradient(90deg, #a9853f 0%, #f1d999 45%, #957233 100%);
+  clip-path: polygon(0 0, 100% 0, 66% 100%, 34% 100%);
+}
+
+.print-demo__progress {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(184, 96, 124, 0.12);
+}
+
+.print-demo__progress span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: print-progress 7s linear infinite;
+}
+
+/* Design (chat) — 실제 채팅 화면처럼: 생성 방식 선택 → 자유 입력 → 타이핑·전송 → … → 생성 중 → 완성 */
+
+.chat-demo {
+  position: absolute;
+  inset: 0;
+  padding: 6%;
+}
+
+.chat-demo__window {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: clamp(14px, 3cqw, 20px);
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgba(29, 26, 28, 0.04),
+    0 20px 50px -30px rgba(29, 26, 28, 0.3);
+  font-size: clamp(0.7rem, 2cqw, 0.875rem);
+}
+
+.chat-demo__head {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.85em 1.1em;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 실제 채팅의 네일리 로고 프로필 (연핑크 원 + 로고) */
+.chat-demo__avatar {
+  flex-shrink: 0;
+  width: 2.2em;
+  height: 2.2em;
+  padding: 0.38em;
+  border-radius: 50%;
+  background: #fdf5f8;
+  object-fit: contain;
+}
+
+.chat-demo__avatar--head {
+  width: 2.5em;
+  height: 2.5em;
+  padding: 0.42em;
+}
+
+.chat-demo__name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.chat-demo__name strong {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.chat-demo__name span {
+  font-size: 0.82em;
+  color: var(--muted);
+}
+
+.chat-demo__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1em 1.1em;
+}
+
+.chat-demo__phase {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75em;
+  transition: transform 0.5s var(--ease);
+  animation: story-fade-in 0.45s var(--ease);
+}
+
+/* 생성 방식 선택 단계 — 안내는 위, 선택 창은 아래 (입력 칸 없이 화면을 다 쓴다) */
+.chat-demo__phase--menu {
+  height: 100%;
+  justify-content: space-between;
+}
+
+.chat-demo__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55em;
+  animation: story-fade-in 0.4s var(--ease);
+}
+
+.chat-demo__bubble {
+  max-width: 78%;
+  margin: 0;
+  padding: 0.65em 0.95em;
+  border-radius: 1.05em;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.chat-demo__bubble--ai {
+  border-top-left-radius: 0.35em;
+  background: #f6f2f3;
+  color: var(--ink);
+}
+
+.chat-demo__bubble--user {
+  align-self: flex-end;
+  border-bottom-right-radius: 0.35em;
+  background: var(--accent);
+  color: #ffffff;
+  animation: story-fade-in 0.4s var(--ease);
+}
+
+/* 4가지 생성 방식 선택 창 — 실제 채팅의 design-chat__menu-grid와 같은 생김새 */
+.chat-demo__menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid #f3e0e7;
+  border-radius: 1.1em;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(222, 134, 159, 0.14), transparent 55%),
+    radial-gradient(circle at 0% 100%, rgba(222, 134, 159, 0.1), transparent 55%),
+    #ffffff;
+}
+
+.chat-demo__menu-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4em;
+  padding: 0.85em 0.9em 0.95em;
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
+}
+
+.chat-demo__menu-item:nth-child(-n + 2) {
+  border-bottom: 1px solid #f3e0e7;
+}
+
+.chat-demo__menu-item:nth-child(odd) {
+  border-right: 1px solid #f3e0e7;
+}
+
+/* 선택됨 — 테두리 대신 칸 전체를 연핑크로 채우고 오른쪽 위에 체크 배지를 띄운다 */
+.chat-demo__menu-item.is-selected {
+  background: rgba(222, 134, 159, 0.14);
+}
+
+.chat-demo__menu-item.is-selected .chat-demo__menu-title {
+  color: var(--accent-deep);
+}
+
+.chat-demo__menu-check {
+  position: absolute;
+  top: 0.75em;
+  right: 0.75em;
+  display: grid;
+  place-items: center;
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 4px 10px -4px rgba(196, 101, 127, 0.7);
+  opacity: 0;
+  transform: scale(0.4);
+  transition:
+    opacity 0.25s var(--ease),
+    transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.chat-demo__menu-check svg {
+  width: 0.95em;
+  height: 0.95em;
+}
+
+.chat-demo__menu-item.is-selected .chat-demo__menu-check {
+  opacity: 1;
+  transform: none;
+}
+
+.chat-demo__menu-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.3em;
+  height: 2.3em;
+  border-radius: 50%;
+  background: #fdf5f8;
+  color: var(--accent);
+}
+
+.chat-demo__menu-icon svg {
+  width: 1.4em;
+  height: 1.4em;
+}
+
+.chat-demo__menu-title {
+  font-size: 0.95em;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #1a1a1a;
+}
+
+.chat-demo__menu-desc {
+  font-size: 0.8em;
+  line-height: 1.45;
+  color: #8a8a8a;
+  word-break: keep-all;
+}
+
+.chat-demo__typing {
+  display: inline-flex;
+  gap: 0.3em;
+  padding: 0.95em 1em;
+  border-radius: 1.05em;
+  border-top-left-radius: 0.35em;
+  background: #f6f2f3;
+}
+
+.chat-demo__typing i {
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: chat-typing 1s ease-in-out infinite;
+}
+
+.chat-demo__typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-demo__typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* 생성 결과 — 생성 중엔 로딩 표시만, 완성되면 이미지가 나타난다 */
+.chat-demo__result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55em;
+  width: 44%;
+}
+
+.chat-demo__image {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-radius: 0.9em;
+  background: #fdf5f8;
+  box-shadow: 0 0 0 1px #f3e0e7;
+}
+
+.chat-demo__generating {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6em;
+  font-weight: 600;
+  color: var(--accent-deep);
+  transition: opacity 0.4s;
+}
+
+.chat-demo__spinner {
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  border: 2.5px solid rgba(222, 134, 159, 0.25);
+  border-top-color: var(--accent);
+  animation: story-spin 0.8s linear infinite;
+}
+
+.chat-demo__image .showcase-image {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.6s var(--ease);
+}
+
+.chat-demo__result.is-done .showcase-image {
+  opacity: 1;
+}
+
+.chat-demo__result.is-done .chat-demo__generating {
+  opacity: 0;
+}
+
+.chat-demo__result .chat-demo__bubble--ai {
+  max-width: none;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.45s var(--ease) 0.3s;
+}
+
+.chat-demo__result.is-done .chat-demo__bubble--ai {
+  opacity: 1;
+}
+
+.chat-demo__input {
+  animation: story-fade-in 0.4s var(--ease);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75em;
+  margin: 0 1.1em 1em;
+  padding: 0.45em 0.45em 0.45em 1em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s;
+}
+
+.chat-demo__input.is-focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(222, 134, 159, 0.15);
+}
+
+.chat-demo__placeholder {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+}
+
+/* 짧을 땐 왼쪽부터 쳐지고, 입력 칸보다 길어지면 앞부분이 왼쪽으로 밀려나 방금 친 글자가 보인다
+   (rtl 칸 안에서 넘치는 줄은 왼쪽으로 넘친다 — 글자 자체는 안쪽에서 ltr로 되돌린다) */
+.chat-demo__typed {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  direction: rtl;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chat-demo__typed-text {
+  display: inline-flex;
+  align-items: center;
+  direction: ltr;
+  unicode-bidi: isolate;
+  color: var(--ink);
+}
+
+.chat-demo__caret {
+  flex-shrink: 0;
+  width: 1.5px;
+  height: 1.15em;
+  margin: 0 1px;
+  background: var(--accent);
+  animation: chat-caret 1s steps(1) infinite;
+}
+
+.chat-demo__send {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2em;
+  height: 2em;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.chat-demo__send.is-pressed {
+  animation: chat-press 0.45s var(--ease);
+}
+
+.chat-demo__send svg {
+  width: 1em;
+  height: 1em;
+}
+
+/* 커서 — 화면 오른쪽 아래에서 '채팅으로 자유롭게' 카드로 다가가 클릭한다 (기준점 = 화살표 끝) */
+.chat-demo__cursor {
+  position: absolute;
+  z-index: 3;
+  width: 1.8em;
+  height: 1.8em;
+  margin: -0.22em 0 0 -0.37em;
+  pointer-events: none;
+  animation: chat-cursor-in 1.1s var(--ease) 0.2s both;
+}
+
+.chat-demo__cursor svg {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 3px rgba(29, 26, 28, 0.3));
+  transform-origin: 20% 12%;
+}
+
+.chat-demo__cursor.is-clicking svg {
+  animation: chat-cursor-click 0.35s var(--ease);
+}
+
+.chat-demo__ripple {
+  position: absolute;
+  left: 0.37em;
+  top: 0.22em;
+  width: 2.6em;
+  height: 2.6em;
+  margin: -1.3em 0 0 -1.3em;
+  border-radius: 50%;
+  background: rgba(222, 134, 159, 0.4);
+  opacity: 0;
+  transform: scale(0);
+}
+
+.chat-demo__cursor.is-clicking .chat-demo__ripple {
+  animation: chat-ripple 0.6s var(--ease);
+}
+
+/* 작은 카드에서는 머리줄과 방식 설명을 접어 대화가 다 보이게 한다 */
+@container (max-width: 400px) {
+  .chat-demo__head,
+  .chat-demo__menu-desc {
+    display: none;
+  }
+
+  .chat-demo__result {
+    width: 52%;
+  }
+}
+
+/* AR */
+
+.ar-demo {
+  position: absolute;
+  inset: 0;
+}
+
+.ar-demo__live {
+  position: absolute;
+  z-index: 2;
+  left: 4.5%;
+  top: 5.5%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0.4em 0.8em;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 6px 18px -10px rgba(29, 26, 28, 0.25);
+  font-size: clamp(0.62rem, 1.7cqw, 0.78rem);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.ar-demo__live i {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: story-blink 1.2s ease-in-out infinite;
+}
+
+/* 캔버스는 hands.png 전체(1320×800) — 왼손(캔버스 폭의 26.5% 지점)이 카드 가운데에 오도록 민다.
+   손끝 위로 길게 뻗는 팁 자리를 남기려고 위쪽을 띄운다 */
+.ar-demo__hand {
+  position: absolute;
+  left: 22.7%;
+  top: 14%;
+  width: 103%;
+  aspect-ratio: 1320 / 800;
+  transform-origin: 26% 85%;
+  animation: ar-sway 7s ease-in-out infinite alternate;
+}
+
+/* 오른손은 잘라 내고 왼손만 남긴다 */
+.ar-demo__hand--image {
+  mix-blend-mode: multiply;
+  clip-path: inset(0 50% 0 0);
+}
+
+.ar-demo__hand--image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+/* 디자인 속 네일 팁을 통째로 — 아래 가운데(큐티클 쪽)를 손톱 뿌리에 맞추고 손가락 기울기만큼 돌린다 */
+.ar-demo__tip {
+  position: absolute;
+  height: auto;
+  transform: translate(-50%, -100%) rotate(var(--tip-rotate));
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 1px 1.5px rgba(120, 50, 80, 0.3));
+  user-select: none;
+  animation: ar-tip-in 0.6s var(--ease) var(--tip-delay, 0s) both;
+}
+
+/* 적용 중인 디자인 — 오른쪽 아래에 이미지만 */
+.ar-demo__design {
+  position: absolute;
+  z-index: 2;
+  right: 4.5%;
+  bottom: 5.5%;
+  width: 19%;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border: 3px solid #ffffff;
+  border-radius: clamp(8px, 1.6cqw, 12px);
+  background: #ffffff;
+  box-shadow: 0 10px 24px -12px rgba(29, 26, 28, 0.35);
+}
+
+.ar-demo__design img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── Showcase (첫 화면의 Cosmos 같은 원형 궤도) ───────────── */
+
+.story-showcase {
+  --card-w: clamp(96px, 10.5vw, 190px);
+  --showcase-bg: #fffafc;
+
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  min-height: 100svh;
+  padding: 4rem var(--gutter);
+  overflow: clip;
+  background: var(--showcase-bg);
+}
+
+/* 위아래 경계에서 카드가 흰 배경 속으로 스며들듯 사라지게 */
+.story-showcase::before,
+.story-showcase::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: clamp(3rem, 10svh, 6rem);
+  pointer-events: none;
+}
+
+.story-showcase::before {
+  top: 0;
+  background: linear-gradient(180deg, #ffffff 0%, rgba(255, 250, 252, 0) 100%);
+}
+
+.story-showcase::after {
+  bottom: 0;
+  background: linear-gradient(0deg, #ffffff 0%, rgba(255, 250, 252, 0) 100%);
+}
+
+.story-showcase__rings {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.story-showcase__card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--card-w);
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border-radius: clamp(10px, 1vw, 14px);
+  background: #ffffff;
+  box-shadow:
+    0 2px 6px rgba(29, 26, 28, 0.06),
+    0 16px 32px -18px rgba(29, 26, 28, 0.4);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.story-showcase__card[data-ring='0'] {
+  filter: blur(0.6px) saturate(0.92);
+}
+
+/* 이미지가 없는 자리 카드 */
+.story-showcase__card .showcase-image {
+  --slot-bg: #f6e6ec;
+}
+
+.story-showcase__center {
+  position: relative;
+  z-index: 2;
+  max-width: 44rem;
+  text-align: center;
+}
+
+/* 지나가는 카드 위에서도 글이 또렷하도록 가운데만 배경색으로 은은하게 덮는다 */
+.story-showcase__center::before {
+  content: '';
+  position: absolute;
+  inset: -22% -16%;
+  z-index: -1;
+  background: radial-gradient(closest-side, var(--showcase-bg) 55%, rgba(255, 250, 252, 0) 100%);
+  pointer-events: none;
+}
+
+.story-showcase__title {
+  margin: 0;
+  font-size: clamp(2rem, 3.6vw, 3.25rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.045em;
+  word-break: keep-all;
+}
+
+.story-showcase__actions {
+  margin-top: 2rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.story-showcase__actions .cta-button {
+  padding: 1.05rem 2.2rem;
+  font-size: 1.0625rem;
+}
+
+.story-showcase__gallery {
+  display: inline-flex;
+  align-items: center;
+  padding: calc(1.05rem - 1px) 2rem;
+  border: 1px solid #efd9e1;
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: normal;
+  color: var(--ink);
+  text-decoration: none;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+
+.story-showcase__gallery:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.story-showcase__gallery:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Showcase image (+ 이미지가 없을 때 보이는 자리 카드) */
+
+.showcase-image {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--slot-bg, #f3f1f1);
+}
+
+.showcase-image__placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.showcase-image__img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── Keyframes ───────────────────────────────────────────── */
+
+@keyframes story-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes story-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes scan-beam {
+  0% {
+    top: -4%;
+    opacity: 0;
+  }
+  3% {
+    opacity: 1;
+  }
+  55% {
+    top: 104%;
+    opacity: 1;
+  }
+  57%,
+  100% {
+    top: 104%;
+    opacity: 0;
+  }
+}
+
+@keyframes scan-corner {
+  0%,
+  14%,
+  28%,
+  42%,
+  56% {
+    opacity: 1;
+    border-color: var(--accent);
+  }
+  7%,
+  21%,
+  35%,
+  49% {
+    opacity: 0.3;
+    border-color: var(--accent);
+  }
+  58%,
+  100% {
+    opacity: 1;
+    border-color: #3fc79a;
+  }
+}
+
+@keyframes scan-draw {
+  0%,
+  56% {
+    stroke-dashoffset: 1;
+    opacity: 0;
+  }
+  58% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  66%,
+  94% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@keyframes scan-run-pill {
+  0%,
+  55% {
+    opacity: 1;
+    transform: none;
+  }
+  58%,
+  97% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes scan-done-pill {
+  0%,
+  55% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  59%,
+  94% {
+    opacity: 1;
+    transform: none;
+  }
+  97%,
+  100% {
+    opacity: 0;
+    transform: none;
+  }
+}
+
+@keyframes scan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes print-build {
+  0%,
+  8% {
+    clip-path: inset(100% -12% -12% -12%);
+    opacity: 1;
+  }
+  72%,
+  92% {
+    clip-path: inset(-12% -12% -12% -12%);
+    opacity: 1;
+  }
+  100% {
+    clip-path: inset(-12% -12% -12% -12%);
+    opacity: 0;
+  }
+}
+
+@keyframes print-head-y {
+  0% {
+    top: 100%;
+    opacity: 0;
+  }
+  6%,
+  8% {
+    top: 100%;
+    opacity: 1;
+  }
+  72% {
+    top: 0%;
+  }
+  80%,
+  92% {
+    top: -12%;
+    opacity: 1;
+  }
+  100% {
+    top: -12%;
+    opacity: 0;
+  }
+}
+
+@keyframes print-head-x {
+  from {
+    left: 4%;
+  }
+  to {
+    left: 96%;
+  }
+}
+
+@keyframes print-count {
+  0%,
+  8% {
+    --print-pct: 0;
+  }
+  72%,
+  100% {
+    --print-pct: 100;
+  }
+}
+
+@keyframes print-progress {
+  0%,
+  8% {
+    transform: scaleX(0);
+  }
+  72%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes chat-press {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(0.9);
+  }
+}
+
+@keyframes chat-cursor-in {
+  from {
+    opacity: 0;
+    translate: 4em 3.5em;
+  }
+  30% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes chat-cursor-click {
+  35% {
+    transform: scale(0.8);
+  }
+}
+
+@keyframes chat-ripple {
+  from {
+    opacity: 0.9;
+    transform: scale(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes chat-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes story-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes chat-typing {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* 손톱 뿌리를 중심으로 커지며 붙는다 — 위치·기울기 transform을 그대로 두고 scale만 더한다 */
+@keyframes ar-tip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -100%) rotate(var(--tip-rotate)) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -100%) rotate(var(--tip-rotate)) scale(1);
+  }
+}
+
+@keyframes ar-sway {
+  0% {
+    transform: rotate(-3deg) translate(-1%, 0.5%);
+  }
+  100% {
+    transform: rotate(3deg) translate(1%, -0.5%);
+  }
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+
+@media (min-width: 900px) {
+  .story-br-wide {
+    display: inline;
+  }
+}
+
+@media (max-width: 860px) {
+  .story-feature {
+    padding: clamp(2rem, 6svh, 3rem) var(--gutter);
+  }
+
+  .story-feature__inner,
+  .story-feature--reverse .story-feature__inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.75rem;
+    max-width: 34rem;
+  }
+
+  .story-feature--reverse .story-feature__copy {
+    order: 0;
+  }
+
+  .story-heading {
+    margin-bottom: 0.875rem;
+    font-size: clamp(1.625rem, 6.4vw, 2.125rem);
+  }
+
+  .story-kicker {
+    margin-bottom: 0.875rem;
+  }
+
+  /* 한 화면에 글과 데모가 함께 들어오도록 체크 목록은 접는다 */
+  .story-points {
+    display: none;
+  }
+
+  /* 좁은 화면에서는 데모 카드를 정사각형으로 — 채팅 데모까지 글자가 잘리지 않을 만큼 높이를 확보한다 */
+  .story-media {
+    width: min(100%, 46svh);
+    aspect-ratio: 1;
+  }
+
+  /* 정사각형 카드에서는 카메라 화면을 더 높게 해 빈 공간을 채운다 */
+  .scan-demo__feed {
+    aspect-ratio: 5 / 4;
+  }
+
+  /* 정사각형 카드에서는 손이 카드 높이를 다 채우도록 더 키운다 */
+  .ar-demo__hand {
+    left: 13.4%;
+    top: 13%;
+    width: 138%;
+  }
+
+  .story-intro__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem 1rem;
+    margin-top: 2.5rem;
+  }
+
+  .story-intro__step {
+    padding-top: 1rem;
+  }
+
+  .story-intro__step-top {
+    margin-bottom: 0.25rem;
+  }
+
+  .story-intro__step strong {
+    font-size: 1rem;
+  }
+
+  .story-intro__step-text {
+    font-size: 0.8125rem;
+  }
+
+  .story-showcase__center::before {
+    inset: -12% -8%;
+  }
+}
+
+/* 키가 작은 휴대폰에서는 소개 단계 설명을 접어 한 화면에 들어오게 한다 */
+@media (max-width: 860px) and (max-height: 720px) {
+  .story-intro__step-text {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story *,
+  .story *::before,
+  .story *::after {
+    animation: none !important;
+  }
+
+  /* 측정 완료 장면에 고정 */
+  .scan-demo__pill--done,
+  .scan-demo__measure path {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+
+  .scan-demo__corner {
+    border-color: #3fc79a;
+  }
+
+  .scan-demo__pill--run,
+  .scan-demo__beam,
+  .print-demo__head {
+    display: none;
+  }
+
+  .print-demo {
+    --print-pct: 100;
+  }
+
+  .print-demo__progress span {
+    transform: none;
+  }
+}
