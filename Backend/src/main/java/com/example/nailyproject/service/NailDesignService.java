@@ -1219,7 +1219,9 @@ public class NailDesignService {
                 .filter(m -> m.getRole() == ChatMessage.MessageRole.user)
                 .map(m -> m.getContent() == null ? "" : m.getContent().trim())
                 .filter(c -> !c.isBlank())
-                .map(c -> c.length() > 300 ? c.substring(0, 300) : c)
+                // 선택지 기반 요약 메시지는 고른 값 + "기타" 직접 입력 의견까지 한 메시지에 담겨 길어질 수 있어서,
+                // 뒤쪽 내용(기타 의견 등)이 잘리지 않도록 여유 있게 자른다.
+                .map(c -> c.length() > 500 ? c.substring(0, 500) : c)
                 .toList();
         if (userMessages.isEmpty()) return "";
         int from = Math.max(0, userMessages.size() - 15);
