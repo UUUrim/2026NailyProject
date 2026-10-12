@@ -460,6 +460,20 @@ _print_queue_lock = threading.Lock()
 _pending_jobs: list = []          # 대기 중 작업 (큐와 같은 내용을 파일 저장용으로 미러링)
 _current_job: dict | None = None  # 지금 처리 중인 작업
 
+# 앞 출력이 끝나고 다음 출력을 시작하기까지 두는 간격(초). 베드 정리/교체 시간을 주기 위한 것.
+# 환경변수 PRINT_COOLDOWN_SEC로 바꿀 수 있고, 0이면 바로 시작한다.
+PRINT_COOLDOWN_SEC = int(os.environ.get("PRINT_COOLDOWN_SEC", "120"))
+_last_job_finished_at: float = 0.0  # 마지막 작업이 끝난 시각(time.time())
+
+
+def _wait_print_cooldown():
+    """직전 작업이 끝난 뒤 PRINT_COOLDOWN_SEC가 지날 때까지 기다린다."""
+    remain = PRINT_COOLDOWN_SEC - (time.time() - _last_job_finished_at)
+    if remain <= 0:
+        return
+    print(f"[PrintQueue] 다음 출력 시작 전 {int(remain)}초 대기합니다 (출력 간 간격 {PRINT_COOLDOWN_SEC}초)")
+    time.sleep(remain)
+
 
 def _save_print_queue_state():
     """호출하는 쪽이 _print_queue_lock을 잡고 있어야 한다."""
@@ -522,11 +536,15 @@ def _restore_print_queue():
 
 def _print_queue_worker():
     """한 번에 하나씩 순서대로 처리하는 워커."""
-    global _current_job
+    global _current_job, _last_job_finished_at
     _restore_print_queue()
     while True:
         job = _print_job_queue.get()
         callback_url = job["callbackUrl"]
+        # 대기 목록(_pending_jobs)에 남겨 둔 채로 기다린다: 서버가 재시작돼도 복구된다.
+        # (재시작 후 상태 확인만 이어가는 resume 작업은 새 출력이 아니라서 기다리지 않는다)
+        if not job.get("resume"):
+            _wait_print_cooldown()
         with _print_queue_lock:
             if job in _pending_jobs:
                 _pending_jobs.remove(job)
@@ -547,6 +565,7 @@ def _print_queue_worker():
             except Exception:
                 pass
         finally:
+            _last_job_finished_at = time.time()
             with _print_queue_lock:
                 _current_job = None
                 _save_print_queue_state()

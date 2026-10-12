@@ -207,15 +207,18 @@ public class DesignController {
      *   - image: 참고 이미지 파일 (1장)
      *   - sessionId: (선택) 채팅 세션 ID
      *   - scanId: (선택) 손 스캔 ID — 없어도 생성 가능
+     *   - note: (선택) 사진과 함께 반영할 사용자 추가 요청 문장
      */
     @PostMapping(value = "/generate-detailed-from-image", consumes = "multipart/form-data")
     public ResponseEntity<ApiResponse<DesignGenerateResponseDto>> generateDetailedDesignFromImage(
             @AuthenticationPrincipal User user,
             @RequestParam("image") MultipartFile image,
             @RequestParam(value = "sessionId", required = false) Long sessionId,
-            @RequestParam(value = "scanId", required = false) Long scanId) throws Exception {
+            @RequestParam(value = "scanId", required = false) Long scanId,
+            @RequestParam(value = "note", required = false) String note) throws Exception {
 
         DesignGenerateRequestDto request = new DesignGenerateRequestDto();
+        request.setUserNote(note);
         // sessionId/scanId가 생성자나 setter로 안 들어가면, DTO에 setter 추가 필요
         // (혹은 이 request 대신 아래처럼 서비스 메서드 파라미터를 직접 늘려도 됨)
         request.setSessionId(sessionId);

@@ -6,20 +6,22 @@ import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.*;
 import java.util.regex.Pattern;
 
 /**
- * 채팅으로 수정 요청이 들어오면 Gemini가 prompt + mask_prompt를 생성하고,
- * gen 서버 /inpaint로 원본 이미지에서 해당 영역만 재생성한다.
- * 전체 이미지를 새로 만들지 않아서 원본과 분위기가 크게 달라지지 않는다.
+ * 채팅으로 들어온 수정 요청을 GPT로 처리한다 (POST /chats/{sessionId}/refine).
+ *
+ * 1. GPT(chat)가 수정 지시문(editInstruction)과 세션 슬롯/손가락별 지정 변경을 JSON으로 만든다.
+ * 2. 원본 이미지(S3) 전체 + 이 지시문 하나를 gpt-image의 이미지 편집(images/edits)에 그대로 보내서
+ *    수정된 이미지를 받는다. 마스크나 디텍션 서버는 쓰지 않으므로, 지시문 안에 "무엇을 바꿀지"와
+ *    "나머지는 그대로 둘 것"을 함께 적어서 다른 영역이 바뀌지 않게 한다.
+ * 3. 결과를 새 NailDesign으로 저장하고 채팅 이력을 남긴다.
  */
 @Service
 @Transactional
@@ -29,114 +31,258 @@ public class RefineService {
     private final DesignSessionRepository designSessionRepository;
     private final NailDesignRepository nailDesignRepository;
     private final ChatMessageRepository chatMessageRepository;
-    private final NailImageService nailImageService;
     private final S3Service s3Service;
-    private final WebClient.Builder webClientBuilder;
     private final ObjectMapper objectMapper;
     private final NailDesignService nailDesignService;
-    private final NailDetectionService nailDetectionService;
     private final GptClientService gptClientService;
 
-    // Gemini 설정 - GPT로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
-    // @Value("${gemini.api.key}")
-    // private String apiKey;
-    //
-    // @Value("${gemini.api.url}")
-    // private String apiUrl;
-
     private static final Pattern HEX_PATTERN = Pattern.compile("^#[0-9A-Fa-f]{6}$");
-    private static final RestTemplate restTemplate = new RestTemplate();
 
-    private static final String SYSTEM_PROMPT_TEMPLATE = """
-            당신은 이미 완성된 네일 디자인 이미지에서 사용자가 요청한 부분만 수정하는 역할입니다.
-            원본 이미지에서 수정할 영역만 마스크로 잡아 재생성할 것이므로,
-            아래 두 가지를 정확히 만들어야 합니다.
+    /**
+     * 수정 지시문(editInstruction) 생성용 시스템 프롬프트.
+     * 디텍션 서버로 영역을 마스킹하지 않고, 원본 이미지 전체 + 이 지시문 하나를
+     * gpt-image edit API에 그대로 넘기므로, "무엇을 바꿀지"와 "나머지는 절대 그대로
+     * 둘 것"을 반드시 한 문장 안에 명시적으로 담아야 한다.
+     */
+    private static final String GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE = """
+            You write the "edit instruction" (editInstruction) that is sent to an image-editing AI
+            (gpt-image) to modify an already finished press-on nail design image. No region is masked
+            this time: the image-editing AI receives the WHOLE original image plus this one instruction.
+            Therefore the instruction must state, inside ONE English sentence group, both WHAT to change
+            and that EVERYTHING ELSE must stay exactly the same. Without a mask, a vague instruction can
+            change unrelated parts of the image.
 
-            [원본 이미지 생성에 사용된 프롬프트]
+            The user writes in Korean. Always write editInstruction in English.
+
+            [The actual current image - MOST IMPORTANT]
+            The CURRENT image is attached to the user's message. LOOK at it and treat it as the single
+            source of truth for what is on each nail. The text below (the original prompt and the
+            previous plan) is only a rough hint: the image generator does not follow the plan exactly,
+            so a nail the plan describes with a certain element may not actually show it, and the
+            element may appear on different nails than the plan says. Count the nails from the left
+            (1st to 5th) in the picture itself and decide the target nails from what you actually see.
+
+            [Prompt that was used to generate the original image - hint only]
             %s
 
-            [직전 손가락별 플랜 (어느 손가락에 뭐가 있었는지 참고)]
+            [Previous per-finger plan - hint only, may not match the picture]
             %s
 
-            [핵심 규칙]
-            1. prompt
-               - 수정할 nail tip을 어떻게 바꿀지 묘사하는 영어 문장. targetFingers에 손가락이
-                 여러 개 들어가도 prompt는 하나만 쓰면 됩니다(그 손가락들 전부에 같은 수정
-                 내용이 적용됩니다). 손가락마다 다른 수정이 필요하면 그중 사용자가 명확히
-                 말한 손가락만 targetFingers에 넣으세요.
-               - 형식: "A studio product photo of individual {shape}-shaped press-on nail tip nailart,
-                 {수정 내용 반영한 묘사}, top-down flat lay view, plain white background,
-                 no shadow, no hands, no fingers, no text, no watermark, no reflection, product shot"
-               - 원본 프롬프트에서 shape, 베이스 컬러 등 변하지 않는 요소는 그대로 유지.
-               - 반드시 사용자가 요청한 수정 내용만 반영하세요.
+            [Finger -> position in the image - VERY IMPORTANT]
+            The original image shows five nail tips lined up horizontally, from left to right:
+            thumb  = 1st (first from the left; Korean: 엄지)
+            index  = 2nd (Korean: 검지, 둘째)
+            middle = 3rd (Korean: 중지, 셋째)
+            ring   = 4th (Korean: 약지, 넷째)
+            pinky  = 5th (rightmost; Korean: 소지, 새끼, 다섯째)
+            Users may also refer to a nail by number counted from the left: "1번"/"첫번째" = 1st,
+            "2번" = 2nd, "3번" = 3rd, "4번" = 4th, "5번" = 5th. "엄지랑 소지" means thumb and pinky.
 
-            2. targetFingers - 매우 중요 (수정할 손톱을 정확히 지정하는 핵심 필드)
-               - 값은 "thumb", "index", "middle", "ring", "pinky" 중에서 골라 배열로 담으세요
-                 (왼쪽부터 1~5번째 손톱에 각각 대응: thumb=1, index=2, middle=3, ring=4,
-                 pinky=5 — Java 쪽에서 이 순서대로 번호로 변환해서 gen 서버에 보냅니다).
-               - 사용자가 손가락을 직접 지정한 경우 그대로 사용하세요:
-                 * 이름으로 지정: "엄지" → thumb, "검지"/"둘째" → index, "중지"/"셋째" → middle,
-                   "약지"/"넷째" → ring, "소지"/"새끼"/"다섯째" → pinky
-                 * 번호로 지정(왼쪽부터 1~5): "1번"/"첫번째" → thumb, "2번" → index,
-                   "3번" → middle, "4번" → ring, "5번" → pinky
-                 * 여러 개 지정: "엄지랑 소지" → ["thumb", "pinky"]
-               - 사용자가 직접 지정하지 않았다면, [직전 손가락별 플랜]에서 각 손가락의
-                 description/base_color/parts를 보고 사용자가 말한 특징(색상, 파츠 등)과
-                 일치하는 손가락을 찾아서 넣으세요 (예: "핑크색 손톱 바꿔줘" → 플랜에서
-                 base_color가 핑크 계열인 손가락).
-               - 어느 손가락인지 도저히 판단이 안 서면(예: 설명이 너무 모호하거나 여러
-                 손가락이 동시에 후보인데 구분이 안 될 때) 빈 배열 []로 두세요 — 이 경우
-                 아래 mask_prompt(시각적 탐지 폴백)가 대신 쓰입니다.
+            [Nail orientation in the image - VERY IMPORTANT]
+            Every nail tip in the image is oriented vertically the same way: the free edge (the tip
+            end, which is pointed, tapered or flat depending on the shape) points straight DOWN toward
+            the bottom of the frame, and the wider cuticle end is at the TOP. A nail "shape" (round,
+            oval, almond, square, stiletto, ballerina) describes ONLY the free edge, i.e. the bottom
+            end. The cuticle end at the top is always a soft rounded arc, whatever the shape is.
 
-            3. mask_prompt - targetFingers를 못 정했을 때만 쓰이는 폴백
-               - targetFingers가 비어있지 않으면 gen 서버가 이 필드를 아예 무시하므로,
-                 targetFingers를 확실히 정했다면 mask_prompt는 대충 채워도 되지만 그래도
-                 아래 규칙에 맞게 작성해두세요 (안전망).
-               - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
-               - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
-               - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
-               - mask_prompt는 수정할 대상(제거/교체할 파츠나 요소)을 묘사하세요.
-                 손톱 전체를 묘사하지 말고, 실제로 변경할 부분만 묘사하세요.
-                 예: 캐릭터 얼굴 관련 → "nail tip with character art"
-                     파츠 교체 → "nail tip with bow charm"
-                     색상 변경 → "yellow nail tip"
-               - 형식: "nail tip with {현재 존재하는 특징}"
+            [When NOT to edit - VERY IMPORTANT]
+            editInstruction is sent straight to the image model, which draws whatever it reads. So it
+            must contain ONLY a concrete edit command, never an apology, a refusal, a question, an
+            explanation or a note to the user. If the user's message is not a concrete request you can
+            turn into a visible change - for example a question, small talk, a complaint, slang or a
+            term you cannot translate into concrete colors/finish/decorations (such as an unfamiliar
+            mood word), or a request too vague to know what to change - do NOT edit: set
+            "isEditRequest" to false, set "editInstruction" to an empty string, and write a short,
+            friendly KOREAN message for the user in "replyToUser". In that message say what you did not
+            understand and ask for something concrete, with one or two examples, e.g. "'멀멀한'이
+            어떤 느낌인지 정확히 모르겠어요. 색을 더 연하게/진하게, 글리터 추가·삭제, 특정 손가락 장식
+            변경처럼 구체적으로 알려주실래요?". When the request is a clear edit, set "isEditRequest" to
+            true and "replyToUser" to an empty string.
+            When "isEditRequest" is false, also fill "replyOptions" with 3 to 4 short KOREAN sentences
+            (each under 20 characters) that the user could click to send as their next request. Each one
+            must be a concrete, ready-to-use edit request relevant to the current image and to what the
+            user seemed to want, e.g. "전체적으로 색을 더 연하게", "글리터 추가해줘", "약지 장식 바꿔줘".
+            When "isEditRequest" is true, set "replyOptions" to an empty array.
 
-               - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
-               - 10단어 이내로 작성하세요.
-               - 좋은 예시:
-                 * "nail tip with 3d heart charm" (현재 하트 3d 파츠가 있을 때)
-                 * "nail tip with white base" (현재 흰색일 때)
-                 * "nail tip with glitter" (현재 글리터가 있을 때)
-               - 나쁜 예시 (절대 금지):
-                 * 수정 후 결과물 색상
-                 * "nail tip with previous design" (의미 없음)
-                 * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
+            [Three kinds of edit requests - VERY IMPORTANT]
+            Before writing editInstruction, decide which kind the user's request is. This decides how
+            much of the rest you lock down.
 
+            A) Local edit - the user changes a specific element on specific finger(s).
+               Examples: "change the heart to a star", "make only the ring finger a deeper color",
+               "add a ribbon to the index finger".
+               -> Lock EVERYTHING outside the targeted finger(s): colors, shapes, decorations,
+                  background, lighting and composition stay identical to the original.
 
-            4. slotActions (기존과 동일, 세션 슬롯 업데이트용)
-               - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
-               - 카테고리: mood, designType, color, season, motif, shape
-               - color는 반드시 hex(#RRGGBB) 형식.
-               - 언급 안 된 카테고리는 넣지 마세요.
+            B) Whole-set style/mood change - the user does not name a finger and asks to change the
+               feel, tone or mood of all five nails.
+               Examples: "make the overall mood cute", "make it more sophisticated", "calmer vibe".
+               -> Here colors, patterns, decorations and finish are all allowed to change. If you lock
+                  "everything else including colors", the result barely changes. Lock ONLY the nail
+                  shape, the number and left-to-right order of the five nails, the white background,
+                  the lighting and the composition; state that the rest (color feel, shape or tone of
+                  motifs and parts, patterns, finish) may change freely to fit the requested mood.
 
-            [중요 규칙]
-            - 반드시 사용자가 요청한 수정 내용만 반영하세요.
+            C) Nail shape change - the user asks to change the nail shape itself.
+               Examples: "change the shape to square", "make them almond", "쉐입을 스퀘어로 바꿔줘".
+               -> Only the free edge (bottom end) is reshaped. The cuticle end at the top MUST keep its
+                  original soft rounded curve. Colors, decorations, background, lighting and
+                  composition stay identical. Read the current shape from the original prompt or the
+                  previous plan (the "shape" field).
 
-            반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만.
+            [How to write editInstruction - VERY IMPORTANT]
+
+            A) For a local edit, follow this structure:
+            "In this five-nail press-on nail set product photo, on the {Nth} nail tip from the left
+            (the {finger} finger), {describe the change concretely}. Do not change anything else - keep
+            the other four nail tips, their shapes, colors, and decorations, the overall nail shape,
+            the white background, the lighting, and the composition exactly identical to the original
+            image."
+            - Use the position table above for {Nth} and {finger}. If several fingers change, put them
+              in one sentence: "on the 2nd and 4th nail tips from the left (the index and ring fingers)".
+            - If the user does not name a finger but asks to change one specific element (a part, a
+              color, a motif, etc.), look at the image and find EVERY nail that actually shows that
+              element, then pin ALL of those positions explicitly. Example: if stars appear on the
+              1st, 3rd and 5th nails and the user says "change the stars to hearts", write "on the
+              1st, 3rd and 5th nail tips from the left (the thumb, middle and pinky fingers), replace
+              each star motif with a heart motif of the same size and position". Never stop at the
+              first match, and never pick a nail that does not show the element. Without a mask, an
+              unspecified or incomplete position risks changing the wrong nails or the whole image.
+              Only if the element truly cannot be found in the image, pick the single most likely
+              nail.
+            - When several nails change, describe each change in one sentence group and say it applies
+              to each of them; keep the replaced element's size, position and style on each nail
+              ("of the same size and position").
+            - Only apply what the user asked for. Never tell the model to change elements the user did
+              not mention (other parts, base color, patterns, ...).
+            - SCOPE OF A LOCAL EDIT - VERY IMPORTANT: change ONLY the element the user named (a motif,
+              a charm, a line, a part ...). Unless the user explicitly asks to change that nail's base
+              color, finish, glitter or surface texture, add a sentence that says the targeted nail's
+              base color, finish, glitter/texture and shape stay exactly as they are and that only
+              the named element changes. Never add base-color, finish or texture changes on your own.
+            - COPYING FROM ANOTHER NAIL - VERY IMPORTANT: when the user says things like "make the 4th
+              swirl like the 1st" or "give the 3rd nail the same star as the 5th", copy ONLY the
+              element the user pointed at: its form (shape, size, line thickness, number of turns,
+              placement). Do NOT copy the source nail's base color, finish, glitter or texture, and
+              do not write "including the same base" or "identical in color" for the whole nail. Keep
+              the target nail's own base. Keep the element's color as the target nail's current
+              motif color, unless the user asks for the same color; a copied color that would be
+              nearly invisible on the target nail's base must not be used. State in the sentence which
+              attributes are copied and which stay, for example: "redraw the swirl on the 4th nail
+              with the same round spiral form, size, line thickness and placement as the swirl on the
+              1st nail, keeping the 4th nail's own base color, finish and its current swirl color".
+
+            B) For a whole-set style/mood change, follow this structure:
+            "In this five-nail press-on nail set product photo, restyle all five nail tips to clearly
+            read as {the requested mood in concrete visual language, e.g. a cute, kawaii, playful feel}
+            - {how color feel, patterns, decorations and finish change to fit that mood, see the rules
+            below}. Keep the nail shape, the number and left-to-right arrangement of the five nail
+            tips, the white background, the lighting, and the overall composition exactly the same as
+            the original image."
+            - Use ONE intensity modifier throughout. Do not mix opposite strengths such as
+              "noticeably" and "subtly" in the same sentence.
+            - Do not assume every nail already has a certain decoration (for example "adjust the
+              crystal motifs"). Some nails have none, so use broad wording such as "the color feel and
+              decorations overall" so that color, tone or finish changes alone can also shift the mood.
+            - The only things that must stay the same are: nail shape, the count and order of the five
+              nails, the white background, the lighting and the composition. Mention only these five as
+              "exactly the same".
+            - BE ASSERTIVE - VERY IMPORTANT: never use hedging words such as "consider adding",
+              "where suitable", "if possible", "may". The image model treats them as optional and often
+              changes almost nothing. Instead state concrete actions: "add small heart charms to two of
+              the nails", "give each nail a soft pastel base".
+            - KEEP COLORS CLOSE TO THE ORIGINAL - VERY IMPORTANT: unless the user explicitly asks for a
+              color change, do not tell the model to move to a different color family (for example
+              "shift the color palette toward pastel tones"). Keep each nail's original color family and
+              allow only a very slight brightening or softening, e.g. "keep each nail's original base
+              color family, only brightening or softening it very slightly to feel more playful,
+              without shifting to a different color family". Create the mood mainly through the shape
+              and feel of motifs, decorations and finish, so the colors look almost the same as the
+              original. Change the color family itself only when the user directly asks for a color
+              change.
+            - ONLY BUILDABLE MOTIFS AND CHARMS - VERY IMPORTANT: describe added motifs or charms only as
+              small, simple things a nail salon can really attach (small hearts, stars, ribbons, pearl
+              beads, or flat artwork). Do not describe specific characters or faces such as "adorable
+              animal faces", or elaborate unrealistic sculptures; the image model may draw them as
+              bizarre shapes that cannot be made in reality.
+
+            C) For a nail shape change, follow this structure:
+            "In this five-nail press-on nail set product photo, reshape ONLY the free edge (the tip end
+            at the bottom of each nail) of all five nail tips from {current shape} to {new shape}:
+            {free-edge description from the table below}. The cuticle end at the top of each nail must
+            keep exactly its original soft, rounded curve - do not square off, flatten or point the
+            top. Keep each nail's width, overall length, colors, decorations, the number and
+            left-to-right order of the five nail tips, the white background, the lighting, and the
+            composition exactly identical to the original image."
+            Free-edge descriptions:
+            - round: the free edge is a soft, evenly rounded curve with no corners
+            - oval: the free edge is an elongated, smooth oval curve
+            - almond: the sides taper gently toward a softly rounded tip
+            - square: the free edge is flat and straight across, with defined squared corners
+            - stiletto: the sides taper to a sharp, pointed tip
+            - ballerina: the sides taper toward a flat, narrower free edge with squared corners
+              (also called coffin)
+            - If the user asks for a shape change on only some fingers, say so explicitly with the
+              position wording from the table above; otherwise apply it to all five.
+            - For a shape change, set "newShape" in the JSON to the new shape keyword (one of: round,
+              oval, almond, square, stiletto, ballerina) and also add a slotActions entry
+              {"category": "shape", "action": "add_like", "value": "<new shape>"}. For every other
+              kind of edit, set "newShape" to null.
+
+            [slotActions - VERY IMPORTANT]
+            The result screen shows keywords taken from these slots, so after your edit the slots must
+            describe exactly what the FINAL image contains. Write one slotActions entry for every
+            element the user adds, removes or replaces in this request. Categories: mood, designType,
+            color, season, motif, shape. Actions:
+            - "append_like": ADD a value and keep the existing ones. Use it when something is added to
+              the design: a new motif/part (star, heart, ribbon, pearl, swirl ...), an additional
+              color, an additional mood or design type.
+            - "remove_like": REMOVE a value that is no longer in the design (e.g. "remove the hearts").
+            - "add_like": REPLACE the whole category with this single value. Use it only for single-
+              choice categories (shape, season), or when the user clearly swaps everything in a category.
+            - "add_dislike": the user does not want this value.
+            Rules: use short English keywords for values ("heart", "star", "ribbon", "swirl", "pearl");
+            a color value must be a hex code (#RRGGBB); one motif per entry (add "heart" and "star" as
+            two entries); do not include categories the request did not touch.
+            Examples:
+            - "add one more star to the ring finger"   -> {"category": "motif", "action": "append_like", "value": "star"}
+            - "add heart drawings to thumb and pinky"  -> {"category": "motif", "action": "append_like", "value": "heart"}
+            - "remove the stars"                       -> {"category": "motif", "action": "remove_like", "value": "star"}
+            - "change the shape to square"             -> {"category": "shape", "action": "add_like", "value": "square"}
+            A request with several changes needs several entries, e.g. "square shape, one more star on
+            the ring finger, hearts on the thumb and pinky" -> shape square (add_like), motif star
+            (append_like), motif heart (append_like).
+
+            [fingerOverrides / fingerDislikes]
+            Same as before; they update the per-finger session state.
+
+            [keywordsAdd / keywordsRemove]
+            The result page shows short English keyword chips describing the whole nail set (for
+            example "jelly", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
+            "pearl"). After your edit, list in "keywordsAdd" the 0 to 4 chips that the edit newly adds
+            to the set (a finish, pattern, motif or decoration that now visibly exists), and in
+            "keywordsRemove" the chips that no longer apply because the edit replaced or removed them
+            (e.g. replacing hearts with stars: add "star charm", remove "heart"). Use 1 to 3 plain
+            lowercase words in the same style as the examples. Only list things that really change;
+            use empty arrays for an edit that only tweaks a shade, size or position.
+
+            Respond ONLY with the JSON below. No markdown, pure JSON only.
             {
-                "prompt": "A studio product photo of individual ...",
-                "targetFingers": ["ring"],
-                "mask_prompt": "nail tip with heart charm",
+                "isEditRequest": true,
+                "replyToUser": "",
+                "replyOptions": [],
+                "keywordsAdd": ["star charm"],
+                "keywordsRemove": ["heart"],
+                "newShape": null,
+                "editInstruction": "In this five-nail press-on nail set product photo, on the 4th nail tip from the left (the ring finger), replace the heart charm with a star charm. Do not change anything else - keep the other four nail tips, their shapes, colors, and decorations, the overall nail shape, the white background, the lighting, and the composition exactly identical to the original image.",
                 "slotActions": [
-                    {"category": "motif", "action": "add_dislike", "value": "heart"}
+                    {"category": "motif", "action": "remove_like", "value": "heart"},
+                    {"category": "motif", "action": "append_like", "value": "star"}
                 ],
-                "fingerOverrides": {"thumb": "replace heart charm with smaller bow charm"},
-                "fingerDislikes": {"thumb": ["large heart"]}
+                "fingerOverrides": {"ring": "star charm instead of heart charm"},
+                "fingerDislikes": {"ring": ["heart"]}
             }
             """;
-
-    private static final List<String> FINGER_ORDER = List.of("thumb", "index", "middle", "ring", "pinky");
 
     /**
      * 채팅 수정 요청 처리 메인 메서드.
@@ -159,51 +305,62 @@ public class RefineService {
         String previousPlanJson = prevDesign.getDesignPlan() != null
                 ? prevDesign.getDesignPlan() : "(직전 플랜 없음)";
 
-        // 1. GPT로 prompt + mask_prompt 생성
-        String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
+        // 1. 현재(원본) 이미지를 S3에서 받는다 - GPT가 실제 그림을 보고 어느 손톱인지 판단하게 하고,
+        //    이어서 이미지 편집(gpt-image)의 입력으로도 쓴다.
+        String originalImageUrl = prevDesign.getImageUrls().get(0);
+        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
+        if (originalImageBytes == null) {
+            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
+        }
 
-        // [Gemini 방식 - 주석 처리]
-        // Map<String, Object> requestBody = Map.of(
-        //         "contents", List.of(Map.of("role", "user",
-        //                 "parts", List.of(Map.of("text", message)))),
-        //         "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
-        //         "generationConfig", Map.of(
-        //                 "responseMimeType", "application/json",
-        //                 "maxOutputTokens", 8192,
-        //                 "thinkingConfig", Map.of("thinkingLevel", "MEDIUM")
-        //         )
-        // );
-        // JsonNode responseNode = callGeminiWithRetry(requestBody);
-        // String aiText = responseNode.path("candidates").get(0)
-        //         .path("content").path("parts").get(0).path("text").asText();
-
-        String aiText = gptClientService.chat(systemPrompt, message, 8192, true);
+        // 2. GPT(vision)로 수정 지시문(editInstruction) 생성 - 이전 플랜 텍스트만 보면 실제 그림과 달라서
+        //    엉뚱한 손톱을 고르는 문제가 있어, 이미지를 함께 보내 "보이는 대로" 판단하게 한다.
+        String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
+        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
+        String aiText = gptClientService.chatWithImage(
+                systemPrompt, message, originalImageBase64, "image/png", 4096, true);
 
         JsonNode resultJson;
         try {
             resultJson = objectMapper.readTree(aiText);
         } catch (Exception e) {
-            System.err.println("수정 요청 JSON 파싱 실패: " + aiText);
+            System.err.println("[RefineService] gpt-image 수정 지시문 JSON 파싱 실패: " + aiText);
             throw new IllegalStateException("수정 내용을 이해하지 못했어요. 다시 말씀해 주세요.");
         }
-// ★ 이 줄 추가
-        System.out.println("[RefineService] GPT 응답: " + aiText);
 
-        String inpaintPrompt = resultJson.path("prompt").asText("");
-        String maskPrompt    = resultJson.path("mask_prompt").asText("");
-        List<Integer> nailIndexes = resolveNailIndexes(resultJson.path("targetFingers"));
+        boolean isEditRequest = resultJson.path("isEditRequest").asBoolean(true);
+        String editInstruction = resultJson.path("editInstruction").asText("").trim();
+        String replyToUser = resultJson.path("replyToUser").asText("").trim();
+        System.out.println("[RefineService] (gpt-image) isEditRequest=" + isEditRequest
+                + " editInstruction: " + editInstruction);
 
-// ★ 이 줄 추가
-        System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt
-                + " / targetFingers nailIndexes: " + nailIndexes + " / maskPrompt: " + maskPrompt);
-
-        if (inpaintPrompt.isBlank() || (nailIndexes.isEmpty() && maskPrompt.isBlank())) {
-            throw new IllegalStateException("수정할 영역을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
+        // 수정 요청이 아니거나(질문/잡담/모르는 표현), 지시문이 비었거나, 지시문 형식이 아니면(사과/거절 문장 등)
+        // 이미지 편집을 부르지 않는다. 그 문장이 그대로 이미지 모델에 가면 사진 위에 설명 그림을 그려 버린다.
+        // 안전장치로 프롬프트가 요구한 문장 시작("In this five-nail ...")인지도 확인한다.
+        boolean looksLikeInstruction = editInstruction.toLowerCase().startsWith("in this five-nail");
+        if (!isEditRequest || editInstruction.isBlank() || !looksLikeInstruction) {
+            String reply = replyToUser.isBlank()
+                    ? "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
+                    + "(예: \"약지 하트를 별로 바꿔줘\", \"전체적으로 색을 더 연하게\")"
+                    : replyToUser;
+            return replyWithoutEdit(session, prevDesign, reply, parseReplyOptions(resultJson.path("replyOptions")));
         }
 
-        // 2. 슬롯 업데이트 (세션 컨텍스트 유지)
+        // 쉐입 변경 요청이면 새 쉐입 키워드(round/oval/almond/square/stiletto/ballerina)
+        String newShape = normalizeShape(resultJson.path("newShape").asText(""));
+        System.out.println("[RefineService] newShape: " + newShape);
+
+        // 세션 슬롯/손가락별 지정 업데이트 (이후 디자인 생성/수정에 계속 반영)
         Map<String, SlotData> slots = loadSlots(session.getExtractedPreferences());
         applySlotActions(slots, resultJson.path("slotActions"));
+        if (newShape != null) {
+            // 쉐입은 하나만 고를 수 있으므로 마지막으로 정한 쉐입으로 교체한다.
+            // (결과 화면 키워드에 처음 골랐던 쉐입이 남지 않도록 GPT의 slotActions에만 맡기지 않는다)
+            SlotData shapeSlot = slots.computeIfAbsent("shape", k -> new SlotData());
+            shapeSlot.getLiked().clear();
+            shapeSlot.getLiked().add(newShape);
+            shapeSlot.getDisliked().remove(newShape);
+        }
         try {
             session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
         } catch (Exception ignored) {}
@@ -213,53 +370,36 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
-        // 3. 원본 이미지 → base64 변환 (S3 URL에서 다운로드)
-        String originalImageUrl = prevDesign.getImageUrls().get(0);
-        byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
-        if (originalImageBytes == null) {
-            throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
-        }
-        String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
+        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄
+        String editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto");
 
-        // 4. gen 서버 /inpaint 호출 — seed는 원본과 동일해야 퀄리티 유지
-        Long seed = prevDesign.getSeed(); // NailDesign에 seed 컬럼 필요
-        String inpaintedBase64 = nailImageService.inpaintNail(
-                originalImageBase64, inpaintPrompt, maskPrompt, nailIndexes, seed
-        );
+        // 4. 수정된 이미지 S3 업로드
+        byte[] editedBytes = Base64.getDecoder().decode(editedBase64);
+        String s3Key = "designs/user_" + user.getId() + "/edit_" + UUID.randomUUID() + ".png";
+        String newImageUrl = s3Service.uploadImageBytes(editedBytes, s3Key);
 
-        // 5. 수정된 이미지 S3 업로드
-        byte[] inpaintedBytes = Base64.getDecoder().decode(inpaintedBase64);
-        String s3Key = "designs/user_" + user.getId() + "/inpaint_" + UUID.randomUUID() + ".png";
-        String newImageUrl = s3Service.uploadImageBytes(inpaintedBytes, s3Key);
+        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
+        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
+                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
 
-//        // ★ 추가: 컬러 팔레트 추출
-//        String colorPaletteJson = null;
-//        try {
-//            List<Map<String, Object>> perNailColors =
-//                    nailDetectionService.extractColorsPerNail(inpaintedBase64);
-//            List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
-//            colorPaletteJson = objectMapper.writeValueAsString(palette);
-//        } catch (Exception e) {
-//            System.err.println("inpaint 컬러 팔레트 추출 실패: " + e.getMessage());
-//        }
-
-        // 6. 새 NailDesign 저장 (원본 seed + 수정된 프롬프트 기록)
+        // 5. 새 NailDesign 저장 (플랜은 그대로 유지, 수정 지시문을 프롬프트로 기록)
         NailDesign newDesign = NailDesign.builder()
                 .user(user)
                 .session(session)
                 .imageUrls(new ArrayList<>(List.of(newImageUrl)))
-                .promptSummary(inpaintPrompt)
-                .aiModel("z-image-turbo + lora-v1 (inpaint)")
+                .promptSummary(editInstruction)
+                .aiModel("gpt-image-2.5-sunburst (edit)")
                 .status(NailDesign.DesignStatus.DRAFT)
-                .designPlan(prevDesign.getDesignPlan()) // 플랜은 그대로 유지
-//                .colorPalette(colorPaletteJson)
-                .seed(seed)
+                // 플랜은 그대로 유지하되, 쉐입이 바뀐 경우 plan의 shape만 새 값으로 바꾼다
+                // (AR/3D 템플릿과 이후 수정 요청이 이 shape를 읽는다)
+                .designPlan(nextPlanJson)
+                .seed(null) // OpenAI 이미지 API는 seed 개념이 없어 재현 불가
                 .build();
         nailDesignRepository.save(newDesign);
         session.updateGeneratedPrompt(originalPrompt); // 원본 프롬프트 유지
         designSessionRepository.save(session);
 
-        // 7. 채팅 이력 저장
+        // 6. 채팅 이력 저장
         chatMessageRepository.save(ChatMessage.builder()
                 .session(session).role(ChatMessage.MessageRole.assistant)
                 .content("말씀하신 대로 수정했어요! 어떠세요?").build());
@@ -267,26 +407,110 @@ public class RefineService {
         return DesignGenerateResponseDto.builder()
                 .designId(newDesign.getId())
                 .status(newDesign.getStatus().name())
-                .generatedPrompt(inpaintPrompt)
+                .generatedPrompt(editInstruction)
                 .imageUrls(newDesign.getImageUrls())
-                .details(nailDesignService.buildDetails(newDesign)) // 수정 후 details는 프론트에서 별도 요청
-                .keywords(nailDesignService.extractKeywordsFromSlots(slots, session))
+                .details(nailDesignService.buildDetails(newDesign))
+                .keywords(nailDesignService.extractDesignKeywords(slots, session, nextPlanJson))
                 .build();
     }
 
     /**
-     * Gemini가 준 targetFingers(["thumb", "ring", ...])를 gen 서버가 받는
-     * nail_index(왼쪽부터 1~5) 배열로 변환한다. FINGER_ORDER 순서가 곧 1~5번 대응.
-     * 목록에 없는 값이나 중복은 무시한다.
+     * 직전 designPlan에 (1) 쉐입 변경과 (2) 키워드 추가/제거(keywordOverrides)를 반영한 새 JSON 문자열.
+     * 플랜이 없거나 파싱에 실패하면 쉐입만 처리한 값(또는 원본)을 돌려준다.
      */
-    private List<Integer> resolveNailIndexes(JsonNode targetFingersNode) {
-        if (targetFingersNode == null || !targetFingersNode.isArray()) return List.of();
-        List<Integer> indexes = new ArrayList<>();
-        for (JsonNode fingerNode : targetFingersNode) {
-            int idx = FINGER_ORDER.indexOf(fingerNode.asText("").trim().toLowerCase());
-            if (idx >= 0 && !indexes.contains(idx + 1)) indexes.add(idx + 1);
+    private String buildNextPlan(String prevPlanJson, String newShape, JsonNode addNode, JsonNode removeNode) {
+        String base = newShape != null ? withShape(prevPlanJson, newShape) : prevPlanJson;
+        if (base == null || base.isBlank()) return base;
+        try {
+            JsonNode node = objectMapper.readTree(base);
+            if (!(node instanceof ObjectNode plan)) return base;
+
+            ObjectNode overrides = plan.path("keywordOverrides") instanceof ObjectNode o
+                    ? o : plan.putObject("keywordOverrides");
+            List<String> adds = new ArrayList<>();
+            List<String> removes = new ArrayList<>();
+            overrides.path("add").forEach(n -> adds.add(n.asText("")));
+            overrides.path("remove").forEach(n -> removes.add(n.asText("")));
+
+            for (JsonNode n : removeNode) {
+                String term = n.asText("").trim();
+                if (term.isBlank()) continue;
+                adds.removeIf(a -> a.equalsIgnoreCase(term) || a.toLowerCase().contains(term.toLowerCase()));
+                if (removes.stream().noneMatch(r -> r.equalsIgnoreCase(term))) removes.add(term);
+            }
+            for (JsonNode n : addNode) {
+                String term = n.asText("").trim();
+                if (term.isBlank()) continue;
+                removes.removeIf(r -> r.equalsIgnoreCase(term)); // 다시 추가한 것은 제거 목록에서 뺀다
+                if (adds.stream().noneMatch(a -> a.equalsIgnoreCase(term))) adds.add(term);
+            }
+
+            overrides.putArray("add").addAll(adds.stream()
+                    .map(a -> (JsonNode) objectMapper.getNodeFactory().textNode(a)).toList());
+            overrides.putArray("remove").addAll(removes.stream()
+                    .map(r -> (JsonNode) objectMapper.getNodeFactory().textNode(r)).toList());
+            return plan.toString();
+        } catch (Exception e) {
+            return base;
         }
-        return indexes;
+    }
+
+    /**
+     * 이미지를 바꾸지 않고 사용자에게 안내 메시지만 돌려준다. 기존 디자인(이미지)은 그대로 응답에 담고,
+     * assistantMessage가 있으면 프론트는 새 이미지 대신 이 메시지를 채팅에 보여준다.
+     */
+    private DesignGenerateResponseDto replyWithoutEdit(DesignSession session, NailDesign prevDesign, String reply,
+                                                       List<String> options) {
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session).role(ChatMessage.MessageRole.assistant).content(reply).build());
+        return DesignGenerateResponseDto.builder()
+                .designId(prevDesign.getId())
+                .status(prevDesign.getStatus().name())
+                .generatedPrompt(prevDesign.getPromptSummary())
+                .imageUrls(prevDesign.getImageUrls())
+                .assistantMessage(reply)
+                .assistantOptions(options)
+                .build();
+    }
+
+    private static final List<String> DEFAULT_REPLY_OPTIONS = List.of(
+            "전체적으로 색을 더 연하게", "전체적으로 색을 더 진하게", "글리터 추가해줘", "하트 장식 빼줘");
+
+    /** GPT가 준 replyOptions를 정리(공백 제거, 최대 4개, 40자 이내). 비어 있으면 기본 선택지. */
+    private List<String> parseReplyOptions(JsonNode node) {
+        List<String> out = new ArrayList<>();
+        if (node != null && node.isArray()) {
+            for (JsonNode n : node) {
+                String s = n.asText("").trim();
+                if (!s.isEmpty() && s.length() <= 40 && !out.contains(s)) out.add(s);
+                if (out.size() >= 4) break;
+            }
+        }
+        return out.isEmpty() ? DEFAULT_REPLY_OPTIONS : out;
+    }
+
+    private static final Set<String> KNOWN_SHAPES =
+            Set.of("round", "oval", "almond", "square", "stiletto", "ballerina");
+
+    /** GPT가 준 newShape를 앱에서 쓰는 쉐입 키워드로 정리한다. 쉐입 변경이 아니거나 모르는 값이면 null. */
+    private String normalizeShape(String raw) {
+        if (raw == null) return null;
+        String shape = raw.trim().toLowerCase();
+        if ("coffin".equals(shape)) shape = "ballerina"; // 앱 내부에서는 항상 ballerina로 통일
+        return KNOWN_SHAPES.contains(shape) ? shape : null;
+    }
+
+    /** designPlan(JSON 문자열)의 shape만 바꾼 새 JSON 문자열. 파싱에 실패하면 원본을 그대로 돌려준다. */
+    private String withShape(String planJson, String shape) {
+        if (planJson == null || planJson.isBlank()) return planJson;
+        try {
+            JsonNode node = objectMapper.readTree(planJson);
+            if (node instanceof ObjectNode obj) {
+                obj.put("shape", shape);
+                return obj.toString();
+            }
+        } catch (Exception ignored) {}
+        return planJson;
     }
 
     // -------------------------------------------------------------------------
@@ -313,9 +537,19 @@ public class RefineService {
 
             SlotData slot = slots.computeIfAbsent(category, k -> new SlotData());
             if ("add_like".equals(actionType)) {
+                // 해당 카테고리 전체를 이 값 하나로 교체 (쉐입/계절처럼 하나만 고르는 항목용)
                 slot.getLiked().clear();
                 slot.getLiked().add(value);
                 slot.getDisliked().remove(value);
+            } else if ("append_like".equals(actionType)) {
+                // 기존 값은 두고 추가 (모티프/무드/컬러처럼 여러 개를 고르는 항목용).
+                // "없음/상관없음"이 들어 있었다면 실제 값이 생겼으니 뺀다.
+                slot.getLiked().removeIf(v -> v == null || v.isBlank()
+                        || "none".equalsIgnoreCase(v.trim()) || "상관없음".equals(v.trim()) || "없음".equals(v.trim()));
+                if (!slot.getLiked().contains(value)) slot.getLiked().add(value);
+                slot.getDisliked().remove(value);
+            } else if ("remove_like".equals(actionType)) {
+                slot.getLiked().remove(value);
             } else if ("add_dislike".equals(actionType)) {
                 if (!slot.getDisliked().contains(value)) slot.getDisliked().add(value);
                 slot.getLiked().remove(value);
@@ -356,30 +590,4 @@ public class RefineService {
         });
         try { updater.accept(objectMapper.writeValueAsString(merged)); } catch (Exception ignored) {}
     }
-
-    // Gemini 호출 로직 - GPT(GptClientService)로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
-    // private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
-    //     WebClient webClient = webClientBuilder.build();
-    //     int maxAttempts = 3;
-    //     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-    //         try {
-    //             return webClient.post()
-    //                     .uri(apiUrl + "?key=" + apiKey.trim())
-    //                     .bodyValue(requestBody)
-    //                     .retrieve()
-    //                     .bodyToMono(JsonNode.class)
-    //                     .block();
-    //         } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-    //             int code = e.getStatusCode().value();
-    //             if ((code == 429 || code == 503) && attempt < maxAttempts) {
-    //                 try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) {
-    //                     Thread.currentThread().interrupt();
-    //                 }
-    //                 continue;
-    //             }
-    //             throw new IllegalStateException("AI 서버 오류: " + e.getStatusCode());
-    //         }
-    //     }
-    //     throw new IllegalStateException("AI 응답 실패");
-    // }
 }

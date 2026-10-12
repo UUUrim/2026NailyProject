@@ -524,8 +524,14 @@ public class NailDesignService {
         record TimelineEntry(java.time.LocalDateTime time, int order, com.example.nailyproject.dto.response.ChatMessageResponseDto dto) {}
         List<TimelineEntry> timeline = new ArrayList<>();
 
+        String photoRequestContent = PHOTO_REQUEST_TEXT; // 참고 사진 말풍선 문구(코멘트가 있으면 함께 표시)
         for (ChatMessage m : chatMessageRepository.findBySessionOrderBySentAtAsc(design.getSession())) {
             if (cutoff != null && m.getSentAt() != null && m.getSentAt().isAfter(cutoff)) continue;
+            if (m.getRole() == ChatMessage.MessageRole.user && m.getContent() != null
+                    && m.getContent().startsWith(PHOTO_REQUEST_TEXT + "\n")) {
+                if (PHOTO_REQUEST_TEXT.equals(photoRequestContent)) photoRequestContent = m.getContent(); // 첫 번째 것만 사용
+                continue; // 별도 말풍선으로는 보여주지 않음
+            }
             timeline.add(new TimelineEntry(
                     m.getSentAt(),
                     0,
@@ -552,7 +558,7 @@ public class NailDesignService {
                         0,
                         com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
                                 .role("user")
-                                .content("이 사진으로 만들어줘")
+                                .content(photoRequestContent)
                                 .sentAt(referenceTime != null ? referenceTime.format(formatter) : "")
                                 .imageUrls(List.of(d.getReferenceImageUrl()))
                                 .build()
@@ -820,9 +826,10 @@ public class NailDesignService {
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
                 : summarizeSlots(slots, handScan)
-                        + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
-                        + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
-                        + buildUserOwnWordsText(session);
+                + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
+                + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
+                + buildUserOwnWordsText(session)
+                + buildPhotoNoteText(request.getUserNote());
 
         String previousPlanJson = null;
         if (session != null) {
@@ -916,6 +923,10 @@ public class NailDesignService {
             session.updateGeneratedPrompt(combinedPrompt);
         }
 
+        // 사진과 함께 보낸 사용자 코멘트를 채팅 이력에 저장한다 (마이페이지 "채팅 이력 보기"에서 보이도록).
+        // 디자인 생성(저장) 직전에 저장해야 이 디자인의 generatedAt 이전 시점이라 이력 조회에서 잘리지 않는다.
+        savePhotoRequestMessage(session, hasImage, request.getUserNote());
+
         // ★ gen 서버로 이미지 생성 (ComfyUI 대체)
         NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session, referenceFinishes);
 
@@ -954,7 +965,7 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
-                .keywords(extractKeywordsFromSlots(slots, session)) //디자인결과화면 선택옵션 단어
+                .keywords(mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
                 .build();
     }
@@ -1210,6 +1221,32 @@ public class NailDesignService {
     }
 
     /**
+     * 사진 기반 생성에서 사용자가 사진과 함께 적은 추가 요청. 사진의 분위기/색감을 기본으로 하되
+     * 이 요청(예: "수채화 느낌을 잘 살려줘")은 사진 해석보다 우선해 반영하도록 plan 생성에 넘긴다.
+     */
+    private static final String PHOTO_REQUEST_TEXT = "이 사진으로 만들어줘";
+
+    /** 사진 기반 생성의 사용자 발화를 "이 사진으로 만들어줘\n<코멘트>" 형태로 저장. 코멘트가 없으면 저장하지 않는다. */
+    private void savePhotoRequestMessage(DesignSession session, boolean hasImage, String note) {
+        if (session == null || !hasImage || note == null || note.isBlank()) return;
+        String trimmed = note.trim();
+        if (trimmed.length() > 300) trimmed = trimmed.substring(0, 300);
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session)
+                .role(ChatMessage.MessageRole.user)
+                .content(PHOTO_REQUEST_TEXT + "\n" + trimmed)
+                .build());
+    }
+
+    private String buildPhotoNoteText(String note) {
+        if (note == null || note.isBlank()) return "";
+        String trimmed = note.trim();
+        if (trimmed.length() > 300) trimmed = trimmed.substring(0, 300);
+        return "\n[사용자가 참고 사진과 함께 직접 적은 추가 요청 - 사진의 색감/분위기를 바탕으로 하되, 이 요청의 느낌/질감/장식/위치는 최우선으로 반영, 절대 누락 금지]\n- "
+                + trimmed.replace("\n", " ") + "\n";
+    }
+
+    /**
      * 채팅에서 사용자가 직접 입력한 원문을 plan 생성에 그대로 넘긴다. 슬롯(카테고리)으로 변환되는
      * 과정에서 "큐빅 넣어줘" 같은 구체 요청이 누락/희석되는 문제를 막기 위한 안전장치.
      */
@@ -1335,7 +1372,7 @@ public class NailDesignService {
         // "muted rose", "warm rose base"를 꽃으로 오인해서 꽃을 요청하지 않은 체크 디자인에 꽃이 그려졌다.
         boolean hasFlower = finger.path("motif").toString().toLowerCase().contains("flower")
                 || java.util.regex.Pattern.compile("(?i)\\b(flowers?|floral|blossoms?|petals?|tulips?|daisy|daisies|peony|peonies)\\b")
-                        .matcher(description).find();
+                .matcher(description).find();
         if (!hasFlower) return false;
         return !java.util.regex.Pattern.compile("(?i)\\b(large|big|oversized|giant|bold|statement)\\b")
                 .matcher(description).find();
@@ -1639,8 +1676,8 @@ public class NailDesignService {
                                 .compile("(?i)full[- ]nail|(whole|entire|full) nail|covers? the (whole|entire)")
                                 .matcher(fingerDescription).find();
                         nailsSection.append(fullNail
-                                ? " covering the whole nail,"
-                                : " as a small patch in the center of the nail about half of the nail width across,")
+                                        ? " covering the whole nail,"
+                                        : " as a small patch in the center of the nail about half of the nail width across,")
                                 .append(" painted flat into the gel with a perfectly smooth, even surface, softly feathered")
                                 .append(" edges, and no raised thickness.");
                     } else {
@@ -1934,6 +1971,103 @@ public class NailDesignService {
         }
         // 세션 없는 경우 (채팅 없이 직접 생성된 디자인)
         return design.getPromptSummary();
+    }
+
+    private static final int MAX_PLAN_KEYWORDS = 8;
+    private static final int MAX_TOTAL_KEYWORDS = 12;
+    // finish/pattern은 이만큼 이상의 손가락에서 쓰였을 때만 키워드로 (한 손가락에만 쓴 보조 디테일은 제외).
+    // motif/parts(눈에 띄는 장식)는 한 손가락이어도 포함한다.
+    private static final int MIN_STYLE_COUNT = 2;
+    // 키워드 비교용: 의미 없이 붙는 일반 단어는 빼고 비교한다 ("snowman art" == "snowman")
+    private static final Set<String> GENERIC_KEYWORD_WORDS = Set.of(
+            "art", "charm", "charms", "pattern", "finish", "design", "motif", "decor", "decoration",
+            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect");
+    // 같은 뜻의 단어는 하나로 본다 ("plaid" == "check pattern")
+    private static final Map<String, String> KEYWORD_SYNONYMS = Map.of(
+            "plaid", "check", "tartan", "check", "gingham", "check", "checkered", "check", "checks", "check");
+
+    /**
+     * 디자인 플랜(5개 손가락)에 실제로 쓰인 finish/pattern/motif/parts 값을 키워드로 뽑는다.
+     * 사진 기반 생성은 슬롯(mood/shape 등)이 거의 비어 있어서 키워드가 3개 안팎으로만 나오던 문제 보완.
+     * 여러 손가락에서 많이 쓰인 값을 먼저, 최대 MAX_PLAN_KEYWORDS개.
+     */
+    private List<String> extractPlanKeywords(JsonNode plan) {
+        if (plan == null || !plan.isObject()) return List.of();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        Set<String> decorations = new HashSet<>(); // motif/parts에서 나온 키워드
+        for (String finger : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            JsonNode f = plan.path(finger);
+            if (!f.isObject()) continue;
+            for (String field : List.of("finish", "pattern", "motif", "parts")) {
+                for (String v : toTextList(f.path(field))) {
+                    String key = v.trim().toLowerCase();
+                    if (key.isBlank() || "none".equals(key) || "상관없음".equals(key)) continue;
+                    counts.merge(key, 1, Integer::sum);
+                    if (field.equals("motif") || field.equals("parts")) decorations.add(key);
+                }
+            }
+        }
+        return counts.entrySet().stream()
+                .filter(e -> decorations.contains(e.getKey()) || e.getValue() >= MIN_STYLE_COUNT)
+                .sorted((x, y) -> y.getValue() - x.getValue()) // 안정 정렬: 동률이면 등장 순서 유지
+                .limit(MAX_PLAN_KEYWORDS)
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    /** 키워드 중복 비교용 정규형: 소문자, 일반 단어 제거, 동의어 통일. 비면 원문 소문자. */
+    private String keywordCore(String k) {
+        List<String> words = new ArrayList<>();
+        for (String w : k.trim().toLowerCase().split("[\\s_-]+")) {
+            if (w.isBlank() || GENERIC_KEYWORD_WORDS.contains(w)) continue;
+            words.add(KEYWORD_SYNONYMS.getOrDefault(w, w));
+        }
+        return words.isEmpty() ? k.trim().toLowerCase() : String.join(" ", words);
+    }
+
+    /** 슬롯 키워드 뒤에 플랜 키워드를 붙이되, 같은 뜻(snowman / snowman art, check pattern / plaid)은 먼저 나온 것만 남기고 전체 MAX_TOTAL_KEYWORDS개까지만. */
+    private List<String> mergeKeywords(List<String> primary, List<String> extra) {
+        Set<String> seen = new HashSet<>();
+        List<String> out = new ArrayList<>();
+        for (List<String> list : List.of(primary, extra)) {
+            for (String k : list) {
+                if (k == null || k.isBlank()) continue;
+                if (seen.add(keywordCore(k)) && out.size() < MAX_TOTAL_KEYWORDS) out.add(k.trim());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 결과 화면 키워드(최종 이미지 기준): 슬롯 + 플랜(finish/pattern/motif/parts) 키워드에,
+     * 수정(refine)으로 누적된 plan.keywordOverrides(add/remove)를 반영한다.
+     * 생성 직후에는 overrides가 없으므로 슬롯 + 플랜 키워드만 나온다.
+     */
+    public List<String> extractDesignKeywords(Map<String, SlotData> slots, DesignSession session, String planJson) {
+        JsonNode plan = null;
+        if (planJson != null && !planJson.isBlank()) {
+            try { plan = objectMapper.readTree(planJson); } catch (Exception ignored) {}
+        }
+        List<String> base = mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan));
+        if (plan == null) return base;
+
+        List<String> removes = new ArrayList<>();
+        plan.path("keywordOverrides").path("remove").forEach(n -> removes.add(n.asText("").trim().toLowerCase()));
+        List<String> adds = new ArrayList<>();
+        plan.path("keywordOverrides").path("add").forEach(n -> {
+            String v = n.asText("").trim();
+            if (!v.isBlank()) adds.add(v);
+        });
+
+        List<String> kept = new ArrayList<>();
+        for (String k : base) {
+            String lk = k.toLowerCase();
+            boolean removed = removes.stream().anyMatch(r -> !r.isBlank() && (lk.contains(r) || r.contains(lk)));
+            if (!removed) kept.add(k);
+        }
+        int room = Math.max(0, MAX_TOTAL_KEYWORDS - adds.size());
+        if (kept.size() > room) kept = new ArrayList<>(kept.subList(0, room));
+        return mergeKeywords(kept, adds);
     }
 
     public List<String> extractKeywordsFromSlots(Map<String, SlotData> slots, DesignSession session) {

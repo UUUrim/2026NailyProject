@@ -307,11 +307,11 @@ export function useNailDesignChatPage() {
     const queryClient = useQueryClient()
     const navState = (location.state as
         | {
-              leftScanId?: number | null
-              rightScanId?: number | null
-              scanId?: number | null
-              regenerate?: RegenerateNavState | null
-          }
+        leftScanId?: number | null
+        rightScanId?: number | null
+        scanId?: number | null
+        regenerate?: RegenerateNavState | null
+    }
         | null) ?? null
 
     // 브라우저 뒤로/앞으로가기(POP)로 돌아온 경우에만 이전 채팅 스냅샷을 복원한다. 앱 안의
@@ -844,32 +844,32 @@ export function useNailDesignChatPage() {
             const context: GenerationContext =
                 source === 'scan-auto'
                     ? {
-                          source,
-                          keywords: [],
-                          referenceImageUrl: null,
-                          handSummary: analysisSummary
-                              ? {
-                                    toneLabel: analysisSummary.toneLabel,
-                                    shapeLabel: analysisSummary.shapeLabel,
-                                    avgLength: analysisSummary.avgLength,
-                                    avgWidth: analysisSummary.avgWidth,
-                                    avgCurve: analysisSummary.avgCurve,
-                                    skinToneHex: analysisSummary.skinToneHex,
-                                    shapeImage: analysisSummary.shapeImage,
-                                    // 추천 팔레트는 "?" 패널과 동일하게 정렬해서, 실제 반영된 색을 강조 표시한다.
-                                    recommendedColors: sortRecommendedColors(
-                                        data.scanAutoReflection?.recommendedColors ?? analysisSummary.skinTonePalette,
-                                    ),
-                                    usedColors: data.scanAutoReflection?.usedColors ?? [],
-                                    reflectedMood: data.scanAutoReflection?.mood ?? null,
-                                    reflectedDesignType: data.scanAutoReflection?.designType ?? null,
-                                    reflectedMotif: data.scanAutoReflection?.motif ?? null,
-                                }
-                              : null,
-                          revisionKeywords,
-                      }
+                        source,
+                        keywords: [],
+                        referenceImageUrl: null,
+                        handSummary: analysisSummary
+                            ? {
+                                toneLabel: analysisSummary.toneLabel,
+                                shapeLabel: analysisSummary.shapeLabel,
+                                avgLength: analysisSummary.avgLength,
+                                avgWidth: analysisSummary.avgWidth,
+                                avgCurve: analysisSummary.avgCurve,
+                                skinToneHex: analysisSummary.skinToneHex,
+                                shapeImage: analysisSummary.shapeImage,
+                                // 추천 팔레트는 "?" 패널과 동일하게 정렬해서, 실제 반영된 색을 강조 표시한다.
+                                recommendedColors: sortRecommendedColors(
+                                    data.scanAutoReflection?.recommendedColors ?? analysisSummary.skinTonePalette,
+                                ),
+                                usedColors: data.scanAutoReflection?.usedColors ?? [],
+                                reflectedMood: data.scanAutoReflection?.mood ?? null,
+                                reflectedDesignType: data.scanAutoReflection?.designType ?? null,
+                                reflectedMotif: data.scanAutoReflection?.motif ?? null,
+                            }
+                            : null,
+                        revisionKeywords,
+                    }
                     : source === 'freeform'
-                      ? {
+                        ? {
                             source,
                             keywords: buildFreeformKeywords(freeformLogRef.current),
                             referenceImageUrl: null,
@@ -926,7 +926,7 @@ export function useNailDesignChatPage() {
     }
 
     // 업로드한 참고 사진(+스캔 정보) 기반 생성
-    const runGenerateDesignFromPhoto = async (file: File) => {
+    const runGenerateDesignFromPhoto = async (file: File, note?: string) => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
@@ -942,7 +942,7 @@ export function useNailDesignChatPage() {
         )
 
         try {
-            const data = await generateDesignFromImage({ sessionId, scanId, image: file })
+            const data = await generateDesignFromImage({ sessionId, scanId, image: file, note })
             setLastDesign({
                 designId: data.designId,
                 imageUrls: data.imageUrls,
@@ -953,7 +953,7 @@ export function useNailDesignChatPage() {
                 details: data.details,
                 context: {
                     source: 'photo',
-                    keywords: [],
+                    keywords: data.keywords ?? [], // 서버가 슬롯 + 플랜(마감/패턴/모티프/파츠)에서 뽑은 키워드
                     referenceImageUrl: selectedPhotoPreviewUrl,
                     handSummary: null,
                     revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
@@ -1271,6 +1271,31 @@ export function useNailDesignChatPage() {
             // ★ refine 결과(inpaint 이미지)를 바로 사용, runGenerateDesign 호출 안 함
             const data = await refineKeywords(sessionId, text)
 
+            // 서버가 "수정 요청이 아니거나 이해하지 못했다"고 안내만 돌려준 경우:
+            // 이미지는 그대로 두고(lastDesign 변경 없음) 안내 메시지만 채팅에 보여준다.
+            if (data.assistantMessage) {
+                pushAssistant(data.assistantMessage)
+                // 서버가 준 "이렇게 말씀해 보세요" 선택지 + 이대로 확정 버튼을 채팅 아래에 보여준다.
+                // (직접 입력도 계속 가능 — mode가 'revise'로 유지된다)
+                const suggestions = (data.assistantOptions ?? []).filter((s) => s.trim().length > 0)
+                if (suggestions.length > 0) {
+                    setActiveQuickReply({
+                        id: 'revise-suggestions',
+                        question: '이렇게 말씀해 보실래요? 직접 입력하셔도 돼요.',
+                        options: [
+                            ...suggestions.map((s) => ({ value: s, label: s })),
+                            { value: '__accept_current__', label: '이대로 괜찮아요 🎉' },
+                        ],
+                        multi: false,
+                        limit: 1,
+                        layout: 'list',
+                    })
+                } else {
+                    setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+                }
+                return
+            }
+
             setLastDesign({
                 designId: data.designId,
                 imageUrls: data.imageUrls,
@@ -1286,7 +1311,14 @@ export function useNailDesignChatPage() {
                         referenceImageUrl: null,
                         handSummary: null,
                     }),
-                    revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
+                    // 결과 화면 키워드는 "마지막 결과 이미지"에 반영된 옵션만 보여준다:
+                    // 서버(RefineService)가 수정을 반영한 슬롯 기준으로 돌려준 키워드로 교체하고
+                    // (예: 쉐입을 스퀘어로 바꿨으면 처음 고른 스틸레토는 빠진다),
+                    // "수정 요청 문장" 원문은 키워드 칩으로 쌓지 않는다.
+                    keywords: data.keywords && data.keywords.length > 0
+                        ? data.keywords
+                        : (lastDesign?.context?.keywords ?? []),
+                    revisionKeywords: [],
                 },
             })
 
@@ -1318,15 +1350,30 @@ export function useNailDesignChatPage() {
         reader.readAsDataURL(file)
     }
 
-    const handlePhotoConfirm = () => {
-        if (!selectedPhotoFile || !selectedPhotoPreviewUrl) return
+    // 사진 + (입력창에 적은) 추가 요청으로 생성. note가 비어 있으면 사진만 사용한다.
+    const confirmPhotoWithNote = (note: string) => {
+        if (!selectedPhotoFile || !selectedPhotoPreviewUrl || isSending) return
         setActiveQuickReply(null)
+        setInputValue('')
+        requestAnimationFrame(() => {
+            if (textareaRef.current) textareaRef.current.style.height = `${INPUT_MIN_HEIGHT}px`
+        })
         setBubbles((prev) => [
             ...prev,
-            { id: makeId(), role: 'user', text: '이 사진으로 만들어줘', imageUrls: [selectedPhotoPreviewUrl] },
+            {
+                id: makeId(),
+                role: 'user',
+                text: note ? `이 사진으로 만들어줘\n${note}` : '이 사진으로 만들어줘',
+                imageUrls: [selectedPhotoPreviewUrl],
+            },
         ])
-        void runGenerateDesignFromPhoto(selectedPhotoFile)
+        // 결과 화면 키워드에도 이 요청이 남도록 기록 (buildFreeformKeywords(reviseLogRef))
+        if (note) reviseLogRef.current.push(note)
+        void runGenerateDesignFromPhoto(selectedPhotoFile, note || undefined)
     }
+
+    // "이 사진으로 생성하기" 버튼: 입력창에 적어둔 내용이 있으면 같이 반영한다.
+    const handlePhotoConfirm = () => confirmPhotoWithNote(inputValue.trim())
 
     const handleFreeformGenerate = () => {
         setActiveQuickReply(null)
@@ -1425,6 +1472,11 @@ export function useNailDesignChatPage() {
     const handleSubmitInput = () => {
         const text = inputValue.trim()
         if (!text || isSending) return
+        // 참고 사진을 이미 골라 둔 상태에서 보내기를 누르면, 사진 + 이 문장을 함께 반영해서 바로 생성한다.
+        if (activeQuickReply?.id === 'photo-upload' && selectedPhotoFile && selectedPhotoPreviewUrl) {
+            confirmPhotoWithNote(text)
+            return
+        }
         setInputValue('')
         setActiveQuickReply(null)
         requestAnimationFrame(() => {
@@ -1480,6 +1532,17 @@ export function useNailDesignChatPage() {
         }
         if (activeQuickReply?.id === 'design-feedback') {
             handleDesignFeedback(option)
+            return
+        }
+        if (activeQuickReply?.id === 'revise-suggestions') {
+            if (option.value === '__accept_current__') {
+                handleDesignFeedback({ value: 'accept', label: option.label })
+                return
+            }
+            // 선택지를 눌렀으면 그 문장을 수정 요청으로 그대로 보낸다
+            setActiveQuickReply(null)
+            pushUser(option.label)
+            void handleReviseSubmit(option.value)
             return
         }
         if (activeQuickReply?.id.startsWith('pref-')) {
