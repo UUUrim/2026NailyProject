@@ -1981,10 +1981,15 @@ public class NailDesignService {
     // 키워드 비교용: 의미 없이 붙는 일반 단어는 빼고 비교한다 ("snowman art" == "snowman")
     private static final Set<String> GENERIC_KEYWORD_WORDS = Set.of(
             "art", "charm", "charms", "pattern", "finish", "design", "motif", "decor", "decoration",
-            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect", "mascot");
+            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect", "mascot", "bead", "beads", "trim");
+    // 디자인 정보가 없는 막연한 말은 키워드로 보여주지 않는다 (예: "trendy"). 화면에 보이면 한 줄씩 추가.
+    private static final Set<String> VAGUE_KEYWORDS = Set.of(
+            "trendy", "nice", "beautiful", "pretty", "stylish", "premium", "luxury",
+            "fashionable", "popular", "aesthetic");
     // 같은 뜻의 단어는 하나로 본다 ("plaid" == "check pattern")
     private static final Map<String, String> KEYWORD_SYNONYMS = Map.of(
-            "plaid", "check", "tartan", "check", "gingham", "check", "checkered", "check", "checks", "check");
+            "plaid", "check", "tartan", "check", "gingham", "check", "checkered", "check", "checks", "check",
+            "flower", "floral");
 
     /**
      * 디자인 플랜(5개 손가락)에 실제로 쓰인 finish/pattern/motif/parts 값을 키워드로 뽑는다.
@@ -2032,6 +2037,7 @@ public class NailDesignService {
         for (List<String> list : List.of(primary, extra)) {
             for (String k : list) {
                 if (k == null || k.isBlank()) continue;
+                if (VAGUE_KEYWORDS.contains(k.trim().toLowerCase())) continue;
                 if (seen.add(keywordCore(k)) && out.size() < MAX_TOTAL_KEYWORDS) out.add(k.trim());
             }
         }
