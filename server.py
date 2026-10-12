@@ -635,8 +635,31 @@ class _StreamState:
         # 재측정 자체는 사진 한 장짜리 단일 프레임 값이라 라이브 평균보다
         # 노이즈에 더 취약하기 때문.
         self.live_wl: dict = {}
+        # 지금 촬영 중인 손의 (userid, session). /analyze/cancel로 취소된 세션이 이것과 같을 때만
+        # cancel_capture를 켠다 - 켜지면 탑뷰/사이드뷰 촬영 루프가 다음 손가락을 기다리지 않고 빠져나온다.
+        self.capture_session: tuple | None = None
+        self.cancel_capture: threading.Event = threading.Event()
 
 _S = _StreamState()
+
+
+# 취소된 스캔 세션 (userid, session). 사용자가 촬영 도중 "다시 촬영해야 한다"는 경고를 확인하고
+# 페이지를 나가면 Spring이 /analyze/cancel로 알려 준다. 이 세션들은 촬영을 멈추고, 측정이 끝나도
+# 양손 최종 measurements.json을 만들거나 성공 콜백을 보내지 않는다.
+_CANCELLED_SESSIONS: set = set()
+_CANCELLED_LOCK = threading.Lock()
+_CANCELLED_CALLBACK = {"success": False, "message": "촬영이 취소되었습니다."}
+
+
+class ScanCancelled(Exception):
+    """촬영 도중 스캔이 취소됨 (/analyze/cancel)"""
+
+
+def _is_cancelled(userid: str, session: str | None) -> bool:
+    if not session:
+        return False
+    with _CANCELLED_LOCK:
+        return (userid, str(session)) in _CANCELLED_SESSIONS
 
 
 class PhoneCamera:
@@ -981,6 +1004,8 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
     _S.top_capture_busy.set()
     try:
         while True:
+            if _S.cancel_capture.is_set():
+                return False
             ret, frame = cap.read()
             if not ret:
                 return False
@@ -1144,6 +1169,8 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
     _S.side_capture_busy.set()
     try:
         while True:
+            if _S.cancel_capture.is_set():
+                return False
             ret, frame = cap.read()
 
             if ret:
@@ -1238,6 +1265,10 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
         else:
             print(f"[Capture] 사이드 카메라(인덱스 {CAMERA_SIDE}) 없음 → brightness fallback")
 
+    # 세션을 먼저 걸고 취소 신호를 비운 뒤 취소 목록을 확인한다 - 이 순서여야 촬영 시작 직전/직후에
+    # 들어온 취소(/analyze/cancel)도 놓치지 않는다.
+    _S.capture_session = (userid, str(session))
+    _S.cancel_capture.clear()
     _S.active = True
     _S.done_fingers = []
 
@@ -1246,12 +1277,16 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
                       args=(cap_top, top_idle_stop), daemon=True).start()
 
     try:
+        if _is_cancelled(userid, session):
+            raise ScanCancelled()
         for finger in FINGER_ORDER:
             _S.current_finger = finger
             _S.force_capture_top.clear()
             _S.force_capture_side.clear()
 
             top_ok, _ = _capture_finger_both(cap_top, cap_side, finger, local_dir, hand)
+            if _S.cancel_capture.is_set():
+                raise ScanCancelled()
             if not top_ok:
                 print(f"  [{finger}] 탑뷰 실패 → 건너뜀")
                 continue
@@ -1268,6 +1303,8 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
         _push_event({"type": "capture_complete", "doneCount": len(_S.done_fingers)})
     finally:
         _S.active = False
+        _S.current_finger = None
+        _S.capture_session = None
         top_idle_stop.set()
         time.sleep(0.1)   # let the idle loop's in-flight read() finish before release()
         # cap_top은 release() 안 함 - 세션 내내(왼손→오른손) 계속 잡고 있는 공용 카메라라서
@@ -1445,6 +1482,12 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
                     _run_measure_only(userid, session, hand)
                 finally:
                     done_event.set()     # 오른손이 이 손을 기다리고 있을 수 있다
+                # 이 손을 측정하는 사이에 스캔이 취소됐으면(예: 왼손 측정 중에 오른손 촬영 도중 나감)
+                # 결과를 쓰지 않는다 - 성공 콜백이 가면 Spring에서 취소(FAILED)가 MEASURED로 덮인다.
+                if _is_cancelled(userid, session) or _is_cancelled(userid, paired_session):
+                    print(f"[Pipeline] 취소된 스캔 - 측정 결과를 쓰지 않음: {hand}/{session}")
+                    requests.post(callback_url, json=_CANCELLED_CALLBACK)
+                    return
                 # 손 단위 합치기/분석은 없다 - 손가락별 파일만 쌓이다가, 반대 손도 측정돼 있으면
                 # (=10손가락이 모이면) 양손 최종 measurements.json을 만든다.
                 # 콜백(= Spring 상태 MEASURED)보다 먼저 만들어서, 화면이 "완료"를 본 시점에
@@ -1459,6 +1502,10 @@ def _run_measure_and_callback(userid: str, session: str, hand: str, callback_url
 
         threading.Thread(target=_background_measure, daemon=True).start()
 
+    except ScanCancelled:
+        done_event.set()
+        print(f"[Scan] 촬영 취소됨: {userid}/{session}/{hand}")
+        requests.post(callback_url, json=_CANCELLED_CALLBACK)
     except Exception as e:
         done_event.set()
         print(f"[Scan] 오류: {e}")
@@ -1541,6 +1588,10 @@ class MeasureRequest(BaseModel):
     # 이게 있어야 양손 최종 measurements.json이 만들어진다.
     pairedSession: str | None = None
 
+class CancelScanRequest(BaseModel):
+    # 취소할 세션들 - 같은 스캔의 왼손/오른손 scanId
+    userid: str; sessions: list[str]
+
 class StlRequest(BaseModel):
     userid: str; session: str; hand: str; shape: str; callbackUrl: str
     # 출력 화면에서 사용자가 설정한 팁 연장 길이(mm). 없으면 쉐입별 기본값을 쓴다.
@@ -1584,6 +1635,20 @@ def analyze_measure(request: MeasureRequest):
         daemon=True,
     ).start()
     return {"status": "started", "message": "스캔이 시작되었습니다. 카메라 화면을 확인하세요."}
+
+
+@app.post("/analyze/cancel")
+def analyze_cancel(request: CancelScanRequest):
+    """사용자가 촬영 도중 경고를 확인하고 페이지를 나가 스캔을 취소했을 때 Spring이 부른다.
+    그 세션을 촬영 중이면 다음 손가락을 기다리지 않고 바로 멈추고, 이미 촬영이 끝나 측정 중인 손은
+    측정이 끝나도 결과를 쓰지 않는다. 아직 촬영 요청이 오지 않은 세션은 나중에 와도 바로 취소된다."""
+    keys = {(request.userid, str(s)) for s in request.sessions}
+    with _CANCELLED_LOCK:
+        _CANCELLED_SESSIONS.update(keys)
+    if _S.capture_session in keys:
+        _S.cancel_capture.set()
+    print(f"[Scan] 스캔 취소 요청: {request.userid} / 세션 {', '.join(request.sessions)}")
+    return {"status": "cancelled"}
 
 
 @app.post("/analyze/stl")
