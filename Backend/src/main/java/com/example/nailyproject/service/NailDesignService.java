@@ -81,6 +81,16 @@ public class NailDesignService {
     @org.springframework.beans.factory.annotation.Value("${naily.image-provider:diffusers}")
     private String imageProvider;
 
+    // gptimage 요청에 background=transparent / output_format=png를 추가할지.
+    // 켜면 프롬프트도 투명 배경용 문구로 바뀐다(흰 배경 / 그림자 / "배경이 비친다" 문구 제거 - 남겨두면 모델이 흰 배경을 그려서
+    // 투명 요청이 무시된다). AR 크롭은 투명 원본의 알파로 만들어지고, 끄면 흰 배경 이미지에서 로컬 누끼를 딴다.
+    @org.springframework.beans.factory.annotation.Value("${naily.gpt-image-transparent:true}")
+    private boolean gptImageTransparent;
+
+    private boolean useTransparentGptImage() {
+        return gptImageTransparent && "gptimage".equalsIgnoreCase(imageProvider);
+    }
+
     public NailDesignService(NailDesignRepository nailDesignRepository,
                              UserRepository userRepository,
                              DesignSessionRepository designSessionRepository,
@@ -192,16 +202,19 @@ public class NailDesignService {
         String imageBase64;
         String aiModel;
         Long seed;
+        // gptimage는 투명 배경 PNG로 생성한다 (AR용 원본). 화면에 보여줄 이미지는 아래에서 흰 배경을 입혀 따로 만든다.
+        boolean transparentImage = false;
         if ("gptimage".equalsIgnoreCase(imageProvider)) {
+            transparentImage = useTransparentGptImage();
             List<byte[]> references = finishReferenceService.referencesFor(referenceFinishes);
             if (references.isEmpty()) {
-                imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto");
+                imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto", transparentImage);
             } else {
                 try {
-                    imageBase64 = gptClientService.generateImageWithReferences(prompt, "1536x1024", "auto", references);
+                    imageBase64 = gptClientService.generateImageWithReferences(prompt, "1536x1024", "auto", references, transparentImage);
                 } catch (Exception e) {
                     System.err.println("[NailDesignService] 레퍼런스 첨부 생성 실패, 텍스트만으로 재시도: " + e.getMessage());
-                    imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto");
+                    imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto", transparentImage);
                 }
             }
             aiModel = "gpt-image-2.5-sunburst";
@@ -220,14 +233,26 @@ public class NailDesignService {
         }
 
         // 2. base64 → bytes → S3 업로드
+        //    표시용 이미지는 흰 배경을 입힌 버전, 투명 원본(imageBase64)은 AR 네일팁 크롭에만 쓴다.
         byte[] imageBytes = Base64.getDecoder().decode(imageBase64);
+        String displayBase64 = imageBase64;
+        if (transparentImage) {
+            // 투명 배경을 요청했어도 모델이 무시하고 불투명(흰/오프화이트 배경) 이미지를 줄 수 있다. 어느 쪽인지 남겨둔다.
+            System.out.println("[GptImage] background=transparent 요청 → 응답: " + PngBackground.describeAlpha(imageBytes));
+        }
+        if (transparentImage) {
+            // 모델 출력 그대로(알파 보정 없음): AR 크롭은 투명 원본, 표시용은 거기에 흰 배경을 입힌 것
+            imageBytes = PngBackground.compositeOnWhite(imageBytes);
+            displayBase64 = Base64.getEncoder().encodeToString(imageBytes);
+        }
         String s3Key = "designs/user_" + userId + "/" + UUID.randomUUID() + ".png";
         String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
 
 
-        // 4. detect 서버에서 손가락별 네일팁 매트 이미지 추출 → S3 업로드 후 URL 리스트 JSON
+        // 4. 손가락별 네일팁 매트 이미지 추출 → S3 업로드 후 URL 리스트 JSON
         //    (AR 미리보기가 로컬 세그멘테이션 대신 이걸 우선 사용 - nailDesignAsset.ts 참고)
-        String nailTipCropsJson = fetchAndUploadNailTipCrops(userId, imageBase64);
+        //    로컬 누끼는 투명 원본의 알파를 그대로 쓰고, detect 서버 폴백에는 흰 배경 버전을 보낸다.
+        String nailTipCropsJson = fetchAndUploadNailTipCrops(userId, imageBase64, displayBase64);
 
         NailDesign design = NailDesign.builder()
                 .user(user)
@@ -245,9 +270,22 @@ public class NailDesignService {
         return saved;
     }
 
-    private String fetchAndUploadNailTipCrops(Long userId, String imageBase64) {
+    private String fetchAndUploadNailTipCrops(Long userId, String imageBase64, String fallbackBase64) {
         try {
-            Map<String, List<String>> parts = nailDetectionService.detectParts(imageBase64, List.of("nail tip"));
+            // 투명(또는 흰) 배경 위 5개 시트라 SAM 없이 픽셀 연산으로 먼저 따고, 5개를 못 찾을 때만 detect 서버로 폴백한다.
+            List<NailSheetSegmenter.Nail> local = nailDetectionService.segmentNailsLocally(imageBase64);
+            if (local != null && local.size() == NailSheetSegmenter.NAIL_COUNT) {
+                System.out.println("[NailTipCrops] 로컬(Java) 누끼 성공: " + local.size() + "개 — detect 서버 호출 안 함");
+                List<String> urls = new ArrayList<>();
+                for (int i = 0; i < local.size(); i++) {
+                    String s3Key = "designs/user_" + userId + "/nail-tips-ordered/" + UUID.randomUUID() + "_" + i + ".png";
+                    urls.add(s3Service.uploadImageBytes(local.get(i).cropPng(), s3Key));
+                }
+                return objectMapper.writeValueAsString(urls);
+            }
+            System.out.println("[NailTipCrops] 로컬 누끼 실패 → detect 서버로 폴백");
+
+            Map<String, List<String>> parts = nailDetectionService.detectParts(fallbackBase64, List.of("nail tip"));
             List<String> crops = parts.get("nail tip");
             System.out.println("[NailTipCrops] 탐지된 크롭 수: " + (crops != null ? crops.size() : "null")); // ★
             if (crops == null || crops.isEmpty()) return null;
@@ -421,7 +459,7 @@ public class NailDesignService {
         try {
             byte[] imgBytes = s3Service.downloadImageBytes(design.getImageUrls().get(0));
             String imgBase64 = Base64.getEncoder().encodeToString(imgBytes);
-            List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNail(imgBase64);
+            List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNailLocalFirst(imgBase64);
             List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
             design.updateColorPalette(objectMapper.writeValueAsString(palette));
             nailDesignRepository.save(design);
@@ -1662,7 +1700,9 @@ public class NailDesignService {
                             .append(" imperfect proportions, but the line itself is perfectly smooth — a solid,")
                             .append(" evenly colored, evenly glossy stroke like a smooth gel pen, with no grain, no")
                             .append(" bumps, no lumps, and no fuzzy pencil texture. It never looks like a sticker,")
-                            .append(" decal, or printed clip-art.");
+                            .append(" decal, or printed clip-art. If the drawing is a named character, only the line")
+                            .append(" quality is naive: keep that character's official signature colors and markings")
+                            .append(" exactly as described (never recolor it to gray, black, or a generic animal).");
                 }
                 // ★ 소용돌이/스파이럴: 플래너가 얇은 라인으로 쓰는 경우가 있어서 굵고 짧은 형태를 확정 문장으로 덮어쓴다.
                 // 세트 전체에서 입체/수채화 중 한 방식만 쓰고, 동심원이 아니라 중심에서 바깥으로 이어지는 한 줄 나선으로 고정한다.
@@ -1784,7 +1824,9 @@ public class NailDesignService {
         sb.append("Composition:\n")
                 .append("Arrange exactly five nail tips in a neat horizontal group, ")
                 .append("similar size and proportion, each nail completely visible, no overlap, ")
-                .append("centered composition, large amount of clean white negative space, ")
+                .append(useTransparentGptImage()
+                        ? "centered composition, large amount of empty negative space around the nails, "
+                        : "centered composition, large amount of clean white negative space, ")
                 .append("tips_only_flatlay presentation.\n\n");
 
         sb.append("Photography:\n")
@@ -1801,14 +1843,29 @@ public class NailDesignService {
                 .append("should follow whatever each nail's own material description above specifies, ")
                 .append("rendered with real-photo specular realism. Where the nail is jelly, milky, or ")
                 .append("translucent, render real light transmission — light glows softly from within ")
-                .append("the clear gel and the white background is faintly visible through the ")
-                .append("translucent edges, like real gel catching light, never a flat opaque pastel ")
-                .append("coating.\n\n")
-                .append("Clean seamless white background, soft gentle shadow beneath each nail, ")
+                .append(useTransparentGptImage()
+                        // 투명 PNG로 받을 때 "배경이 비친다"고 쓰면 모델이 손톱의 흰/맑은 부분을 알파 0으로 뚫어버려
+                        // 손톱 끝이 잘린 채 나온다(AR 크롭에서 흰 그라데이션 끝이 사라지던 원인). 손톱 몸통은 알파가 꽉 차야 한다.
+                        ? "the clear gel, like real gel catching light. The silhouette of every nail stays fully "
+                                + "solid from cuticle to free edge — no part of a nail may be transparent, "
+                                + "semi-transparent, or cut out. Show translucency only as glassy depth and inner "
+                                + "glow inside the nail, and render any white, milky, or clear-looking part (for "
+                                + "example a gradient that fades to white at the tip) as solid milky white.\n\n"
+                        : "the clear gel and the white background is faintly visible through the "
+                                + "translucent edges, like real gel catching light, never a flat opaque pastel "
+                                + "coating.\n\n")
+                .append(useTransparentGptImage()
+                        // 투명 PNG에서는 그림자가 반투명 회색 픽셀로 남아 AR 크롭에 섞이므로 그림자를 요구하지 않는다.
+                        ? "Isolated cut-out on a fully transparent background — no backdrop, floor, or white or colored "
+                                + "fill behind the nails — and no cast shadow, drop shadow, or reflection under or beside the nails, "
+                        : "Clean seamless white background, soft gentle shadow beneath each nail, ")
                 .append("shallow depth of field with tack-sharp macro focus on the nail surfaces, ")
                 .append("true-to-life color rendering. Subtle imperfections typical of real handmade ")
-                .append("gel nail polish — faint visible brush texture, slightly uneven gloss sheen, ")
-                .append("tiny natural variation between the five nails. Unless the design explicitly ")
+                .append("gel nail polish — faint visible brush texture and slightly uneven gloss sheen. ")
+                .append("The five nails are one matched set cured from the same bottle: the base color, ")
+                .append("tone, translucency, and gloss level are exactly the same on every nail, with no ")
+                .append("nail looking pinker, grayer, bluer, lighter, or more transparent than the others — ")
+                .append("only designs that a nail's own description assigns to it may differ. Unless the design explicitly ")
                 .append("calls for glitter, render every reflective or shimmery surface as a smooth, ")
                 .append("continuous, mirror-like gloss — never as scattered glitter specks or sparkle ")
                 .append("dust. This must read as an unedited raw photograph from a real Korean nail ")

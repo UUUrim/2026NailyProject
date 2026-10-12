@@ -1614,8 +1614,20 @@ def apply_wl_correction(finger: str, width_mm: float, length_mm: float) -> dict:
 
 NAIL_SHAPES = ("round", "oval", "square", "almond", "ballerina", "stiletto")
 
+# 비율 z(넓고 짧을수록 +) -> 쉐입. 위에서부터 "z가 이 값 이상이면" 순서로 본다.
+# 넓고 짧은 손톱일수록 끝을 길게 좁히는 쉐입(길어 보이게), 좁고 긴 손톱일수록
+# 끝을 좁히지 않는 쉐입(폭이 살아 보이게)으로 가는 한 줄짜리 축이다.
+_SHAPE_BY_WL_Z = (
+    ( 1.25, "stiletto"),
+    ( 0.75, "ballerina"),
+    ( 0.25, "almond"),
+    (-0.25, "oval"),
+    (-0.75, "square"),
+)
+_SHAPE_NARROWEST = "round"   # 위 구간 어디에도 안 걸리는 가장 좁고 긴 쪽 (z 정보가 없을 때의 기본값도 이것)
 
-def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
+
+def recommend_nail_shape(wl_checks: list) -> str:
     """Recommend a nail shape from this hand's measured width/length proportions.
 
     wl_checks: the wl_ratio_check dicts (see apply_wl_correction) for this
@@ -1625,16 +1637,18 @@ def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
     wl_diff/wl_std_dev across fingers gives a single z-score for how wide
     or narrow this hand's nail beds are relative to the population norm:
     positive = wider/shorter than average, negative = narrower/longer than
-    average - the same axis nail techs use to pick a shape (a wide/short
-    bed gets rounded/tapered to look longer; a bed that's already narrow/
-    long has room to taper into something more dramatic).
+    average.
 
-    overall_size (this hand's mode nail_size classification, already
-    computed elsewhere from the same population norms - see
-    _size_category) gates the two most dramatic shapes: ballerina and
-    stiletto both need real absolute nail length to taper into, not just
-    narrow proportions on an otherwise short nail, so a narrow-but-short
-    bed gets almond instead.
+    The shape is chosen to correct the proportion, not to follow it: a
+    wide/short bed gets a shape that tapers and extends the free edge so
+    the nail reads longer and slimmer (stiletto > ballerina > almond), an
+    average bed gets the all-round oval, and a narrow/long bed gets a
+    shape that does not taper it any further (square, then round at the
+    narrowest). See _SHAPE_BY_WL_Z for the cut points.
+
+    Natural nail length does not gate any shape: the printed tip adds its
+    own extension on top of the measured nail (see TIP_EXTENSION_DEFAULT_MM
+    in nail_exact_stl.py), so a short nail can still carry a long shape.
 
     This is a heuristic, not a clinically validated recommendation -
     thresholds were picked to match common nail-tech shape guidance, not
@@ -1643,18 +1657,13 @@ def recommend_nail_shape(wl_checks: list, overall_size: str) -> str:
     zs = [c["wl_diff"] / c["wl_std_dev"]
           for c in wl_checks if c.get("wl_std_dev")]
     if not zs:
-        return "round"
+        return _SHAPE_NARROWEST
     z = sum(zs) / len(zs)
 
-    if z >= 1.25:
-        return "round"
-    if z >= 0.5:
-        return "oval"
-    if z >= -0.5:
-        return "square"
-    if overall_size in ("larger", "much_larger"):
-        return "stiletto" if z < -1.25 else "ballerina"
-    return "almond"
+    for threshold, shape in _SHAPE_BY_WL_Z:
+        if z >= threshold:
+            return shape
+    return _SHAPE_NARROWEST
 
 
 # ─────────────────────────────────────────────────────────────

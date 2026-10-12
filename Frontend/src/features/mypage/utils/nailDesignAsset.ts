@@ -974,8 +974,20 @@ export async function prepareNailDesignAsset(
       // With the composite's pixels unreadable there's no way to check the
       // crops' positions - and local segmentation needs those same pixels -
       // so exactly five crops keep their given order as the best available.
-      const ordered =
-        orderCropsLeftToRight(prepared, crops) ?? (crops.length === FINGER_COUNT && !prepared.data ? crops : null)
+      // 백엔드가 로컬(알파/픽셀) 세그멘테이션으로 만든 크롭은 이미 왼쪽→오른쪽(엄지→새끼) 순서로 저장되고
+      // S3 경로에 nail-tips-ordered가 들어간다. 이 경우는 투명 원본에서 잘라서 표시 이미지와 색이 정확히
+      // 일치하지 않을 수 있으니, 색 매칭 없이 받은 순서를 그대로 쓴다.
+      const backendOrdered =
+        crops.length === FINGER_COUNT && nailTipCropUrls.every((url) => url.includes('/nail-tips-ordered/'))
+      const ordered = backendOrdered
+        ? crops
+        : orderCropsLeftToRight(prepared, crops) ?? (crops.length === FINGER_COUNT && !prepared.data ? crops : null)
+      // eslint-disable-next-line no-console
+      console.info('[NailAR] 크롭 사용:', {
+        source: backendOrdered ? '백엔드 순서 그대로' : ordered ? '색 매칭으로 정렬' : '매칭 실패 → 로컬 누끼 폴백',
+        urls: nailTipCropUrls,
+        sizes: crops.map((crop) => `${crop.width}x${crop.height}`),
+      })
       if (ordered) {
         return {
           image: prepared.image,
@@ -989,6 +1001,8 @@ export async function prepareNailDesignAsset(
     }
   }
 
+  // eslint-disable-next-line no-console
+  console.info('[NailAR] 서버 크롭 없음 → 프론트 로컬 누끼 사용', { nailTipCropUrls })
   return {
     image: prepared.image,
     fingerNails: extractFingerNails(prepared).map(normalizeNailCutout),

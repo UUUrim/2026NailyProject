@@ -54,7 +54,7 @@ public class DesignController {
     /**
      * [테스트 전용] OpenAI 이미지 생성(GPT Image 2.5 Sunburst) 직접 호출 테스트.
      * POST /designs/test-gptimage-generate
-     * body: {"prompt": "...", "size": "1536x1024"(선택, 기본 가로형), "quality": "auto"(선택)}
+     * body: {"prompt": "...", "size": "1536x1024"(선택, 기본 가로형), "quality": "auto"(선택), "transparent": "true"(선택, 투명 배경 PNG)}
      * DB 저장 없이 base64 이미지만 바로 돌려준다.
      */
     @PostMapping("/test-gptimage-generate")
@@ -64,7 +64,8 @@ public class DesignController {
         String prompt = request.get("prompt");
         String size = request.getOrDefault("size", "1536x1024");
         String quality = request.getOrDefault("quality", "auto");
-        String imageBase64 = gptClientService.generateImage(prompt, size, quality);
+        boolean transparent = Boolean.parseBoolean(request.getOrDefault("transparent", "false"));
+        String imageBase64 = gptClientService.generateImage(prompt, size, quality, transparent);
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "GPT Image 테스트 생성 성공", Map.of("imageBase64", imageBase64))
