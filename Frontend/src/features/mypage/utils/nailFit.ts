@@ -142,9 +142,18 @@ const MASK_SEARCH_SAMPLES = 400
 const MAX_MASK_TILT = (40 * Math.PI) / 180
 const MASK_TILT_STEP = Math.PI / 180
 const MASK_TILT_PRIOR = 1.6
-/** A mask is matched to the finger whose expected nail zone - from just past
- *  DIP to well past TIP, on the DIP->TIP line - it's closest to, if within
- *  this many nail widths. */
+/** A mask is matched to the finger whose line on screen its centroid is
+ *  closest to, if within MASK_MATCH_DISTANCE nail widths: the polyline from
+ *  MASK_LINE_START of the way from PIP back to MCP (from halfway along the
+ *  thumb's MCP->IP), through PIP, DIP and TIP, on past TIP by MASK_PAST_TIP
+ *  along the pose's direction. Not just near DIP->TIP: in the claw - palm to
+ *  the camera, fingers curled until the nails face it - the landmarks pile
+ *  DIP and TIP up on the knuckle at the top of the curl, while the nail sits
+ *  1.5-2.5 widths down the finger from them, between PIP and MCP on screen;
+ *  on three live recordings every nail lay within 0.3 widths of its own
+ *  finger's line (0.8 once) and at least 1.46 from any other's. */
+const MASK_LINE_START = 0.7
+const MASK_PAST_TIP = 0.9
 const MASK_MATCH_DISTANCE = 1
 /** The crop around a hand's fingertips is this much bigger than the box
  *  around their search windows. */
@@ -233,6 +242,9 @@ type Job = {
   nailWidth: number
   /** DIP -> TIP on-screen length, px. */
   segment: number
+  /** The finger's line on screen, where its nail can be (see
+   *  MASK_LINE_START), px. */
+  line: Point[]
   /** The hand's HAND_MOTION_LANDMARKS on this frame, px. */
   hand: Point[]
   rows: number
@@ -334,6 +346,10 @@ function wrapAngle(angle: number) {
 function smoothingAlpha(cutoff: number, dt: number) {
   const tau = 1 / (2 * Math.PI * cutoff)
   return 1 / (1 + tau / dt)
+}
+
+function lerp(a: Point, b: Point, t: number): Point {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
 }
 
 /**
@@ -685,6 +701,20 @@ function measureEdge(
   return { slope, offset: Math.min(...bins.map((b) => b.along - slope * b.sideways)) }
 }
 
+/** Distance from `p` to the nearest point of the polyline `line`, px. */
+function distanceToLine(p: Point, line: Point[]) {
+  let best = Infinity
+  for (let k = 0; k + 1 < line.length; k += 1) {
+    const a = line[k]
+    const abx = line[k + 1].x - a.x
+    const aby = line[k + 1].y - a.y
+    const span = abx * abx + aby * aby
+    const t = span > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / span)) : 0
+    best = Math.min(best, Math.hypot(p.x - a.x - abx * t, p.y - a.y - aby * t))
+  }
+  return best
+}
+
 /** Matches one hand's masks to its fingers (each mask to at most one). */
 function matchMasks(masks: NailMask[], jobs: Job[]) {
   const centroids = masks.map((mask) => {
@@ -703,16 +733,9 @@ function matchMasks(masks: NailMask[], jobs: Job[]) {
   })
   const pairs: Array<{ distance: number; job: Job; mask: NailMask; index: number }> = []
   for (const job of jobs) {
-    // Zone along DIP->TIP where this finger's nail can be: just past DIP to
-    // well past TIP (the claw puts it there).
-    const zoneEnd = job.segment / job.nailWidth + 1.4
     centroids.forEach((centroid, index) => {
       if (!centroid) return
-      const dx = centroid.x - job.dip.x
-      const dy = centroid.y - job.dip.y
-      const along = (dx * job.axis.x + dy * job.axis.y) / job.nailWidth
-      const lateral = Math.abs(dx * job.across.x + dy * job.across.y) / job.nailWidth
-      const distance = Math.max(0, 0.3 - along, along - zoneEnd) + lateral
+      const distance = distanceToLine(centroid, job.line) / job.nailWidth
       if (distance < MASK_MATCH_DISTANCE) pairs.push({ distance, job, mask: masks[index], index })
     })
   }
@@ -1055,16 +1078,31 @@ export class NailFitter {
         // Nails turned too far away to search still fade out where they were
         // last found, rather than jumping back to the landmark estimate.
         if (pose.facing <= 0 && !modelReady) continue
-        const dipLm = hand.landmarks[pose.finger.dip]
-        const tipLm = hand.landmarks[pose.finger.tip]
-        const dip = { x: dipLm.x * width, y: dipLm.y * height }
-        const dx = tipLm.x * width - dip.x
-        const dy = tipLm.y * height - dip.y
-        const segment = Math.hypot(dx, dy)
-        if (segment < 1) continue
-        const axis = { x: dx / segment, y: dy / segment }
+        const at = (index: number) => ({ x: hand.landmarks[index].x * width, y: hand.landmarks[index].y * height })
+        const { finger } = pose
+        const dip = at(finger.dip)
+        const before = at(finger.dip - 1)
+        // Unmirrored, so the pose's display space is raw camera space.
+        const segment = Math.hypot(pose.tip.x - dip.x, pose.tip.y - dip.y)
+        // The pose's direction on screen - or, where the fingertip points
+        // straight at the camera and DIP and TIP share a pixel, the finger's
+        // own line, the way steadyTip turns a short DIP->TIP.
+        const flat = Math.hypot(pose.axis.x, pose.axis.y)
+        const back = Math.hypot(dip.x - before.x, dip.y - before.y)
+        const toward = pose.palmTowardCamera ? -1 : 1
+        let axis: Point
+        if (flat > 1e-3) axis = { x: pose.axis.x / flat, y: pose.axis.y / flat }
+        else if (back > 1) axis = { x: (toward * (dip.x - before.x)) / back, y: (toward * (dip.y - before.y)) / back }
+        else continue
         const reach = BEFORE_DIP + Math.min(segment / pose.width, MAX_SEGMENT) + PAST_TIP
-        const fingerIdx = FINGERS.indexOf(pose.finger)
+        const start =
+          finger.name === 'thumb' ? lerp(before, dip, 0.5) : lerp(before, at(finger.dip - 2), MASK_LINE_START)
+        const line = [start, ...(finger.name === 'thumb' ? [] : [before]), dip, pose.tip]
+        line.push({
+          x: pose.tip.x + axis.x * MASK_PAST_TIP * pose.width,
+          y: pose.tip.y + axis.y * MASK_PAST_TIP * pose.width,
+        })
+        const fingerIdx = FINGERS.indexOf(finger)
         jobs.push({
           key: `${hand.id}:${fingerIdx}`,
           handId: hand.id,
@@ -1075,6 +1113,7 @@ export class NailFitter {
           across: { x: -axis.y, y: axis.x },
           nailWidth: pose.width,
           segment,
+          line,
           hand: handPoints,
           rows: Math.min(GRID_MAX_ROWS, Math.round(reach * CELLS_PER_NAIL)),
           search: (modelReady || pose.facing >= MIN_FACING) && pose.width >= MIN_NAIL_PX,
@@ -1140,12 +1179,19 @@ export class NailFitter {
   }
 }
 
-/** A square region around one hand's fingertips (their search windows). */
+/** A square region around one hand's fingertips: their search windows, and
+ *  the stretch of each finger's line its nail can be on (Job.line). */
 function fingertipRegion(jobs: Job[], width: number, height: number): CropRegion {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
+  const include = (x: number, y: number) => {
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x)
+    maxY = Math.max(maxY, y)
+  }
   for (const job of jobs) {
     const reach = job.segment + 0.8 * job.nailWidth
     for (const [along, across] of [
@@ -1154,12 +1200,11 @@ function fingertipRegion(jobs: Job[], width: number, height: number): CropRegion
       [reach, job.nailWidth],
       [job.segment + PAST_TIP * job.nailWidth, 0],
     ]) {
-      const x = job.dip.x + job.axis.x * along + job.across.x * across
-      const y = job.dip.y + job.axis.y * along + job.across.y * across
-      minX = Math.min(minX, x)
-      minY = Math.min(minY, y)
-      maxX = Math.max(maxX, x)
-      maxY = Math.max(maxY, y)
+      include(job.dip.x + job.axis.x * along + job.across.x * across, job.dip.y + job.axis.y * along + job.across.y * across)
+    }
+    for (const point of job.line) {
+      include(point.x - job.nailWidth / 2, point.y - job.nailWidth / 2)
+      include(point.x + job.nailWidth / 2, point.y + job.nailWidth / 2)
     }
   }
   const size = Math.min(Math.max(width, height), Math.max(maxX - minX, maxY - minY) * CROP_MARGIN)
