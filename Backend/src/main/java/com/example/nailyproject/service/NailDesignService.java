@@ -965,7 +965,7 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
-                .keywords(mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
+                .keywords(localizeKeywords(mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
                 .build();
     }
@@ -1981,7 +1981,7 @@ public class NailDesignService {
     // 키워드 비교용: 의미 없이 붙는 일반 단어는 빼고 비교한다 ("snowman art" == "snowman")
     private static final Set<String> GENERIC_KEYWORD_WORDS = Set.of(
             "art", "charm", "charms", "pattern", "finish", "design", "motif", "decor", "decoration",
-            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect");
+            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect", "mascot");
     // 같은 뜻의 단어는 하나로 본다 ("plaid" == "check pattern")
     private static final Map<String, String> KEYWORD_SYNONYMS = Map.of(
             "plaid", "check", "tartan", "check", "gingham", "check", "checkered", "check", "checks", "check");
@@ -2038,6 +2038,108 @@ public class NailDesignService {
         return out;
     }
 
+    // ── 키워드 한글화 ─────────────────────────────────────────────────────────
+    // 결과 화면 키워드 칩은 영어 값(슬롯/플랜의 통제 어휘)이므로, 마지막 단계에서 한글로 바꾼다.
+    // 중복 제거(keywordCore)는 영어 기준으로 먼저 끝난 뒤에 적용한다.
+    // 사전에 없는 단어가 하나라도 있으면 그 키워드는 영어 그대로 둔다 (엉뚱한 번역보다 낫다).
+    // 새 키워드가 영어로 뜨면 KO_WORDS(단어) 또는 KO_PHRASES(문구 전체)에 한 줄 추가하면 된다.
+    private static final Map<String, String> KO_PHRASES = Map.ofEntries(
+            Map.entry("warm and cozy", "따뜻/포근"),
+            Map.entry("french tip", "프렌치"),
+            Map.entry("check pattern", "체크"),
+            Map.entry("powder finish", "파우더"),
+            Map.entry("magnetic cat eye", "마그네틱"),
+            Map.entry("cheek blush", "치크"),
+            Map.entry("sculpted 3d", "3D"),
+            Map.entry("polka dot", "도트"),
+            Map.entry("line art", "라인 아트"),
+            Map.entry("color block", "컬러 블록"),
+            Map.entry("bow ribbon", "리본"),
+            Map.entry("bow charm 3d", "리본"),
+            Map.entry("rose gold", "로즈 골드"));
+
+    private static final Map<String, String> KO_WORDS = Map.ofEntries(
+            // 무드
+            Map.entry("lovely", "러블리"), Map.entry("simple", "심플"), Map.entry("modern", "모던"),
+            Map.entry("chic", "시크"), Map.entry("cute", "큐트"), Map.entry("kitsch", "키치"),
+            Map.entry("funky", "펑키"), Map.entry("feminine", "페미닌"), Map.entry("elegant", "우아"),
+            Map.entry("pure", "순수"), Map.entry("delicate", "섬세"), Map.entry("glamorous", "글램"),
+            Map.entry("glam", "글램"), Map.entry("romantic", "로맨틱"), Map.entry("soft", "소프트"),
+            Map.entry("minimal", "미니멀"), Map.entry("natural", "내추럴"), Map.entry("vintage", "빈티지"),
+            Map.entry("edgy", "엣지"), Map.entry("dark", "다크"), Map.entry("playful", "플레이풀"),
+            Map.entry("sweet", "스위트"), Map.entry("sophisticated", "세련된"), Map.entry("cool", "쿨"),
+            Map.entry("y2k", "Y2K"), Map.entry("cozy", "포근한"), Map.entry("warm", "따뜻한"),
+            // 디자인/마감/패턴
+            Map.entry("glitter", "글리터"), Map.entry("gradient", "그라데이션"), Map.entry("cheek", "치크"),
+            Map.entry("marble", "마블"), Map.entry("french", "프렌치"), Map.entry("magnetic", "마그네틱"),
+            Map.entry("powder", "파우더"), Map.entry("matte", "매트"), Map.entry("glossy", "글로시"),
+            Map.entry("art", "아트"), Map.entry("chrome", "크롬"), Map.entry("jelly", "젤리"),
+            Map.entry("foil", "호일"), Map.entry("syrup", "시럽"), Map.entry("plaid", "체크"),
+            Map.entry("check", "체크"), Map.entry("stripe", "스트라이프"), Map.entry("lace", "레이스"),
+            Map.entry("watercolor", "수채화"), Map.entry("speckle", "스펙클"), Map.entry("line", "라인"),
+            Map.entry("dot", "도트"), Map.entry("dots", "도트"), Map.entry("sparkle", "스파클"),
+            // 모티프/파츠
+            Map.entry("star", "별"), Map.entry("ribbon", "리본"), Map.entry("bow", "리본"),
+            Map.entry("floral", "플로럴"), Map.entry("flower", "플라워"), Map.entry("heart", "하트"),
+            Map.entry("crystal", "크리스탈"), Map.entry("pearl", "진주"), Map.entry("swirl", "소용돌이"),
+            Map.entry("butterfly", "나비"), Map.entry("cross", "십자가"), Map.entry("bunny", "토끼"),
+            Map.entry("leaf", "잎"), Map.entry("shell", "조개"), Map.entry("character", "캐릭터"),
+            Map.entry("lettering", "레터링"), Map.entry("rhinestone", "큐빅"), Map.entry("bead", "비즈"),
+            Map.entry("charm", "참"), Map.entry("metal", "메탈"),
+            Map.entry("stud", "스터드"), Map.entry("chain", "체인"), Map.entry("cluster", "클러스터"),
+            Map.entry("snowman", "눈사람"), Map.entry("spider", "거미"), Map.entry("web", "거미줄"),
+            Map.entry("cobweb", "거미줄"), Map.entry("tip", "팁"), Map.entry("3d", "3D"),
+            // 쉐입/길이
+            Map.entry("round", "라운드"), Map.entry("oval", "오발"), Map.entry("almond", "아몬드"),
+            Map.entry("stiletto", "스틸레토"), Map.entry("ballerina", "발레리나"), Map.entry("coffin", "발레리나"),
+            Map.entry("square", "스퀘어"), Map.entry("short", "숏"), Map.entry("medium", "미디엄"),
+            Map.entry("long", "롱"),
+            // 계절
+            Map.entry("spring", "봄"), Map.entry("summer", "여름"), Map.entry("autumn", "가을"),
+            Map.entry("fall", "가을"), Map.entry("winter", "겨울"),
+            // 색 (ColorNameService 이름 + 수식어)
+            Map.entry("white", "화이트"), Map.entry("black", "블랙"), Map.entry("red", "레드"),
+            Map.entry("blue", "블루"), Map.entry("green", "그린"), Map.entry("yellow", "옐로"),
+            Map.entry("orange", "오렌지"), Map.entry("pink", "핑크"), Map.entry("purple", "퍼플"),
+            Map.entry("brown", "브라운"), Map.entry("gray", "그레이"), Map.entry("grey", "그레이"),
+            Map.entry("beige", "베이지"), Map.entry("ivory", "아이보리"), Map.entry("cream", "크림"),
+            Map.entry("navy", "네이비"), Map.entry("teal", "청록"), Map.entry("mint", "민트"),
+            Map.entry("peach", "피치"), Map.entry("coral", "코랄"), Map.entry("rose", "로즈"),
+            Map.entry("lavender", "라벤더"), Map.entry("olive", "올리브"), Map.entry("gold", "골드"),
+            Map.entry("silver", "실버"), Map.entry("magenta", "마젠타"), Map.entry("burgundy", "버건디"),
+            Map.entry("nude", "누드"), Map.entry("clear", "클리어"), Map.entry("deep", "딥"),
+            Map.entry("light", "라이트"), Map.entry("pale", "페일"), Map.entry("muted", "뮤트"),
+            Map.entry("vivid", "비비드"), Map.entry("dusty", "애쉬"), Map.entry("milky", "밀키"));
+
+    // 한글로 옮길 때 뜻이 없어 빼는 단어 ("star motif" -> "별")
+    private static final Set<String> KO_DROP_WORDS = Set.of("motif", "finish", "pattern", "design", "mascot", "trim");
+
+    /** 키워드 하나를 한글로. 사전에 없는 단어가 있거나 이미 한글이면 원문 그대로. */
+    private String localizeKeyword(String keyword) {
+        String k = keyword.trim();
+        String lower = k.toLowerCase();
+        if (lower.isEmpty()) return k;
+        if (KO_PHRASES.containsKey(lower)) return KO_PHRASES.get(lower);
+        List<String> out = new ArrayList<>();
+        for (String w : lower.split("[\\s_-]+")) {
+            if (w.isBlank() || KO_DROP_WORDS.contains(w)) continue;
+            String ko = KO_WORDS.get(w);
+            if (ko == null) return k; // 모르는 단어(또는 한글) -> 원문 유지
+            out.add(ko);
+        }
+        return out.isEmpty() ? k : String.join(" ", out);
+    }
+
+    /** 키워드 목록을 한글로 바꾸고, 한글로 바꾼 뒤 같아진 것(예: plaid / check pattern -> 체크)은 하나만 남긴다. */
+    private List<String> localizeKeywords(List<String> keywords) {
+        Set<String> seen = new LinkedHashSet<>();
+        for (String k : keywords) {
+            if (k == null || k.isBlank()) continue;
+            seen.add(localizeKeyword(k));
+        }
+        return new ArrayList<>(seen);
+    }
+
     /**
      * 결과 화면 키워드(최종 이미지 기준): 슬롯 + 플랜(finish/pattern/motif/parts) 키워드에,
      * 수정(refine)으로 누적된 plan.keywordOverrides(add/remove)를 반영한다.
@@ -2049,7 +2151,7 @@ public class NailDesignService {
             try { plan = objectMapper.readTree(planJson); } catch (Exception ignored) {}
         }
         List<String> base = mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan));
-        if (plan == null) return base;
+        if (plan == null) return localizeKeywords(base);
 
         List<String> removes = new ArrayList<>();
         plan.path("keywordOverrides").path("remove").forEach(n -> removes.add(n.asText("").trim().toLowerCase()));
@@ -2067,7 +2169,7 @@ public class NailDesignService {
         }
         int room = Math.max(0, MAX_TOTAL_KEYWORDS - adds.size());
         if (kept.size() > room) kept = new ArrayList<>(kept.subList(0, room));
-        return mergeKeywords(kept, adds);
+        return localizeKeywords(mergeKeywords(kept, adds));
     }
 
     public List<String> extractKeywordsFromSlots(Map<String, SlotData> slots, DesignSession session) {
