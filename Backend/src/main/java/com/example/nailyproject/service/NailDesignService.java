@@ -1647,6 +1647,11 @@ public class NailDesignService {
                 .append(" points straight down toward the bottom of the frame, and the wider")
                 .append(" cuticle end is at the top. Do not rotate or flip any nail —")
                 .append(" all five must share this exact same up/down orientation.");
+        // ★ 쉐입(스퀘어 등)은 "끝(프리엣지)" 모양만 정한다. 이 구분이 없으면 이미지 모델이 큐티클 쪽 위 모서리까지
+        // 각지게 그려서, 큐티클은 항상 부드러운 둥근 곡선이 되도록 명시한다.
+        sb.append(" The nail shape describes ONLY the free edge at the bottom of each nail. The cuticle end at the top")
+                .append(" of every nail is always a soft, rounded arc, whatever the shape is - never squared off,")
+                .append(" flattened or pointed.");
         sb.append("\n\n");
 
         List<String> collectedFinishes = new ArrayList<>();
@@ -1847,17 +1852,17 @@ public class NailDesignService {
                         // 투명 PNG로 받을 때 "배경이 비친다"고 쓰면 모델이 손톱의 흰/맑은 부분을 알파 0으로 뚫어버려
                         // 손톱 끝이 잘린 채 나온다(AR 크롭에서 흰 그라데이션 끝이 사라지던 원인). 손톱 몸통은 알파가 꽉 차야 한다.
                         ? "the clear gel, like real gel catching light. The silhouette of every nail stays fully "
-                                + "solid from cuticle to free edge — no part of a nail may be transparent, "
-                                + "semi-transparent, or cut out. Show translucency only as glassy depth and inner "
-                                + "glow inside the nail, and render any white, milky, or clear-looking part (for "
-                                + "example a gradient that fades to white at the tip) as solid milky white.\n\n"
+                        + "solid from cuticle to free edge — no part of a nail may be transparent, "
+                        + "semi-transparent, or cut out. Show translucency only as glassy depth and inner "
+                        + "glow inside the nail, and render any white, milky, or clear-looking part (for "
+                        + "example a gradient that fades to white at the tip) as solid milky white.\n\n"
                         : "the clear gel and the white background is faintly visible through the "
-                                + "translucent edges, like real gel catching light, never a flat opaque pastel "
-                                + "coating.\n\n")
+                        + "translucent edges, like real gel catching light, never a flat opaque pastel "
+                        + "coating.\n\n")
                 .append(useTransparentGptImage()
                         // 투명 PNG에서는 그림자가 반투명 회색 픽셀로 남아 AR 크롭에 섞이므로 그림자를 요구하지 않는다.
                         ? "Isolated cut-out on a fully transparent background — no backdrop, floor, or white or colored "
-                                + "fill behind the nails — and no cast shadow, drop shadow, or reflection under or beside the nails, "
+                        + "fill behind the nails — and no cast shadow, drop shadow, or reflection under or beside the nails, "
                         : "Clean seamless white background, soft gentle shadow beneath each nail, ")
                 .append("shallow depth of field with tack-sharp macro focus on the nail surfaces, ")
                 .append("true-to-life color rendering. Subtle imperfections typical of real handmade ")
@@ -1943,9 +1948,9 @@ public class NailDesignService {
         return switch (shape.toLowerCase()) {
             case "stiletto"  -> " with sharp elegant proportions";
             case "almond"    -> " with slightly elongated proportions";
-            case "ballerina" -> " with long flat-tipped proportions";
+            case "ballerina" -> " with long proportions whose free edge is flat and narrower with squared corners";
             case "oval"      -> " with soft rounded proportions";
-            case "square"   -> " with clean straight-edged proportions";
+            case "square"   -> " whose free edge is flat and straight across with softly squared corners";
             case "round"    -> " with natural rounded proportions";
             default -> "";
         };

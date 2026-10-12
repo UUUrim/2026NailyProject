@@ -871,7 +871,11 @@ export function useNailDesignChatPage() {
                     : source === 'freeform'
                         ? {
                             source,
-                            keywords: buildFreeformKeywords(freeformLogRef.current),
+                            // 서버가 슬롯(무드/타입/모티프/쉐입/컬러)과 플랜에서 뽑아 한글로 정리한 키워드를 우선 쓴다.
+                            // 사용자가 친 문장을 쪼개 칩으로 쓰는 건 서버 키워드가 비었을 때의 폴백으로만 사용한다.
+                            keywords: data.keywords && data.keywords.length > 0
+                                ? data.keywords
+                                : buildFreeformKeywords(freeformLogRef.current),
                             referenceImageUrl: null,
                             handSummary: null,
                             revisionKeywords,
@@ -1151,6 +1155,19 @@ export function useNailDesignChatPage() {
         goToPreferenceStep(targetIndex, updatedPreferences)
     }
 
+    // 선택지에서 고른 내용을 "무드는 …, 디자인 타입은 … 로 해주세요." 형태의 문장으로 만든다. 고른 게 없으면 ''.
+    const buildPreferenceSummary = (preferences: NailDesignPreferences): string => {
+        const parts = [
+            preferences.mood?.length ? `무드는 ${preferences.mood.join(', ')}` : null,
+            preferences.designType?.length ? `디자인 타입은 ${preferences.designType.join(', ')}` : null,
+            preferences.season?.length ? `계절은 ${preferences.season.join(', ')}` : null,
+            preferences.motif?.length ? `모티프는 ${preferences.motif.join(', ')}` : null,
+            preferences.shape?.length ? `쉐입은 ${preferences.shape.join(', ')}` : null,
+            preferences.color?.length ? `컬러는 ${preferences.color.join(', ')}` : null,
+        ].filter(Boolean)
+        return parts.length > 0 ? parts.join(', ') + '로 해주세요.' : ''
+    }
+
     const finalizePreferenceDesign = async (preferences: NailDesignPreferences) => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
@@ -1162,16 +1179,7 @@ export function useNailDesignChatPage() {
         // 예전에는 /chats/{sessionId}/preferences(savePreferences, 레거시 API)를 호출했는데,
         // 이 엔드포인트는 더 이상 백엔드의 SlotData 기반 슬롯 시스템과 연결되어 있지 않아서
         // 여기서 고른 shape/color/season 등이 최종 프롬프트에 반영되지 않는 문제가 있었다.
-        const summaryMessage = [
-            preferences.mood?.length ? `무드는 ${preferences.mood.join(', ')}` : null,
-            preferences.designType?.length ? `디자인 타입은 ${preferences.designType.join(', ')}` : null,
-            preferences.season?.length ? `계절은 ${preferences.season.join(', ')}` : null,
-            preferences.motif?.length ? `모티프는 ${preferences.motif.join(', ')}` : null,
-            preferences.shape?.length ? `쉐입은 ${preferences.shape.join(', ')}` : null,
-            preferences.color?.length ? `컬러는 ${preferences.color.join(', ')}` : null,
-        ]
-            .filter(Boolean)
-            .join(', ') + '로 해주세요.'
+        const summaryMessage = buildPreferenceSummary(preferences) || '로 해주세요.'
 
         try {
             await sendChatMessage(sessionId, summaryMessage)
@@ -1383,7 +1391,10 @@ export function useNailDesignChatPage() {
         void runGenerateDesign({ ...INITIAL_PREFERENCES, freeText }, 'freeform')
     }
 
-    const sendFreeformMessage = async (text: string) => {
+    // priorContext: 선택지 진행 중에 직접 입력으로 넘어온 경우, 그때까지 고른 선택 내용(요약 문장).
+    // 서버/GPT는 선택지 단계에서 고른 값을 모르고 있으므로(마지막 단계에서야 한꺼번에 전송), 첫 메시지에 같이 보내서
+    // 이미 정한 무드/타입/모티프 등을 다시 묻지 않게 한다. 말풍선과 freeformLog에는 사용자가 친 문장만 남긴다.
+    const sendFreeformMessage = async (text: string, priorContext = '') => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
@@ -1391,7 +1402,7 @@ export function useNailDesignChatPage() {
         freeformLogRef.current.push(text)
         setIsSending(true)
         try {
-            const res = await sendChatMessage(sessionId, text)
+            const res = await sendChatMessage(sessionId, priorContext ? `${priorContext}\n${text}` : text)
             pushAssistant(res.reply)
 
             if (res.isComplete) {
@@ -1496,8 +1507,19 @@ export function useNailDesignChatPage() {
             return
         }
 
+        // 선택지(preference) 진행 중에 직접 입력하면 자유채팅으로 넘어간다 — 이때까지 확정한 선택
+        // + 지금 단계에서 고르기만 하고 "다음"을 안 누른 값도 함께 GPT에 전달한다.
+        let priorContext = ''
+        if (mode === 'preference') {
+            const currentStep = PREFERENCE_STEPS[preferenceStepIndex]
+            priorContext = buildPreferenceSummary({
+                ...collectedPreferences,
+                ...(currentStep && selectedInQuickReply.length > 0 ? { [currentStep]: selectedInQuickReply } : {}),
+            })
+        }
+
         if (mode !== 'freeform') setMode('freeform')
-        void sendFreeformMessage(text)
+        void sendFreeformMessage(text, priorContext)
     }
 
     const handleQuickReplyClick = (option: QuickReplyOption) => {
