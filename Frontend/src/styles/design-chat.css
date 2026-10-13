@@ -364,8 +364,8 @@
 
 .design-chat-sidebar__palette {
     display: grid;
-    /* 분석 결과 화면(.skin-tone-palette-grid)과 동일: arrangeRecommendedColors({ columns: 6 })가
-       열=색상군, 행=명도 단계로 배열을 만들고, 기본 흐름(row-major)으로 채운다. */
+    /* 분석 결과 화면(.skin-tone-palette-grid)과 동일: sortRecommendedColors 순서(가장 연한 색에서
+       출발해 비슷한 색끼리 잇는 TSP 경로)를 기본 흐름(row-major)으로 이어 채운다. */
     grid-template-columns: repeat(6, 1fr);
     gap: 0.3rem;
     margin-top: 0.8rem;
@@ -1292,7 +1292,8 @@
         height: calc(100dvh - 260px);
     }
 
-    /* 10열 배치(arrangeRecommendedColors)를 절반씩 접어도 색상군·명도 순서가 유지되도록 5열로 */
+    /* 모바일 5열 의도 — 단, 파일 뒤쪽의 기본 .design-chat__color-grid(10열) 규칙이 이 규칙을 덮어서
+       지금은 모바일도 10열로 나온다. (정렬은 이어 읽는 순서라 열 수와 상관없다) */
     .design-chat__color-grid {
         grid-template-columns: repeat(5, 1fr);
     }

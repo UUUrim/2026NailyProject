@@ -7,7 +7,7 @@ import { MY_SCAN_SESSIONS_QUERY_KEY } from '@/entities/scan/queries'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
-import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
+import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
@@ -289,14 +289,13 @@ export function useHandScanResultPage() {
     const skinToneAnalysis =
         skinToneAnalysisFromMetrics(result?.tone ?? null, result?.warmness ?? null, result?.brightness ?? null, result?.saturation ?? null) ??
         (result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null)
-    // .skin-tone-palette-grid 는 6열 row-major 그리드 (열 = 색상군, 행 = 명도 단계, 진한 색은 맨 아랫줄)
-    const skinTonePalette = arrangeRecommendedColors(
+    // .skin-tone-palette-grid(6열)에 정렬 순서 그대로 흘려 넣는다 — 비슷한 색끼리 잇는 TSP 경로, 연한 색 → 진한 색
+    const skinTonePalette = sortRecommendedColors(
         result?.recommendedColors && result.recommendedColors.length > 0
             ? result.recommendedColors
             : result?.skinToneHex
                 ? generateSkinTonePalette(result.skinToneHex, 30)
                 : [],
-        { columns: 6 }
     )
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락

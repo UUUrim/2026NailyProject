@@ -682,8 +682,8 @@
     grid-template-columns: 1fr;
   }
 
-  /* 반영된 추천 컬러: 6열 그리드(30색 → 6×5). 자리는 arrangeRecommendedColors({ columns: 6 })가 준
-     --mobile-order로 바꿔서 열=색상군, 행=명도 단계가 되게 한다 */
+  /* 반영된 추천 컬러: 6열 그리드(30색 → 6×5). sortRecommendedColors 순서(비슷한 색끼리 잇는 TSP 경로, 연한 → 진한)
+     그대로 row-major로 채운다 */
   .design-result-v2__origin-palette {
     grid-auto-flow: row;
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -691,7 +691,6 @@
   }
 
   .design-result-v2__origin-swatch {
-    order: var(--mobile-order, 0);
     border-radius: 8px;
   }
 
