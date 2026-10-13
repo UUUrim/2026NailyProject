@@ -25,11 +25,14 @@ public class FinishReferenceService {
 
     public static final String POWDER_FINISH = "powder finish";
     public static final String FLOWER_ART = "flower art";
+    /** 우아한 무드 + 체크 조합: 반투명 대각선 아가일 체크와 절제된 우아함의 레퍼런스(색/장식/배치는 복사하지 않도록 흑백으로 보낸다). */
+    public static final String ELEGANT_CHECK = "elegant check";
 
     private record Ref(List<String> files, boolean grayscale) {}
 
     private static final Map<String, Ref> REFS = Map.of(
             POWDER_FINISH, new Ref(List.of("finish-refs/powder-finish.jpg"), true),
+            ELEGANT_CHECK, new Ref(List.of("finish-refs/elegant-check.jpg"), true),
             FLOWER_ART, new Ref(List.of("finish-refs/flower-paint-1.png", "finish-refs/flower-paint-2.png"), false)
     );
 
@@ -47,6 +50,19 @@ public class FinishReferenceService {
         for (String key : keys) {
             String normalized = normalize(key);
             if (!result.contains(normalized) && has(normalized)) result.add(normalized);
+        }
+        return result;
+    }
+
+    /**
+     * 레퍼런스가 설정돼 있는데(REFS) 이미지 파일이 없어서 붙이지 못하는 키.
+     * 파일이 없으면 조용히 텍스트만으로 생성되기 때문에, 호출하는 쪽이 이걸 로그로 알린다.
+     */
+    public List<String> configuredButMissing(Collection<String> keys) {
+        List<String> result = new ArrayList<>();
+        for (String key : keys) {
+            String normalized = normalize(key);
+            if (REFS.containsKey(normalized) && !has(normalized) && !result.contains(normalized)) result.add(normalized);
         }
         return result;
     }

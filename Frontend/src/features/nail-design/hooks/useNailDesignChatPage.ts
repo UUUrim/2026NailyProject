@@ -80,6 +80,7 @@ const MONTHLY_TRENDING_COLORS = sortRecommendedColors([
     '#1C1C1E', // 오닉스 블랙
 ])
 import { ApiError } from '@/shared/utils/apiClient'
+import { ensureSupportedImage } from '@/shared/utils/imageFormat'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import { registerChatSessionGuard, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
 
@@ -385,6 +386,8 @@ export function useNailDesignChatPage() {
 
     const [inputValue, setInputValue] = useState(chatSessionSnapshot?.inputValue ?? '')
     const [isSending, setIsSending] = useState(false)
+    // 컬러 선택 단계의 "기타 입력"(예: "지금까지 고른 거에 어울리는 색 추천해줘"). 제출하면 자유채팅으로 넘어간다.
+    const [colorNote, setColorNote] = useState('')
     const [customColor, setCustomColor] = useState('#DE869F')
     const [isQuickReplyCollapsed, setIsQuickReplyCollapsed] = useState(chatSessionSnapshot?.isQuickReplyCollapsed ?? false)
 
@@ -706,6 +709,7 @@ export function useNailDesignChatPage() {
 
     useEffect(() => {
         setIsQuickReplyCollapsed(false)
+        setColorNote('')
     }, [activeQuickReply?.id])
 
     // 렌더될 때마다 현재 채팅 진행 상태를 모듈 스코프 스냅샷에 그대로 반영해 둔다.
@@ -888,7 +892,11 @@ export function useNailDesignChatPage() {
                     : source === 'freeform'
                         ? {
                             source,
-                            keywords: buildFreeformKeywords(freeformLogRef.current),
+                            // 서버가 슬롯(무드/타입/모티프/쉐입/컬러)과 플랜에서 뽑아 한글로 정리한 키워드를 우선 쓴다.
+                            // 사용자가 친 문장을 쪼개 칩으로 쓰는 건 서버 키워드가 비었을 때의 폴백으로만 사용한다.
+                            keywords: data.keywords && data.keywords.length > 0
+                                ? data.keywords
+                                : buildFreeformKeywords(freeformLogRef.current),
                             referenceImageUrl: null,
                             handSummary: null,
                             revisionKeywords,
@@ -1159,6 +1167,31 @@ export function useNailDesignChatPage() {
         }
     }
 
+    // 컬러 단계 "기타 입력" 제출: 지금까지 고른 선택(+컬러피커에서 고르던 색)을 요약해 이 문장과 함께 GPT에 보내고
+    // 자유채팅으로 넘어간다. GPT가 이미 정한 무드/타입/모티프 등은 다시 묻지 않고 색 이야기부터 이어간다.
+    const submitColorNote = () => {
+        const text = colorNote.trim()
+        if (!text || isSending) return
+        // 컬러피커에서 고른 색은 "선택한 순서대로 1번째, 2번째 ..."로 번호를 붙여서 같이 보낸다 —
+        // "2번째 색상은 포인트 색으로만 써줘" 같은 기타 입력이 어떤 색을 가리키는지 GPT가 알 수 있게 하기 위함.
+        const pickedColors = [...selectedInQuickReply]
+        const basePart = buildPreferenceSummary({ ...collectedPreferences, color: [] }, preferenceNotes)
+        const colorPart = pickedColors.length > 0
+            ? `컬러는 선택한 순서대로 ${pickedColors.map((hex, i) => `${i + 1}번째 ${hex}`).join(', ')}로 해주세요. ` +
+            '(직접 고른 색이며, 아래 요청이 색의 역할(예: 포인트 색)을 정하면 따라 주세요.)'
+            : ''
+        const priorContext = [basePart, colorPart].filter(Boolean).join(' ')
+        setColorNote('')
+        setSelectedInQuickReply([])
+        setActiveQuickReply(null)
+        // 말풍선에도 고른 색과 입력한 문장이 함께 보이게 한다
+        if (pickedColors.length > 0) pushUserColors(text, pickedColors)
+        else pushUser(text)
+        setMode('freeform')
+        setFreeformSelectedColors([])
+        void sendFreeformMessage(text, priorContext)
+    }
+
     const setPreferenceNote = (step: PreferenceKey, value: string) => {
         setPreferenceNotes((prev) => ({ ...prev, [step]: value.slice(0, PREFERENCE_NOTE_MAX_LENGTH) }))
     }
@@ -1186,6 +1219,32 @@ export function useNailDesignChatPage() {
         goToPreferenceStep(targetIndex, updatedPreferences)
     }
 
+    // 선택지에서 고른 내용을 "무드는 …, 디자인 타입은 … 로 해주세요." 형태의 문장으로 만든다. 고른 게 없으면 ''.
+    // "기타" 의견은 키워드로 다듬어서(예: "몽환적인 느낌" → "몽환적") 해당 카테고리의 선택값 바로 뒤에
+    // 같은 값처럼 붙인다 — 채팅 쪽에서 슬롯으로 변환되고, 백엔드가 디자인 플랜 생성에 넘기는 "사용자
+    // 원문"에도 그대로 실리게 하기 위함(원문이 길면 뒷부분이 잘리므로 기타 의견이 들어가는
+    // 분위기/디자인 타입/모티프를 앞쪽에 둔다).
+    const buildPreferenceSummary = (
+        preferences: NailDesignPreferences,
+        notes: Partial<Record<PreferenceKey, string>> = {},
+    ): string => {
+        const describe = (key: PreferenceKey, prefix: string) => {
+            const values = preferences[key] ?? []
+            const noteKeywords = extractNoteKeywords(notes[key] ?? '')
+            const parts = Array.from(new Set([...values, ...noteKeywords]))
+            return parts.length ? `${prefix} ${parts.join(', ')}` : null
+        }
+        const parts = [
+            describe('mood', '무드는'),
+            describe('designType', '디자인 타입은'),
+            describe('motif', '모티프는'),
+            describe('season', '계절은'),
+            describe('shape', '쉐입은'),
+            describe('color', '컬러는'),
+        ].filter(Boolean)
+        return parts.length > 0 ? parts.join(', ') + '로 해주세요.' : ''
+    }
+
     const finalizePreferenceDesign = async (
         preferences: NailDesignPreferences,
         notes: Partial<Record<PreferenceKey, string>>,
@@ -1204,27 +1263,7 @@ export function useNailDesignChatPage() {
         // 예전에는 /chats/{sessionId}/preferences(savePreferences, 레거시 API)를 호출했는데,
         // 이 엔드포인트는 더 이상 백엔드의 SlotData 기반 슬롯 시스템과 연결되어 있지 않아서
         // 여기서 고른 shape/color/season 등이 최종 프롬프트에 반영되지 않는 문제가 있었다.
-        // "기타" 의견은 키워드로 다듬어서(예: "몽환적인 느낌" → "몽환적") 해당 카테고리의 선택값 바로 뒤에
-        // 같은 값처럼 붙인다 — 채팅 쪽에서 슬롯으로 변환되고, 백엔드가 디자인 플랜 생성에 넘기는 "사용자
-        // 원문"에도 그대로 실리게 하기 위함(원문이 길면 뒷부분이 잘리므로 기타 의견이 들어가는
-        // 분위기/디자인 타입/모티프를 앞쪽에 둔다).
-        const describe = (key: PreferenceKey, prefix: string) => {
-            const values = preferences[key] ?? []
-            const noteKeywords = extractNoteKeywords(notes[key] ?? '')
-            const parts = Array.from(new Set([...values, ...noteKeywords]))
-            return parts.length ? `${prefix} ${parts.join(', ')}` : null
-        }
-        const summaryMessage =
-            [
-                describe('mood', '무드는'),
-                describe('designType', '디자인 타입은'),
-                describe('motif', '모티프는'),
-                describe('season', '계절은'),
-                describe('shape', '쉐입은'),
-                describe('color', '컬러는'),
-            ]
-                .filter(Boolean)
-                .join(', ') + '로 해주세요.'
+        const summaryMessage = buildPreferenceSummary(preferences, notes) || '로 해주세요.'
 
         try {
             await sendChatMessage(sessionId, summaryMessage)
@@ -1392,8 +1431,17 @@ export function useNailDesignChatPage() {
     }
 
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────
-    const handlePhotoFileChange = (file: File | null) => {
-        if (!file) return
+    const handlePhotoFileChange = async (originalFile: File | null) => {
+        if (!originalFile) return
+        // avif 등 생성 API가 받지 못하는 형식은 PNG로 바꿔서 쓴다.
+        let file: File
+        try {
+            file = await ensureSupportedImage(originalFile)
+        } catch (e) {
+            console.error('사진 형식 변환 실패:', e)
+            pushAssistant('이 사진 형식은 사용할 수 없어요. JPG, PNG, WEBP 사진으로 다시 선택해 주세요.')
+            return
+        }
         setSelectedPhotoFile(file)
         setSelectedPhotoPreviewUrl(null)
         // blob: URL은 이 페이지를 벗어났다가(뒤로가기 등) 다시 돌아왔을 때 무효화되어 이미지가
@@ -1439,7 +1487,10 @@ export function useNailDesignChatPage() {
         void runGenerateDesign({ ...INITIAL_PREFERENCES, freeText }, 'freeform')
     }
 
-    const sendFreeformMessage = async (text: string) => {
+    // priorContext: 선택지 진행 중에 직접 입력으로 넘어온 경우, 그때까지 고른 선택 내용(요약 문장).
+    // 서버/GPT는 선택지 단계에서 고른 값을 모르고 있으므로(마지막 단계에서야 한꺼번에 전송), 첫 메시지에 같이 보내서
+    // 이미 정한 무드/타입/모티프 등을 다시 묻지 않게 한다. 말풍선과 freeformLog에는 사용자가 친 문장만 남긴다.
+    const sendFreeformMessage = async (text: string, priorContext = '') => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
@@ -1447,7 +1498,7 @@ export function useNailDesignChatPage() {
         freeformLogRef.current.push(text)
         setIsSending(true)
         try {
-            const res = await sendChatMessage(sessionId, text)
+            const res = await sendChatMessage(sessionId, priorContext ? `${priorContext}\n${text}` : text)
             pushAssistant(res.reply)
 
             if (res.isComplete) {
@@ -1550,11 +1601,26 @@ export function useNailDesignChatPage() {
             return
         }
 
+        // 선택지(preference) 진행 중에 직접 입력하면 자유채팅으로 넘어간다 — 이때까지 확정한 선택
+        // + 지금 단계에서 고르기만 하고 "다음"을 안 누른 값도 함께 GPT에 전달한다.
+        let priorContext = ''
+        if (mode === 'preference') {
+            const currentStep = PREFERENCE_STEPS[preferenceStepIndex]
+            priorContext = buildPreferenceSummary(
+                {
+                    ...collectedPreferences,
+                    ...(currentStep && selectedInQuickReply.length > 0 ? { [currentStep]: selectedInQuickReply } : {}),
+                },
+                preferenceNotes,
+            )
+        }
+
         if (mode !== 'freeform') {
             setMode('freeform')
             setFreeformSelectedColors([])
         }
-        void sendFreeformMessage(text)
+        void sendFreeformMessage(text, priorContext)
+
     }
 
     const handleQuickReplyClick = (option: QuickReplyOption) => {
@@ -1809,6 +1875,9 @@ export function useNailDesignChatPage() {
         activeNote,
         hasActiveNote,
         setPreferenceNote,
+        colorNote,
+        setColorNote,
+        submitColorNote,
         preferenceStepIndex,
         lastDesign,
         selectedPhotoFile,

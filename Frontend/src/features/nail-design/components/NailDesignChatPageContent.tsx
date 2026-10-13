@@ -271,6 +271,9 @@ export function NailDesignChatPageContent() {
         activeNote,
         hasActiveNote,
         setPreferenceNote,
+        colorNote,
+        setColorNote,
+        submitColorNote,
         preferenceStepIndex,
         selectedPhotoFile,
         selectedPhotoPreviewUrl,
@@ -915,7 +918,7 @@ export function NailDesignChatPageContent() {
                                                     activeQuickReply.id === 'pref-motif' &&
                                                     !selected &&
                                                     ((option.value === MOTIF_NONE_VALUE &&
-                                                        (selectedInQuickReply.length > 0 || hasActiveNote)) ||
+                                                            (selectedInQuickReply.length > 0 || hasActiveNote)) ||
                                                         (option.value !== MOTIF_NONE_VALUE && selectedInQuickReply.includes(MOTIF_NONE_VALUE)))
 
                                                 // 라벨 전체가 hex인지가 아니라, 라벨 안에 hex가 포함되어 있는지로 검사
@@ -1080,11 +1083,38 @@ export function NailDesignChatPageContent() {
                                         </label>
                                     )}
 
-                                    {isMultiConfirmVisible && (
+                                    {activeQuickReply.id === 'pref-color' && (
+                                        <>
+                                            <label className="design-chat__quickreply-note">
+                                                <span className="design-chat__quickreply-note-label">기타 입력</span>
+                                                <input
+                                                    type="text"
+                                                    className="design-chat__quickreply-note-input"
+                                                    value={colorNote}
+                                                    maxLength={100}
+                                                    placeholder="색을 직접 설명하거나 추천받고 싶다면 적어 주세요 (예: 지금까지 고른 거에 어울리는 색 추천해줘)"
+                                                    onChange={(e) => setColorNote(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                                                        e.preventDefault()
+                                                        submitColorNote()
+                                                    }}
+                                                    disabled={isSending}
+                                                />
+                                            </label>
+                                        </>
+                                    )}
+
+                                    {(isMultiConfirmVisible ||
+                                        (activeQuickReply.id === 'pref-color' && colorNote.trim().length > 0)) && (
                                         <button
                                             type="button"
                                             className="design-chat__quickreply-confirm"
-                                            onClick={() => confirmPreferenceStep(selectedInQuickReply)}
+                                            onClick={() => {
+                                                // 컬러 단계에서 기타 입력을 적어 둔 채 누르면, 고른 색과 기타 입력을 함께 보낸다
+                                                if (activeQuickReply.id === 'pref-color' && colorNote.trim()) submitColorNote()
+                                                else confirmPreferenceStep(selectedInQuickReply)
+                                            }}
                                             disabled={isSending}
                                             aria-label={
                                                 activeQuickReply.id === 'pref-color'
@@ -1113,7 +1143,11 @@ export function NailDesignChatPageContent() {
                                                     ...(hasActiveNote ? ['기타 의견'] : []),
                                                 ].join(', ')} `
                                             )}
-                                            선택
+                                            {activeQuickReply.id === 'pref-color' && colorNote.trim()
+                                                ? selectedInQuickReply.length > 0
+                                                    ? '함께 보내기'
+                                                    : '이 내용으로 색상 추천받기'
+                                                : '선택'}
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                                 <path
                                                     d="M5 12h12M13 6l6 6-6 6"
@@ -1149,8 +1183,8 @@ export function NailDesignChatPageContent() {
                     isPreferenceInputLocked
                         ? '선택지 기반으로 진행 중이에요. 위 선택지에서 골라 주세요'
                         : isAwaitingGenerateConfirm
-                          ? '위 버튼 중 하나를 선택해 주세요'
-                          : '또는 원하는 디자인 직접 입력'
+                            ? '위 버튼 중 하나를 선택해 주세요'
+                            : '또는 원하는 디자인 직접 입력'
                 }
                 value={inputValue}
                 onChange={(e) => {

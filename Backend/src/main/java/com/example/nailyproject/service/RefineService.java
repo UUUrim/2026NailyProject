@@ -28,6 +28,11 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class RefineService {
 
+    /** 수정 결과를 투명 배경으로 받을 때 지시문 뒤에 붙인다: 입력의 흰 배경을 다시 그리지 않고, 손톱은 꽉 찬 불투명으로 둔다. */
+    private static final String TRANSPARENT_EDIT_SUFFIX =
+            " Return the result as a cut-out on a fully transparent background (no white or colored backdrop, "
+                    + "no cast shadow), and keep the silhouette of every nail fully solid and unchanged from the original photo.";
+
     private final DesignSessionRepository designSessionRepository;
     private final NailDesignRepository nailDesignRepository;
     private final ChatMessageRepository chatMessageRepository;
@@ -42,7 +47,8 @@ public class RefineService {
      * 수정 지시문(editInstruction) 생성용 시스템 프롬프트.
      * 디텍션 서버로 영역을 마스킹하지 않고, 원본 이미지 전체 + 이 지시문 하나를
      * gpt-image edit API에 그대로 넘기므로, "무엇을 바꿀지"와 "나머지는 절대 그대로
-     * 둘 것"을 반드시 한 문장 안에 명시적으로 담아야 한다.
+     * 둘 것"을 반드시 한 문장 안에 명시적으로 담아야 한다 — 마스크가 없으니 지시문이
+     * 불명확하면 관련 없는 부분까지 바뀔 위험이 있다.
      */
     private static final String GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE = """
             You write the "edit instruction" (editInstruction) that is sent to an image-editing AI
@@ -66,6 +72,16 @@ public class RefineService {
             %s
 
             [Previous per-finger plan - hint only, may not match the picture]
+            %s
+
+            [Conversation so far - VERY IMPORTANT]
+            The user's new message may refer to earlier turns ("아니 다 없애란 말은 아니었는데", "아까처럼 해줘",
+            "그거 말고", "다시 원래대로"). Read this history to understand what the previous edit changed and
+            what the user means now. The CURRENT image already contains the result of the previous edit.
+            If the user says the previous edit went too far or was not what they meant, bring back PART of what
+            was removed or changed (use the original prompt, the previous plan and the earlier edit
+            instructions below to know what used to be there), in the way the user now describes - do not ask what they meant unless it is truly
+            ambiguous. Treat earlier requests as still valid unless the user takes them back.
             %s
 
             [Finger -> position in the image - VERY IMPORTANT]
@@ -315,7 +331,12 @@ public class RefineService {
 
         // 2. GPT(vision)로 수정 지시문(editInstruction) 생성 - 이전 플랜 텍스트만 보면 실제 그림과 달라서
         //    엉뚱한 손톱을 고르는 문제가 있어, 이미지를 함께 보내 "보이는 대로" 판단하게 한다.
-        String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
+        // 이전 대화(사용자의 수정 요청/답변)와 앞선 수정 지시문(프롬프트) 내역을 텍스트로 GPT에게 같이 보여줘서,
+        // "아니 다 없애란 말은 아니었는데"처럼 앞선 수정을 가리키는 말을 이해하게 한다. (이미지는 현재 이미지 한 장만 보낸다)
+        List<NailDesign> designsInSession = nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(sessionId);
+        String conversationContext = buildConversationContext(session, message, designsInSession, prevDesign);
+        String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE,
+                originalPrompt, previousPlanJson, conversationContext);
         String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
         String aiText = gptClientService.chatWithImage(
                 systemPrompt, message, originalImageBase64, "image/png", 4096, true);
@@ -370,13 +391,41 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
-        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄
-        String editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto");
+        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄.
+        //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
+        //    합성본이라 모델이 흰 배경을 그대로 그려 불투명으로 줄 수도 있는데, 그러면 아래 크롭 단계가 서버 누끼로 처리한다.
+        boolean transparentEdit = nailDesignService.isTransparentGptImage();
+        String editedBase64;
+        try {
+            String instructionToSend = transparentEdit ? editInstruction + TRANSPARENT_EDIT_SUFFIX : editInstruction;
+            editedBase64 = gptClientService.editImage(instructionToSend, originalImageBytes, "1536x1024", "auto", transparentEdit);
+        } catch (Exception e) {
+            if (!transparentEdit) throw e;
+            // 스레드가 중단된 경우(서버 재시작/종료, 요청 취소)는 투명 배경 거절이 아니므로 재시도하지 않는다 -
+            // 중단 플래그가 켜진 채로 다시 호출해도 곧바로 같은 예외가 나고 GPT 호출만 낭비된다.
+            if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException
+                    || e.getCause() instanceof InterruptedException
+                    || String.valueOf(e.getMessage()).contains("InterruptedException")) throw e;
+            // 이미지 수정 API가 투명 배경 요청을 거절하면 수정 기능 전체가 막히므로, 예전 방식(흰 배경)으로 한 번 더 시도한다.
+            System.err.println("[RefineService] 투명 배경 수정 요청이 실패해 흰 배경 방식으로 다시 시도합니다: " + e.getMessage());
+            transparentEdit = false;
+            editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto", false);
+        }
 
-        // 4. 수정된 이미지 S3 업로드
+        // 4. 수정된 이미지 S3 업로드 (표시용은 흰 배경을 입힌 것, 투명 원본은 AR 크롭에만 쓴다)
         byte[] editedBytes = Base64.getDecoder().decode(editedBase64);
+        String displayBase64 = editedBase64;
+        if (transparentEdit) {
+            System.out.println("[GptImage] (edit) background=transparent 요청 → 응답: " + PngBackground.describeAlpha(editedBytes));
+            editedBytes = PngBackground.compositeOnWhite(editedBytes);
+            displayBase64 = Base64.getEncoder().encodeToString(editedBytes);
+        }
         String s3Key = "designs/user_" + user.getId() + "/edit_" + UUID.randomUUID() + ".png";
         String newImageUrl = s3Service.uploadImageBytes(editedBytes, s3Key);
+
+        // AR 미리보기용 손톱별 크롭: 생성본과 똑같이 만든다. 없으면 AR이 프론트의 색 기반 누끼로 폴백해서
+        // 흰색으로 번지는 손톱 끝이 잘린다.
+        String nailTipCropsJson = nailDesignService.createNailTipCrops(user.getId(), editedBase64, displayBase64);
 
         // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
         String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
@@ -393,6 +442,7 @@ public class RefineService {
                 // 플랜은 그대로 유지하되, 쉐입이 바뀐 경우 plan의 shape만 새 값으로 바꾼다
                 // (AR/3D 템플릿과 이후 수정 요청이 이 shape를 읽는다)
                 .designPlan(nextPlanJson)
+                .nailTipCropsJson(nailTipCropsJson)
                 .seed(null) // OpenAI 이미지 API는 seed 개념이 없어 재현 불가
                 .build();
         nailDesignRepository.save(newDesign);
@@ -412,6 +462,53 @@ public class RefineService {
                 .details(nailDesignService.buildDetails(newDesign))
                 .keywords(nailDesignService.extractDesignKeywords(slots, session, nextPlanJson))
                 .build();
+    }
+
+    /**
+     * 프롬프트의 [Conversation so far] 에 넣을 텍스트:
+     *  1) 최근 대화(사용자 요청/챗봇 답변, 현재 메시지 제외) 8개
+     *  2) 이 세션에서 지금까지 이미지 모델에 보낸 수정 지시문(프롬프트) 최근 5개 - 현재 이미지는 이 수정들이 모두 반영된 결과
+     * 둘 다 없으면 "(no earlier turns)".
+     */
+    private String buildConversationContext(DesignSession session, String currentMessage,
+                                            List<NailDesign> designsInSession, NailDesign prevDesign) {
+        StringBuilder sb = new StringBuilder();
+
+        List<ChatMessage> all = chatMessageRepository.findBySessionOrderBySentAtAsc(session);
+        int end = all.size();
+        // 맨 끝은 방금 저장한 현재 사용자 메시지이므로 제외
+        if (end > 0 && all.get(end - 1).getRole() == ChatMessage.MessageRole.user
+                && currentMessage.equals(all.get(end - 1).getContent())) {
+            end--;
+        }
+        int start = Math.max(0, end - 8);
+        for (int i = start; i < end; i++) {
+            ChatMessage m = all.get(i);
+            String c = m.getContent() == null ? "" : m.getContent().replace("\n", " ").trim();
+            if (c.isEmpty()) continue;
+            if (c.length() > 160) c = c.substring(0, 160) + "...";
+            sb.append(m.getRole() == ChatMessage.MessageRole.user ? "user: " : "assistant: ").append(c).append("\n");
+        }
+
+        // 지금까지의 수정 지시문(오래된 것 -> 최근 순). prevDesign(현재 이미지)까지만 포함
+        List<String> editInstructions = new ArrayList<>();
+        for (NailDesign d : designsInSession) {
+            if (d.getAiModel() != null && d.getAiModel().contains("(edit)")
+                    && d.getPromptSummary() != null && !d.getPromptSummary().isBlank()) {
+                editInstructions.add(d.getPromptSummary().trim());
+            }
+            if (d.getId().equals(prevDesign.getId())) break;
+        }
+        if (!editInstructions.isEmpty()) {
+            int from = Math.max(0, editInstructions.size() - 5);
+            sb.append("[Edit instructions already applied to the image, oldest first - the CURRENT image shows the result of all of them]\n");
+            for (int i = from; i < editInstructions.size(); i++) {
+                String ins = editInstructions.get(i);
+                if (ins.length() > 400) ins = ins.substring(0, 400) + "...";
+                sb.append(i + 1).append(") ").append(ins).append("\n");
+            }
+        }
+        return sb.length() == 0 ? "(no earlier turns)" : sb.toString().trim();
     }
 
     /**
