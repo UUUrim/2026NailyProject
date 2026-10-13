@@ -126,7 +126,33 @@ SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5}
 # 감싸는 현(chord) 폭이 측정값보다 작아져서, 프린트한 손톱이 실제보다 작게
 # 나옴.  이를 보정하기 위해 STL 생성 전에 측정 폭에 이 값을 더한다.
 # (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
-WIDTH_FIT_MARGIN_MM = 1.5
+WIDTH_FIT_MARGIN_MM = 0.5
+
+# 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
+# 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → 팁 끝(C*TIP_DOME_FRAC)
+# 까지 한 번에 완만히 줄어드는 모양.
+DOME_CREST_START = 0.45
+# 돔 최고 높이 배율(측정/하한 C에 곱함).  1.0이면 C 그대로, 낮출수록 천장이 낮아짐.
+DOME_HEIGHT_SCALE = 0.60
+# 큐티클 끝에서 남아 있는 돔 높이 비율(0이면 납작하게 시작).  큐티클 라인도 돔 단면을
+# 따라 둥글게 올라가도록 0이 아닌 값에서 시작한다.
+CUTICLE_DOME_FRAC = 0.7
+# 높이 프로파일을 길이 방향으로 부드럽게 만드는 가우시안 폭(mm, 표준편차).  정점이
+# 뾰족하게 튀어나와 보이는 것을 완화한다.  0이면 평활화 없음.
+CREST_SMOOTH_MM = 3.0
+TIP_DOME_FRAC    = 0.35
+# 폭 방향 돔 단면의 지수.  2.0이면 포물선(가운데만 볼록), 클수록 윗면이 넓게
+# 퍼지고 가장자리 쪽에서 더 급히 내려간다(테두리는 항상 z=0).
+DOME_SHAPE_POWER = 3.0
+
+# 양 끝(큐티클/팁 끝)에서 껍질 두께가 줄어드는 최소값(mm).  몸통은 --thickness 그대로,
+# 양 끝으로 갈수록 이 값까지 부드럽게 얇아져 바닥 평면으로 스무스하게 떨어진다.
+# 0.2 미만은 프린트가 어려움.  --exact 모드에는 적용하지 않음.
+END_MIN_THICKNESS_MM = 0.2
+
+# 폭 방향 C-curve 하한(mm).  측정값/폴백이 이보다 작으면 이 값으로 올린다.
+# 0이면 하한 없음.  --exact 모드에는 적용하지 않음.
+MIN_C_CURVE_DEFAULT_MM = 2.0
 
 # Stiletto plan-view taper shape — see the superellipse formula where it's
 # used below. 1 = straight line to the point, 2 = full ellipse (round/oval/
@@ -444,7 +470,8 @@ def generate_stl(params, output_path):
     else:
         # 폭 보정: C-curve로 구부리면 현(chord) 폭이 줄어 실제보다 작게
         # 프린트되므로, 측정 폭에 fit margin(+WIDTH_FIT_MARGIN_MM)을 더한다.
-        W     = float(params["width_mm"]) + WIDTH_FIT_MARGIN_MM
+        _fit = params.get("fit_margin_mm")
+        W     = float(params["width_mm"]) + (WIDTH_FIT_MARGIN_MM if _fit is None else float(_fit))
         # Length: use the MEASURED length (Sobel tip→cuticle).  The old code
         # preferred corrected_length_mm = width / 0.91 (Jung et al. W/L prior),
         # but ruler ground truth showed 0.91 is wrong (true ~0.64–0.86), which
@@ -465,6 +492,14 @@ def generate_stl(params, output_path):
         _ext_default = TIP_EXTENSION_DEFAULT_MM.get(_shape_tmp, 3.0)
         L_ext = float(params.get("tip_extension_mm") or _ext_default)
     x_cen     = W / 2.0
+
+    # Width-direction curvature floor: a too-shallow measured C-curve (or the
+    # 1.0 mm fallback) prints nearly flat, so raise it to the minimum and
+    # recompute the arc radius for the final width (R = W²/(8C) + C/2).
+    MIN_C = float(params.get("min_c_curve_mm", MIN_C_CURVE_DEFAULT_MM) or 0.0)
+    if not EXACT and C < MIN_C:
+        C     = MIN_C
+        arc_r = W ** 2 / (8.0 * C) + C / 2.0
 
     shape   = params.get("shape", "round")
     EDGE_R  = float(params.get("edge_round_mm", 0.0))
@@ -527,9 +562,18 @@ def generate_stl(params, output_path):
 
     # ── Build structured grid ─────────────────────────────────
     nx = 50   # columns across width
-    ny = 80   # rows along length
-
-    ys = np.linspace(-CUT_DEPTH, L_total, ny)
+    # Rows along the length.  The cuticle arch's width changes like sqrt(y)
+    # near its bottom point, so evenly spaced rows leave only a few vertices
+    # there and the arc renders as a faceted polyline.  Cosine spacing packs
+    # the arch rows densely at the bottom point; the body keeps even spacing.
+    n_arch = 40
+    n_body = 70
+    t_arch = np.linspace(0.0, 1.0, n_arch, endpoint=False)
+    ys = np.concatenate([
+        -CUT_DEPTH * np.cos(t_arch * np.pi / 2.0),
+        np.linspace(0.0, L_total, n_body),
+    ])
+    ny = len(ys)
 
     # grid_x[i, j], grid_y[i, j] = XY position of grid point (i, j)
     grid_x = np.zeros((ny, nx))
@@ -567,10 +611,80 @@ def generate_stl(params, output_path):
         sag   = R_row[:, None] - np.sqrt(
             np.maximum(R_row[:, None] ** 2 - dx ** 2, 0.0))
         z_bot = C_row[:, None] - sag                 # rounder dome at base
-    else:
+    elif EXACT:
         arc_off = arc_z(grid_x, x_cen, C, arc_r)   # (ny, nx)  0→C  bowl
         z_bot   = C - arc_off                        # (ny, nx)  C→0  dome (inner)
-    z_top = z_bot + THICK                          # (ny, nx)  uniform shell
+    else:
+        # Row-wise dome that runs all the way to the free edge.  Each row gets
+        # its own arch spanning that row's footprint (edges at z=0), so the
+        # dome keeps following the narrowing tip instead of going flat.
+        # Every row uses the FULL nail width as the dome's reference, even
+        # where the footprint is narrower (cuticle arch, tapering tip).  The
+        # footprint just clips one continuous dome surface, so the cuticle
+        # line and the tip edge follow the dome instead of being forced down
+        # to z=0 row by row.
+        hw     = np.full(ny, W / 2.0)
+        xc_row = np.full(ny, x_cen)
+        # Tip side: as the footprint narrows toward the tip, a full-width
+        # reference would leave the side edges riding up the dome (z > 0).
+        # Blend to each row's own half-width over the first half of the nail
+        # (footprint is full width there, so the blend is a no-op) so the two
+        # tip sides stay down on the rim plane (z=0), like the body.
+        hw_act = (grid_x[:, -1] - grid_x[:, 0]) / 2.0
+        wt     = np.clip(ys / max(0.5 * L, 1e-6), 0.0, 1.0)
+        wt     = wt * wt * (3.0 - 2.0 * wt)
+        hw     = (1.0 - wt) * hw + wt * np.minimum(hw_act, hw)
+        # Lens-shaped height profile along the length: the rim stays on one
+        # flat plane (z=0) while the dome's crest rises from the cuticle end,
+        # peaks once at the crest, then falls in a single gentle quarter-cosine
+        # all the way to the tip (zero slope at the crest, non-zero slope at
+        # the tip, so there is no long flat tail).
+        y0, y1 = -CUT_DEPTH, DOME_CREST_START * L
+
+        def _profiles(yv):
+            # Cuticle side: dome height AND shell thickness both rise
+            # linearly, so the outer line down to the cuticle has a constant
+            # slope (no shoulder).  Tip side: quarter-cosine fall.  The
+            # crest corner between them is rounded by the smoothing below.
+            raw  = (yv - y0) / max(y1 - y0, 1e-6)
+            up   = np.clip(CUTICLE_DOME_FRAC + (1.0 - CUTICLE_DOME_FRAC) * raw, 0.0, 1.0)
+            tail = np.cos(np.clip((yv - y1) / max(L_total - y1, 1e-6), 0.0, 1.0)
+                          * np.pi / 2.0)
+            fade = up * (TIP_DOME_FRAC + (1.0 - TIP_DOME_FRAC) * tail)
+            t_min = min(END_MIN_THICKNESS_MM, THICK)
+            ru = np.clip(raw, 0.0, 1.0)
+            return fade, t_min + (THICK - t_min) * ru * tail
+
+        # Gaussian-smooth both profiles along the length on a fine uniform
+        # grid (rows are unevenly spaced) over a domain extended past both
+        # ends (so the ends keep their slope), then sample at the row positions.
+        ext = 4.0 * max(CREST_SMOOTH_MM, 0.0)
+        yy  = np.linspace(y0 - ext, L_total + ext, 1000)
+        f_fine, t_fine = _profiles(yy)
+        sig = max(CREST_SMOOTH_MM, 0.0) / (yy[1] - yy[0])
+        if sig > 0.5:
+            kx = np.arange(-int(4 * sig), int(4 * sig) + 1)
+            k  = np.exp(-0.5 * (kx / sig) ** 2); k /= k.sum()
+            yc = yy[int(4 * sig): len(yy) - int(4 * sig)]
+            f_fine = np.convolve(f_fine, k, mode="valid")
+            t_fine = np.convolve(t_fine, k, mode="valid")
+        else:
+            yc = yy
+        fade      = np.interp(ys, yc, f_fine)
+        thick_row = np.interp(ys, yc, t_fine)
+        # The dome height also shrinks with the row's width toward the tip.
+        # Otherwise the last, nearly zero-width rows keep ~1 mm of height while
+        # their sides sit at z=0, which makes a thin upright blade/notch at
+        # the tip instead of a rounded hood.
+        C_row  = C * DOME_HEIGHT_SCALE * fade * (hw / (W / 2.0))
+        # Parabolic cross-section per row (edges at z=0).  Unlike a circular
+        # arc it stays valid for any height/width ratio, so the narrow cuticle
+        # arch rows can rise smoothly instead of being clamped flat.
+        u      = (grid_x - xc_row[:, None]) / np.maximum(hw, 1e-6)[:, None]
+        z_bot  = C_row[:, None] * np.maximum(1.0 - np.abs(u) ** DOME_SHAPE_POWER, 0.0)
+    if EXACT or C < 0.05 or CUT_CURVE > 1e-6:
+        thick_row = np.full(ny, THICK)
+    z_top = z_bot + thick_row[:, None]             # (ny, nx)  shell
 
     # ── Top perimeter edge rounding ───────────────────────────
     # Applies a fillet where the top surface meets the side walls / tip
@@ -780,6 +894,11 @@ def main():
                         "2.35; 0 = sharp corner, matching the arch's raw "
                         "tangent exactly). Capped at ~90%% of "
                         "--cuticle-depth — raise that too for more room")
+    p.add_argument("--min-c-curve",    type=float,
+                   default=MIN_C_CURVE_DEFAULT_MM,
+                   help="Minimum width-direction C-curve height in mm; a "
+                        "smaller measured value is raised to this "
+                        "(default 2.0; 0 = no floor). Ignored in --exact mode")
     p.add_argument("--thickness",      type=float, default=0.6,
                    help="Uniform shell thickness in mm (default 0.6)")
     p.add_argument("--exact",          action="store_true",
@@ -814,6 +933,10 @@ def main():
                         "tip corners — real square nails aren't perfectly "
                         "parallel-sided (default: 1.0 for square, ignored "
                         "by other shapes; 0 = parallel sides)")
+    p.add_argument("--fit-margin",     type=float, default=None,
+                   help="Width fit margin in mm added to the measured width "
+                        f"(default: {WIDTH_FIT_MARGIN_MM}; 0 = none). "
+                        "Ignored in --exact mode")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -868,6 +991,7 @@ def main():
             "tip_extension_mm":    args.tip_extension,
             "cuticle_depth_mm":    args.cuticle_depth,
             "cuticle_curve_mm":    args.cuticle_curve,
+            "min_c_curve_mm":      args.min_c_curve,
             "cuticle_round_mm":    args.cuticle_round,
             "thickness_mm":        args.thickness,
             "shape":               args.shape,
@@ -876,6 +1000,7 @@ def main():
             "shoulder_round_mm":   shoulder_round,
             "taper_mm":            taper,
             "exact":               args.exact,
+            "fit_margin_mm":       args.fit_margin,
         }
 
         out   = os.path.join(args.output, f"nail_{finger}_{args.shape}.stl")

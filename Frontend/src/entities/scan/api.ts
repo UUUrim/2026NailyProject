@@ -1,4 +1,5 @@
-import { apiClient, BASE_URL } from '@/shared/utils/apiClient'
+import { apiClient } from '@/shared/utils/apiClient'
+import type { ScanSession } from '@/shared/utils/scanDetail'
 
 // ─── 응답 타입 (ScanStartResponseDto, ScanResultResponseDto) ─────────────────
 export interface ScanStartResponse {
@@ -7,9 +8,6 @@ export interface ScanStartResponse {
 
 export interface FingerResult {
     finger: string
-    imageUrl: string
-    imageUrlSide: string
-    stlUrl: string
     measurements: string // JSON 문자열
     size: string
 }
@@ -36,41 +34,11 @@ export interface ScanResultResponse {
 // ─── 스캔 API ─────────────────────────────────────────────────────────────────
 
 /** POST /scans — 스캔 세션 시작 */
-export async function startScan(handSide: 'LEFT' | 'RIGHT'): Promise<ScanStartResponse> {
-    const res = await apiClient.post<ScanStartResponse>('/scans', { handSide })
+export async function startScan(handSide: 'LEFT' | 'RIGHT', pairedScanId?: number | null): Promise<ScanStartResponse> {
+    // pairedScanId: 같은 스캔(한 사람의 양손)에서 이미 찍은 반대 손의 scanId. 두 번째 손을 시작할 때 넘기면
+    // 서버가 둘을 짝으로 기록하고, 양손 결과(피부톤/추천 컬러/치수)를 이 짝으로만 만든다.
+    const res = await apiClient.post<ScanStartResponse>('/scans', { handSide, pairedScanId: pairedScanId ?? null })
     return res.data
-}
-
-/** POST /scans/{scanId}/images?finger=THUMB — 손가락 탑뷰/측면뷰 이미지 2장 업로드 */
-export async function uploadFingerImage(
-    scanId: number,
-    finger: 'THUMB' | 'INDEX' | 'MIDDLE' | 'RING' | 'PINKY',
-    topBlob: Blob,
-    sideBlob: Blob,
-): Promise<{ imageUrlTop: string; imageUrlSide: string }> {
-    const formData = new FormData()
-    formData.append('fileTop', topBlob, `${finger.toLowerCase()}_top.jpg`)
-    formData.append('fileSide', sideBlob, `${finger.toLowerCase()}_side.jpg`)
-
-    // upload()는 Content-Type을 자동으로 multipart로 처리
-    const token = localStorage.getItem('token')
-    const res = await fetch(`${BASE_URL}/scans/${scanId}/images?finger=${finger}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-    })
-
-    const raw = await res.text()
-    let body: { ok?: boolean; message?: string; data?: unknown }
-    try {
-        body = raw ? JSON.parse(raw) : {}
-    } catch {
-        throw new Error(`서버 응답을 처리할 수 없습니다. (status ${res.status})`)
-    }
-    if (!res.ok || !body.ok) {
-        throw new Error(body.message || `이미지 업로드에 실패했습니다. (status ${res.status})`)
-    }
-    return body.data as { imageUrlTop: string; imageUrlSide: string }
 }
 
 /** POST /scans/{scanId}/analyze — 분석 요청 */
@@ -99,6 +67,8 @@ export async function generateStl(scanId: number, shape: string, tipExtensionMm?
 
 export interface ScanHistoryItem {
     scanId: number
+    // 같은 스캔에서 짝으로 찍은 반대 손의 scanId. 아직 반대 손을 안 찍었거나 이 필드가 생기기 전의 예전 스캔은 null
+    pairedScanId?: number | null
     handSide: string | null
     status: string | null
     shape: string | null
@@ -112,7 +82,16 @@ export interface ScanHistoryItem {
     avgLengthMm: number | null
     avgWidthMm: number | null
     avgCurve: number | null
+    // 손톱이 손가락 살 끝보다 평균 몇 mm 나와 있는지 (스캔 사진 기준). 이 측정 전의 예전 스캔은 null
+    avgFreeEdgeMm?: number | null
     scannedAt: string
+}
+
+/** GET /users/me/scan-sessions — 내 손 분석 기록.
+ *  양손 최종 measurements.json 하나가 한 줄이다. 왼손/오른손 기록을 시각으로 다시 짝지어 만들지 않는다. */
+export async function getMyScanSessions(): Promise<ScanSession[]> {
+    const res = await apiClient.get<ScanSession[]>('/users/me/scan-sessions')
+    return res.data
 }
 
 /** GET /users/me/scans — 내 손 스캔 전체 이력 */

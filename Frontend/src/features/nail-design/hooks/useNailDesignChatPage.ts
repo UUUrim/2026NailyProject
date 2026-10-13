@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { getMyProfile } from '@/entities/user/api'
-import { getMyScans, getScanResult, type ScanResultResponse } from '@/entities/scan/api'
-import { MY_SCANS_QUERY_KEY } from '@/entities/scan/queries'
-import { buildScanSessions, isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
+import { getMyScanSessions, getScanResult, type ScanResultResponse } from '@/entities/scan/api'
+import { MY_SCAN_SESSIONS_QUERY_KEY } from '@/entities/scan/queries'
+import { isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FALLBACK_C_CURVE_MM, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
     sendChatMessage,
@@ -465,8 +465,9 @@ export function useNailDesignChatPage() {
     const [showAnalysisPanel, setShowAnalysisPanel] = useState(chatSessionSnapshot?.showAnalysisPanel ?? false)
 
     // 확대/이동은 공용 DesignImageDetailModal이 담당하므로, 여기서는 어떤 이미지를 확대해서 보여줄지만 들고 있는다.
-    const [zoomedImage, setZoomedImage] = useState<string | null>(null)
-    const openZoomedImage = (url: string) => setZoomedImage(url)
+    // 생성된 디자인 이미지면 다운로드 버튼만, 내가 첨부한 참고 사진이면 버튼 없이 사진만 보여준다.
+    const [zoomedImage, setZoomedImage] = useState<{ url: string; isDesignResult: boolean } | null>(null)
+    const openZoomedImage = (url: string, isDesignResult: boolean) => setZoomedImage({ url, isDesignResult })
     const closeZoomedImage = () => setZoomedImage(null)
 
     const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.leftAnalysis ?? null)
@@ -561,13 +562,13 @@ export function useNailDesignChatPage() {
                     // 최신 세션을 기본으로 보여주고, 드롭다운으로 다른 세션도 고를 수 있게 한다.
                     // 마이페이지 이력과 동일하게, 실제로 분석이 다 끝난(퍼스널 컬러+추천 쉐입+
                     // 길이/너비/곡률까지 전부 채워진) 세션만 대상으로 한다.
-                    // 마이페이지/손 촬영/출력과 같은 react-query 캐시(MY_SCANS_QUERY_KEY)를 공유해서,
+                    // 마이페이지/손 촬영/출력과 같은 react-query 캐시(MY_SCAN_SESSIONS_QUERY_KEY)를 공유해서,
                     // 다른 화면에서 이미 받아온 데이터가 있으면 다시 네트워크를 타지 않는다.
                     const historyItems = await queryClient.fetchQuery({
-                        queryKey: MY_SCANS_QUERY_KEY,
-                        queryFn: getMyScans,
+                        queryKey: MY_SCAN_SESSIONS_QUERY_KEY,
+                        queryFn: getMyScanSessions,
                     })
-                    const sessions = buildScanSessions(historyItems).filter(isFullyAnalyzedSession)
+                    const sessions = historyItems.filter(isFullyAnalyzedSession)
                     if (!cancelled) setScanSessions(sessions)
                     const latest = sessions[0] ?? null
                     if (latest) {
@@ -1589,7 +1590,7 @@ export function useNailDesignChatPage() {
             return {
                 lengthMm: Number(measurements.lengthMm ?? measurements.length ?? fingerSize.lengthMm),
                 widthMm: Number(measurements.widthMm ?? measurements.width ?? fingerSize.widthMm),
-                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? FALLBACK_C_CURVE_MM),
+                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? fingerSize.cCurveMm),
             }
         })
 

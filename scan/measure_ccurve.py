@@ -44,6 +44,14 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
+# De-rotating by the upper/lower centroid offset is OFF: on this rig the silhouette is not
+# symmetric (light-leak slivers beside the fingertip, one-sided shoulders), so the centroid
+# offset reads 8-12 degrees of 'roll' on fingers that sit square to the camera and the rotation
+# then shears the nail arc into a slanted line. The C-curve is a perpendicular-to-chord quantity
+# anyway, so a roll does not need undoing.
+TILT_CORRECTION = False
+
+
 def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     """Threshold separating background b* (border median) from the finger.
 
@@ -75,6 +83,139 @@ def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     b8 = np.clip((B - B.min()) / (np.ptp(B) + 1e-6) * 255, 0, 255).astype(np.uint8)
     t, _ = cv2.threshold(b8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return float(B.min() + t / 255.0 * np.ptp(B)), bg_b
+
+
+def _finger_mask_color(img: np.ndarray, min_frac: float = 0.01, open_frac: float = 0.045):
+    """Finger blob by colour: skin (and the nail, which is pale but still warm in
+    b*) vs the grey/black box wall and mat.
+
+    The side photo is a fixed rig - black wall with an arch hole, grey mat - so
+    "warm and not dark" isolates the fingertip without any hand-tuned geometry.
+    Replaces the table-edge column-variance localisation (which found no finger
+    on most photos, and on the one it 'found' cropped to mostly wall) and the
+    histogram-gap split (which found nothing on some fingers).
+
+    Returns the binary mask (largest warm blob) or None when no plausible
+    finger-sized blob exists, so the caller can fall back to the older paths.
+    """
+    H, W = img.shape[:2]
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
+    L, A, B = lab[:, :, 0], lab[:, :, 1] - 128, lab[:, :, 2] - 128
+    m = (((B > 9) | (A > 12)) & (L > 70)).astype(np.uint8) * 255
+    ks = max(7, int(0.011 * max(H, W)) | 1)
+    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, k)
+    # The light-leak slivers/triangles behind the finger are warm too and stay glued to
+    # the silhouette; they are much narrower than the fingertip, so a wide opening
+    # removes them while leaving the round fingertip intact.
+    kb = max(15, int(open_frac * max(H, W)) | 1)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kb, kb)))
+    n, lbl, st, _ = cv2.connectedComponentsWithStats(m)
+    if n <= 1:
+        return None
+    i = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+    area_frac = st[i, cv2.CC_STAT_AREA] / float(H * W)
+    if not (min_frac <= area_frac <= 0.40):
+        return None
+    return ((lbl == i) * 255).astype(np.uint8)
+
+
+def side_edge_blur_px(img: np.ndarray, top=0.38, bottom=0.35, left=0.25, right=0.30):
+    """How soft the fingertip edge is in a side photo: the median 10%-90% rise distance (px, at the
+    photo's own resolution) of the brightness step across the finger's upper silhouette, where it
+    borders the dark box wall.
+
+    An in-focus edge rises within a few pixels; a defocused fingertip (autofocus latching onto the
+    wall behind the finger) takes 20-60 px, which is as large as the nail arc itself (20-40 px sag)
+    and is what makes the nail outline unreadable. Used to give feedback while tuning the phone's
+    focus. Returns None if no finger/edge could be measured."""
+    H0, W0 = img.shape[:2]
+    cr = img[int(top * H0):H0 - int(bottom * H0), int(left * W0):W0 - int(right * W0)]
+    m = _finger_mask_color(cr)
+    if m is None:
+        return None
+    g = cv2.GaussianBlur(cv2.cvtColor(cr, cv2.COLOR_BGR2GRAY).astype(np.float32), (0, 0), 1.0)
+    xs = np.nonzero(m.any(axis=0))[0]
+    x0, x1 = xs.min(), xs.max()
+    widths = []
+    for x in range(int(x0 + 0.3 * (x1 - x0)), int(x1 - 0.3 * (x1 - x0)), 5):
+        col = np.nonzero(m[:, x])[0]
+        if col.size == 0:
+            continue
+        t = int(col.min())
+        seg = g[max(0, t - 60):t + 60, x]
+        if seg.size < 100:
+            continue
+        lo, hi = np.percentile(seg[:30], 50), np.percentile(seg[-30:], 50)
+        if hi - lo < 40:
+            continue
+        n = (seg - lo) / (hi - lo)
+        i10, i90 = int(np.argmax(n > 0.1)), int(np.argmax(n > 0.9))
+        if i90 > i10:
+            widths.append(i90 - i10)
+    return float(np.median(widths)) if len(widths) >= 5 else None
+
+
+def find_finger_point(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65), nail_frac=0.35):
+    """Where the fingertip/nail is in a side-camera frame, as (x, y) normalised to the frame.
+
+    Used to tell the phone where to focus and meter (instead of making someone tap the phone while
+    scanning). The rig is fixed so the finger always lands in the middle band of the frame; searching
+    only that ROI keeps the box's coloured light strips and ceiling out of the way. The point returned is
+    horizontally centred on the finger blob and `nail_frac` of the way down from its top, i.e. on the nail.
+    Checked on 32 real side photos: found in all, within 0.026 (x) / 0.016 (y) of the nail (a nail is
+    ~0.08 wide). Returns None if no finger-sized warm blob is in the ROI."""
+    h, w = frame.shape[:2]
+    x0, y0, x1, y1 = int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h)
+    if x1 - x0 < 20 or y1 - y0 < 20:
+        return None
+    m = _finger_mask_color(frame[y0:y1, x0:x1], min_frac=0.005, open_frac=0.06)
+    if m is None:
+        return None
+    ys, xs = np.nonzero(m)
+    cx = x0 + (xs.min() + xs.max()) / 2.0
+    cy = y0 + ys.min() + nail_frac * (ys.max() - ys.min())
+    return float(cx / w), float(cy / h)
+
+
+def finger_box_norm(frame: np.ndarray, roi=(0.20, 0.35, 0.80, 0.65), pad=0.01):
+    """Bounding box (x0, y0, x1, y1), normalised to the frame, of the fingertip blob in the middle ROI.
+    The focus sweep measures every frame inside this one fixed box (the finger does not move during
+    the sweep), so a dark or very blurry frame can no longer fail to segment and drop out."""
+    h, w = frame.shape[:2]
+    x0, y0, x1, y1 = int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h)
+    if x1 - x0 < 20 or y1 - y0 < 20:
+        return None
+    m = _finger_mask_color(frame[y0:y1, x0:x1], min_frac=0.005, open_frac=0.06)
+    if m is None:
+        return None
+    ys, xs = np.nonzero(m)
+    return (max(0.0, (x0 + xs.min()) / w - pad), max(0.0, (y0 + ys.min()) / h - pad),
+            min(1.0, (x0 + xs.max()) / w + pad), min(1.0, (y0 + ys.max()) / h + pad))
+
+
+def focus_score(frame: np.ndarray, box=None, roi=(0.20, 0.35, 0.80, 0.65)):
+    """Sharpness of the fingertip in a (raw, any-resolution) side frame - higher is sharper.
+
+    Mean squared Sobel gradient divided by the brightness variance inside the box (a contrast-
+    normalised Tenengrad), so a frame that is simply darker or brighter - auto-exposure moves between
+    focus steps - does not look blurrier or sharper. Only meant for comparing frames of the same
+    scene taken at different focus settings. `box` is a normalised (x0, y0, x1, y1) from
+    finger_box_norm(); without it the finger is segmented in every frame (None if not found)."""
+    h, w = frame.shape[:2]
+    if box is None:
+        box = finger_box_norm(frame, roi)
+        if box is None:
+            return None
+    x0, y0, x1, y1 = int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)
+    if x1 - x0 < 10 or y1 - y0 < 10:
+        return None
+    g = cv2.cvtColor(frame[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gx, gy = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    var = float(g.var())
+    if var < 1.0:
+        return None
+    return float(np.mean(gx * gx + gy * gy) / var)
 
 
 def _find_table_edge(img: np.ndarray, margin_frac: float = 0.15):
@@ -316,7 +457,10 @@ def measure_ccurve(image_path: str, width_mm: float,
               f"(rows {y0}:{y1}, cols {x0}:{x1} of {W0}x{H0})")
 
     located = False
-    if table_edge:
+    color_mask = _finger_mask_color(img)
+    if color_mask is not None:
+        print("  [Finger] colour mask (warm, non-dark blob) - skipping table-edge search")
+    if table_edge and color_mask is None:
         edge_row = _find_table_edge(img)
         if edge_row is None:
             print("  [Edge] no flat table-edge mat found at the bottom — "
@@ -346,7 +490,9 @@ def measure_ccurve(image_path: str, width_mm: float,
     ks = max(5, int(9 * scale_factor) | 1)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks, ks))
 
-    if located:
+    if color_mask is not None:
+        mask = color_mask
+    elif located:
         # Already a tight, finger-only crop (see
         # _locate_finger_by_edge_variance's docstring for why) - a plain
         # Otsu split on L* cleanly separates the finger from the table/
@@ -375,9 +521,10 @@ def measure_ccurve(image_path: str, width_mm: float,
         raise RuntimeError("No finger-sized warm region found — "
                            "check that the fingertip is in frame.")
 
-    if located:
-        # Crop is already tight around just the finger - take the largest
-        # blob, no need to guess which one is "the" finger among several.
+    if located or color_mask is not None:
+        # Crop is already tight around just the finger (or the colour mask
+        # already picked the one warm blob) - take the largest blob, no need
+        # to guess which one is "the" finger among several.
         finger_cnt = max(big, key=cv2.contourArea)
     elif table_edge:
         # Whole-frame fallback: the target nail is whichever warm blob
@@ -401,7 +548,7 @@ def measure_ccurve(image_path: str, width_mm: float,
     # circle fit, hook-tip pick) just runs on an already-corrected frame
     # without needing to know tilt ever happened.
     tilt_deg = _compute_tilt_angle(fmask)
-    if abs(tilt_deg) > 1.5:
+    if TILT_CORRECTION and abs(tilt_deg) > 1.5:
         print(f"  [Tilt] finger rolled {tilt_deg:+.1f}°  →  de-rotating crop")
         img = _rotate_image(img, tilt_deg)
         fmask = _rotate_image(fmask, tilt_deg)
@@ -628,7 +775,10 @@ def measure_ccurve(image_path: str, width_mm: float,
         ov[pulp_mask > 0] = (200, 0, 200)
         ov[band_mask > 0] = (0, 200, 255)
         cv2.addWeighted(ov, 0.35, vis, 0.65, 0, vis)
-        cv2.drawContours(vis, [finger_cnt], -1, (0, 255, 0), 2)
+        # fmask is already de-rotated with img; finger_cnt (taken before the
+        # rotation) would be drawn at the wrong place whenever tilt was corrected.
+        fcnts, _ = cv2.findContours(fmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        cv2.drawContours(vis, fcnts, -1, (0, 255, 0), 2)
 
         for xa, ya, kp in zip(xs, ys, keep):
             cv2.circle(vis, (int(xa), int(ya)), 2,

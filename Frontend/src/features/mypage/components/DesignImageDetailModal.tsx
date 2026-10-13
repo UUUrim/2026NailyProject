@@ -337,6 +337,8 @@ export function DesignImageDetailModal({
 
   const canManage = owner ?? false
   const folderLabel = viewFolder?.name ?? '기본'
+  const hasActions =
+    (viewDesignId != null && (showChatHistoryToggle || showDelete || showShare)) || showDownload || showAr
 
   return (
     <div
@@ -408,63 +410,70 @@ export function DesignImageDetailModal({
           </div>
         )}
 
-        <div className="mypage-x__modal-info">
-          {createdAt && <p className="mypage-x__modal-date">{createdAt}</p>}
-          {showDesignDetailsToggle && (
-            <button
-              type="button"
-              className={`mypage-x__modal-details-btn mypage-x__modal-details-btn--inline${showDesignDetails ? ' is-open' : ''}`}
-              onClick={() => setShowDesignDetails((prev) => !prev)}
-              aria-expanded={showDesignDetails}
-              aria-controls="design-image-detail-panel"
-            >
-              {ModalActionIcons.details}
-              <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
-            </button>
-          )}
-        </div>
-        <div className="mypage-x__modal-actions">
-          {showChatHistoryToggle && viewDesignId != null && (
-            <button type="button" className="mypage-x__modal-action--accent" onClick={() => setShowChatHistory(true)}>
-              {ModalActionIcons.chat}
-              <span>채팅 이력 보기</span>
-            </button>
-          )}
-          {showDelete && viewDesignId != null && (
-            <button
-              type="button"
-              className="mypage-x__modal-action--danger"
-              onClick={() => void handleDelete()}
-              disabled={isBusy || !canManage}
-              title={!canManage ? '내 디자인만 삭제할 수 있어요' : undefined}
-            >
-              {ModalActionIcons.trash}
-              <span>이미지 삭제</span>
-            </button>
-          )}
-          {showDownload && (
-            <button type="button" className="mypage-x__modal-action--ghost" onClick={() => void downloadImage(viewImageUrl, `naily-design-${Date.now()}.png`)}>
-              {ModalActionIcons.download}
-              <span>이미지 다운로드</span>
-            </button>
-          )}
-          {showShare && viewDesignId != null && (
-            <button
-              type="button"
-              className={`mypage-x__modal-action--ghost${shared ? ' is-active' : ''}`}
-              onClick={() => void handleToggleShare()}
-              disabled={shareBusy || !canManage}
-              title={!canManage ? '내 디자인만 공유할 수 있어요' : undefined}
-            >
-              {ModalActionIcons.share}
-              <span>{shareBusy ? '처리 중...' : shared ? '공유 해제' : '공유하기'}</span>
-            </button>
-          )}
-          <button type="button" className="mypage-x__modal-action--accent" onClick={() => setArTryOnImageUrl(viewImageUrl)}>
-            {ModalActionIcons.ar}
-            <span>AR로 미리보기</span>
-          </button>
-        </div>
+        {(createdAt || showDesignDetailsToggle) && (
+          <div className="mypage-x__modal-info">
+            {createdAt && <p className="mypage-x__modal-date">{createdAt}</p>}
+            {showDesignDetailsToggle && (
+              <button
+                type="button"
+                className={`mypage-x__modal-details-btn mypage-x__modal-details-btn--inline${showDesignDetails ? ' is-open' : ''}`}
+                onClick={() => setShowDesignDetails((prev) => !prev)}
+                aria-expanded={showDesignDetails}
+                aria-controls="design-image-detail-panel"
+              >
+                {ModalActionIcons.details}
+                <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
+              </button>
+            )}
+          </div>
+        )}
+        {/* 버튼이 하나도 없으면(참고 사진 보기 등) 빈 줄이 패널 gap만큼 여백을 남기지 않도록 통째로 뺀다 */}
+        {hasActions && (
+          <div className="mypage-x__modal-actions">
+            {showChatHistoryToggle && viewDesignId != null && (
+              <button type="button" className="mypage-x__modal-action--accent" onClick={() => setShowChatHistory(true)}>
+                {ModalActionIcons.chat}
+                <span>채팅 이력 보기</span>
+              </button>
+            )}
+            {showDelete && viewDesignId != null && (
+              <button
+                type="button"
+                className="mypage-x__modal-action--danger"
+                onClick={() => void handleDelete()}
+                disabled={isBusy || !canManage}
+                title={!canManage ? '내 디자인만 삭제할 수 있어요' : undefined}
+              >
+                {ModalActionIcons.trash}
+                <span>이미지 삭제</span>
+              </button>
+            )}
+            {showDownload && (
+              <button type="button" className="mypage-x__modal-action--ghost" onClick={() => void downloadImage(viewImageUrl, `naily-design-${Date.now()}.png`)}>
+                {ModalActionIcons.download}
+                <span>이미지 다운로드</span>
+              </button>
+            )}
+            {showShare && viewDesignId != null && (
+              <button
+                type="button"
+                className={`mypage-x__modal-action--ghost${shared ? ' is-active' : ''}`}
+                onClick={() => void handleToggleShare()}
+                disabled={shareBusy || !canManage}
+                title={!canManage ? '내 디자인만 공유할 수 있어요' : undefined}
+              >
+                {ModalActionIcons.share}
+                <span>{shareBusy ? '처리 중...' : shared ? '공유 해제' : '공유하기'}</span>
+              </button>
+            )}
+            {showAr && (
+              <button type="button" className="mypage-x__modal-action--accent" onClick={() => setArTryOnImageUrl(viewImageUrl)}>
+                {ModalActionIcons.ar}
+                <span>AR로 미리보기</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {showChatHistory && (

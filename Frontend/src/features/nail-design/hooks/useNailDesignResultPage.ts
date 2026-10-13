@@ -99,6 +99,10 @@ export function useNailDesignResultPage() {
   const [colorPalette, setColorPalette] = useState<DesignExtractedDetails['colorPalette'] | null>(
       initialDetails?.colorPalette?.length ? initialDetails.colorPalette : null
   )
+  // 폴링이 끝나기 전(팔레트 추출 중)엔 "컬러 정보가 없어요" 대신 "생성 중" 스피너를 보여준다.
+  const [colorPaletteLoading, setColorPaletteLoading] = useState(
+      hasRealResult && designId != null && !initialDetails?.colorPalette?.length
+  )
   const colorPollCountRef = useRef(0)
   const colorPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [liked, setLiked] = useState(false)
@@ -161,11 +165,13 @@ export function useNailDesignResultPage() {
         const palette = detail.details?.colorPalette
         if (palette && palette.length > 0) {
           setColorPalette(palette)
+          setColorPaletteLoading(false)
           if (colorPollTimerRef.current) clearInterval(colorPollTimerRef.current)
           return
         }
       } catch {}
       if (colorPollCountRef.current >= POLL_MAX) {
+        setColorPaletteLoading(false)
         if (colorPollTimerRef.current) clearInterval(colorPollTimerRef.current)
       }
     }
@@ -276,6 +282,7 @@ export function useNailDesignResultPage() {
     sessionId,
     context,
     swatchLoading,
+    colorPaletteLoading,
     liked,
     likedFolder,
     isLiking,

@@ -387,7 +387,9 @@
 
 /* 왼쪽 디자인 이미지 박스와 오른쪽 컬러 팔레트·텍스처 박스 묶음의 세로 높이를 맞춘다 -
    두 칸을 같은 행 높이로 늘리고(stretch), 이미지는 박스를 꽉 채우며(cover),
-   오른쪽은 남는 높이를 컬러 팔레트 띠가 가져간다(.design-result-v2__detail-block--palette). */
+   오른쪽은 질감 박스를 고정 높이로 두고 남는 높이를 컬러 팔레트 박스가 가져간다.
+   행 높이는 이미지 박스 비율과 오른쪽 박스들의 고정 크기로만 정해지고, 팔레트·스와치가 늦게
+   도착해도("생성 중" → 실제 내용) 어느 박스의 크기도 바뀌지 않는다. */
 .design-result-v2__body {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
@@ -407,6 +409,8 @@
   position: relative;
   flex: 1 1 auto;
   width: 100%;
+  /* 생성 이미지(1536x1024) 비율로 박스 크기를 미리 잡는다 — 이미지가 로드되기 전에도 같은 크기 */
+  aspect-ratio: 3 / 2;
   max-height: 420px;
   border-radius: 18px;
   overflow: hidden;
@@ -416,11 +420,13 @@
   background: #fff;
 }
 
+/* 박스 크기에 영향을 주지 않도록 띄워서 박스를 꽉 채운다 */
 .design-result-v2__image {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
-  max-height: 420px;
   object-fit: cover;
 }
 
@@ -485,6 +491,29 @@
   font-weight: 600;
 }
 
+/* 컬러 팔레트·질감 스와치 생성 중 표시 */
+.design-result-v2__panel-hint--loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.design-result-v2__spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #e8b4c0;
+  border-top-color: #c47a90;
+  border-radius: 50%;
+  animation: design-result-spin 0.8s linear infinite;
+}
+
+@keyframes design-result-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ── 컬러 팔레트: 가로 한 줄 띠 (디자인 결과 화면·마이페이지·갤러리 공용) ──────────
    호버(키보드 포커스)한 색 구간이 넓어지면서 그 위에 HEX 값이 뜨고, 클릭하면 복사된다. */
 .design-result-v2__detail-block--palette {
@@ -492,8 +521,31 @@
   flex-direction: column;
 }
 
+/* 결과 화면 오른쪽 박스 크기 고정 (마이페이지 상세모달 등 다른 곳의 같은 패널은 그대로) —
+   팔레트 박스는 내용과 무관하게(basis 0) 남는 높이를 전부 갖고, 질감 박스는 스와치 한 줄
+   (썸네일 + 두 줄 라벨) 높이로 고정한다. */
 .design-result-v2__body .design-result-v2__detail-block--palette {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-height: 7.5rem;
+}
+
+.design-result-v2__body .design-result-v2__detail-block--texture {
+  flex: 0 0 auto;
+  height: 8.6rem;
+}
+
+/* 스와치가 한 줄에 다 안 들어가면 줄바꿈(박스가 커짐) 대신 가로 스크롤.
+   패딩은 썸네일 호버 확대(scale 1.08)가 스크롤 영역에 잘리지 않게 하는 여유분 */
+.design-result-v2__body .design-result-v2__texture-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: -4px;
+  padding: 4px;
+  scrollbar-width: thin;
+}
+
+.design-result-v2__body .design-result-v2__texture-item {
+  flex-shrink: 0;
 }
 
 .design-result-v2__palette-strip {
@@ -894,30 +946,54 @@
   font-weight: 700;
 }
 
-/* scan-auto 결과: 추천 팔레트 + 반영된 색 강조 */
+/* scan-auto 결과: 추천 컬러 전체 + 반영된 색 체크 표시.
+   웹은 한 줄(색 수만큼 열, 30색이면 30열) — 모바일은 아래 미디어쿼리에서 6열 그리드(30색 → 5행) */
 .design-result-v2__origin-palette {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.15rem;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 2.5rem);
+  gap: 0.35rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  list-style: none;
 }
 
 .design-result-v2__origin-swatch {
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 6px;
   border: 1px solid rgba(0, 0, 0, 0.12);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
-  opacity: 0.4;
+  color: #fff;
+  opacity: 0.3;
   transition: opacity 0.15s ease;
 }
 
 .design-result-v2__origin-swatch.is-used {
   opacity: 1;
   border-color: #c45f7e;
+  /* 링 두께(2.5px)를 gap의 절반 이하로 둬서 이웃한 반영 컬러끼리 링이 겹치지 않게 한다 */
   box-shadow:
-    0 0 0 2px #fff,
-    0 0 0 4px #e79bb2;
+    0 0 0 1px #fff,
+    0 0 0 2.5px #e79bb2;
+}
+
+.design-result-v2__origin-swatch svg {
+  width: 64%;
+  height: 64%;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.4));
+}
+
+/* 밝은 색 위에서는 흰 체크가 묻히므로 진한 체크 */
+.design-result-v2__origin-swatch.is-light {
+  color: #3d2b33;
+}
+
+.design-result-v2__origin-swatch.is-light svg {
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.6));
 }
 
 .design-result-v2__origin-stat--reflected {
@@ -969,6 +1045,19 @@
 
   .design-result-v2__origin-hand {
     grid-template-columns: 1fr;
+  }
+
+  /* 반영된 추천 컬러: 6열 그리드(30색 → 6×5). 자리는 arrangeRecommendedColors({ columns: 6 })가 준
+     --mobile-order로 바꿔서 열=색상군, 행=명도 단계가 되게 한다 */
+  .design-result-v2__origin-palette {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .design-result-v2__origin-swatch {
+    order: var(--mobile-order, 0);
+    border-radius: 8px;
   }
 
   .design-result-v2__origin-photo-row {

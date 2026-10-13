@@ -7,7 +7,6 @@ import com.example.nailyproject.dto.request.StlResultRequestDto;
 import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.dto.response.ScanStartResponseDto;
-import com.example.nailyproject.entity.ScanImg;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.service.ScanService;
 import jakarta.validation.Valid;
@@ -17,10 +16,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-
-import java.io.IOException;
-import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -42,25 +37,6 @@ public class ScanController {
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.success(201, "새 스캔이 생성되었습니다.", data));
-    }
-
-    /**
-     * 손가락 이미지 업로드 POST /scans/{scanId}/images?finger=THUMB
-     * 탑뷰(fileTop)와 측면뷰(fileSide) 두 장을 한 번에 받아 각각 저장합니다.
-     */
-    @PostMapping("/{scanId}/images")
-    public ResponseEntity<ApiResponse<Map<String, String>>> uploadFingerImage(
-            @AuthenticationPrincipal User user,
-            @PathVariable Long scanId,
-            @RequestParam("finger") ScanImg.Finger finger,
-            @RequestParam("fileTop") MultipartFile fileTop,
-            @RequestParam("fileSide") MultipartFile fileSide) throws IOException {
-
-        Map<String, String> urls = scanService.uploadFingerImages(user, scanId, finger, fileTop, fileSide);
-
-        return ResponseEntity.ok(
-                ApiResponse.success(200, "이미지가 업로드되었습니다.", urls)
-        );
     }
 
     /**

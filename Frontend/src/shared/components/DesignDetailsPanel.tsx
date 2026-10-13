@@ -352,13 +352,24 @@ function PaletteStrip({ items }: { items: NormalizedDetail[] }) {
     )
 }
 
+// 컬러 팔레트·질감 스와치가 비동기로 만들어지는 동안 보여주는 스피너 + 문구
+function GeneratingHint({ label }: { label: string }) {
+    return (
+        <p className="design-result-v2__panel-hint design-result-v2__panel-hint--loading" role="status">
+            <span className="design-result-v2__spinner" aria-hidden="true" />
+            {label}
+        </p>
+    )
+}
+
 type Props = {
     details?: DesignExtractedDetails | null
     loading?: boolean
+    paletteLoading?: boolean // 컬러 팔레트 폴링 중 여부
     swatchLoading?: boolean  // ★ 스와치 폴링 중 여부
 }
 
-export function DesignDetailsPanel({ details, loading = false, swatchLoading = false }: Props) {
+export function DesignDetailsPanel({ details, loading = false, paletteLoading = false, swatchLoading = false }: Props) {
     const [lightbox, setLightbox] = useState<{ url: string; alt: string } | null>(null)
 
     if (loading) {
@@ -389,19 +400,18 @@ export function DesignDetailsPanel({ details, loading = false, swatchLoading = f
                 <p className="design-result-v2__detail-label">컬러 팔레트</p>
                 {normalizedPalette.length > 0 ? (
                     <PaletteStrip items={normalizedPalette} />
+                ) : paletteLoading ? (
+                    <GeneratingHint label="컬러 팔레트 생성 중..." />
                 ) : (
                     <p className="design-result-v2__panel-hint">컬러 정보가 없어요.</p>
                 )}
             </div>
 
             {/* ★ 질감 스와치 — swatches 맵의 모든 항목 렌더링 */}
-            <div className="design-result-v2__detail-block">
+            <div className="design-result-v2__detail-block design-result-v2__detail-block--texture">
                 <p className="design-result-v2__detail-label">질감 · 텍스처</p>
                 {swatchLoading ? (
-                    <p className="design-result-v2__panel-hint" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid #e8b4c0', borderTopColor: '#c47a90', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                        스와치 생성 중...
-                    </p>
+                    <GeneratingHint label="스와치 생성 중..." />
                 ) : swatchEntries.length > 0 ? (
                     <div className="design-result-v2__texture-row">
                         {swatchEntries.map(([textureKey, swatchUrl]) => {

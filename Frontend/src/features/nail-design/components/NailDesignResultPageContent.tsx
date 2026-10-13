@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { FavoriteFolderModal } from '@/shared/components/FavoriteFolderModal'
@@ -11,8 +11,20 @@ import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { useNailDesignResultPage } from '@/features/nail-design/hooks/useNailDesignResultPage'
 import { INITIAL_PREFERENCES } from '@/shared/constants/designPreferences'
 import type { NailShapeId } from '@/shared/constants/nailShapes'
+import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
+
+// 반영된 추천 컬러 위에 올리는 체크 표시를 진한 색으로 할지 — 밝은 색(YIQ 밝기 기준) 위에선 흰 체크가 묻힌다.
+function isLightColor(hex: string): boolean {
+    const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+    if (!match) return false
+    const int = parseInt(match[1], 16)
+    const r = (int >> 16) & 255
+    const g = (int >> 8) & 255
+    const b = int & 255
+    return 0.299 * r + 0.587 * g + 0.114 * b > 150
+}
 
 export function NailDesignResultPageContent() {
     const {
@@ -22,6 +34,7 @@ export function NailDesignResultPageContent() {
         sessionId,
         context,
         swatchLoading,
+        colorPaletteLoading,
         liked,
         likedFolder,
         isLiking,
@@ -89,6 +102,12 @@ export function NailDesignResultPageContent() {
 
     const allKeywords = context ? Array.from(new Set([...context.keywords, ...context.revisionKeywords])) : []
 
+    // 반영된 추천 컬러 — 웹은 한 줄(DOM 순서 그대로), 모바일 6열 그리드에선 다른 화면들과 같이
+    // 열=색상군, 행=명도 단계가 되도록 CSS order로 자리만 바꾼다.
+    const mobilePaletteOrder = new Map(
+        arrangeRecommendedColors(context?.handSummary?.recommendedColors ?? [], { columns: 6 }).map((hex, i) => [hex, i]),
+    )
+
     return (
         <AppShell mainClassName="design-result-page">
             <div className="design-result-v2">
@@ -150,9 +169,10 @@ export function NailDesignResultPageContent() {
                         </div>
                     </div>
 
-                    {/* ★ swatchLoading 상태 전달 */}
+                    {/* ★ 팔레트·스와치 폴링 상태 전달 */}
                     <DesignDetailsPanel
                         details={detailsWithSwatches}
+                        paletteLoading={colorPaletteLoading}
                         swatchLoading={swatchLoading}
                     />
                 </div>
@@ -198,22 +218,30 @@ export function NailDesignResultPageContent() {
                                         </div>
                                         {context.handSummary.recommendedColors && context.handSummary.recommendedColors.length > 0 && (
                                             <div className="design-result-v2__origin-stat design-result-v2__origin-stat--palette">
-                                                <span className="design-result-v2__origin-stat-label">추천 컬러 반영</span>
-                                                <div className="design-result-v2__origin-palette">
+                                                <span className="design-result-v2__origin-stat-label">반영된 추천 컬러</span>
+                                                {/* 추천 컬러 전체를 보여주고, 프롬프트 Overall style에 쓰인 색만 체크 표시 (헥스값은 노출하지 않음) */}
+                                                <ul className="design-result-v2__origin-palette" aria-label="추천 컬러">
                                                     {context.handSummary.recommendedColors.map((hex) => {
                                                         const used = (context.handSummary?.usedColors ?? []).some(
                                                             (u) => u.toLowerCase() === hex.toLowerCase(),
                                                         )
                                                         return (
-                                                            <span
+                                                            <li
                                                                 key={hex}
-                                                                className={`design-result-v2__origin-swatch${used ? ' is-used' : ''}`}
-                                                                style={{ backgroundColor: hex }}
-                                                                title={used ? `${hex} · 이 디자인에 반영됨` : hex}
-                                                            />
+                                                                className={`design-result-v2__origin-swatch${used ? ' is-used' : ''}${used && isLightColor(hex) ? ' is-light' : ''}`}
+                                                                style={{ backgroundColor: hex, '--mobile-order': mobilePaletteOrder.get(hex) ?? 0 } as CSSProperties}
+                                                                title={used ? '이 디자인에 반영된 컬러' : undefined}
+                                                                aria-label={used ? '반영된 추천 컬러' : '추천 컬러'}
+                                                            >
+                                                                {used && (
+                                                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                                        <path d="m5 12.5 4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                                                                    </svg>
+                                                                )}
+                                                            </li>
                                                         )
                                                     })}
-                                                </div>
+                                                </ul>
                                             </div>
                                         )}
                                         {(context.handSummary.reflectedMood ||

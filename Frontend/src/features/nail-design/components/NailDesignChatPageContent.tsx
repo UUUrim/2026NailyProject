@@ -535,7 +535,7 @@ export function NailDesignChatPageContent() {
                                                     <img
                                                         src={url}
                                                         alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'}
-                                                        onClick={() => openZoomedImage(url)}
+                                                        onClick={() => openZoomedImage(url, Boolean(bubble.isDesignResult))}
                                                         onLoad={scrollMessagesToBottom}
                                                         style={{ cursor: 'zoom-in' }}
                                                     />
@@ -1156,7 +1156,7 @@ export function NailDesignChatPageContent() {
 
             {zoomedImage && (
                 <DesignImageDetailModal
-                    image={{ designId: null, imageUrl: zoomedImage, liked: false, folder: null }}
+                    image={{ designId: null, imageUrl: zoomedImage.url, liked: false, folder: null }}
                     onClose={closeZoomedImage}
                     showDelete={false}
                     showChatHistoryToggle={false}
@@ -1164,6 +1164,7 @@ export function NailDesignChatPageContent() {
                     showLike={false}
                     showShare={false}
                     showAr={false}
+                    showDownload={zoomedImage.isDesignResult}
                 />
             )}
 

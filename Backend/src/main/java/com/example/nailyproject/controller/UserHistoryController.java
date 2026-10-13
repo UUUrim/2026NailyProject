@@ -5,15 +5,12 @@ import com.example.nailyproject.dto.response.ApiResponse;
 import com.example.nailyproject.dto.response.PrintOrderResponseDto;
 import com.example.nailyproject.dto.response.PrinterProgressResponseDto;
 import com.example.nailyproject.dto.response.ScanHistoryItemDto;
-import com.example.nailyproject.dto.response.ScanResultResponseDto;
+import com.example.nailyproject.dto.response.ScanSessionDto;
 import com.example.nailyproject.entity.HandScan;
-import com.example.nailyproject.entity.ScanImg;
 import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.HandScanRepository;
-import com.example.nailyproject.repository.ScanImgRepository;
 import com.example.nailyproject.service.PrintOrderService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.nailyproject.service.ScanResultFileService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,7 +23,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 // 마이페이지 '손 분석 결과 이력' / '네일팁 출력 내역' 조회·기록용
 @RestController
@@ -35,9 +35,8 @@ import java.util.stream.Collectors;
 public class UserHistoryController {
 
     private final HandScanRepository handScanRepository;
-    private final ScanImgRepository scanImgRepository;
     private final PrintOrderService printOrderService;
-    private final ObjectMapper objectMapper;
+    private final ScanResultFileService scanResultFileService;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
@@ -52,22 +51,25 @@ public class UserHistoryController {
 
         List<ScanHistoryItemDto> data = scans.stream()
                 .map(scan -> {
-                    FingerAverages averages = computeFingerAverages(scan);
+                    // 분석 값은 로컬 양손 최종 measurements.json에서 온다 (파일이 아직 없으면 비어 있음).
+                    ScanResultFileService.ScanAnalysis a = scanResultFileService.analysisFor(scan).orElse(null);
                     return ScanHistoryItemDto.builder()
                             .scanId(scan.getId())
+                            .pairedScanId(scan.getPairedScanId())
                             .handSide(scan.getHandSide() != null ? scan.getHandSide().name() : null)
                             .status(scan.getStatus() != null ? scan.getStatus().name() : null)
-                            .shape(scan.getShape())
-                            .recommendedShape(scan.getRecommendedShape())
-                            .skinToneHex(scan.getSkinToneHex())
-                            .recommendedColors(ScanResultResponseDto.parseRecommendedColors(scan.getRecommendedColors(), objectMapper))
-                            .tone(scan.getTone())
-                            .warmness(scan.getWarmness())
-                            .brightness(scan.getBrightness())
-                            .saturation(scan.getSaturation())
-                            .avgLengthMm(averages.lengthMm())
-                            .avgWidthMm(averages.widthMm())
-                            .avgCurve(averages.curve())
+                            .shape(a != null ? a.recommendedShape() : null)
+                            .recommendedShape(a != null ? a.recommendedShape() : null)
+                            .skinToneHex(a != null ? a.skinToneHex() : null)
+                            .recommendedColors(a != null ? a.recommendedColors() : List.of())
+                            .tone(a != null ? a.tone() : null)
+                            .warmness(a != null ? a.warmness() : null)
+                            .brightness(a != null ? a.brightness() : null)
+                            .saturation(a != null ? a.saturation() : null)
+                            .avgLengthMm(a != null ? a.avgLengthMm() : null)
+                            .avgWidthMm(a != null ? a.avgWidthMm() : null)
+                            .avgCurve(a != null ? a.avgCurveMm() : null)
+                            .avgFreeEdgeMm(a != null ? a.avgFreeEdgeMm() : null)
                             .scannedAt(scan.getScannedAt() != null ? scan.getScannedAt().format(FORMATTER) : "")
                             .build();
                 })
@@ -76,6 +78,58 @@ public class UserHistoryController {
         return ResponseEntity.ok(
                 ApiResponse.success(200, "손 스캔 이력 조회 성공.", data)
         );
+    }
+
+    /**
+     * 내 손 분석 기록 목록 GET /users/me/scan-sessions
+     * 양손 최종 measurements.json 하나가 한 줄이다. 마이페이지/출력/디자인 채팅이 공통으로 쓴다.
+     * (손 한쪽씩의 DB 기록을 시각으로 짝지어 만들지 않는다)
+     */
+    @GetMapping("/scan-sessions")
+    public ResponseEntity<ApiResponse<List<ScanSessionDto>>> getMyScanSessions(
+            @AuthenticationPrincipal User user) {
+
+        List<ScanSessionDto> data = scanResultFileService.sessions(user.getId()).stream()
+                .map(s -> ScanSessionDto.builder()
+                        .key(s.leftScanId() + "-" + s.rightScanId())
+                        .leftScanId(s.leftScanId())
+                        .rightScanId(s.rightScanId())
+                        .scannedAt(s.scannedAt().format(FORMATTER))
+                        .status(sessionStatus(user, s.leftScanId(), s.rightScanId()))
+                        .shape(s.recommendedShape())
+                        .recommendedShape(s.recommendedShape())
+                        .skinToneHex(s.skinToneHex())
+                        .recommendedColors(s.recommendedColors())
+                        .tone(s.tone())
+                        .warmness(s.warmness())
+                        .brightness(s.brightness())
+                        .saturation(s.saturation())
+                        .avgLengthMm(s.avgLengthMm())
+                        .avgWidthMm(s.avgWidthMm())
+                        .avgCurve(s.avgCurveMm())
+                        .avgFreeEdgeMm(s.avgFreeEdgeMm())
+                        .build())
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(ApiResponse.success(200, "손 분석 기록 조회 성공.", data));
+    }
+
+    private static final List<HandScan.ScanStatus> STATUS_ORDER = List.of(
+            HandScan.ScanStatus.FAILED, HandScan.ScanStatus.READY, HandScan.ScanStatus.ANALYZING,
+            HandScan.ScanStatus.MEASURED, HandScan.ScanStatus.GENERATING_STL, HandScan.ScanStatus.COMPLETED);
+
+    /** 두 손의 DB 상태 중 가장 덜 끝난 것. 파일이 있는데 DB 행이 없으면(예전 데이터) MEASURED. */
+    private String sessionStatus(User user, long leftId, long rightId) {
+        List<HandScan.ScanStatus> statuses = Stream.of(leftId, rightId)
+                .map(id -> handScanRepository.findByIdAndUserId(id, user.getId()))
+                .flatMap(Optional::stream)
+                .map(HandScan::getStatus)
+                .filter(Objects::nonNull)
+                .toList();
+        for (HandScan.ScanStatus s : STATUS_ORDER) {
+            if (statuses.contains(s)) return s.name();
+        }
+        return HandScan.ScanStatus.MEASURED.name();
     }
 
     /**
@@ -139,66 +193,4 @@ public class UserHistoryController {
                 ApiResponse.success(200, "프린터 진행 상황 조회 성공.", data)
         );
     }
-
-    // ── 손가락별 측정값 평균 계산 (마이페이지 손 분석 이력 카드에 표시) ──────────────
-
-    private FingerAverages computeFingerAverages(HandScan scan) {
-        List<ScanImg> images = scanImgRepository.findByHandScan(scan);
-        double lengthSum = 0;
-        double widthSum = 0;
-        double curveSum = 0;
-        int count = 0;
-
-        for (ScanImg img : images) {
-            double[] values = parseMeasurements(img.getMeasurements());
-            if (values == null) continue;
-            lengthSum += values[0];
-            widthSum += values[1];
-            curveSum += values[2];
-            count++;
-        }
-
-        if (count == 0) {
-            return new FingerAverages(null, null, null);
-        }
-        return new FingerAverages(
-                round1(lengthSum / count),
-                round1(widthSum / count),
-                round2(curveSum / count)
-        );
-    }
-
-    private double[] parseMeasurements(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            JsonNode node = objectMapper.readTree(raw);
-            double length = firstNumber(node, "lengthMm", "length");
-            double width = firstNumber(node, "widthMm", "width");
-            // 실제 스캔 파이프라인(scan/server.py)이 내려주는 곡률 필드명은 cCurveMm이다.
-            // cCurve/curve는 과거 목업 데이터 호환용 fallback으로만 남겨둔다.
-            double curve = firstNumber(node, "cCurveMm", "cCurve", "curve");
-            return new double[]{length, width, curve};
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private double firstNumber(JsonNode node, String... keys) {
-        for (String key : keys) {
-            if (node.has(key) && node.get(key).isNumber()) {
-                return node.get(key).asDouble();
-            }
-        }
-        return 0;
-    }
-
-    private Double round1(double value) {
-        return Math.round(value * 10.0) / 10.0;
-    }
-
-    private Double round2(double value) {
-        return Math.round(value * 100.0) / 100.0;
-    }
-
-    private record FingerAverages(Double lengthMm, Double widthMm, Double curve) {}
 }

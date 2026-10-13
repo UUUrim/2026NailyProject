@@ -24,6 +24,6 @@ public class StlResultRequestDto {
     @NoArgsConstructor
     public static class StlFingerResult {
         private String finger;  // THUMB, INDEX ...
-        private String stlUrl;  // 완성된 3D 파일 S3 주소
+        private String stlUrl;  // 완성된 3D 파일의 로컬 경로(S3에 올리지 않음)
     }
 }

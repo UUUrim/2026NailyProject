@@ -74,7 +74,7 @@ export const TIP_EXTENSION_DEFAULT_MM: Record<NailShapeId, number> = {
 }
 
 export const TIP_EXTENSION_MIN_MM = 1
-export const TIP_EXTENSION_MAX_MM = 15
+export const TIP_EXTENSION_MAX_MM = 20
 
 export function getDefaultTipExtensionMm(shapeId: string | null | undefined): number {
   if (!shapeId) return TIP_EXTENSION_DEFAULT_MM.round

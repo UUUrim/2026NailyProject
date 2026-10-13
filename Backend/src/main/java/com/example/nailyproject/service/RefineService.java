@@ -35,12 +35,14 @@ public class RefineService {
     private final ObjectMapper objectMapper;
     private final NailDesignService nailDesignService;
     private final NailDetectionService nailDetectionService;
+    private final GptClientService gptClientService;
 
-    @Value("${gemini.api.key}")
-    private String apiKey;
-
-    @Value("${gemini.api.url}")
-    private String apiUrl;
+    // Gemini 설정 - GPT로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // @Value("${gemini.api.key}")
+    // private String apiKey;
+    //
+    // @Value("${gemini.api.url}")
+    // private String apiUrl;
 
     private static final Pattern HEX_PATTERN = Pattern.compile("^#[0-9A-Fa-f]{6}$");
     private static final RestTemplate restTemplate = new RestTemplate();
@@ -58,42 +60,73 @@ public class RefineService {
 
             [핵심 규칙]
             1. prompt
-               - 수정할 손가락 nail tip 하나를 묘사하는 영어 문장.
+               - 수정할 nail tip을 어떻게 바꿀지 묘사하는 영어 문장. targetFingers에 손가락이
+                 여러 개 들어가도 prompt는 하나만 쓰면 됩니다(그 손가락들 전부에 같은 수정
+                 내용이 적용됩니다). 손가락마다 다른 수정이 필요하면 그중 사용자가 명확히
+                 말한 손가락만 targetFingers에 넣으세요.
                - 형식: "A studio product photo of individual {shape}-shaped press-on nail tip nailart,
                  {수정 내용 반영한 묘사}, top-down flat lay view, plain white background,
                  no shadow, no hands, no fingers, no text, no watermark, no reflection, product shot"
                - 원본 프롬프트에서 shape, 베이스 컬러 등 변하지 않는 요소는 그대로 유지.
                - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
-            2. mask_prompt
-                           - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
-                           - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
-                           - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
-                           - 형식: "nail tip with {현재 존재하는 특징}"
-                           - 특징은 색상 또는 파츠 중 하나로만 잡으세요.
-                           - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
-                           - 10단어 이내로 작성하세요.
-                           - 좋은 예시:
-                             * "nail tip with heart charm" (현재 하트 파츠가 있을 때)
-                             * "nail tip with white base" (현재 흰색일 때)
-                             * "nail tip with glitter" (현재 글리터가 있을 때)
-                           - 나쁜 예시 (절대 금지):
-                             * 수정 후 결과물 색상 ("nail tip with aquatic blue gradient" 등)
-                             * "nail tip with previous design" (의미 없음)
-                             * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
+            2. targetFingers - 매우 중요 (수정할 손톱을 정확히 지정하는 핵심 필드)
+               - 값은 "thumb", "index", "middle", "ring", "pinky" 중에서 골라 배열로 담으세요
+                 (왼쪽부터 1~5번째 손톱에 각각 대응: thumb=1, index=2, middle=3, ring=4,
+                 pinky=5 — Java 쪽에서 이 순서대로 번호로 변환해서 gen 서버에 보냅니다).
+               - 사용자가 손가락을 직접 지정한 경우 그대로 사용하세요:
+                 * 이름으로 지정: "엄지" → thumb, "검지"/"둘째" → index, "중지"/"셋째" → middle,
+                   "약지"/"넷째" → ring, "소지"/"새끼"/"다섯째" → pinky
+                 * 번호로 지정(왼쪽부터 1~5): "1번"/"첫번째" → thumb, "2번" → index,
+                   "3번" → middle, "4번" → ring, "5번" → pinky
+                 * 여러 개 지정: "엄지랑 소지" → ["thumb", "pinky"]
+               - 사용자가 직접 지정하지 않았다면, [직전 손가락별 플랜]에서 각 손가락의
+                 description/base_color/parts를 보고 사용자가 말한 특징(색상, 파츠 등)과
+                 일치하는 손가락을 찾아서 넣으세요 (예: "핑크색 손톱 바꿔줘" → 플랜에서
+                 base_color가 핑크 계열인 손가락).
+               - 어느 손가락인지 도저히 판단이 안 서면(예: 설명이 너무 모호하거나 여러
+                 손가락이 동시에 후보인데 구분이 안 될 때) 빈 배열 []로 두세요 — 이 경우
+                 아래 mask_prompt(시각적 탐지 폴백)가 대신 쓰입니다.
 
-            3. slotActions (기존과 동일, 세션 슬롯 업데이트용)
+            3. mask_prompt - targetFingers를 못 정했을 때만 쓰이는 폴백
+               - targetFingers가 비어있지 않으면 gen 서버가 이 필드를 아예 무시하므로,
+                 targetFingers를 확실히 정했다면 mask_prompt는 대충 채워도 되지만 그래도
+                 아래 규칙에 맞게 작성해두세요 (안전망).
+               - GroundingDINO가 원본 이미지에서 수정할 영역을 찾을 때 쓰는 텍스트.
+               - 반드시 원본 이미지에 현재 존재하는 시각적 특징으로 묘사하세요.
+               - 수정 후 결과물의 색상이나 특징을 쓰면 탐지 실패합니다.
+               - mask_prompt는 수정할 대상(제거/교체할 파츠나 요소)을 묘사하세요.
+                 손톱 전체를 묘사하지 말고, 실제로 변경할 부분만 묘사하세요.
+                 예: 캐릭터 얼굴 관련 → "nail tip with character art"
+                     파츠 교체 → "nail tip with bow charm"
+                     색상 변경 → "yellow nail tip"
+               - 형식: "nail tip with {현재 존재하는 특징}"
+
+               - [직전 손가락별 플랜]에서 해당 손가락의 현재 base_color나 parts를 참고하세요.
+               - 10단어 이내로 작성하세요.
+               - 좋은 예시:
+                 * "nail tip with 3d heart charm" (현재 하트 3d 파츠가 있을 때)
+                 * "nail tip with white base" (현재 흰색일 때)
+                 * "nail tip with glitter" (현재 글리터가 있을 때)
+               - 나쁜 예시 (절대 금지):
+                 * 수정 후 결과물 색상
+                 * "nail tip with previous design" (의미 없음)
+                 * 특징 없이 "nail tip" 단독 사용은 최후 수단으로만
+
+
+            4. slotActions (기존과 동일, 세션 슬롯 업데이트용)
                - 수정 요청에 맞게 카테고리별 liked/disliked 업데이트.
                - 카테고리: mood, designType, color, season, motif, shape
                - color는 반드시 hex(#RRGGBB) 형식.
                - 언급 안 된 카테고리는 넣지 마세요.
-               
+
             [중요 규칙]
             - 반드시 사용자가 요청한 수정 내용만 반영하세요.
 
             반드시 아래 JSON 형식으로만 응답하세요. 마크다운 없이 순수 JSON만.
             {
                 "prompt": "A studio product photo of individual ...",
+                "targetFingers": ["ring"],
                 "mask_prompt": "nail tip with heart charm",
                 "slotActions": [
                     {"category": "motif", "action": "add_dislike", "value": "heart"}
@@ -102,6 +135,8 @@ public class RefineService {
                 "fingerDislikes": {"thumb": ["large heart"]}
             }
             """;
+
+    private static final List<String> FINGER_ORDER = List.of("thumb", "index", "middle", "ring", "pinky");
 
     /**
      * 채팅 수정 요청 처리 메인 메서드.
@@ -124,22 +159,25 @@ public class RefineService {
         String previousPlanJson = prevDesign.getDesignPlan() != null
                 ? prevDesign.getDesignPlan() : "(직전 플랜 없음)";
 
-        // 1. Gemini로 prompt + mask_prompt 생성
+        // 1. GPT로 prompt + mask_prompt 생성
         String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, originalPrompt, previousPlanJson);
-        Map<String, Object> requestBody = Map.of(
-                "contents", List.of(Map.of("role", "user",
-                        "parts", List.of(Map.of("text", message)))),
-                "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
-                "generationConfig", Map.of(
-                        "responseMimeType", "application/json",
-                        "maxOutputTokens", 8192,
-                        "thinkingConfig", Map.of("thinkingLevel", "MEDIUM")
-                )
-        );
 
-        JsonNode responseNode = callGeminiWithRetry(requestBody);
-        String aiText = responseNode.path("candidates").get(0)
-                .path("content").path("parts").get(0).path("text").asText();
+        // [Gemini 방식 - 주석 처리]
+        // Map<String, Object> requestBody = Map.of(
+        //         "contents", List.of(Map.of("role", "user",
+        //                 "parts", List.of(Map.of("text", message)))),
+        //         "systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))),
+        //         "generationConfig", Map.of(
+        //                 "responseMimeType", "application/json",
+        //                 "maxOutputTokens", 8192,
+        //                 "thinkingConfig", Map.of("thinkingLevel", "MEDIUM")
+        //         )
+        // );
+        // JsonNode responseNode = callGeminiWithRetry(requestBody);
+        // String aiText = responseNode.path("candidates").get(0)
+        //         .path("content").path("parts").get(0).path("text").asText();
+
+        String aiText = gptClientService.chat(systemPrompt, message, 8192, true);
 
         JsonNode resultJson;
         try {
@@ -149,15 +187,17 @@ public class RefineService {
             throw new IllegalStateException("수정 내용을 이해하지 못했어요. 다시 말씀해 주세요.");
         }
 // ★ 이 줄 추가
-        System.out.println("[RefineService] Gemini 응답: " + aiText);
+        System.out.println("[RefineService] GPT 응답: " + aiText);
 
         String inpaintPrompt = resultJson.path("prompt").asText("");
         String maskPrompt    = resultJson.path("mask_prompt").asText("");
+        List<Integer> nailIndexes = resolveNailIndexes(resultJson.path("targetFingers"));
 
 // ★ 이 줄 추가
-        System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt + " / maskPrompt: " + maskPrompt);
+        System.out.println("[RefineService] inpaintPrompt: " + inpaintPrompt
+                + " / targetFingers nailIndexes: " + nailIndexes + " / maskPrompt: " + maskPrompt);
 
-        if (inpaintPrompt.isBlank() || maskPrompt.isBlank()) {
+        if (inpaintPrompt.isBlank() || (nailIndexes.isEmpty() && maskPrompt.isBlank())) {
             throw new IllegalStateException("수정할 영역을 파악하지 못했어요. 좀 더 구체적으로 말씀해 주세요.");
         }
 
@@ -184,7 +224,7 @@ public class RefineService {
         // 4. gen 서버 /inpaint 호출 — seed는 원본과 동일해야 퀄리티 유지
         Long seed = prevDesign.getSeed(); // NailDesign에 seed 컬럼 필요
         String inpaintedBase64 = nailImageService.inpaintNail(
-                originalImageBase64, inpaintPrompt, maskPrompt, seed
+                originalImageBase64, inpaintPrompt, maskPrompt, nailIndexes, seed
         );
 
         // 5. 수정된 이미지 S3 업로드
@@ -232,6 +272,21 @@ public class RefineService {
                 .details(nailDesignService.buildDetails(newDesign)) // 수정 후 details는 프론트에서 별도 요청
                 .keywords(nailDesignService.extractKeywordsFromSlots(slots, session))
                 .build();
+    }
+
+    /**
+     * Gemini가 준 targetFingers(["thumb", "ring", ...])를 gen 서버가 받는
+     * nail_index(왼쪽부터 1~5) 배열로 변환한다. FINGER_ORDER 순서가 곧 1~5번 대응.
+     * 목록에 없는 값이나 중복은 무시한다.
+     */
+    private List<Integer> resolveNailIndexes(JsonNode targetFingersNode) {
+        if (targetFingersNode == null || !targetFingersNode.isArray()) return List.of();
+        List<Integer> indexes = new ArrayList<>();
+        for (JsonNode fingerNode : targetFingersNode) {
+            int idx = FINGER_ORDER.indexOf(fingerNode.asText("").trim().toLowerCase());
+            if (idx >= 0 && !indexes.contains(idx + 1)) indexes.add(idx + 1);
+        }
+        return indexes;
     }
 
     // -------------------------------------------------------------------------
@@ -302,28 +357,29 @@ public class RefineService {
         try { updater.accept(objectMapper.writeValueAsString(merged)); } catch (Exception ignored) {}
     }
 
-    private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
-        WebClient webClient = webClientBuilder.build();
-        int maxAttempts = 3;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                return webClient.post()
-                        .uri(apiUrl + "?key=" + apiKey.trim())
-                        .bodyValue(requestBody)
-                        .retrieve()
-                        .bodyToMono(JsonNode.class)
-                        .block();
-            } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
-                int code = e.getStatusCode().value();
-                if ((code == 429 || code == 503) && attempt < maxAttempts) {
-                    try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                    }
-                    continue;
-                }
-                throw new IllegalStateException("AI 서버 오류: " + e.getStatusCode());
-            }
-        }
-        throw new IllegalStateException("AI 응답 실패");
-    }
+    // Gemini 호출 로직 - GPT(GptClientService)로 교체하면서 주석 처리 (롤백 대비, 삭제 안 함)
+    // private JsonNode callGeminiWithRetry(Map<String, Object> requestBody) {
+    //     WebClient webClient = webClientBuilder.build();
+    //     int maxAttempts = 3;
+    //     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+    //         try {
+    //             return webClient.post()
+    //                     .uri(apiUrl + "?key=" + apiKey.trim())
+    //                     .bodyValue(requestBody)
+    //                     .retrieve()
+    //                     .bodyToMono(JsonNode.class)
+    //                     .block();
+    //         } catch (org.springframework.web.reactive.function.client.WebClientResponseException e) {
+    //             int code = e.getStatusCode().value();
+    //             if ((code == 429 || code == 503) && attempt < maxAttempts) {
+    //                 try { Thread.sleep(1500L * attempt); } catch (InterruptedException ie) {
+    //                     Thread.currentThread().interrupt();
+    //                 }
+    //                 continue;
+    //             }
+    //             throw new IllegalStateException("AI 서버 오류: " + e.getStatusCode());
+    //         }
+    //     }
+    //     throw new IllegalStateException("AI 응답 실패");
+    // }
 }
