@@ -28,6 +28,11 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class RefineService {
 
+    /** 수정 결과를 투명 배경으로 받을 때 지시문 뒤에 붙인다: 입력의 흰 배경을 다시 그리지 않고, 손톱은 꽉 찬 불투명으로 둔다. */
+    private static final String TRANSPARENT_EDIT_SUFFIX =
+            " Return the result as a cut-out on a fully transparent background (no white or colored backdrop, "
+                    + "no cast shadow), and keep the silhouette of every nail fully solid and unchanged from the original photo.";
+
     private final DesignSessionRepository designSessionRepository;
     private final NailDesignRepository nailDesignRepository;
     private final ChatMessageRepository chatMessageRepository;
@@ -386,13 +391,41 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
-        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄
-        String editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto");
+        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄.
+        //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
+        //    합성본이라 모델이 흰 배경을 그대로 그려 불투명으로 줄 수도 있는데, 그러면 아래 크롭 단계가 서버 누끼로 처리한다.
+        boolean transparentEdit = nailDesignService.isTransparentGptImage();
+        String editedBase64;
+        try {
+            String instructionToSend = transparentEdit ? editInstruction + TRANSPARENT_EDIT_SUFFIX : editInstruction;
+            editedBase64 = gptClientService.editImage(instructionToSend, originalImageBytes, "1536x1024", "auto", transparentEdit);
+        } catch (Exception e) {
+            if (!transparentEdit) throw e;
+            // 스레드가 중단된 경우(서버 재시작/종료, 요청 취소)는 투명 배경 거절이 아니므로 재시도하지 않는다 -
+            // 중단 플래그가 켜진 채로 다시 호출해도 곧바로 같은 예외가 나고 GPT 호출만 낭비된다.
+            if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException
+                    || e.getCause() instanceof InterruptedException
+                    || String.valueOf(e.getMessage()).contains("InterruptedException")) throw e;
+            // 이미지 수정 API가 투명 배경 요청을 거절하면 수정 기능 전체가 막히므로, 예전 방식(흰 배경)으로 한 번 더 시도한다.
+            System.err.println("[RefineService] 투명 배경 수정 요청이 실패해 흰 배경 방식으로 다시 시도합니다: " + e.getMessage());
+            transparentEdit = false;
+            editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto", false);
+        }
 
-        // 4. 수정된 이미지 S3 업로드
+        // 4. 수정된 이미지 S3 업로드 (표시용은 흰 배경을 입힌 것, 투명 원본은 AR 크롭에만 쓴다)
         byte[] editedBytes = Base64.getDecoder().decode(editedBase64);
+        String displayBase64 = editedBase64;
+        if (transparentEdit) {
+            System.out.println("[GptImage] (edit) background=transparent 요청 → 응답: " + PngBackground.describeAlpha(editedBytes));
+            editedBytes = PngBackground.compositeOnWhite(editedBytes);
+            displayBase64 = Base64.getEncoder().encodeToString(editedBytes);
+        }
         String s3Key = "designs/user_" + user.getId() + "/edit_" + UUID.randomUUID() + ".png";
         String newImageUrl = s3Service.uploadImageBytes(editedBytes, s3Key);
+
+        // AR 미리보기용 손톱별 크롭: 생성본과 똑같이 만든다. 없으면 AR이 프론트의 색 기반 누끼로 폴백해서
+        // 흰색으로 번지는 손톱 끝이 잘린다.
+        String nailTipCropsJson = nailDesignService.createNailTipCrops(user.getId(), editedBase64, displayBase64);
 
         // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
         String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
@@ -409,6 +442,7 @@ public class RefineService {
                 // 플랜은 그대로 유지하되, 쉐입이 바뀐 경우 plan의 shape만 새 값으로 바꾼다
                 // (AR/3D 템플릿과 이후 수정 요청이 이 shape를 읽는다)
                 .designPlan(nextPlanJson)
+                .nailTipCropsJson(nailTipCropsJson)
                 .seed(null) // OpenAI 이미지 API는 seed 개념이 없어 재현 불가
                 .build();
         nailDesignRepository.save(newDesign);
