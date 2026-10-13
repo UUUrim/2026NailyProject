@@ -10,7 +10,11 @@ export type TextureOption = {
     swatch?: string
 }
 
-const TEXTURE_KEY_BY_KO = Object.fromEntries(Object.entries(TEXTURE_INFO).map(([key, info]) => [info.labelKo, key]))
+const TEXTURE_KEY_BY_KO: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(TEXTURE_INFO).map(([key, info]) => [info.labelKo, key])),
+    // 예전에 저장된 한글 라벨도 같은 질감으로 인식한다 ("마그네틱 크롬" → "자석")
+    '마그네틱 크롬': 'magnetic_chrome',
+}
 
 // textures는 키("glitter") · 한글 라벨 · {label} 객체가 섞여 올 수 있어 TEXTURE_INFO 키 하나로 맞춘다
 function textureKeyOf(item: DesignDetailItem): string | null {
