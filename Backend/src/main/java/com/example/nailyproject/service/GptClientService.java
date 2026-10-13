@@ -194,11 +194,24 @@ public class GptClientService {
      * @return base64 인코딩된 수정 이미지(PNG)
      */
     public String editImage(String editInstruction, byte[] originalImageBytes, String size, String quality) {
+        return editImage(editInstruction, originalImageBytes, size, quality, false);
+    }
+
+    /**
+     * @param transparent true면 background="transparent" + output_format="png"도 같이 보내 알파 채널이 있는 PNG로 받는다
+     *                    (생성과 똑같이 AR 크롭을 투명 원본에서 따기 위해). 모델이 무시하면 불투명 이미지가 온다.
+     */
+    public String editImage(String editInstruction, byte[] originalImageBytes, String size, String quality,
+                            boolean transparent) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
         builder.part("model", imageModel);
         builder.part("prompt", editInstruction);
         builder.part("size", size);
         builder.part("quality", quality);
+        if (transparent) {
+            builder.part("background", "transparent");
+            builder.part("output_format", "png");
+        }
         builder.part("image", new ByteArrayResource(originalImageBytes))
                 .filename("original.png")
                 .contentType(MediaType.IMAGE_PNG);
