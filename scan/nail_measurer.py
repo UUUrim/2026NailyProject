@@ -2252,119 +2252,86 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     }
 
 
-# 평균과 이 값(mm)보다 더 차이가 나야 "작음/큼"으로 본다. 측정 오차가 ±1mm 안팎이라
-# (손가락 SD 0.34~0.5mm보다 큼) z-score 판정은 너무 민감해서 mm 구간으로 단순화했다.
-C_CURVE_AVG_BAND_MM = 0.5
-
 _C_CURVE_DESC = {
+    "much_smaller": "평균보다 많이 평평한 편",
     "smaller": "평균보다 평평한 편",
     "average": "평균과 비슷한 편",
     "larger": "평균보다 둥글게 휜 편",
+    "much_larger": "평균보다 많이 둥글게 휜 편",
 }
+
+
+def _c_curve_z(n: dict):
+    """한 손가락의 C-curve z-score = (측정값 - 그 손가락 평균) / SD (STANDARD_NAILS).
+    쓸 수 없는 값이면 None.  측정 실패로 손가락 평균이 대신 들어간 값은 뺀다
+    (z가 0 쪽으로 쏠리므로).  c_curve_source가 없는 예전 결과 파일은 측정값으로 간주한다."""
+    std = STANDARD_NAILS.get(n.get("finger"))
+    if std is None or n.get("c_curve_source") == "fallback_average":
+        return None
+    try:
+        v = float(n.get("c_curve_mm"))
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(v) or math.isinf(v):
+        return None
+    return (v - std["c_curve_mm"]) / std["c_curve_sd"]
 
 
 def _classify_c_curve_total(all_nails: list) -> dict:
     """
-    양손 C-curve를 여성 평균(STANDARD_NAILS의 c_curve_mm)과 비교해 3단계로 판정한다.
-
-    각 손가락의 (측정값 - 그 손가락의 평균)을 구해 평균낸 차이(mm)가
-    -C_CURVE_AVG_BAND_MM ~ +C_CURVE_AVG_BAND_MM 안이면 average, 그보다 작으면 smaller,
-    크면 larger. 측정값이 없는 손가락(None)과 평균 대체값은 계산에서 뺀다.
-    c_curve_size: smaller / average / larger
+    C-curve를 손가락별로 여성 평균/SD(STANDARD_NAILS)와 비교해 5단계로 판정하고,
+    손 전체 판정은 손가락별 판정의 다수결로 정한다 (폭/길이와 같은 방식).
+    c_curve_size: much_smaller / smaller / average / larger / much_larger
     (smaller = 평균보다 평평, larger = 평균보다 더 휘어 있음)
     """
-    total, ref_mean, used = 0.0, 0.0, 0
-    for n in all_nails:
-        std = STANDARD_NAILS.get(n.get("finger"))
-        # 측정 실패로 손가락 평균이 대신 들어간 값은 판정에서 뺀다 (z가 0 쪽으로 쏠리므로).
-        # c_curve_source가 없는 예전 결과 파일은 측정값으로 간주한다.
-        if n.get("c_curve_source") == "fallback_average":
-            continue
-        try:
-            v = float(n.get("c_curve_mm"))
-        except (TypeError, ValueError):
-            continue
-        if std is None or math.isnan(v) or math.isinf(v):
-            continue
-        total    += v
-        ref_mean += std["c_curve_mm"]
-        used     += 1
-
-    if used == 0:
-        return {"c_curve_size": None, "c_curve_diff_mm": None, "avg_c_curve_mm_used": None,
-                "reference_c_curve_mm": None, "c_curve_finger_count": 0,
-                "c_curve_text": None}
-
-    diff = (total - ref_mean) / used   # 손가락당 평균 차이(mm)
-    if diff < -C_CURVE_AVG_BAND_MM:
-        size = "smaller"
-    elif diff > C_CURVE_AVG_BAND_MM:
-        size = "larger"
-    else:
-        size = "average"
+    labels = [_size_category(z) for z in map(_c_curve_z, all_nails) if z is not None]
+    if not labels:
+        return {"c_curve_size": None, "c_curve_finger_count": 0, "c_curve_text": None}
+    size = _majority(labels)
     return {
-        "avg_c_curve_mm_used":  round(total / used, 2),
-        "reference_c_curve_mm": round(ref_mean / used, 2),
-        "c_curve_diff_mm":      round(diff, 2),
         "c_curve_size":         size,
-        "c_curve_finger_count": used,
-        "c_curve_text": f"양손 C-curve(손톱의 휘어진 정도)는 {_C_CURVE_DESC[size]}이에요.",
+        "c_curve_finger_count": len(labels),
+        "c_curve_text": f"C-curve(손톱의 휘어진 정도)는 {_C_CURVE_DESC[size]}이에요.",
     }
 
 
 def classify_size_totals(all_nails: list) -> dict:
     """
-    Aggregate-vs-aggregate size verdict across BOTH hands (10 fingers).
-
-    Per 팀장's request: instead of classifying each finger against its own
-    per-finger Asian-women reference and majority-voting the resulting 5/10
-    labels (what build_profile()/merge_hand_measurements() do per hand),
-    sum this person's measured width/length across all 10 fingers and
-    compare that ONE total against the combined 10-finger reference total
-    (each of the 5 STANDARD_NAILS entries counted once per hand) - one
-    z-score, one verdict, for "양손 vs 아시아 여성 평균 양손".
-
-    Combining the reference: assuming each finger's measurement is
-    independent, the sum of 10 means is the reference mean, and the SD of
-    that sum is sqrt(sum of the 10 variances) (SDs don't just add).
+    Hand-level size verdict across BOTH hands (10 fingers): each finger is
+    classified against its own STANDARD_NAILS reference (width / length /
+    C-curve, 5 levels each, z-score = (measured - mean) / SD), and the
+    overall verdict for each axis is the majority vote of those labels
+    (ties broken toward 'average', see _majority).
 
     all_nails: the 10 "nails" entries from a left hand's measurements.json
                + a right hand's measurements.json (5 each).
     """
-    std_width_mean  = 2 * sum(STANDARD_NAILS[f]["width_mm"]         for f in FINGER_NAMES)
-    std_width_sd    = math.sqrt(2 * sum(STANDARD_NAILS[f]["width_sd"]  ** 2 for f in FINGER_NAMES))
-    std_length_mean = 2 * sum(STANDARD_NAILS[f]["length_mm"]        for f in FINGER_NAMES)
-    std_length_sd   = math.sqrt(2 * sum(STANDARD_NAILS[f]["length_sd"] ** 2 for f in FINGER_NAMES))
+    width_labels, length_labels, nail_labels = [], [], []
+    for n in all_nails:
+        std = STANDARD_NAILS.get(n.get("finger"))
+        if std is None:
+            continue
+        # Measured length as-is (no W/L-ratio corrected length) - live-view
+        # measurement is accurate, and avg_length_mm uses the same value.
+        w_z = (n["width_mm"]  - std["width_mm"])  / std["width_sd"]
+        l_z = (n["length_mm"] - std["length_mm"]) / std["length_sd"]
+        width_labels.append(_size_category(w_z))
+        length_labels.append(_size_category(l_z))
+        nail_labels.append(_size_category((w_z + l_z) / 2.0))
 
-    total_width  = sum(n["width_mm"] for n in all_nails)
-    # Measured length as-is (no W/L-ratio corrected length) - live-view
-    # measurement is accurate, and avg_length_mm uses the same value.
-    total_length = sum(n["length_mm"] for n in all_nails)
-
-    width_z  = (total_width  - std_width_mean)  / std_width_sd
-    length_z = (total_length - std_length_mean) / std_length_sd
-
-    width_size  = _size_category(width_z)
-    length_size = _size_category(length_z)
-    nail_size   = _size_category((width_z + length_z) / 2.0)
+    width_size  = _majority(width_labels)
+    length_size = _majority(length_labels)
+    nail_size   = _majority(nail_labels)
 
     length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
     width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
     summary_text = f"양손 손톱을 전체로 봤을 때 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
 
-    c_curve = _classify_c_curve_total(all_nails)
-
     return {
-        **c_curve,
-        "total_width_mm":       round(total_width, 2),
-        "total_length_mm":      round(total_length, 2),
-        "reference_width_mm":   round(std_width_mean, 2),
-        "reference_length_mm":  round(std_length_mean, 2),
-        "width_z":              round(width_z, 3),
-        "length_z":             round(length_z, 3),
-        "width_size":           width_size,
-        "length_size":          length_size,
-        "nail_size":            nail_size,
+        **_classify_c_curve_total(all_nails),
+        "width_size":           width_size or "average",
+        "length_size":          length_size or "average",
+        "nail_size":            nail_size or "average",
         "summary_text":         summary_text,
     }
 
