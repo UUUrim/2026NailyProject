@@ -44,10 +44,39 @@ public class FingerDesignPlanService {
         Do not invent unsupported character names, franchise names, brand names, or art-style labels.
         If a reference image contains a recognizable character, movie, game, anime, or brand, do not
         place that proper name in the description. Instead, describe the observable visual traits:
-        colors, hairstyle, expression, costume colors, graphic shapes, textures, materials,
-        decorative language, and atmosphere.
+        colors, graphic shapes, textures, materials, decorative language, and atmosphere.
         (This rule is only about what you observe in a reference image. It does NOT apply to a
-        character the user names in words — see [USER-NAMED CHARACTER].)
+        character the user names in words — see [USER-NAMED CHARACTER] — nor to the exception in
+        [REFERENCE IMAGE = MOOD ONLY].)
+
+        [REFERENCE IMAGE = MOOD ONLY - NO CHARACTER FACES - VERY IMPORTANT]
+        By default a reference image is only a source of mood, color palette, texture and decoration
+        feel. If it shows a character, face, person, mascot, logo or title text (for example an anime
+        poster or a character illustration), read only its atmosphere and colors. Do NOT draw that
+        character or any face, figure, silhouette, logo or text from the image on the nails, and do
+        not describe hairstyle, eyes, facial expression, costume or body of the character. This also
+        covers look-alikes: do not replace the character with a generic bear, chick, bunny, cat or
+        any other animal, mascot, doll or food character taken from the image, and do not put them
+        in the motif or parts fields either. The same goes for the characters' accessories and props
+        that identify them. Translate the image into abstract design language instead: color
+        blocking, gradients, small abstract motifs such as dots, hearts, stars, flowers or
+        leaves that fit the mood, patterns, finishes. Where the other rules ask you to keep the
+        decoration richness of the reference image, apply that only to colors, materials and finish,
+        never to characters.
+        EXCEPTION - the user asked for it: only when the user's own words (the photo note or the chat
+        text in the confirmed input) explicitly ask to put the character, its face, or its figure on
+        the nails (for example "캐릭터 얼굴 넣어줘", "얼굴 그려줘", "나루토 넣어줘", "put the character
+        on it"), draw that character on the nail(s). In that case treat the character exactly like a
+        [USER-NAMED CHARACTER]: keep its name in the description of the nail that carries it and spell
+        out its official look (signature colors, hair or ear shape, markings, face features), using
+        what you see in the reference image together with your own knowledge. Put the character on
+        the nails the user named, or on one or two nails as a small accent when no nail is named, and
+        keep the other nails in the mood-only style. The character must be blended into that nail as
+        hand-painted gel art, never a sticker or printed picture: sized in balance with the nail's
+        other decorations, simplified and cute, sealed under the same glossy top coat so the nail's reflections
+        run over it, its colors gently tinted by the nail's base color, soft edges with no hard white
+        outline, and placed among the nail's other decorations instead of covering them. A request that merely mentions the work, or only
+        asks for the same vibe or feeling, is NOT a request for the character itself.
 
         [SHAPE VALUE - VERY IMPORTANT]
         The top-level "shape" must be EXACTLY one of these six lowercase words, nothing else:
@@ -64,9 +93,22 @@ public class FingerDesignPlanService {
         common Korean name in the top-level "reference_subject" field (for example "나루토",
         "스파이더맨", "별이 빛나는 밤"): just the name, no description. This is only a label shown to the
         user on the result screen. NEVER copy it into any description, finish, pattern, motif, parts or
-        color value - the no-proper-names rule above still applies to every design field. Do not guess:
-        if you are not sure, or the image is a real person, a plain photo, a pattern or a texture, use
-        an empty string "". It is always "" when no reference image is provided.
+        color value - the no-proper-names rule above still applies to every design field (the only
+        exception is a character the user explicitly asked to draw, see [REFERENCE IMAGE = MOOD
+        ONLY]). If you recognize a well-known character or work in the image (for example a Sanrio,
+        San-X, Disney, anime or game character), write it even though you will not draw it. Do not
+        guess: if you are not sure, or the image is a real person, a plain photo, a pattern or a
+        texture, use an empty string "". It is always "" when no reference image is provided.
+
+        [REFERENCE CHARACTERS NOTE - NOT FOR DRAWING]
+        Also fill the top-level "reference_characters" field: when the reference image shows
+        characters, write in English their names and a short official look of each (signature colors,
+        ear and head shape, markings, face features), for example "Rilakkuma (brown bear with a
+        round cream muzzle), Korilakkuma (cream white bear with pink ears), Kiiroitori (yellow chick)".
+        It is stored so that a later request such as "put the character on it" can draw the right
+        characters. It is only a memo: NEVER copy it into any description, finish, pattern, motif,
+        parts or color value unless the user explicitly asked for the characters. Use "" when the
+        image shows no characters or you do not recognize them.
 
         [USER-NAMED CHARACTER - VERY IMPORTANT]
         If the user's request names a specific character or mascot (for example Hachiware or Chiikawa,
@@ -751,7 +793,8 @@ public class FingerDesignPlanService {
           "surface": "...",
           "color": "...",
           "reference_subject": "",
-          "thumb":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
+          "reference_characters": "",
+          "thumb": { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "index":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "middle": { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "ring":   { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },

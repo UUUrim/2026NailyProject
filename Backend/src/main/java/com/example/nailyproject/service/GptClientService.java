@@ -93,6 +93,19 @@ public class GptClientService {
         return chat(systemPrompt, messages, maxCompletionTokens, jsonObjectMode);
     }
 
+    /** 이미지를 여러 장(base64 + mime 순서쌍) 함께 보내는 호출. images 의 각 원소는 {base64, mimeType}. */
+    public String chatWithImages(String systemPrompt, String userText, List<String[]> images,
+                                 int maxCompletionTokens, boolean jsonObjectMode) {
+        List<Map<String, Object>> content = new java.util.ArrayList<>();
+        content.add(Map.of("type", "text", "text", userText));
+        for (String[] img : images) {
+            content.add(Map.of("type", "image_url", "image_url",
+                    Map.of("url", "data:" + img[1] + ";base64," + img[0])));
+        }
+        List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", content));
+        return chat(systemPrompt, messages, maxCompletionTokens, jsonObjectMode);
+    }
+
     /**
      * [테스트 전용] GPT Image 2.5 Sunburst로 실제 이미지를 생성해서 base64(PNG)를 돌려준다.
      * 텍스트/JSON용 chat()과 완전히 다른 엔드포인트(images/generations)와 모델을 쓴다.
