@@ -1988,7 +1988,7 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
     votes = []
     for r in results:
         std = STANDARD_LENGTH.get(r["finger"])
-        cl  = r.get("corrected_length_mm")
+        cl  = r.get("length_mm")
         if std and cl:
             votes.append("long" if cl >= std else "short")
     nail_length = "long" if votes.count("long") > votes.count("short") else "short"
@@ -2088,7 +2088,9 @@ def build_profile(results: list) -> dict:
             continue
         w   = r["width_mm"]
         l   = r["length_mm"]
-        l_c = r.get("corrected_length_mm") or l
+        # Live-view measurement is accurate enough to judge on directly -
+        # no W/L-ratio corrected length.
+        l_c = l
         w_z = (w - std["width_mm"]) / std["width_sd"]
         l_z = (l_c - std["length_mm"]) / std["length_sd"]
         fingers.append({
@@ -2189,7 +2191,7 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     votes = []
     for n in nails:
         std = STANDARD_LENGTH.get(n["finger"])
-        cl  = n.get("corrected_length_mm")
+        cl  = n.get("length_mm")
         if std and cl:
             votes.append("long" if cl >= std else "short")
     nail_length = "long" if votes.count("long") > votes.count("short") else "short"
@@ -2335,7 +2337,9 @@ def classify_size_totals(all_nails: list) -> dict:
     std_length_sd   = math.sqrt(2 * sum(STANDARD_NAILS[f]["length_sd"] ** 2 for f in FINGER_NAMES))
 
     total_width  = sum(n["width_mm"] for n in all_nails)
-    total_length = sum((n.get("corrected_length_mm") or n["length_mm"]) for n in all_nails)
+    # Measured length as-is (no W/L-ratio corrected length) - live-view
+    # measurement is accurate, and avg_length_mm uses the same value.
+    total_length = sum(n["length_mm"] for n in all_nails)
 
     width_z  = (total_width  - std_width_mean)  / std_width_sd
     length_z = (total_length - std_length_mean) / std_length_sd
