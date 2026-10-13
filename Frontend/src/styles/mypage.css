@@ -954,11 +954,12 @@
   transform: scale(1.03);
 }
 
+/* 그라데이션 세기·높이는 둘러보기 카드(.gallery-card__hint)와 같게 맞춘다 */
 .mypage-x__card-zoom-hint {
   position: absolute;
   inset: auto 0 0 0;
-  padding: 0.55rem 0.65rem;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.6), transparent);
+  padding: 1.25rem 0.65rem 0.55rem;
+  background: linear-gradient(0deg, rgba(43, 30, 36, 0.5), transparent);
   color: #fff;
   font-size: 0.68rem;
   font-weight: 600;
@@ -4107,7 +4108,6 @@
 .mypage-x__modal-actions button.mypage-x__modal-action--accent.is-active {
   background: linear-gradient(135deg, #e89aaf, #c96f88);
 }
-
 .mypage-x__modal-actions button.mypage-x__modal-action--danger {
   border-color: #f0c8c8;
   color: #c94a4a;
