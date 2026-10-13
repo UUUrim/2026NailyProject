@@ -82,6 +82,7 @@ const MONTHLY_TRENDING_COLORS = [
     '#1C1C1E', // 오닉스 블랙
 ]
 import { ApiError } from '@/shared/utils/apiClient'
+import { ensureSupportedImage } from '@/shared/utils/imageFormat'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import { registerChatSessionGuard, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
 
@@ -1432,8 +1433,17 @@ export function useNailDesignChatPage() {
     }
 
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────
-    const handlePhotoFileChange = (file: File | null) => {
-        if (!file) return
+    const handlePhotoFileChange = async (originalFile: File | null) => {
+        if (!originalFile) return
+        // avif 등 생성 API가 받지 못하는 형식은 PNG로 바꿔서 쓴다.
+        let file: File
+        try {
+            file = await ensureSupportedImage(originalFile)
+        } catch (e) {
+            console.error('사진 형식 변환 실패:', e)
+            pushAssistant('이 사진 형식은 사용할 수 없어요. JPG, PNG, WEBP 사진으로 다시 선택해 주세요.')
+            return
+        }
         setSelectedPhotoFile(file)
         setSelectedPhotoPreviewUrl(null)
         // blob: URL은 이 페이지를 벗어났다가(뒤로가기 등) 다시 돌아왔을 때 무효화되어 이미지가
