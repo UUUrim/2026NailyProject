@@ -28,11 +28,6 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class RefineService {
 
-    /** 수정 결과를 투명 배경으로 받을 때 지시문 뒤에 붙인다: 입력의 흰 배경을 다시 그리지 않고, 손톱은 꽉 찬 불투명으로 둔다. */
-    private static final String TRANSPARENT_EDIT_SUFFIX =
-            " Return the result as a cut-out on a fully transparent background (no white or colored backdrop, "
-                    + "no cast shadow), and keep the silhouette of every nail fully solid and unchanged from the original photo.";
-
     private final DesignSessionRepository designSessionRepository;
     private final NailDesignRepository nailDesignRepository;
     private final ChatMessageRepository chatMessageRepository;
@@ -250,9 +245,18 @@ public class RefineService {
               made from; the first image is the current design). "Put the character on it", "그냥
               이미지 캐릭터를 넣어줘" and similar wording mean the characters of that reference
               photo, so never ask the user which character they mean when any of these tells you.
-              Write the English name in editInstruction and ALSO spell out its official look from
-              what you see and know: signature colors, hair or ear shape, markings, face features.
-              Keep the colors accurate. If the photo shows several characters and the user did not
+              Write the English name in editInstruction with a short phrase (about 15 words) for
+              its face: signature colors, ear or head shape, a few key features. Keep the colors
+              accurate.
+            - Send the reference photo to the image editor: when a second image (the reference
+              photo) is attached to the user's message, set "useReferenceImage" to true. The image
+              editor then receives the current design first and the reference photo second, so
+              editInstruction must say so. Still begin editInstruction with "In this five-nail
+              press-on nail set product photo (the first image), ...", then add the sentence: "The
+              second image is a reference photo of the character; copy ONLY the character's face and
+              drawing style from it, nothing else from that photo (not its layout, background,
+              colors or other elements)." For every other kind of edit set "useReferenceImage"
+              to false. If the photo shows several characters and the user did not
               pick one, choose the one or two main characters; do not draw all of them.
             - Only if none of these sources gives a character (no reference photo, empty fields, and
               the message names no character), do not guess: set "isEditRequest" to false and ask in
@@ -333,6 +337,7 @@ public class RefineService {
                 "keywordsAdd": ["star charm"],
                 "keywordsRemove": ["heart"],
                 "newShape": null,
+                "useReferenceImage": false,
                 "editInstruction": "In this five-nail press-on nail set product photo, on the 4th nail tip from the left (the ring finger), replace the heart charm with a star charm. Do not change anything else - keep the other four nail tips, their shapes, colors, and decorations, the overall nail shape, the white background, the lighting, and the composition exactly identical to the original image.",
                 "slotActions": [
                     {"category": "motif", "action": "remove_like", "value": "heart"},
@@ -385,10 +390,11 @@ public class RefineService {
         // ("그 캐릭터 넣어줘"가 어떤 캐릭터인지 GPT가 알 수 있게 하기 위함. 현재 디자인 이미지가 항상 첫 번째)
         List<String[]> visionImages = new ArrayList<>();
         visionImages.add(new String[]{originalImageBase64, "image/png"});
+        byte[] referenceBytes = null; // 이미지 편집에도 넘길 수 있게 유지한다 (useReferenceImage)
         String referenceUrl = session.getReferenceImageUrl();
         if (referenceUrl != null && !referenceUrl.isBlank()) {
             try {
-                byte[] referenceBytes = s3Service.downloadImageBytes(referenceUrl);
+                referenceBytes = s3Service.downloadImageBytes(referenceUrl);
                 if (referenceBytes != null) {
                     String refMime = referenceUrl.toLowerCase().contains(".png") ? "image/png" : "image/jpeg";
                     visionImages.add(new String[]{Base64.getEncoder().encodeToString(referenceBytes), refMime});
@@ -416,7 +422,10 @@ public class RefineService {
         // 수정 요청이 아니거나(질문/잡담/모르는 표현), 지시문이 비었거나, 지시문 형식이 아니면(사과/거절 문장 등)
         // 이미지 편집을 부르지 않는다. 그 문장이 그대로 이미지 모델에 가면 사진 위에 설명 그림을 그려 버린다.
         // 안전장치로 프롬프트가 요구한 문장 시작("In this five-nail ...")인지도 확인한다.
-        boolean looksLikeInstruction = editInstruction.toLowerCase().startsWith("in this five-nail");
+        // 참고 사진을 같이 보내는 수정은 "The first image is the nail set to edit..."로 시작할 수 있어서 그 시작도 허용한다.
+        String instructionLower = editInstruction.toLowerCase();
+        boolean looksLikeInstruction = instructionLower.startsWith("in this five-nail")
+                || instructionLower.startsWith("the first image is the nail set");
         if (!isEditRequest || editInstruction.isBlank() || !looksLikeInstruction) {
             String reply = replyToUser.isBlank()
                     ? "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
@@ -449,41 +458,18 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
-        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄.
-        //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
-        //    합성본이라 모델이 흰 배경을 그대로 그려 불투명으로 줄 수도 있는데, 그러면 아래 크롭 단계가 서버 누끼로 처리한다.
-        boolean transparentEdit = nailDesignService.isTransparentGptImage();
-        String editedBase64;
-        try {
-            String instructionToSend = transparentEdit ? editInstruction + TRANSPARENT_EDIT_SUFFIX : editInstruction;
-            editedBase64 = gptClientService.editImage(instructionToSend, originalImageBytes, "1536x1024", "auto", transparentEdit);
-        } catch (Exception e) {
-            if (!transparentEdit) throw e;
-            // 스레드가 중단된 경우(서버 재시작/종료, 요청 취소)는 투명 배경 거절이 아니므로 재시도하지 않는다 -
-            // 중단 플래그가 켜진 채로 다시 호출해도 곧바로 같은 예외가 나고 GPT 호출만 낭비된다.
-            if (Thread.currentThread().isInterrupted() || e instanceof InterruptedException
-                    || e.getCause() instanceof InterruptedException
-                    || String.valueOf(e.getMessage()).contains("InterruptedException")) throw e;
-            // 이미지 수정 API가 투명 배경 요청을 거절하면 수정 기능 전체가 막히므로, 예전 방식(흰 배경)으로 한 번 더 시도한다.
-            System.err.println("[RefineService] 투명 배경 수정 요청이 실패해 흰 배경 방식으로 다시 시도합니다: " + e.getMessage());
-            transparentEdit = false;
-            editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto", false);
-        }
+        // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄
+        // 캐릭터 추가처럼 참고 사진이 필요한 수정이면 원본 참고 사진도 편집 모델에 함께 보낸다 (두 번째 이미지).
+        boolean useReferenceImage = resultJson.path("useReferenceImage").asBoolean(false) && referenceBytes != null;
+        System.out.println("[RefineService] useReferenceImage=" + useReferenceImage);
+        String editedBase64 = useReferenceImage
+                ? gptClientService.editImage(editInstruction, originalImageBytes, List.of(referenceBytes), "1536x1024", "auto")
+                : gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto");
 
-        // 4. 수정된 이미지 S3 업로드 (표시용은 흰 배경을 입힌 것, 투명 원본은 AR 크롭에만 쓴다)
+        // 4. 수정된 이미지 S3 업로드
         byte[] editedBytes = Base64.getDecoder().decode(editedBase64);
-        String displayBase64 = editedBase64;
-        if (transparentEdit) {
-            System.out.println("[GptImage] (edit) background=transparent 요청 → 응답: " + PngBackground.describeAlpha(editedBytes));
-            editedBytes = PngBackground.compositeOnWhite(editedBytes);
-            displayBase64 = Base64.getEncoder().encodeToString(editedBytes);
-        }
         String s3Key = "designs/user_" + user.getId() + "/edit_" + UUID.randomUUID() + ".png";
         String newImageUrl = s3Service.uploadImageBytes(editedBytes, s3Key);
-
-        // AR 미리보기용 손톱별 크롭: 생성본과 똑같이 만든다. 없으면 AR이 프론트의 색 기반 누끼로 폴백해서
-        // 흰색으로 번지는 손톱 끝이 잘린다.
-        String nailTipCropsJson = nailDesignService.createNailTipCrops(user.getId(), editedBase64, displayBase64);
 
         // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
         String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
@@ -500,7 +486,6 @@ public class RefineService {
                 // 플랜은 그대로 유지하되, 쉐입이 바뀐 경우 plan의 shape만 새 값으로 바꾼다
                 // (AR/3D 템플릿과 이후 수정 요청이 이 shape를 읽는다)
                 .designPlan(nextPlanJson)
-                .nailTipCropsJson(nailTipCropsJson)
                 .seed(null) // OpenAI 이미지 API는 seed 개념이 없어 재현 불가
                 .build();
         nailDesignRepository.save(newDesign);

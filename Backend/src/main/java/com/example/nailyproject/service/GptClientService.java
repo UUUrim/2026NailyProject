@@ -194,27 +194,35 @@ public class GptClientService {
      * @return base64 인코딩된 수정 이미지(PNG)
      */
     public String editImage(String editInstruction, byte[] originalImageBytes, String size, String quality) {
-        return editImage(editInstruction, originalImageBytes, size, quality, false);
+        return editImage(editInstruction, originalImageBytes, List.of(), size, quality);
     }
 
     /**
-     * @param transparent true면 background="transparent" + output_format="png"도 같이 보내 알파 채널이 있는 PNG로 받는다
-     *                    (생성과 똑같이 AR 크롭을 투명 원본에서 따기 위해). 모델이 무시하면 불투명 이미지가 온다.
+     * 수정할 이미지(첫 번째) 뒤에 참고 이미지(예: 사용자가 올린 원본 참고 사진)를 함께 보낸다.
+     * 참고 이미지는 지시문에 적은 역할(예: 캐릭터 얼굴 그림체만 참고)대로만 쓰이도록 지시문 쪽에서 제한해야 한다.
      */
-    public String editImage(String editInstruction, byte[] originalImageBytes, String size, String quality,
-                            boolean transparent) {
+    public String editImage(String editInstruction, byte[] originalImageBytes, List<byte[]> references,
+                            String size, String quality) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
         builder.part("model", imageModel);
         builder.part("prompt", editInstruction);
         builder.part("size", size);
         builder.part("quality", quality);
-        if (transparent) {
-            builder.part("background", "transparent");
-            builder.part("output_format", "png");
+        if (references == null || references.isEmpty()) {
+            builder.part("image", new ByteArrayResource(originalImageBytes))
+                    .filename("original.png")
+                    .contentType(MediaType.IMAGE_PNG);
+        } else {
+            // 여러 장이면 image[] 로 보낸다. 첫 번째가 수정 대상, 이후가 참고 이미지.
+            builder.part("image[]", new ByteArrayResource(originalImageBytes))
+                    .filename("original.png")
+                    .contentType(MediaType.IMAGE_PNG);
+            for (byte[] reference : references) {
+                builder.part("image[]", new ByteArrayResource(reference))
+                        .filename("reference.png")
+                        .contentType(MediaType.IMAGE_PNG);
+            }
         }
-        builder.part("image", new ByteArrayResource(originalImageBytes))
-                .filename("original.png")
-                .contentType(MediaType.IMAGE_PNG);
 
         JsonNode responseNode = callWithRetry(builder.build(), imageEditApiUrl);
         JsonNode dataArray = responseNode.path("data");
