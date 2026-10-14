@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
@@ -230,7 +232,19 @@ public class ScanService {
 
         // 3. 이 손의 STL 생성이 방금 끝났으니, 이 scanId를 기다리고 있던 출력 주문이 있으면
         //    (양손 다 필요한 주문이면 나머지 손도 끝났는지 확인 후) 병합을 시작한다.
-        printOrderService.tryStartMergeForScan(scanId);
+        //    tryStartMergeForScan은 새 트랜잭션(REQUIRES_NEW)으로 DB를 읽으므로, 위의 COMPLETED가
+        //    커밋된 뒤에 불러야 방금 끝난 손의 상태가 보인다. 커밋 전에 부르면 항상 "아직 안 끝남"으로
+        //    판단해서 주문이 QUEUED에 영원히 남는다.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    printOrderService.tryStartMergeForScan(scanId);
+                }
+            });
+        } else {
+            printOrderService.tryStartMergeForScan(scanId);
+        }
     }
 
     /**
