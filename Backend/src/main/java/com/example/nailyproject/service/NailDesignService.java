@@ -903,11 +903,15 @@ public class NailDesignService {
                 && request.getMode().equalsIgnoreCase("scan-auto")
                 && handScan != null;
 
+        // 사진 기반 생성이면 색은 참고 사진에서 읽는다. 스캔 추천 팔레트를 랜덤으로 확정색에 박으면
+        // 플랜 LLM이 "확정 헥스"를 그대로 따라서 사진의 색감이 무시되므로, 이때는 쉐입/무드만 스캔 값으로 메운다.
+        boolean hasImage = imageBase64 != null && !imageBase64.isBlank();
+
         // scan-auto가 아니면 기존대로 빈 슬롯을 스캔 값으로 메운다.
         // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
         //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
         if (!scanAuto) {
-            fillMissingFromScan(slots, handScan);
+            fillMissingFromScan(slots, handScan, !hasImage);
         }
 
         if (session != null && !scanAuto) {
@@ -916,7 +920,7 @@ public class NailDesignService {
 
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
-                : summarizeSlots(slots, handScan)
+                : summarizeSlots(slots, handScan, !hasImage)
                 + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
                 + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
                 + buildUserOwnWordsText(session)
@@ -941,7 +945,6 @@ public class NailDesignService {
         // motif "없음"을 골라도 그 선택이 무시되는 버그가 있었다(사용자가 직접 재현/확인함).
         // scanId가 프론트에서 매 요청마다 자동으로 함께 오는 경우가 있어서, handScan 존재
         // 여부만으로는 "이번 생성이 스캔 기반 흐름인지"를 판단할 수 없다.
-        boolean hasImage = imageBase64 != null && !imageBase64.isBlank();
         JsonNode plan = fingerDesignPlanService.generatePlan(
                 summary, imageBase64, imageMimeType, previousPlanJson, userSeasonForTrend, scanAuto);
 
@@ -1247,6 +1250,11 @@ public class NailDesignService {
     }
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
+        fillMissingFromScan(slots, handScan, true);
+    }
+
+    /** @param useScanColors false면 색은 건드리지 않는다(사진 기반 생성: 색은 참고 사진에서 읽는다). */
+    private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan, boolean useScanColors) {
         if (handScan == null) {
             if (getLiked(slots, "mood").isEmpty()) {
                 addLiked(slots, "mood", pickDefaultMood(slots));
@@ -1263,7 +1271,7 @@ public class NailDesignService {
         // 팔레트를 넘겨도 첫 번째 색이 항상 똑같이 나오는 문제가 있었다. 대신 여기 Java
         // 쪽에서 팔레트 전체(30개)에서 실제로 무작위로 1~3개를 뽑아 확정해버려서, 매
         // 생성마다 색 조합 자체가 달라지도록 한다.
-        if (getLiked(slots, "color").isEmpty()) {
+        if (useScanColors && getLiked(slots, "color").isEmpty()) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
                 List<String> shuffled = new ArrayList<>(palette);
@@ -1375,6 +1383,11 @@ public class NailDesignService {
     }
 
     private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan) {
+        return summarizeSlots(slots, handScan, true);
+    }
+
+    /** @param useScanPalette false면 "color 후보"(스캔 추천 팔레트)를 넘기지 않는다(사진 기반 생성). */
+    private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan, boolean useScanPalette) {
         StringBuilder sb = new StringBuilder();
         for (String cat : List.of("shape", "mood", "designType", "color", "season", "motif")) {
             List<String> liked = getLiked(slots, cat);
@@ -1400,7 +1413,7 @@ public class NailDesignService {
             }
         }
 
-        if (getLiked(slots, "color").isEmpty() && handScan != null) {
+        if (useScanPalette && getLiked(slots, "color").isEmpty() && handScan != null) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
                 sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, mood와 가장 잘 어울리는 것을 고르고 " +
