@@ -17,11 +17,14 @@ const TEXTURE_KEY_BY_KO: Record<string, string> = {
 }
 
 // textures는 키("glitter") · 한글 라벨 · {label} 객체가 섞여 올 수 있어 TEXTURE_INFO 키 하나로 맞춘다
+// 예전에 powder로 저장된 질감은 chrome과 같은 재료라 하나로 센다
+const TEXTURE_KEY_ALIASES: Record<string, string> = { powder: 'chrome' }
+
 function textureKeyOf(item: DesignDetailItem): string | null {
     const raw = typeof item === 'string' ? item : item.label
     if (!raw) return null
-    if (TEXTURE_INFO[raw]) return raw
-    return TEXTURE_KEY_BY_KO[raw] ?? raw
+    const key = TEXTURE_INFO[raw] ? raw : (TEXTURE_KEY_BY_KO[raw] ?? raw)
+    return TEXTURE_KEY_ALIASES[key] ?? key
 }
 
 export function textureKeysOf(design: CommunityDesignResponse): string[] {

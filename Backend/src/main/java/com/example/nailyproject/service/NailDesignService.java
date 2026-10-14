@@ -59,17 +59,19 @@ public class NailDesignService {
 
     private static final Map<String, String> TEXTURE_KEYWORD_MAP = new LinkedHashMap<>();
     static {
+        // 스와치 베이스 이미지가 있는 재료 키만 (ink는 베이스 이미지 등록 전까지 제외, powder는 chrome으로 통합)
+        TEXTURE_KEYWORD_MAP.put("syrup",        "syrup");
         TEXTURE_KEYWORD_MAP.put("glitter",      "glitter");
-        TEXTURE_KEYWORD_MAP.put("marble",       "marble");
+        TEXTURE_KEYWORD_MAP.put("knit",         "knit");
+        TEXTURE_KEYWORD_MAP.put("velvet",       "knit");
+        TEXTURE_KEYWORD_MAP.put("chrome sheen", "chrome");
+        TEXTURE_KEYWORD_MAP.put("powder",       "chrome");
+        TEXTURE_KEYWORD_MAP.put("aurora",       "chrome");
         TEXTURE_KEYWORD_MAP.put("magnetic",     "magnetic_chrome");
         TEXTURE_KEYWORD_MAP.put("cat eye",      "magnetic_chrome");
         TEXTURE_KEYWORD_MAP.put("mercury",      "mercury_chrome");
-        TEXTURE_KEYWORD_MAP.put("powder",       "powder");
-        TEXTURE_KEYWORD_MAP.put("aurora",       "powder");
         TEXTURE_KEYWORD_MAP.put("matte",        "matte");
         TEXTURE_KEYWORD_MAP.put("3d charm",     "3d_charm");
-        TEXTURE_KEYWORD_MAP.put("drawing",      "drawing");
-        TEXTURE_KEYWORD_MAP.put("doodle",       "drawing");
         TEXTURE_KEYWORD_MAP.put("solid color",  "plain_solid");
     }
 
@@ -555,11 +557,7 @@ public class NailDesignService {
                     for (Map.Entry<String, String> entry : swatchBase64Map.entrySet()) {
                         if (entry.getValue() == null || entry.getValue().isBlank()) continue;
 
-                        // ★ mercury_chrome은 이미 S3 URL — base64 디코딩 없이 바로 저장
-                        if ("mercury_chrome".equals(entry.getKey())) {
-                            swatchUrlMap.put("mercury_chrome", entry.getValue());
-                            continue;
-                        }
+                        // mercury_chrome도 SwatchColorizer가 base64 이미지를 돌려주므로 다른 스와치와 똑같이 S3에 올린다
                         try {
                             byte[] swatchBytes = Base64.getDecoder().decode(entry.getValue());
                             String swatchKey = "designs/user_" + finalUserId
