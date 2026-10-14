@@ -117,7 +117,7 @@ export const ImageGrid = memo(function ImageGrid({
                                     공유 중
                                 </span>
                             )}
-                            <span className="mypage-x__card-zoom-hint">확대해서 보기</span>
+                            <span className="mypage-x__card-zoom-hint">상세 보기</span>
                         </button>
                         <div className="mypage-x__card-footer">
                             <span className="mypage-x__card-date">{cardDate}</span>

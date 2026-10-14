@@ -219,7 +219,7 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     swatchStyle: { background: '#f0d8de' },
   },
   magnetic_chrome: {
-    labelKo: '마그네틱 크롬',
+    labelKo: '자석',
     swatchStyle: { background: 'conic-gradient(from 180deg, #7a8899, #3f4d63, #7a8899)' },
   },
   drawing: {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { CommunityDesignResponse, DesignExtractedDetails } from '@/entities/design/api'
+import { NailArTryOnModal } from '@/features/mypage/components/NailArTryOnModal'
 import { DesignDetailsPanel } from '@/shared/components/DesignDetailsPanel'
 import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
 import '@/styles/mypage.css'
@@ -30,6 +31,9 @@ type CommunityDesignModalProps = {
   design: CommunityDesignResponse
   details: DesignExtractedDetails | null
   detailsLoading: boolean
+  /** AR 미리보기용 네일팁 쉐입·손가락별 손톱팁 이미지 (상세 조회 응답) */
+  shape: string | null
+  nailTipCropUrls: string[] | null
   favorited: boolean
   folderName: string
   busy: boolean
@@ -47,6 +51,8 @@ export function CommunityDesignModal({
   design,
   details,
   detailsLoading,
+  shape,
+  nailTipCropUrls,
   favorited,
   folderName,
   busy,
@@ -61,6 +67,7 @@ export function CommunityDesignModal({
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
+  const [arOpen, setArOpen] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, panX: 0, panY: 0 })
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const liked = Boolean(design.likedByMe)
@@ -74,14 +81,15 @@ export function CommunityDesignModal({
     }
   }, [])
 
+  // AR 창이 떠 있으면 Esc는 그 창(전체화면 종료)에 맡기고 상세 모달은 닫지 않는다
   useEffect(() => {
-    if (!closeOnEscape) return
+    if (!closeOnEscape || arOpen) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [closeOnEscape, onClose])
+  }, [closeOnEscape, arOpen, onClose])
 
   // ── 마우스 휠로 확대/축소 ──────
   useEffect(() => {
@@ -200,7 +208,7 @@ export function CommunityDesignModal({
         <div className="mypage-x__modal-actions">
           <button
             type="button"
-            className={`mypage-x__modal-action--accent${liked ? ' is-active' : ''}`}
+            className={`gallery-modal__like${liked ? ' is-active' : ''}`}
             onClick={onToggleReaction}
             disabled={busy}
             aria-pressed={liked}
@@ -215,8 +223,27 @@ export function CommunityDesignModal({
             {ModalActionIcons.download}
             <span>이미지 다운로드</span>
           </button>
+          {/* 쉐입·손톱팁 정보가 오기 전에 열면 도중에 AR이 다시 시작되므로 상세 조회가 끝난 뒤에 연다 */}
+          <button
+            type="button"
+            className="mypage-x__modal-action--accent"
+            onClick={() => setArOpen(true)}
+            disabled={detailsLoading}
+          >
+            {ModalActionIcons.ar}
+            <span>AR로 미리보기</span>
+          </button>
         </div>
       </div>
+
+      {arOpen && (
+        <NailArTryOnModal
+          imageUrl={design.imageUrl}
+          shape={shape}
+          nailTipCropUrls={nailTipCropUrls}
+          onClose={() => setArOpen(false)}
+        />
+      )}
     </div>
   )
 }

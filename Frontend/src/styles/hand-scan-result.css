@@ -236,9 +236,8 @@
 
 .skin-tone-palette-grid {
   display: grid;
-  /* arrangeRecommendedColors({ columns: 6 })가 열=색상군, 행=명도 단계가 되도록 배열을 만든다.
-     기본 흐름(row-major)으로 채우면 세로줄 하나가 한 색상군(위=밝음 → 아래=어두움),
-     맨 아랫줄에 진한 색이 모인다. */
+  /* sortRecommendedColors 순서(가장 연한 색에서 출발해 비슷한 색끼리 잇는 TSP 경로, 연한 → 진한)를
+     기본 흐름(row-major)으로 이어 채운다. */
   grid-template-columns: repeat(6, 1fr);
   gap: 8px;
 }

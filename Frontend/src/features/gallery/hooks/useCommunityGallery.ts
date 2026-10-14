@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     addDesignReaction,
@@ -47,6 +47,11 @@ export function useCommunityGallery() {
     const [detailDesign, setDetailDesign] = useState<CommunityDesignResponse | null>(null)
     const [detailDetails, setDetailDetails] = useState<DesignExtractedDetails | null>(null)
     const [detailLoading, setDetailLoading] = useState(false)
+    // AR 미리보기용 — 목록 응답에는 없고 상세 조회에서만 내려온다
+    const [detailShape, setDetailShape] = useState<string | null>(null)
+    const [detailNailTipCropUrls, setDetailNailTipCropUrls] = useState<string[] | null>(null)
+    // 상세를 연달아 열고 닫을 때, 앞서 연 디자인의 늦은 응답이 지금 모달을 덮어쓰지 않게 한다
+    const detailRequestRef = useRef(0)
 
     useEffect(() => {
         let cancelled = false
@@ -94,28 +99,39 @@ export function useCommunityGallery() {
 
     // ── 상세 모달 열기/닫기 ──────
     const openDetail = (design: CommunityDesignResponse) => {
+        const requestId = ++detailRequestRef.current
         setDetailDesign(design)
         setDetailDetails(design.details ?? null)
+        setDetailShape(null)
+        setDetailNailTipCropUrls(null)
         setDetailLoading(true)
         void getDesignDetail(design.designId)
             .then((detail) => {
+                if (requestId !== detailRequestRef.current) return
                 setDetailDesign((prev) =>
                     prev && prev.designId === design.designId
                         ? { ...prev, createdAt: detail.createdAt || prev.createdAt, details: detail.details }
                         : prev,
                 )
                 setDetailDetails(detail.details ?? null)
+                setDetailShape(detail.shape ?? null)
+                setDetailNailTipCropUrls(detail.nailTipCropUrls ?? null)
             })
             .catch(() => {
-                /* 목록에 있던 details로 폴백 */
+                /* 목록에 있던 details로 폴백 (AR은 2D·로컬 손톱 인식으로 폴백) */
             })
-            .finally(() => setDetailLoading(false))
+            .finally(() => {
+                if (requestId === detailRequestRef.current) setDetailLoading(false)
+            })
     }
 
     // 모달이 Esc 리스너를 이 함수에 걸어 두므로 렌더마다 새로 만들지 않는다
     const closeDetail = useCallback(() => {
+        detailRequestRef.current += 1
         setDetailDesign(null)
         setDetailDetails(null)
+        setDetailShape(null)
+        setDetailNailTipCropUrls(null)
         setDetailLoading(false)
     }, [])
 
@@ -219,6 +235,8 @@ export function useCommunityGallery() {
         detailDesign,
         detailDetails,
         detailLoading,
+        detailShape,
+        detailNailTipCropUrls,
         openDetail,
         closeDetail,
         isBusy,

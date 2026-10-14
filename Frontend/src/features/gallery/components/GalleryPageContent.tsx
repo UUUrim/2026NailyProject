@@ -59,7 +59,7 @@ function GalleryCard({ design, favorited, onOpen }: GalleryCardProps) {
 
   return (
     <li className="gallery-card">
-      <button type="button" className="gallery-card__media" onClick={onOpen} aria-label="네일 디자인 크게 보기">
+      <button type="button" className="gallery-card__media" onClick={onOpen} aria-label="네일 디자인 상세 보기">
         <img
           src={design.imageUrl}
           alt="네일리 사용자가 만든 네일 디자인"
@@ -80,11 +80,10 @@ function GalleryCard({ design, favorited, onOpen }: GalleryCardProps) {
           </span>
         )}
         <span className="gallery-card__hint" aria-hidden="true">
-          크게 보기
+          상세 보기
         </span>
       </button>
       <div className="gallery-card__meta">
-        <span className="gallery-card__date">{design.createdAt}</span>
         <span
           className={`gallery-card__likes${design.likedByMe ? ' is-liked' : ''}`}
           aria-label={`좋아요 ${likeCount}개${design.likedByMe ? ', 내가 좋아요 누름' : ''}`}
@@ -92,6 +91,7 @@ function GalleryCard({ design, favorited, onOpen }: GalleryCardProps) {
           <LikeIcon filled={design.likedByMe} />
           {likeCount}
         </span>
+        <span className="gallery-card__date">{design.createdAt}</span>
       </div>
     </li>
   )
@@ -283,6 +283,8 @@ export function GalleryPageContent() {
           design={detailDesign}
           details={gallery.detailDetails}
           detailsLoading={gallery.detailLoading}
+          shape={gallery.detailShape}
+          nailTipCropUrls={gallery.detailNailTipCropUrls}
           favorited={gallery.isFavorited(detailDesign)}
           folderName={gallery.folderNameOf(detailDesign)}
           busy={gallery.isBusy}

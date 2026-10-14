@@ -3,7 +3,7 @@ import { getScanResult } from '@/entities/scan/api'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
-import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
+import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import {
   buildScanDetail,
   dateKeyOf,
@@ -185,14 +185,13 @@ export function ScanDetailModal({ session, onClose }: Props) {
           skinToneAnalysisFromMetrics(detail.tone, detail.warmness, detail.brightness, detail.saturation) ??
           (detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null)
         const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
-        // .mypage-x__scanx-palette 는 6열 row-major 그리드 (열 = 색상군, 행 = 명도 단계, 진한 색은 맨 아랫줄)
-        const palette = arrangeRecommendedColors(
+        // .mypage-x__scanx-palette(6열)에 정렬 순서 그대로 흘려 넣는다 — 비슷한 색끼리 잇는 TSP 경로, 연한 색 → 진한 색
+        const palette = sortRecommendedColors(
           detail.recommendedColors.length > 0
             ? detail.recommendedColors
             : detail.skinToneHex
               ? generateSkinTonePalette(detail.skinToneHex, 30)
               : [],
-          { columns: 6 }
         )
         const shapeLabel = detail.shapeId
           ? getNailShape(detail.shapeId)?.labelKo ?? detail.shapeId

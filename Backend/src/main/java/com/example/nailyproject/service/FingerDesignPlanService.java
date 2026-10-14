@@ -854,21 +854,22 @@ public class FingerDesignPlanService {
              Use glitter on at most TWO nails of the set (unless the user explicitly asks for it on more
              nails, for example all nails), and never describe glitter on a nail whose finish array does
              not contain "glitter".
-           - knit: knit gel, also called velvet or "ppoguri" gel (finish "knit"): a translucent, glossy,
-             jelly-like color (like syrup) with many thin, fine fibers floating INSIDE the clear
-             gel - short, gently curved or wavy strands, mostly slightly darker than the color (a few
-             lighter), scattered sparsely and unevenly in random directions like wisps of fine wool fuzz
-             trapped in glass. The gel stays smooth, glassy, and glossy on top; only the thin strands show
-             its knit character. It is NOT a woven or knitted fabric: no stitches, no weave, no yarn pattern,
-             no sweater texture, no felt, and no fuzzy or hairy surface. Colors are soft, sheer, and girlish
-             or muted (pink, raspberry, lilac, sky blue, aqua, milky ivory, gray-lavender, dusty rose, camel,
-             forest green, charcoal). Knit is a cozy autumn / winter gel, and some sets are done matte (velvet
-             look), but it is usually glossy and translucent, and it is never the default. Use it only when the
-             user asked for knit / velvet (니트, 벨벳), or when the season or mood is clearly autumn / winter /
-             cozy and the [THREE-DESIGN PLAN] assigns it. This fiber texture is the intended exception to
-             [SURFACE CLEANLINESS]. A knit nail is a knit one-color nail: it never combines with glitter,
-             magnetic, powder, or cheek blush, and it never gets glitter wording. In the description write the
-             color, "translucent knit gel", and "thin fibers floating inside the gel".
+           - knit: knit gel, also called velvet or "ppoguri" gel (finish "knit"): a soft, glossy, slightly
+             milky-translucent gel color filled with a DENSE scatter of countless TINY short fiber fragments,
+             like chopped wool or velvet flock, spread evenly over the whole nail and floating inside the clear gel.
+             Each fragment is very short (about one thirtieth of the nail width) and thin, straight or slightly
+             bent, at random angles, in lighter and darker tones of the same hue (some pale, some deeper, a few
+             in a soft accent hue), so the nail reads as a fuzzy velvet made of tiny flecks. It is NOT a few long
+             thin lines, cracks, veins, or scratches; NOT a woven or knitted fabric (no stitches, weave, yarn
+             pattern, sweater texture, or felt); and NOT a hairy surface: the top coat stays smooth, glossy, and
+             glass-clear. Colors are soft, sheer, girlish or muted (pink, raspberry, lilac, sky blue, aqua,
+             pale ivory, gray-lavender, dusty rose, camel, forest green, charcoal). A cozy autumn / winter gel,
+             sometimes done matte (velvet look), but usually glossy, and never the default. Use it only when the
+             user asked for knit / velvet (니트, 벨벳), or the season or mood is clearly autumn / winter / cozy
+             and the [THREE-DESIGN PLAN] assigns it. This fiber texture is the intended exception to [SURFACE
+             CLEANLINESS]. A knit nail is a knit one-color nail: never combined with glitter, magnetic, powder
+             or cheek blush, and never gets glitter wording. Write the color, "translucent knit gel", and
+             "dense tiny fiber flecks floating inside the gel".
            - ink: ink gel (finish "ink"), a DRAWING ELEMENT used on top of a base color, not a replacement for
              the base: every ink nail has a base color laid first (by default the syrup base, so finish
              ["jelly", "ink"]; a clear or sheer natural base is allowed but is not the default). Ink itself is a

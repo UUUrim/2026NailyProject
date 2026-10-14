@@ -430,12 +430,6 @@ export function DesignImageDetailModal({
         {/* 버튼이 하나도 없으면(참고 사진 보기 등) 빈 줄이 패널 gap만큼 여백을 남기지 않도록 통째로 뺀다 */}
         {hasActions && (
           <div className="mypage-x__modal-actions">
-            {showChatHistoryToggle && viewDesignId != null && (
-              <button type="button" className="mypage-x__modal-action--accent" onClick={() => setShowChatHistory(true)}>
-                {ModalActionIcons.chat}
-                <span>채팅 이력 보기</span>
-              </button>
-            )}
             {showDelete && viewDesignId != null && (
               <button
                 type="button"
@@ -446,6 +440,12 @@ export function DesignImageDetailModal({
               >
                 {ModalActionIcons.trash}
                 <span>이미지 삭제</span>
+              </button>
+            )}
+            {showChatHistoryToggle && viewDesignId != null && (
+              <button type="button" className="mypage-x__modal-action--ghost" onClick={() => setShowChatHistory(true)}>
+                {ModalActionIcons.chat}
+                <span>채팅 이력 보기</span>
               </button>
             )}
             {showDownload && (

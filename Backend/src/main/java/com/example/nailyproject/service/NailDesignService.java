@@ -1950,13 +1950,13 @@ public class NailDesignService {
                 if (fingerHasFinish(finger, "knit")) {
                     // ★ "솜털/울 같은 불투명 컬러"라고 쓰면 니트 스웨터 직물처럼 나왔다 - 레퍼런스(뽀그리젤)는 투명한 시럽 젤 속에
                     // 가는 머리카락 같은 섬유가 떠 있는 모습이다. 직물/뜨개 질감은 명시적으로 막는다.
-                    nailsSection.append(" The knit gel is a translucent, glossy, jelly-like color with many thin, hair-like fine")
-                            .append(" fibers floating inside the clear gel — short, gently curved or wavy strands, mostly")
-                            .append(" slightly darker than the color with a few lighter ones, scattered sparsely and unevenly in")
-                            .append(" random directions like wisps of fine wool fuzz trapped in glass, under a smooth glassy top")
-                            .append(" coat. The fibers sit inside the gel and the surface stays smooth and glossy. It is not a")
-                            .append(" woven or knitted fabric: no stitches, weave, yarn pattern, sweater or felt texture, and no")
-                            .append(" fuzzy surface. No glitter or sparkle.");
+                    nailsSection.append(" Knit (velvet) gel: the soft glossy gel color is filled with hundreds of TINY short fiber")
+                            .append(" fragments, like chopped wool or velvet flock, spread evenly over the whole nail and floating inside")
+                            .append(" the clear gel. Each fragment is very short (about one thirtieth of the nail width) and thin, at")
+                            .append(" random angles, in lighter and darker tones of the same hue with a few in a soft accent hue, so the")
+                            .append(" nail looks like fuzzy velvet made of tiny flecks. They are never a few long thin lines, cracks,")
+                            .append(" veins, or scratches. The surface stays smooth and glossy; it is not a woven or knitted fabric. No")
+                            .append(" large glitter.");
                 }
                 // ★ 잉크젤. 모티프가 있으면 "잉크 일러스트"(또렷한 외곽선 + 투명 잉크 색 채움)고, 없으면 맑은 손톱 위의 투명 워시다.
                 // (선만 있거나 워시만 있으면 잉크를 썼다고 볼 수 없다 - 참고: 외곽선 안을 잉크로 칠한 귀여운 손그림 캐릭터)
@@ -2305,8 +2305,9 @@ public class NailDesignService {
                     "champagne gold only, never a stripe or swirl, with no visible particles or sparkle");
         if (finishLower.contains("foil"))           items.add("metallic foil accents");
         if (java.util.regex.Pattern.compile("\\bknit\\b").matcher(finishLower).find())
-            items.add("knit gel on the nails described as knit — translucent glossy jelly-like color with thin hair-like " +
-                    "fibers floating inside the clear gel, smooth glassy surface, not a woven or knitted fabric look");
+            items.add("knit (velvet) gel on the nails described as knit — soft glossy gel color densely filled with hundreds " +
+                    "of tiny short fiber fragments (chopped wool / velvet flock) at random angles floating inside the gel, smooth " +
+                    "glossy top coat, not long lines or cracks and not a woven fabric look");
         if (java.util.regex.Pattern.compile("\\bink\\b").matcher(finishLower).find())
             items.add("ink gel on the nails described as ink — vivid but fully transparent ink color like colored glass or " +
                     "marker ink, used as drawing fills, washes, or checks on top of the base color, juicy glossy dome");

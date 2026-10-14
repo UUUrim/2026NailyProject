@@ -6,7 +6,7 @@ import { getMyScanSessions, getScanResult, type ScanResultResponse } from '@/ent
 import { MY_SCAN_SESSIONS_QUERY_KEY } from '@/entities/scan/queries'
 import { isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
-import { arrangeRecommendedColors, sortRecommendedColors } from '@/shared/utils/colorSort'
+import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import {
     createChatSession,
@@ -37,11 +37,9 @@ import {
 // 예쁘고 트렌디한 네일 컬러를 큐레이션한 고정 팔레트.
 // 구성: 요즘 유행하는 민트·아쿠아 계열, 파스텔~쨍한 레몬 옐로우, 스테디한 누디 톤, MLBB 로즈,
 // 블랙&화이트, 그리고 네일에 자주 쓰는 핑크·피치·버건디 등.
-// 순서는 색상환(hue) 기준 빨→주→노→초→파→남→보 무지개 순으로 배치하고, 같은 계열 안에서는
-// 연한 색 → 진한 색 순으로 정렬한다. 무채색 화이트는 맨 앞, 블랙은 맨 끝에 두고, 명도가 낮은
-// 네이비·플럼·버건디는 밝은 무지개 흐름을 깨지 않도록 블랙 직전에 모아 둔다
-// - 고정된 30색 목록이라 매번 계산할 필요가 없다.
-const MONTHLY_TRENDING_COLORS = [
+// 화면 순서는 추천 컬러와 같은 규칙(sortRecommendedColors: 가장 연한 색에서 출발해 비슷한 색끼리
+// 잇는 TSP 경로)으로 모듈 로드 때 한 번만 정렬해 둔다 — 아래 나열 순서는 상관없다.
+const MONTHLY_TRENDING_COLORS = sortRecommendedColors([
     '#FFFFFF', // 퓨어 화이트
     // 빨강 (연 → 진)
     '#E1A9A4', // MLBB 로즈
@@ -80,7 +78,7 @@ const MONTHLY_TRENDING_COLORS = [
     '#362E45', // 다크 플럼
     '#5D1519', // 다크 버건디
     '#1C1C1E', // 오닉스 블랙
-]
+])
 import { ApiError } from '@/shared/utils/apiClient'
 import { ensureSupportedImage } from '@/shared/utils/imageFormat'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
@@ -1840,19 +1838,10 @@ export function useNailDesignChatPage() {
     const scanColorPalette = useMemo(() => analysisSummary?.skinTonePalette ?? [], [analysisSummary])
     const hasScanColorPalette = scanColorPalette.length > 0
 
-    // 사이드바 "추천 컬러"(.design-chat-sidebar__palette): 6열 row-major
-    const sidebarColorPalette = useMemo(
-        () => arrangeRecommendedColors(scanColorPalette, { columns: 6 }),
-        [scanColorPalette],
-    )
-    // 컬러 선택 그리드(.design-chat__color-grid): 10열 row-major
-    const colorPickerPalette = useMemo(
-        () => arrangeRecommendedColors(
-            hasScanColorPalette ? scanColorPalette : MONTHLY_TRENDING_COLORS,
-            { columns: 10 },
-        ),
-        [hasScanColorPalette, scanColorPalette],
-    )
+    // 사이드바 "추천 컬러"(.design-chat-sidebar__palette)와 컬러 선택 그리드(.design-chat__color-grid)
+    // 모두 sortRecommendedColors 순서를 그대로 흘려 넣는다 (스캔 팔레트는 위에서 이미 정렬됨).
+    const sidebarColorPalette = scanColorPalette
+    const colorPickerPalette = hasScanColorPalette ? scanColorPalette : MONTHLY_TRENDING_COLORS
 
     // 지금 떠 있는 선택지 단계가 "기타" 입력란을 받는 단계(분위기/디자인 타입/모티프)라면 그 단계 키
     const activeNoteStep = useMemo<PreferenceKey | null>(() => {
