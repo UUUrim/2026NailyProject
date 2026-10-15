@@ -35,9 +35,9 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
         (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
     )?.replace(/\s+/g, '') ?? '미분석'
-    // 화면 표시용으로 정렬한 추천 컬러(sortRecommendedColors: 색상군별로 묶고 밝은→어두운,
-    // 진한 색은 후미)에서 균등 간격으로 6색만 뽑아 미리보기로 쓴다 — 짧은 스와치에도
-    // 서로 다른 색상군이 골고루 섞여 보인다.
+    // 화면 표시용으로 정렬한 추천 컬러(sortRecommendedColors: 비슷한 색끼리 잇는 TSP 경로)에서
+    // 균등 간격으로 6색만 뽑아 미리보기로 쓴다 — 경로 전체에서 고르게 뽑으니 짧은 스와치에도 서로
+    // 다른 색과 밝기가 골고루 섞여 보이고, 미리보기도 같은 순서를 따른다.
     const palettePreview =
         session.recommendedColors.length > 0
             ? pickSpreadColors(sortRecommendedColors(session.recommendedColors), 6)

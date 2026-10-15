@@ -19,6 +19,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.net.URI;
 import java.util.Base64;
 import java.util.Map;
+import com.example.nailyproject.dto.request.InpaintRequestDto;
+import com.example.nailyproject.dto.response.InpaintResponseDto;
+import com.example.nailyproject.service.InpaintService;
+import jakarta.validation.Valid;
 
 @RestController
 @RequiredArgsConstructor
@@ -26,6 +30,7 @@ import java.util.Map;
 public class DesignController {
 
     private final NailDesignService nailDesignService;
+    private final InpaintService inpaintService;
     private final NailImageService nailImageService;
     private final GptClientService gptClientService;
 
@@ -49,7 +54,7 @@ public class DesignController {
     /**
      * [테스트 전용] OpenAI 이미지 생성(GPT Image 2.5 Sunburst) 직접 호출 테스트.
      * POST /designs/test-gptimage-generate
-     * body: {"prompt": "...", "size": "1536x1024"(선택, 기본 가로형), "quality": "auto"(선택)}
+     * body: {"prompt": "...", "size": "1536x1024"(선택, 기본 가로형), "quality": "auto"(선택), "transparent": "true"(선택, 투명 배경 PNG)}
      * DB 저장 없이 base64 이미지만 바로 돌려준다.
      */
     @PostMapping("/test-gptimage-generate")
@@ -59,7 +64,8 @@ public class DesignController {
         String prompt = request.get("prompt");
         String size = request.getOrDefault("size", "1536x1024");
         String quality = request.getOrDefault("quality", "auto");
-        String imageBase64 = gptClientService.generateImage(prompt, size, quality);
+        boolean transparent = Boolean.parseBoolean(request.getOrDefault("transparent", "false"));
+        String imageBase64 = gptClientService.generateImage(prompt, size, quality, transparent);
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "GPT Image 테스트 생성 성공", Map.of("imageBase64", imageBase64))
@@ -202,15 +208,18 @@ public class DesignController {
      *   - image: 참고 이미지 파일 (1장)
      *   - sessionId: (선택) 채팅 세션 ID
      *   - scanId: (선택) 손 스캔 ID — 없어도 생성 가능
+     *   - note: (선택) 사진과 함께 반영할 사용자 추가 요청 문장
      */
     @PostMapping(value = "/generate-detailed-from-image", consumes = "multipart/form-data")
     public ResponseEntity<ApiResponse<DesignGenerateResponseDto>> generateDetailedDesignFromImage(
             @AuthenticationPrincipal User user,
             @RequestParam("image") MultipartFile image,
             @RequestParam(value = "sessionId", required = false) Long sessionId,
-            @RequestParam(value = "scanId", required = false) Long scanId) throws Exception {
+            @RequestParam(value = "scanId", required = false) Long scanId,
+            @RequestParam(value = "note", required = false) String note) throws Exception {
 
         DesignGenerateRequestDto request = new DesignGenerateRequestDto();
+        request.setUserNote(note);
         // sessionId/scanId가 생성자나 setter로 안 들어가면, DTO에 setter 추가 필요
         // (혹은 이 request 대신 아래처럼 서비스 메서드 파라미터를 직접 늘려도 됨)
         request.setSessionId(sessionId);
@@ -272,6 +281,25 @@ public class DesignController {
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "스와치 조회 성공", swatches)
+        );
+    }
+
+    /**
+     * 특정 손톱(들)만 바꾸는 inpaint  POST /designs/{designId}/inpaint
+     * Request: { prompt, nailIndex, strength?, seed? }
+     * Response: { imageUrl, imageBase64 }
+     */
+    @PostMapping("/{designId}/inpaint")
+    public ResponseEntity<ApiResponse<InpaintResponseDto>> inpaintDesign(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long designId,
+            @Valid @RequestBody InpaintRequestDto request) throws Exception {
+
+        request.setDesignId(designId);
+        InpaintResponseDto data = inpaintService.inpaint(user, request);
+
+        return ResponseEntity.ok(
+                ApiResponse.success(200, "인페인트 완료.", data)
         );
     }
 

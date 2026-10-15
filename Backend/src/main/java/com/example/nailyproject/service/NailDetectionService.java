@@ -31,9 +31,42 @@ public class NailDetectionService {
     }
 
     // -------------------------------------------------------------------------
+    // 0. 로컬 누끼 (detect 서버/SAM 없이) — 흰 배경 위 네일팁 5개 시트 전용
+    // -------------------------------------------------------------------------
+
+    /** 손톱 5개 분리에 실패(5개가 아님 등)하면 null. */
+    public List<NailSheetSegmenter.Nail> segmentNailsLocally(String imageBase64) {
+        try {
+            return NailSheetSegmenter.segment(java.util.Base64.getDecoder().decode(imageBase64));
+        } catch (Exception e) {
+            System.err.println("[NailLocal] 로컬 누끼 실패: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /** 로컬 누끼로 손톱별 대표색을 뽑고, 실패하면 detect 서버로 폴백한다. */
+    public List<Map<String, Object>> extractColorsPerNailLocalFirst(String imageBase64) {
+        List<NailSheetSegmenter.Nail> nails = segmentNailsLocally(imageBase64);
+        if (nails == null) {
+            System.out.println("[Color] 로컬 누끼 실패 → detect 서버로 폴백");
+            return extractColorsPerNail(imageBase64);
+        }
+        System.out.println("[Color] 로컬(Java) 누끼로 컬러 추출 성공 — detect 서버 호출 안 함");
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = 0; i < nails.size(); i++) {
+            Map<String, Object> nailMap = new HashMap<>();
+            nailMap.put("nail_index", i);
+            nailMap.put("colors", nails.get(i).colors());
+            result.add(nailMap);
+        }
+        return result;
+    }
+
+    // -------------------------------------------------------------------------
     // 1. 손톱별 대표 컬러 추출
     // -------------------------------------------------------------------------
     public List<Map<String, Object>> extractColorsPerNail(String imageBase64) {
+        System.out.println("[Detect] detect 서버 호출: /colors_per_nail (" + detectServerUrl + ")");
         Map<String, Object> body = new HashMap<>();
         body.put("image_base64", imageBase64);
         body.put("segment_prompt", "nail tip");
@@ -87,10 +120,11 @@ public class NailDetectionService {
     // 2. 파츠 검출
     // -------------------------------------------------------------------------
     public Map<String, List<String>> detectParts(String imageBase64, List<String> parts) {
+        System.out.println("[Detect] detect 서버 호출: /parts " + parts + " (" + detectServerUrl + ")");
         Map<String, Object> body = new HashMap<>();
         body.put("image_base64", imageBase64);
         body.put("parts", parts);
-        body.put("threshold", 0.1);
+        body.put("threshold", 0.35);
         // extractColorsPerNail()과 동일한 값 - SAM 마스크가 손톱 큐티클 쪽처럼
         // 손톱 본연의 색과 배경색이 거의 같은 지점에서 경계를 살짝 넓게 잡는 걸
         // 안쪽으로 침식시켜 보정한다 (detect 서버가 이 필드를 지원해야 반영됨).

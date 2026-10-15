@@ -1,6 +1,7 @@
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { FingerDetailModal } from '@/features/hand-scan/components/FingerDetailModal'
+import { RecommendedShapeCard } from '@/features/hand-scan/components/RecommendedShapeCard'
 import { NextStepButton } from '@/shared/components/NextStepButton'
 import { useHandScanResultPage } from '@/features/hand-scan/hooks/useHandScanResultPage'
 import '@/styles/hand-scan-result.css'
@@ -195,30 +196,20 @@ export function HandScanResultPageContent() {
                 <section className="scan-result-section" aria-hidden="true">
                     <h2>추천 네일팁 쉐입</h2>
                     <div className="scan-shape-highlight scan-shape-highlight--skeleton">
-                        <div className="scan-shape-highlight__body">
-                            <p className="scan-shape-highlight__name">&nbsp;</p>
-                            <p className="scan-shape-highlight__desc">분석중...</p>
+                        <div className="scan-shape-highlight__top">
+                            <div className="scan-shape-highlight__body">
+                                <p className="scan-shape-highlight__name">&nbsp;</p>
+                                <p className="scan-shape-highlight__desc">분석중...</p>
+                            </div>
+                            <div className="scan-shape-highlight__icon-skeleton" />
                         </div>
-                        <div className="scan-shape-highlight__icon-skeleton" />
                     </div>
                 </section>
             ) : (
                 <section className="scan-result-section">
                     <h2>추천 네일팁 쉐입</h2>
                     {recommended ? (
-                        <div className="scan-shape-highlight">
-                            <div className="scan-shape-highlight__body">
-                                <p className="scan-shape-highlight__name">{recommended.labelKo}</p>
-                                <p className="scan-shape-highlight__label-en">{recommended.labelEn}</p>
-                                <p className="scan-shape-highlight__desc">
-                                    {userName ? `${userName}님은 ` : '회원님께는 '}
-                                    {recommended.description}이 잘 어울려요.
-                                </p>
-                            </div>
-                            <div className="scan-shape-highlight__icon" aria-hidden="true">
-                                <img src={recommended.image} alt="" />
-                            </div>
-                        </div>
+                        <RecommendedShapeCard shape={recommended} userName={userName} />
                     ) : (
                         <p className="scan-result-section__sub">AI가 추천 쉐입을 분석하고 있어요.</p>
                     )}

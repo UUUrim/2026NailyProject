@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthNav } from '@/shared/layout/AuthNav'
 import { useAuth } from '@/shared/hooks/useAuth'
@@ -7,8 +6,7 @@ import '@/styles/landing.css'
 
 type HeaderProps = {
     // 메인(홈) 페이지의 히어로 위에 겹쳐 보이는 헤더에서만 true로 전달된다.
-    // 처음엔 히어로 이미지 위에 투명 배경으로 떠 있다가, 스크롤을 시작하면
-    // 화면 상단에 고정되면서 배경이 흰색으로 바뀐다.
+    // 히어로 맨 위에 투명 배경으로 얹혀 있고, 화면에 고정되지 않아 스크롤하면 히어로와 함께 올라간다.
     overlay?: boolean
 }
 
@@ -16,16 +14,6 @@ export function Header({ overlay = false }: HeaderProps) {
     const { isLoggedIn } = useAuth()
     const navigate = useNavigate()
     const location = useLocation()
-    const [scrolled, setScrolled] = useState(false)
-
-    useEffect(() => {
-        if (!overlay) return
-
-        const handleScroll = () => setScrolled(window.scrollY > 4)
-        handleScroll()
-        window.addEventListener('scroll', handleScroll, { passive: true })
-        return () => window.removeEventListener('scroll', handleScroll)
-    }, [overlay])
 
     const handleNavClick = (to: string) => (e: React.MouseEvent) => {
         e.preventDefault()
@@ -47,13 +35,7 @@ export function Header({ overlay = false }: HeaderProps) {
         return `landing-header__center-link${isActive ? ' landing-header__center-link--active' : ''}`
     }
 
-    const headerClassName = [
-        'landing-header',
-        overlay && 'landing-header--overlay',
-        overlay && scrolled && 'landing-header--scrolled',
-    ]
-        .filter(Boolean)
-        .join(' ')
+    const headerClassName = overlay ? 'landing-header landing-header--overlay' : 'landing-header'
 
     return (
         <header className={headerClassName}>
@@ -62,19 +44,25 @@ export function Header({ overlay = false }: HeaderProps) {
                     <img src="/images/logo.png" alt="Naily" className="landing-header__logo-image" />
                 </Link>
 
-                {isLoggedIn && (
-                    <nav className="landing-header__center-nav" aria-label="바로가기 메뉴">
-                        <Link to="/scan/hand" className={navLinkClassName('/scan')} onClick={handleNavClick('/scan/hand')}>
-                            scan
-                        </Link>
-                        <Link to="/print" className={navLinkClassName('/print')} onClick={handleNavClick('/print')}>
-                            print
-                        </Link>
-                        <Link to="/design/chat" className={navLinkClassName('/design')} onClick={handleNavClick('/design/chat')}>
-                            design
-                        </Link>
-                    </nav>
-                )}
+                <nav className="landing-header__center-nav" aria-label="바로가기 메뉴">
+                    {isLoggedIn && (
+                        <>
+                            <Link to="/scan/hand" className={navLinkClassName('/scan')} onClick={handleNavClick('/scan/hand')}>
+                                scan
+                            </Link>
+                            <Link to="/print" className={navLinkClassName('/print')} onClick={handleNavClick('/print')}>
+                                print
+                            </Link>
+                            <Link to="/design/chat" className={navLinkClassName('/design')} onClick={handleNavClick('/design/chat')}>
+                                design
+                            </Link>
+                        </>
+                    )}
+                    {/* 갤러리는 로그인 없이도 볼 수 있어서 항상 보여 준다 */}
+                    <Link to="/gallery" className={navLinkClassName('/gallery')} onClick={handleNavClick('/gallery')}>
+                        gallery
+                    </Link>
+                </nav>
 
                 <nav className="landing-header__nav" aria-label="주요 메뉴">
                     <AuthNav

@@ -344,8 +344,8 @@ def recommend_nail_colors(
     tone = tone_from_hue(hue)
     summary = {
         "tone":       tone,
-        "skin_hue":   round(hue, 1),
-        "warmness":   round(hue, 1),      # 화면의 웜/쿨 슬라이더가 쓰는 값 = 색상각(도)
+        "skin_hue":   round(hue, 2),
+        "warmness":   round(hue, 2),      # 화면의 웜/쿨 슬라이더가 쓰는 값 = 색상각(도)
         "chroma":     round(skin_chroma(a, b), 1),
         "L":          round(L, 1),
     }

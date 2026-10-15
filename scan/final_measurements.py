@@ -210,7 +210,7 @@ def build_final_payload(userid: str, left_session: str, left_payloads: dict,
         "summary":           summary,
         "skin":              skin,
         "recommendedColors": recommended_colors,
-        "recommendedShape":  recommend_nail_shape(wl_checks, summary["nail_size"]),
+        "recommendedShape":  recommend_nail_shape(wl_checks),
         "left":              left_block,
         "right":             right_block,
     }

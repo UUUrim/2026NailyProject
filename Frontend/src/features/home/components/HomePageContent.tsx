@@ -1,15 +1,15 @@
 import { LandingScrollButtons } from '@/features/home/components/LandingScrollButtons'
-import { FeaturesGridSection } from '@/features/home/components/FeaturesGridSection'
 import { Footer } from '@/features/home/components/Footer'
-import { GallerySection } from '@/features/home/components/GallerySection'
-import { HeroPanel } from '@/features/home/components/HeroPanel'
-import { HowItWorksSection } from '@/features/home/components/HowItWorksSection'
 import { PrintHero } from '@/features/home/components/PrintHero'
-import { StatsSection } from '@/features/home/components/StatsSection'
-import { WaveDivider } from '@/features/home/components/WaveDivider'
-import { WhyNailySection } from '@/features/home/components/WhyNailySection'
+import { ArSection } from '@/features/home/components/story/ArSection'
+import { DesignSection } from '@/features/home/components/story/DesignSection'
+import { IntroSection } from '@/features/home/components/story/IntroSection'
+import { PrintSection } from '@/features/home/components/story/PrintSection'
+import { ScanSection } from '@/features/home/components/story/ScanSection'
+import { ShowcaseFinale } from '@/features/home/components/story/ShowcaseFinale'
 import { useHomePage } from '@/features/home/hooks/useHomePage'
 import '@/styles/landing.css'
+import '@/styles/landing-story.css'
 
 export function HomePageContent() {
     const { handleStartClick } = useHomePage()
@@ -17,21 +17,15 @@ export function HomePageContent() {
     return (
         <div className="landing landing--snap">
             <PrintHero onStartClick={handleStartClick} />
-            <main className="landing__middle">
-                <StatsSection />
-                <WaveDivider variant="bottom" color="#faf8f9" />
-                <HowItWorksSection />
-                <WaveDivider variant="bottom" color="#ffffff" />
-                <FeaturesGridSection />
-                <WaveDivider variant="bottom" color="#fff9fb" />
-                <WhyNailySection />
-                <WaveDivider variant="bottom" color="#ffffff" />
-                <GallerySection />
-                {/*<WaveDivider variant="bottom" color="#faf8f9" />*/}
-                {/*<FaqSection />*/}
+            <main className="landing__middle story">
+                <IntroSection />
+                <ScanSection />
+                <PrintSection />
+                <DesignSection />
+                <ArSection />
+                <ShowcaseFinale onStartClick={handleStartClick} />
             </main>
             <div className="landing-bottom">
-                <HeroPanel variant="bottom" showTitle={false} onStartClick={handleStartClick} />
                 <Footer />
             </div>
             <LandingScrollButtons />

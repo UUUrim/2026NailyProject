@@ -21,7 +21,11 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -36,15 +40,17 @@ class ScanServiceTest {
     Path results;
 
     private HandScanRepository handScanRepository;
+    private WebClient.Builder webClientBuilder;
     private ScanService service;
     private HandScan left;
 
     @BeforeEach
     void setUp() {
         handScanRepository = mock(HandScanRepository.class);
+        webClientBuilder = mock(WebClient.Builder.class, RETURNS_DEEP_STUBS);
         service = new ScanService(
                 handScanRepository,
-                mock(WebClient.Builder.class),
+                webClientBuilder,
                 mock(PrintOrderService.class),
                 new ScanResultFileService(results.toString()));
 
@@ -190,6 +196,77 @@ class ScanServiceTest {
         assertTrue(dto.getFingers().isEmpty());
         assertNull(dto.getSkinToneHex());
         assertNull(dto.getRecommendedShape());
+    }
+
+    // ── 기록 확정 / 촬영 취소 ───────────────────────────────────────────
+
+    private HandScan pairedRight() {
+        HandScan right = HandScan.builder()
+                .id(11L)
+                .user(left.getUser())
+                .handSide(HandScan.HandSide.RIGHT)
+                .status(HandScan.ScanStatus.ANALYZING)
+                .pairedScanId(10L)
+                .build();
+        left.pairWith(11L);
+        when(handScanRepository.findByIdAndUserId(11L, USER)).thenReturn(Optional.of(right));
+        return right;
+    }
+
+    @Test
+    void 새_스캔은_확정되기_전엔_기록이_아니다() {
+        assertFalse(left.isResultConfirmed());
+    }
+
+    @Test
+    void 확정_컬럼이_없던_예전_스캔은_확정된_것으로_본다() {
+        HandScan legacy = HandScan.builder().id(1L).handSide(HandScan.HandSide.LEFT).resultConfirmed(null).build();
+        assertTrue(legacy.isResultConfirmed());
+    }
+
+    @Test
+    void 결과가_있으면_짝_손까지_함께_확정된다() throws IOException {
+        HandScan right = pairedRight();
+        putFinalFile();
+
+        service.confirmResult(left.getUser(), 11L);
+
+        assertTrue(left.isResultConfirmed());
+        assertTrue(right.isResultConfirmed());
+    }
+
+    @Test
+    void 결과_파일이_없으면_확정되지_않는다() {
+        HandScan right = pairedRight();
+
+        assertThrows(IllegalStateException.class, () -> service.confirmResult(left.getUser(), 11L));
+        assertFalse(left.isResultConfirmed());
+        assertFalse(right.isResultConfirmed());
+    }
+
+    @Test
+    void 취소하면_짝_손까지_실패가_되고_스캔_서버에_알린다() {
+        HandScan right = pairedRight();
+
+        service.cancelScan(left.getUser(), 11L);
+
+        assertEquals(HandScan.ScanStatus.FAILED, left.getStatus());
+        assertEquals(HandScan.ScanStatus.FAILED, right.getStatus());
+        verify(webClientBuilder.build().post()).uri(org.mockito.ArgumentMatchers.endsWith("/analyze/cancel"));
+    }
+
+    @Test
+    void 확정된_기록은_취소되지_않는다() throws IOException {
+        HandScan right = pairedRight();
+        putFinalFile();
+        service.confirmResult(left.getUser(), 11L);
+        left.updateStatus(HandScan.ScanStatus.MEASURED);
+
+        service.cancelScan(left.getUser(), 11L);
+
+        assertEquals(HandScan.ScanStatus.MEASURED, left.getStatus());
+        assertEquals(HandScan.ScanStatus.ANALYZING, right.getStatus());
+        verify(webClientBuilder.build().post(), never()).uri(anyString());
     }
 
     @Test

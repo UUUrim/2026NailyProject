@@ -12,10 +12,10 @@ import { apiClient, BASE_URL } from '@/shared/utils/apiClient'
 export type DesignDetailItem =
     | string
     | {
-          label?: string
-          hex?: string
-          imageUrl?: string | null
-      }
+    label?: string
+    hex?: string
+    imageUrl?: string | null
+}
 
 /**
  * 디자인 생성 모델이 이미지와 함께 추출해서 내려주는 세부 요소.
@@ -55,6 +55,9 @@ export interface DesignGenerateResponse {
     details?: DesignExtractedDetails
     keywords?: string[]
     scanAutoReflection?: ScanAutoReflection | null
+    /** 수정 요청이 아니라서 이미지를 바꾸지 않았을 때 서버가 주는 안내 메시지 (있으면 새 이미지가 아님) */
+    assistantMessage?: string | null
+    assistantOptions?: string[] | null
 }
 
 export interface DesignImageResponse {
@@ -140,15 +143,17 @@ export async function generateDesign(params: {
 
 /**
  * POST /designs/generate-detailed-from-image — 업로드한 참고 이미지 기반 상세 디자인 생성 요청
- * multipart/form-data: image(파일), sessionId(선택), scanId(선택)
+ * multipart/form-data: image(파일), sessionId(선택), scanId(선택), note(선택)
  */
 export async function generateDesignFromImage(params: {
     sessionId: number
     scanId?: number | null
     image: Blob
+    note?: string // 사진과 함께 반영할 사용자 추가 요청 (선택)
 }): Promise<DesignGenerateResponse> {
     const formData = new FormData()
     formData.append('sessionId', String(params.sessionId))
+    if (params.note && params.note.trim()) formData.append('note', params.note.trim())
     if (params.scanId != null) formData.append('scanId', String(params.scanId))
     formData.append('image', params.image, 'reference.jpg')
 
@@ -301,7 +306,7 @@ export async function deleteSavedFolder(folderId: number): Promise<void> {
 
 // ─── 둘러보기(커뮤니티 갤러리) ─────────────────────────────────────────────────
 
-/** GET /designs/community — 메인페이지 '둘러보기': 전체 사용자가 생성한 디자인 목록 */
+/** GET /designs/community — 둘러보기(갤러리) 페이지: 사용자들이 공유한 디자인 목록 */
 export async function getCommunityDesigns(): Promise<CommunityDesignResponse[]> {
     // 로그인 토큰이 있으면 함께 보내 likedByMe를 받는다 (토큰 없어도 조회는 가능)
     const res = await apiClient.get<CommunityDesignResponse[]>('/designs/community')

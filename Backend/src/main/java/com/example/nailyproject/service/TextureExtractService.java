@@ -14,7 +14,7 @@ import java.util.Map;
 /**
  * Gemini API를 사용해 디자인 프롬프트에서 사용된 텍스처 종류와 컬러를 추출한다.
  * test_texture_batch.py의 "안3" 방식 — 텍스처 프롬프트 작성까지 Gemini에 맡기지 않고,
- * "어떤 텍스처+어떤 컬러"만 추출한 뒤 서버 쪽 템플릿(TextureSwatchService)에 매핑한다.
+ * "어떤 텍스처+어떤 컬러(이름과 hex)"만 추출한 뒤 TextureSwatchService가 SwatchColorizer로 스와치를 만든다.
  *
  * Gemini 호출 패턴은 FingerDesignPlanService.callGeminiWithRetry()와 동일하게 구성함.
  */
@@ -33,30 +33,55 @@ public class TextureExtractService {
     // @Value("${gemini.api.url}")
     // private String apiUrl;
 
-    // test_texture_batch.py의 TEXTURE_KEYWORDS와 동일한 8종
+    // 스와치 대상은 "재료"만이다. 그라데이션/프렌치/치크/마블/드로잉 같은 시술 기법은 텍스처가 아니다.
     private static final String SYSTEM_PROMPT = """
-            You are a nail art analyst. Given a nail design prompt, extract ONLY the textures
-            and colors actually used in the design.
+            You are a nail art analyst. Given a nail design prompt, extract ONLY the gel/polish
+            materials (textures) and colors actually used in the design.
 
             Supported textures (use EXACTLY these keys):
-              glitter, marble, magnetic_chrome,  mercury_chrome, powder, matte, 3d_charm, plain_solid
+              syrup, plain_solid, glitter, knit, chrome, mercury_chrome, magnetic_chrome, matte,
+              ink, 3d_charm
+
+            Material definitions:
+            - syrup: translucent, juicy, glass-like syrup / jelly gel where the pigment looks suspended in
+              clear gel. If ANY nail in the design uses syrup (the word "syrup" or "translucent syrup gel"
+              appears, including syrup used as the base under glitter, chrome, or ink), you MUST include a
+              syrup entry.
+            - plain_solid: opaque, even solid-color gel (not syrup).
+            - glitter: visible sparkle particles.
+            - chrome: chrome powder, a full-cover mirror-like metallic chrome finish. This also covers
+              pearlescent / aurora / "powder finish" (powder and chrome are the same material, always use
+              the key "chrome", never "powder").
+            - mercury_chrome: liquid mercury, liquid metal look.
+            - magnetic_chrome: magnetic gel / magnetic cat eye.
+            - matte: matte finish.
+            - ink: ink gel, a vivid fully transparent colored gel (ink drawing, ink wash, ink check).
+              (Classification only, so an ink nail is not mistaken for another texture.)
+            - knit: knit / velvet gel filled with tiny fiber flecks.
+            - 3d_charm: raised 3D charms. (Classification only.)
 
             Rules:
-            - Extract only textures that genuinely appear in the prompt. Do NOT invent textures.
-            - No duplicate texture entries.
-            - "color" should be the primary color associated with that texture in the design.
-              Use descriptive English color names like "dusty rose pink", "ivory", "Hazelnut".
-              Set color to null if the texture has its own inherent color (e.g. magnetic_chrome).
-            - If a design has gradient/ombre/french/cheek → classify as plain_solid.
+            - Extract only materials that genuinely appear in the prompt. Do NOT invent textures.
+            - No duplicate texture entries (one entry per texture; use its most prominent color).
+            - Techniques are NOT textures: gradient / ombre / french tip / cheek blush / marble / drawing /
+              line art / dots / stripes / plaid / lace never get their own entry. Classify such a nail by the
+              gel material underneath it: syrup if it is a translucent syrup gel, otherwise plain_solid.
+            - "color": the primary color of that texture as a descriptive English color name like
+              "dusty rose pink", "ivory", "Hazelnut".
+            - "color_hex": the same color as a 6-digit hex "#RRGGBB" (uppercase). It is REQUIRED for
+              syrup, plain_solid, glitter, knit, matte, chrome, and magnetic_chrome, and is used to tint a base
+              image, so give the real visible color of that material on the nail
+              (for example silver chrome "#C0C0C0", champagne gold "#E8D3A2", soft pink syrup "#F4B6C6").
+              Never output color names in color_hex.
+            - mercury_chrome has no color: set color and color_hex to null.
             - Respond ONLY with a JSON array. No markdown, no explanation, no preamble.
-            - mercury_chrome: liquid mercury, mirror finish, chrome powder, liquid metal 표현이 있을 때
-            - magnetic_chrome: metallic chrome, chrome finish, metallic accent 등 일반 크롬 표현일 때
-            - Set color to null for mercury_chrome.
 
             Output format:
             [
-              {"texture": "glitter", "color": "dusty rose pink"},
-              {"texture": "plain_solid", "color": "ivory"}
+              {"texture": "syrup", "color": "soft pink", "color_hex": "#F4B6C6"},
+              {"texture": "glitter", "color": "dusty rose pink", "color_hex": "#D9A3AB"},
+              {"texture": "chrome", "color": "silver", "color_hex": "#C0C0C0"},
+              {"texture": "plain_solid", "color": "warm beige", "color_hex": "#D8C3A5"}
             ]
             """;
 
@@ -64,7 +89,7 @@ public class TextureExtractService {
      * 디자인 프롬프트에서 사용된 텍스처+컬러 쌍 목록을 추출한다.
      *
      * @param designPrompt NailDesignService가 조립한 최종 프롬프트 (buildCombinedPromptFromPlan 결과)
-     * @return [{"texture": "glitter", "color": "pink"}, ...] 형태의 리스트
+     * @return [{"texture": "glitter", "color": "dusty rose pink", "color_hex": "#D9A3AB"}, ...] 형태의 리스트
      */
     public List<Map<String, Object>> extractTextureColorPairs(String designPrompt) {
         // [Gemini 방식 - 주석 처리]
@@ -100,13 +125,18 @@ public class TextureExtractService {
                     Map<String, Object> pair = new java.util.LinkedHashMap<>();
                     String texture = item.path("texture").asText();
 
-                    // 3D 참은 파츠라서 스와치를 만들지 않는다. 참이 다른 텍스처로 잘못 분류되지
-                    // 않도록 프롬프트의 분류 키에는 남겨두고, 결과에서만 뺀다.
-                    if ("3d_charm".equals(texture)) continue;
+                    // 3D 참은 파츠라서, ink는 스와치 베이스 이미지가 아직 없어서 스와치를 만들지 않는다.
+                    // 다른 텍스처로 잘못 분류되지 않도록 프롬프트의 분류 키에는 남겨두고, 결과에서만 뺀다.
+                    if ("3d_charm".equals(texture) || "ink".equals(texture)) continue;
+
+                    // powder는 chrome과 합쳐졌다 (같은 베이스 이미지를 쓰므로 여기서 먼저 통일해 중복을 막는다)
+                    if ("powder".equals(texture)) texture = "chrome";
 
                     pair.put("texture", texture);
                     pair.put("color", item.has("color") && !item.get("color").isNull()
                             ? item.get("color").asText() : null);
+                    pair.put("color_hex", item.has("color_hex") && !item.get("color_hex").isNull()
+                            ? item.get("color_hex").asText() : null);
                     final String finalTexture = texture;
                     boolean alreadyExists = result.stream()
                             .anyMatch(p -> finalTexture.equals(p.get("texture")));

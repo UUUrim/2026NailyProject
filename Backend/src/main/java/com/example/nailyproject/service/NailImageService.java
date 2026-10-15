@@ -127,37 +127,7 @@ public class NailImageService {
         return extractBase64(response.getBody(), "image_base64");
     }
 
-    // -------------------------------------------------------------------------
-    // 3. 텍스처 스와치 생성 (원형 견본 이미지 1개)
-    // -------------------------------------------------------------------------
-
-    /**
-     * 텍스처 스와치 프롬프트 1개를 받아 원형 견본 이미지를 생성한다.
-     * TextureSwatchService가 텍스처 종류만큼 반복 호출한다.
-     *
-     * @param swatchPrompt TextureSwatchService가 조립한 스와치 전용 프롬프트
-     * @param seed         배치 내 모든 스와치에 동일한 시드 사용 권장 (일관성)
-     * @return base64 인코딩된 PNG 이미지
-     */
-    public String generateTextureSwatch(String swatchPrompt, Long seed) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("prompt", swatchPrompt);
-        body.put("steps", 15);          // 스와치는 빠르게 (매트는 TextureSwatchService에서 22로 올려서 호출)
-        body.put("guidance_scale", 3);
-        body.put("width", 512);
-        body.put("height", 384);
-        if (seed != null) {
-            body.put("seed", seed);
-        }
-        System.out.println("[NailImageService] texture swatch seed=" + seed);
-
-        HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, buildHeaders());
-        ResponseEntity<String> response = restTemplate.postForEntity(
-                genServerUrl + "/generate", request, String.class
-        );
-
-        return extractBase64(response.getBody(), "image_base64");
-    }
+    // (텍스처 스와치는 이제 이 서버를 거치지 않고 SwatchColorizer가 백엔드 안에서 만든다)
 
     // -------------------------------------------------------------------------
     // 4. ComfyUI 브릿지 서버 (main_comfy.py) — 테스트용

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { startScan, requestAnalyze } from '@/entities/scan/api'
+import { startScan, requestAnalyze, cancelScan } from '@/entities/scan/api'
 import { useMyScanSessionsQuery } from '@/entities/scan/queries'
 import { useAuth } from '@/shared/hooks/useAuth'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
@@ -156,6 +156,8 @@ export function useHandScanPage() {
   // isSwitching 판단용 — startedAt: 손가락 촬영 완료 시각, sawStart: 다음 손가락 측정 시작
   // (finger_start) 받음, emptySince: 그 뒤 측정값 없음이 시작된 시각
   const switchRef = useRef<{ startedAt: number; sawStart: boolean; emptySince: number | null } | null>(null)
+  // 촬영 도중 "처음부터 다시 찍어야 한다"는 경고를 확인하고 나가서 이 스캔을 취소했는지
+  const cancelledRef = useRef(false)
 
   const currentStep   = STEPS[Math.min(currentStepIndex, STEPS.length - 1)] ?? STEPS[0]
   const currentHand   = currentStep.hand
@@ -181,6 +183,16 @@ export function useHandScanPage() {
     setGateStatus('pass')
     setSearchParams({ rescan: '1' }, { replace: true })
   }
+
+  // 촬영 도중 경고를 확인하고 나간 경우 — 서버에서 촬영을 멈추고 이 스캔을 취소한다(마이페이지 기록에도 안 남는다).
+  // 오른손 스캔은 왼손과 짝이라 오른손이 있으면 그것 하나로 양손이 함께 취소된다.
+  // 카메라 화면만 닫은 경우는 취소가 아니다 — 다시 열어 이어서 찍는다.
+  const cancelScanInProgress = useCallback(() => {
+    if (cancelledRef.current) return
+    cancelledRef.current = true
+    const scanId = scanIdsRef.current.RIGHT ?? scanIdsRef.current.LEFT
+    if (scanId !== null) cancelScan(scanId)
+  }, [])
 
   const endCapturing = useCallback(() => {
     if (captureTimeoutRef.current !== null) {
@@ -313,6 +325,12 @@ export function useHandScanPage() {
                   setScanIds((prev) => ({ ...prev, RIGHT: nextScanId }))
                   scanIdsRef.current = { ...scanIdsRef.current, RIGHT: nextScanId }
                 }
+                if (cancelledRef.current) {
+                  // 오른손 스캔을 준비하는 사이에 경고를 확인하고 나갔다 — 촬영을 시작하지 않고,
+                  // 취소 요청 때 아직 없었을 수 있는 이 오른손 스캔도 (짝인 왼손과 함께) 취소한다.
+                  cancelScan(nextScanId)
+                  return
+                }
                 await requestAnalyze(nextScanId)
               } catch (e) {
                 console.error('[HandScan] 오른손 스캔 시작 실패', e)
@@ -421,11 +439,32 @@ export function useHandScanPage() {
   }, [currentStepIndex, scanIds, uploadedSteps, isDone])
 
   // ── 이탈 경고: 촬영을 진행 중일 때 새로고침/탭 닫기/헤더 링크로 나가려 하면 경고 ──
+  // 경고를 확인하고 나가면 이 스캔을 취소한다(cancelScanInProgress).
+  const isScanInProgress = !isDone && (currentStepIndex > 0 || scanIds.LEFT !== null || scanIds.RIGHT !== null)
   useLeaveWarning(
-      !isDone && (currentStepIndex > 0 || scanIds.LEFT !== null || scanIds.RIGHT !== null),
+      isScanInProgress,
       '지금 나가면 촬영 진행 상황이 초기화돼 처음부터 다시 찍어야 해요. 그래도 나가시겠어요?',
-      () => { handScanSnapshot = null },
+      () => {
+        handScanSnapshot = null
+        cancelScanInProgress()
+      },
   )
+
+  // 새로고침/탭 닫기는 브라우저 기본 확인창으로 경고한다 — 그걸 확인하고 페이지가 실제로 내려갈 때(pagehide)도 취소한다.
+  useEffect(() => {
+    if (!isScanInProgress) return
+    const handlePageHide = () => cancelScanInProgress()
+    // 뒤로가기 캐시(bfcache)로 이 화면이 그대로 되살아나면 이미 취소된 스캔이라 처음부터 다시 연다
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && cancelledRef.current) window.location.reload()
+    }
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [isScanInProgress, cancelScanInProgress])
 
   // ── ESC 키 ───────────────────────────────────────────────────
   useEffect(() => {
