@@ -179,7 +179,7 @@ export function HandScanResultPagePreviewContent() {
                             ))}
                         </div>
                         <p className="skin-tone-palette-card__desc">
-                            네일리 님과 어울리는 컬러들이에요.
+                            네일리님과 어울리는 컬러들이에요.
                         </p>
                     </article>
                 </div>

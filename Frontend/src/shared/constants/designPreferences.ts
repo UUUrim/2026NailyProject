@@ -117,7 +117,7 @@ export const PREFERENCE_OPTION_INFO: Partial<Record<PreferenceKey, Record<string
     glitter: { desc: '반짝이는 펄·글리터 가루로 화려한 광채를 내는 디자인.', image: '/images/nail-sample/design-type/glitter.png' },
     gradient: { desc: '두 가지 이상의 색이 자연스럽게 번지듯 이어지는 디자인.', image: '/images/nail-sample/design-type/gradient.png' },
     cheek: { desc: '손톱 중앙에 볼터치처럼 은은하게 색을 입히는 디자인.', image: '/images/nail-sample/design-type/cheek.png' },
-    marble: { desc: '대리석 무늬처럼 색이 불규칙하게 퍼지는 패턴.', image: '/images/nail-sample/design-type/marble.jpg' },
+    marble: { desc: '대리석 무늬처럼 색이 불규칙하게 퍼지는 패턴 디자인.', image: '/images/nail-sample/design-type/marble.jpg' },
     french: { desc: '손톱 끝부분만 다른 컬러로 라인을 그리는 클래식 디자인.', image: '/images/nail-sample/design-type/french.jpg' },
     magnetic: { desc: '자석 젤로 오로라 같은 입체적인 빛 무늬를 만드는 디자인.', image: '/images/nail-sample/design-type/magnetic.jpg' },
     powder: { desc: '고운 컬러 파우더를 발라 매트하고 벨벳 같은 광을 내는 디자인.', image: '/images/nail-sample/design-type/powder.jpg' },

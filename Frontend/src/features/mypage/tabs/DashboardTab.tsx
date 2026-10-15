@@ -28,7 +28,7 @@ export function DashboardTab() {
           <div className="mypage-x__hero-copy">
             <p className="mypage-x__hero-subtitle">My Naily</p>
             <h1 className="mypage-x__hero-title">
-              {profile?.nickname ?? '회원'} 님,<br />
+              {profile?.nickname ?? '회원'}님,<br />
               오늘도 네일리와 함께해요!
             </h1>
             <p className="mypage-x__hero-desc">

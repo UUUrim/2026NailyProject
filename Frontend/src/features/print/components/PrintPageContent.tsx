@@ -310,7 +310,7 @@ export function PrintPageContent() {
                                 <span className="print-modal__icon-badge" aria-hidden="true">{PrinterIcon}</span>
                                 <h2>네일팁 출력 안내</h2>
                                 <p>
-                                    {userName || '회원'} 님의{' '}
+                                    {userName || '회원'}님의{' '}
                                     {selectedSession ? formatScanDateLabel(selectedSession.scannedAt) : ''} 분석 결과를 기반으로
                                     <br />
                                     <strong> {selectedShape ? getNailShape(selectedShape)?.labelKo ?? selectedShape : ''} </strong>

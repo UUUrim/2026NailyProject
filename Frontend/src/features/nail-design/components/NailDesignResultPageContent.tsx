@@ -185,7 +185,7 @@ export function NailDesignResultPageContent() {
 
                             {context.handSummary && (
                                 <div className="design-result-v2__origin-block">
-                                    <h2>{userName ? `${userName} 님의 손 분석 결과를 반영했어요.` : '내 손 분석 결과를 반영했어요.'}</h2>
+                                    <h2>{userName ? `${userName}님의 손 분석 결과를 반영했어요.` : '내 손 분석 결과를 반영했어요.'}</h2>
                                     <div className="design-result-v2__origin-hand design-result-v2__origin-hand--scan-auto">
                                         <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
                                             <span className="design-result-v2__origin-stat-label">피부 톤</span>

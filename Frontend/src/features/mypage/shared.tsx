@@ -288,7 +288,7 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   favorites: {
     subtitle: 'Liked',
     title: '찜 목록',
-    description: 'ㅇㅇ 님이 찜해둔 디자인만 모아놨어요.',
+    description: 'ㅇㅇ님이 찜해둔 디자인만 모아놨어요.',
   },
 }
 
