@@ -220,7 +220,59 @@ public class RefineService {
               small, simple things a nail salon can really attach (small hearts, stars, ribbons, pearl
               beads, or flat artwork). Do not describe specific characters or faces such as "adorable
               animal faces", or elaborate unrealistic sculptures; the image model may draw them as
-              bizarre shapes that cannot be made in reality.
+              bizarre shapes that cannot be made in reality. The only exception is a character the
+              user explicitly asks for, see [Character faces on request] below.
+
+            [Character faces on request - VERY IMPORTANT]
+            The design may have been made from a reference photo (a poster, a character illustration,
+            ...). By default that photo only set the mood, so the current image has no character face.
+            If the user's message explicitly asks to put the character, its face or its figure on the
+            nails (for example "캐릭터 얼굴 넣어줘", "나루토 얼굴 넣어줘", "그 캐릭터 그려줘"), this is a
+            clear edit request (A, local edit): add that character on the nail(s) the user named, or on
+            one or two nails as an accent when no nail is named.
+            - BLEND IT IN - VERY IMPORTANT: the character must look like part of that nail's own
+              design, never a sticker, decal or printed picture laid on top. Write the instruction so
+              that the character is hand-painted nail art in the same style as the existing nail: drawn
+              with the same gel-paint look, softly sealed under the same glossy top coat so the nail's
+              reflections and light streaks run across it, its colors gently tinted by the nail's base
+              color (for example a slightly icy, bluish white on a blue nail instead of a pure
+              paper-white cut-out), with soft edges and no hard white outline or drop shadow. Choose a
+              size that is balanced with the nail's other decorations, simplified and cute, and place
+              it with the existing decorations in mind: tuck it beside or among them, let neighbouring
+              elements (for example snowflakes, pearls, stars) overlap or surround it a little, and
+              leave the nail's own design visible around it. Do not centre a big face over everything
+              and do not hide or erase the existing decorations to make room.
+            - Which character: use, in this order, the name the user gave in the message, the
+              "reference_characters" field of the previous plan (English names and looks of the
+              characters in the reference photo), the "reference_subject" field (Korean name of the
+              work or character), and the reference photo itself when a second image is attached to
+              the user's message (that second image is the original reference photo the design was
+              made from; the first image is the current design). "Put the character on it", "그냥
+              이미지 캐릭터를 넣어줘" and similar wording mean the characters of that reference
+              photo, so never ask the user which character they mean when any of these tells you.
+              Write the English name in editInstruction with a short phrase (about 15 words) for
+              its face: signature colors, ear or head shape, a few key features. Keep the colors
+              accurate.
+            - Send the reference photo to the image editor: when a second image (the reference
+              photo) is attached to the user's message, set "useReferenceImage" to true. The image
+              editor then receives the current design first and the reference photo second, so
+              editInstruction must say so. Still begin editInstruction with "In this five-nail
+              press-on nail set product photo (the first image), ...", then add the sentence: "The
+              second image is a reference photo of the character; copy ONLY the character's face and
+              drawing style from it, nothing else from that photo (not its layout, background,
+              colors or other elements)." For every other kind of edit set "useReferenceImage"
+              to false. If the photo shows several characters and the user did not
+              pick one, choose the one or two main characters; do not draw all of them.
+            - Only if none of these sources gives a character (no reference photo, empty fields, and
+              the message names no character), do not guess: set "isEditRequest" to false and ask in
+              "replyToUser" (Korean) which character they mean.
+            - Keep the nail's base color, finish, shape and its other decorations unchanged; only the
+              character is added, blended in as described above. The five nail tips must keep the
+              same size, position and framing in the picture as in the original image. Add the character to slotActions as {"category": "motif",
+              "action": "append_like", "value": "character"} and to keywordsAdd (for example
+              "character art").
+            If the user only asks for a mood, color or decoration change and does not ask for the
+            character, never add a character or a face.
 
             C) For a nail shape change, follow this structure:
             "In this five-nail press-on nail set product photo, reshape ONLY the free edge (the tip end
@@ -290,6 +342,7 @@ public class RefineService {
                 "keywordsAdd": ["star charm"],
                 "keywordsRemove": ["heart"],
                 "newShape": null,
+                "useReferenceImage": false,
                 "editInstruction": "In this five-nail press-on nail set product photo, on the 4th nail tip from the left (the ring finger), replace the heart charm with a star charm. Do not change anything else - keep the other four nail tips, their shapes, colors, and decorations, the overall nail shape, the white background, the lighting, and the composition exactly identical to the original image.",
                 "slotActions": [
                     {"category": "motif", "action": "remove_like", "value": "heart"},
@@ -338,8 +391,24 @@ public class RefineService {
         String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE,
                 originalPrompt, previousPlanJson, conversationContext);
         String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
-        String aiText = gptClientService.chatWithImage(
-                systemPrompt, message, originalImageBase64, "image/png", 4096, true);
+        // 사진 기반으로 만든 세션이면 원본 참고 사진도 두 번째 이미지로 함께 보낸다.
+        // ("그 캐릭터 넣어줘"가 어떤 캐릭터인지 GPT가 알 수 있게 하기 위함. 현재 디자인 이미지가 항상 첫 번째)
+        List<String[]> visionImages = new ArrayList<>();
+        visionImages.add(new String[]{originalImageBase64, "image/png"});
+        byte[] referenceBytes = null; // 이미지 편집에도 넘길 수 있게 유지한다 (useReferenceImage)
+        String referenceUrl = session.getReferenceImageUrl();
+        if (referenceUrl != null && !referenceUrl.isBlank()) {
+            try {
+                referenceBytes = s3Service.downloadImageBytes(referenceUrl);
+                if (referenceBytes != null) {
+                    String refMime = referenceUrl.toLowerCase().contains(".png") ? "image/png" : "image/jpeg";
+                    visionImages.add(new String[]{Base64.getEncoder().encodeToString(referenceBytes), refMime});
+                }
+            } catch (Exception e) {
+                System.err.println("[RefineService] 참고 이미지 로드 실패, 현재 이미지만 사용: " + e.getMessage());
+            }
+        }
+        String aiText = gptClientService.chatWithImages(systemPrompt, message, visionImages, 4096, true);
 
         JsonNode resultJson;
         try {
@@ -358,7 +427,10 @@ public class RefineService {
         // 수정 요청이 아니거나(질문/잡담/모르는 표현), 지시문이 비었거나, 지시문 형식이 아니면(사과/거절 문장 등)
         // 이미지 편집을 부르지 않는다. 그 문장이 그대로 이미지 모델에 가면 사진 위에 설명 그림을 그려 버린다.
         // 안전장치로 프롬프트가 요구한 문장 시작("In this five-nail ...")인지도 확인한다.
-        boolean looksLikeInstruction = editInstruction.toLowerCase().startsWith("in this five-nail");
+        // 참고 사진을 같이 보내는 수정은 "The first image is the nail set to edit..."로 시작할 수 있어서 그 시작도 허용한다.
+        String instructionLower = editInstruction.toLowerCase();
+        boolean looksLikeInstruction = instructionLower.startsWith("in this five-nail")
+                || instructionLower.startsWith("the first image is the nail set");
         if (!isEditRequest || editInstruction.isBlank() || !looksLikeInstruction) {
             String reply = replyToUser.isBlank()
                     ? "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
@@ -395,10 +467,14 @@ public class RefineService {
         //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
         //    합성본이라 모델이 흰 배경을 그대로 그려 불투명으로 줄 수도 있는데, 그러면 아래 크롭 단계가 서버 누끼로 처리한다.
         boolean transparentEdit = nailDesignService.isTransparentGptImage();
+        // 캐릭터 추가처럼 참고 사진이 필요한 수정이면 원본 참고 사진도 편집 모델에 함께 보낸다 (두 번째 이미지).
+        boolean useReferenceImage = resultJson.path("useReferenceImage").asBoolean(false) && referenceBytes != null;
+        List<byte[]> editReferences = useReferenceImage ? List.of(referenceBytes) : List.of();
+        System.out.println("[RefineService] useReferenceImage=" + useReferenceImage);
         String editedBase64;
         try {
             String instructionToSend = transparentEdit ? editInstruction + TRANSPARENT_EDIT_SUFFIX : editInstruction;
-            editedBase64 = gptClientService.editImage(instructionToSend, originalImageBytes, "1536x1024", "auto", transparentEdit);
+            editedBase64 = gptClientService.editImage(instructionToSend, originalImageBytes, editReferences, "1536x1024", "auto", transparentEdit);
         } catch (Exception e) {
             if (!transparentEdit) throw e;
             // 스레드가 중단된 경우(서버 재시작/종료, 요청 취소)는 투명 배경 거절이 아니므로 재시도하지 않는다 -
@@ -409,7 +485,7 @@ public class RefineService {
             // 이미지 수정 API가 투명 배경 요청을 거절하면 수정 기능 전체가 막히므로, 예전 방식(흰 배경)으로 한 번 더 시도한다.
             System.err.println("[RefineService] 투명 배경 수정 요청이 실패해 흰 배경 방식으로 다시 시도합니다: " + e.getMessage());
             transparentEdit = false;
-            editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, "1536x1024", "auto", false);
+            editedBase64 = gptClientService.editImage(editInstruction, originalImageBytes, editReferences, "1536x1024", "auto", false);
         }
 
         // 4. 수정된 이미지 S3 업로드 (표시용은 흰 배경을 입힌 것, 투명 원본은 AR 크롭에만 쓴다)

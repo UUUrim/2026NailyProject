@@ -93,6 +93,19 @@ public class GptClientService {
         return chat(systemPrompt, messages, maxCompletionTokens, jsonObjectMode);
     }
 
+    /** 이미지를 여러 장(base64 + mime 순서쌍) 함께 보내는 호출. images 의 각 원소는 {base64, mimeType}. */
+    public String chatWithImages(String systemPrompt, String userText, List<String[]> images,
+                                 int maxCompletionTokens, boolean jsonObjectMode) {
+        List<Map<String, Object>> content = new java.util.ArrayList<>();
+        content.add(Map.of("type", "text", "text", userText));
+        for (String[] img : images) {
+            content.add(Map.of("type", "image_url", "image_url",
+                    Map.of("url", "data:" + img[1] + ";base64," + img[0])));
+        }
+        List<Map<String, Object>> messages = List.of(Map.of("role", "user", "content", content));
+        return chat(systemPrompt, messages, maxCompletionTokens, jsonObjectMode);
+    }
+
     /**
      * [테스트 전용] GPT Image 2.5 Sunburst로 실제 이미지를 생성해서 base64(PNG)를 돌려준다.
      * 텍스트/JSON용 chat()과 완전히 다른 엔드포인트(images/generations)와 모델을 쓴다.
@@ -190,6 +203,15 @@ public class GptClientService {
      */
     public String editImage(String editInstruction, byte[] originalImageBytes, String size, String quality,
                             boolean transparent) {
+        return editImage(editInstruction, originalImageBytes, List.of(), size, quality, transparent);
+    }
+
+    /**
+     * 수정할 이미지(첫 번째) 뒤에 참고 이미지(예: 사용자가 올린 원본 참고 사진)를 함께 보낸다.
+     * 참고 이미지는 지시문에 적은 역할(예: 캐릭터 얼굴 그림체만 참고)대로만 쓰이도록 지시문 쪽에서 제한해야 한다.
+     */
+    public String editImage(String editInstruction, byte[] originalImageBytes, List<byte[]> references,
+                            String size, String quality, boolean transparent) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
         builder.part("model", imageModel);
         builder.part("prompt", editInstruction);
@@ -199,9 +221,21 @@ public class GptClientService {
             builder.part("background", "transparent");
             builder.part("output_format", "png");
         }
-        builder.part("image", new ByteArrayResource(originalImageBytes))
-                .filename("original.png")
-                .contentType(MediaType.IMAGE_PNG);
+        if (references == null || references.isEmpty()) {
+            builder.part("image", new ByteArrayResource(originalImageBytes))
+                    .filename("original.png")
+                    .contentType(MediaType.IMAGE_PNG);
+        } else {
+            // 여러 장이면 image[] 로 보낸다. 첫 번째가 수정 대상, 이후가 참고 이미지.
+            builder.part("image[]", new ByteArrayResource(originalImageBytes))
+                    .filename("original.png")
+                    .contentType(MediaType.IMAGE_PNG);
+            for (byte[] reference : references) {
+                builder.part("image[]", new ByteArrayResource(reference))
+                        .filename("reference.png")
+                        .contentType(MediaType.IMAGE_PNG);
+            }
+        }
 
         JsonNode responseNode = callWithRetry(builder.build(), imageEditApiUrl);
         JsonNode dataArray = responseNode.path("data");

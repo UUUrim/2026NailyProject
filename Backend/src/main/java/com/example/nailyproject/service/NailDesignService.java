@@ -59,17 +59,19 @@ public class NailDesignService {
 
     private static final Map<String, String> TEXTURE_KEYWORD_MAP = new LinkedHashMap<>();
     static {
+        // 스와치 베이스 이미지가 있는 재료 키만 (ink는 베이스 이미지 등록 전까지 제외, powder는 chrome으로 통합)
+        TEXTURE_KEYWORD_MAP.put("syrup",        "syrup");
         TEXTURE_KEYWORD_MAP.put("glitter",      "glitter");
-        TEXTURE_KEYWORD_MAP.put("marble",       "marble");
+        TEXTURE_KEYWORD_MAP.put("knit",         "knit");
+        TEXTURE_KEYWORD_MAP.put("velvet",       "knit");
+        TEXTURE_KEYWORD_MAP.put("chrome sheen", "chrome");
+        TEXTURE_KEYWORD_MAP.put("powder",       "chrome");
+        TEXTURE_KEYWORD_MAP.put("aurora",       "chrome");
         TEXTURE_KEYWORD_MAP.put("magnetic",     "magnetic_chrome");
         TEXTURE_KEYWORD_MAP.put("cat eye",      "magnetic_chrome");
         TEXTURE_KEYWORD_MAP.put("mercury",      "mercury_chrome");
-        TEXTURE_KEYWORD_MAP.put("powder",       "powder");
-        TEXTURE_KEYWORD_MAP.put("aurora",       "powder");
         TEXTURE_KEYWORD_MAP.put("matte",        "matte");
         TEXTURE_KEYWORD_MAP.put("3d charm",     "3d_charm");
-        TEXTURE_KEYWORD_MAP.put("drawing",      "drawing");
-        TEXTURE_KEYWORD_MAP.put("doodle",       "drawing");
         TEXTURE_KEYWORD_MAP.put("solid color",  "plain_solid");
     }
 
@@ -555,11 +557,7 @@ public class NailDesignService {
                     for (Map.Entry<String, String> entry : swatchBase64Map.entrySet()) {
                         if (entry.getValue() == null || entry.getValue().isBlank()) continue;
 
-                        // ★ mercury_chrome은 이미 S3 URL — base64 디코딩 없이 바로 저장
-                        if ("mercury_chrome".equals(entry.getKey())) {
-                            swatchUrlMap.put("mercury_chrome", entry.getValue());
-                            continue;
-                        }
+                        // mercury_chrome도 SwatchColorizer가 base64 이미지를 돌려주므로 다른 스와치와 똑같이 S3에 올린다
                         try {
                             byte[] swatchBytes = Base64.getDecoder().decode(entry.getValue());
                             String swatchKey = "designs/user_" + finalUserId
@@ -903,11 +901,15 @@ public class NailDesignService {
                 && request.getMode().equalsIgnoreCase("scan-auto")
                 && handScan != null;
 
+        // 사진 기반 생성이면 색은 참고 사진에서 읽는다. 스캔 추천 팔레트를 랜덤으로 확정색에 박으면
+        // 플랜 LLM이 "확정 헥스"를 그대로 따라서 사진의 색감이 무시되므로, 이때는 쉐입/무드만 스캔 값으로 메운다.
+        boolean hasImage = imageBase64 != null && !imageBase64.isBlank();
+
         // scan-auto가 아니면 기존대로 빈 슬롯을 스캔 값으로 메운다.
         // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
         //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
         if (!scanAuto) {
-            fillMissingFromScan(slots, handScan);
+            fillMissingFromScan(slots, handScan, !hasImage);
         }
 
         if (session != null && !scanAuto) {
@@ -916,7 +918,7 @@ public class NailDesignService {
 
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
-                : summarizeSlots(slots, handScan)
+                : summarizeSlots(slots, handScan, !hasImage)
                 + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
                 + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
                 + buildUserOwnWordsText(session)
@@ -941,7 +943,6 @@ public class NailDesignService {
         // motif "없음"을 골라도 그 선택이 무시되는 버그가 있었다(사용자가 직접 재현/확인함).
         // scanId가 프론트에서 매 요청마다 자동으로 함께 오는 경우가 있어서, handScan 존재
         // 여부만으로는 "이번 생성이 스캔 기반 흐름인지"를 판단할 수 없다.
-        boolean hasImage = imageBase64 != null && !imageBase64.isBlank();
         JsonNode plan = fingerDesignPlanService.generatePlan(
                 summary, imageBase64, imageMimeType, previousPlanJson, userSeasonForTrend, scanAuto);
 
@@ -1247,6 +1248,11 @@ public class NailDesignService {
     }
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
+        fillMissingFromScan(slots, handScan, true);
+    }
+
+    /** @param useScanColors false면 색은 건드리지 않는다(사진 기반 생성: 색은 참고 사진에서 읽는다). */
+    private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan, boolean useScanColors) {
         if (handScan == null) {
             if (getLiked(slots, "mood").isEmpty()) {
                 addLiked(slots, "mood", pickDefaultMood(slots));
@@ -1263,7 +1269,7 @@ public class NailDesignService {
         // 팔레트를 넘겨도 첫 번째 색이 항상 똑같이 나오는 문제가 있었다. 대신 여기 Java
         // 쪽에서 팔레트 전체(30개)에서 실제로 무작위로 1~3개를 뽑아 확정해버려서, 매
         // 생성마다 색 조합 자체가 달라지도록 한다.
-        if (getLiked(slots, "color").isEmpty()) {
+        if (useScanColors && getLiked(slots, "color").isEmpty()) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
                 List<String> shuffled = new ArrayList<>(palette);
@@ -1375,6 +1381,11 @@ public class NailDesignService {
     }
 
     private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan) {
+        return summarizeSlots(slots, handScan, true);
+    }
+
+    /** @param useScanPalette false면 "color 후보"(스캔 추천 팔레트)를 넘기지 않는다(사진 기반 생성). */
+    private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan, boolean useScanPalette) {
         StringBuilder sb = new StringBuilder();
         for (String cat : List.of("shape", "mood", "designType", "color", "season", "motif")) {
             List<String> liked = getLiked(slots, cat);
@@ -1400,7 +1411,7 @@ public class NailDesignService {
             }
         }
 
-        if (getLiked(slots, "color").isEmpty() && handScan != null) {
+        if (useScanPalette && getLiked(slots, "color").isEmpty() && handScan != null) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
                 sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, mood와 가장 잘 어울리는 것을 고르고 " +
@@ -1937,13 +1948,13 @@ public class NailDesignService {
                 if (fingerHasFinish(finger, "knit")) {
                     // ★ "솜털/울 같은 불투명 컬러"라고 쓰면 니트 스웨터 직물처럼 나왔다 - 레퍼런스(뽀그리젤)는 투명한 시럽 젤 속에
                     // 가는 머리카락 같은 섬유가 떠 있는 모습이다. 직물/뜨개 질감은 명시적으로 막는다.
-                    nailsSection.append(" The knit gel is a translucent, glossy, jelly-like color with many thin, hair-like fine")
-                            .append(" fibers floating inside the clear gel — short, gently curved or wavy strands, mostly")
-                            .append(" slightly darker than the color with a few lighter ones, scattered sparsely and unevenly in")
-                            .append(" random directions like wisps of fine wool fuzz trapped in glass, under a smooth glassy top")
-                            .append(" coat. The fibers sit inside the gel and the surface stays smooth and glossy. It is not a")
-                            .append(" woven or knitted fabric: no stitches, weave, yarn pattern, sweater or felt texture, and no")
-                            .append(" fuzzy surface. No glitter or sparkle.");
+                    nailsSection.append(" Knit (velvet) gel: the soft glossy gel color is filled with hundreds of TINY short fiber")
+                            .append(" fragments, like chopped wool or velvet flock, spread evenly over the whole nail and floating inside")
+                            .append(" the clear gel. Each fragment is very short (about one thirtieth of the nail width) and thin, at")
+                            .append(" random angles, in lighter and darker tones of the same hue with a few in a soft accent hue, so the")
+                            .append(" nail looks like fuzzy velvet made of tiny flecks. They are never a few long thin lines, cracks,")
+                            .append(" veins, or scratches. The surface stays smooth and glossy; it is not a woven or knitted fabric. No")
+                            .append(" large glitter.");
                 }
                 // ★ 잉크젤. 모티프가 있으면 "잉크 일러스트"(또렷한 외곽선 + 투명 잉크 색 채움)고, 없으면 맑은 손톱 위의 투명 워시다.
                 // (선만 있거나 워시만 있으면 잉크를 썼다고 볼 수 없다 - 참고: 외곽선 안을 잉크로 칠한 귀여운 손그림 캐릭터)
@@ -2292,8 +2303,9 @@ public class NailDesignService {
                     "champagne gold only, never a stripe or swirl, with no visible particles or sparkle");
         if (finishLower.contains("foil"))           items.add("metallic foil accents");
         if (java.util.regex.Pattern.compile("\\bknit\\b").matcher(finishLower).find())
-            items.add("knit gel on the nails described as knit — translucent glossy jelly-like color with thin hair-like " +
-                    "fibers floating inside the clear gel, smooth glassy surface, not a woven or knitted fabric look");
+            items.add("knit (velvet) gel on the nails described as knit — soft glossy gel color densely filled with hundreds " +
+                    "of tiny short fiber fragments (chopped wool / velvet flock) at random angles floating inside the gel, smooth " +
+                    "glossy top coat, not long lines or cracks and not a woven fabric look");
         if (java.util.regex.Pattern.compile("\\bink\\b").matcher(finishLower).find())
             items.add("ink gel on the nails described as ink — vivid but fully transparent ink color like colored glass or " +
                     "marker ink, used as drawing fills, washes, or checks on top of the base color, juicy glossy dome");

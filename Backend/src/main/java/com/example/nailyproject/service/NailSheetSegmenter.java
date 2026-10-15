@@ -44,6 +44,12 @@ public final class NailSheetSegmenter {
     private static final double SHADOW_SIDE_MIN = 4.0;
     /** 좌우대칭으로 가장자리를 맞출 때 허용하는 오차(px). */
     private static final int SYMMETRY_TOLERANCE = 3;
+    /**
+     * 옆 그림자 보정이 한 손톱에서 이 비율보다 많이 잘라내려 하면 그림자가 아니라 중심축을 잘못 잡은 것이라 그 손톱은 건드리지 않는다.
+     * (흰/연한 손톱은 그림자 제외 기준에서 몸통이 사라져 축이 틀어지고, 손톱이 통째로 지워지거나 한쪽이 크게 잘렸다.
+     * 쇼케이스 42장 측정: 정상 보정은 최대 25%, 잘못된 보정은 35%~100%.)
+     */
+    private static final double MAX_SHADOW_CLIP_FRACTION = 0.30;
     private static final int SHADOW_MAX_CHROMA = 24;
     private static final int SHADOW_MAX_BRIGHTNESS = 245;
     /** 그림자 띠/잔 노이즈를 지우는 침식→팽창(opening) 반경(px). */
@@ -111,12 +117,23 @@ public final class NailSheetSegmenter {
             }
             // 손톱 끝(아래) 쪽은 그림자 자락이 같이 따이므로, 끝의 날카로운 윤곽선에서 한 번 더 자른다.
             boolean tipTrimmed = !excludeShadow && trimTipByRim(labels, rgb, bg, w, h);
+            if (!allLabelsPresent(labels)) { // 보정이 손톱을 지워버렸다면 이 임계값은 포기하고 다음 단계로 (예외 대신)
+                System.out.println("[NailSheetSegmenter] 임계값 " + (int) threshold + ": 보정 후 빈 손톱이 생겨 다음 단계로");
+                continue;
+            }
             System.out.println("[NailSheetSegmenter] 성공 (임계값 " + (int) threshold + ", 그림자 제외 " + excludeShadow
                     + ", 옆 그림자 보정 " + clipped + ", 끝 윤곽선 보정 " + tipTrimmed + ")");
             return buildNails(img, rgb, labels, w, h, false);
         }
         System.out.println("[NailSheetSegmenter] 모든 임계값에서 5개를 못 찾음 (bg=" + java.util.Arrays.toString(bg) + ")");
         return null;
+    }
+
+    private static boolean allLabelsPresent(int[] labels) {
+        boolean[] seen = new boolean[NAIL_COUNT + 1];
+        for (int l : labels) if (l >= 1 && l <= NAIL_COUNT) seen[l] = true;
+        for (int i = 1; i <= NAIL_COUNT; i++) if (!seen[i]) return false;
+        return true;
     }
 
     /** 손톱 5개의 라벨 맵(1~5, 왼쪽→오른쪽, 0=배경)을 만든다. 5개를 못 찾으면 null. */
@@ -220,9 +237,11 @@ public final class NailSheetSegmenter {
             java.util.Arrays.fill(incR, -1);
             java.util.Arrays.fill(strR, -1);
             int sy0 = h, sy1 = -1;
+            int area = 0;
             for (int p = 0; p < labels.length; p++) {
                 int x = p % w, y = p / w;
                 if (labels[p] == label) {
+                    area++;
                     if (x < incL[y]) incL[y] = x;
                     if (x > incR[y]) incR[y] = x;
                 }
@@ -251,6 +270,8 @@ public final class NailSheetSegmenter {
             if (Math.max(dLeft, dRight) < SHADOW_SIDE_MIN) continue; // 어느 쪽에도 뚜렷한 그림자 없음
 
             boolean trustLeft = dLeft < dRight; // 그림자가 오른쪽에 있으면 왼쪽 가장자리를 믿는다
+            int[] loArr = new int[h], hiArr = new int[h];
+            long removing = 0;
             for (int y = 0; y < h; y++) {
                 if (incR[y] < 0) continue;
                 int lo, hi;
@@ -261,9 +282,23 @@ public final class NailSheetSegmenter {
                     hi = incR[y];
                     lo = Math.max(incL[y], (int) Math.round(2 * axis - incR[y]) - SYMMETRY_TOLERANCE);
                 }
+                loArr[y] = lo;
+                hiArr[y] = hi;
+                for (int x = incL[y]; x <= incR[y]; x++) {
+                    if (labels[y * w + x] == label && (x < lo || x > hi)) removing++;
+                }
+            }
+            // 그림자는 손톱의 일부분일 뿐이다. 절반 가까이 잘라내려 하면 축 추정이 틀린 것이라 이 손톱은 그대로 둔다.
+            if (removing > area * MAX_SHADOW_CLIP_FRACTION) {
+                System.out.println("[NailSheetSegmenter] 옆 그림자 보정 건너뜀: 손톱 " + label + " 의 "
+                        + Math.round(100.0 * removing / area) + "%를 자르려 해서 축 추정 오류로 판단");
+                continue;
+            }
+            for (int y = 0; y < h; y++) {
+                if (incR[y] < 0) continue;
                 for (int x = incL[y]; x <= incR[y]; x++) {
                     int p = y * w + x;
-                    if (labels[p] == label && (x < lo || x > hi)) { labels[p] = 0; any = true; }
+                    if (labels[p] == label && (x < loArr[y] || x > hiArr[y])) { labels[p] = 0; any = true; }
                 }
             }
         }

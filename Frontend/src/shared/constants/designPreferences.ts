@@ -162,7 +162,8 @@ export type TextureInfo = {
   }
 }
 
-// 디자인 타입(design_type) 키워드 → 결과 페이지 [texture] 패널용 시각 표현
+// 백엔드 스와치/텍스처 키(TextureExtractService·NailDesignService.TEXTURE_KEYWORD_MAP) → 한글 라벨 + CSS 폴백 배경.
+// 결과 페이지 [질감·텍스처] 패널과 갤러리 질감 필터가 이 표로 라벨/색을 찾는다. 재료 키만 둔다(기법은 제외).
 export const TEXTURE_INFO: Record<string, TextureInfo> = {
   glitter: {
     labelKo: '글리터',
@@ -174,33 +175,7 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
           'linear-gradient(135deg, #cfcfcf, #efefef)',
     },
   },
-  gradient: {
-    labelKo: '그라데이션',
-    swatchStyle: { background: 'linear-gradient(135deg, #ffc0d0, #a98bff)' },
-  },
-  cheek: {
-    labelKo: '치크',
-    swatchStyle: {
-      background: 'radial-gradient(circle at 50% 50%, #ff90b3 0%, #ffe3ea 70%)',
-    },
-  },
-  marble: {
-    labelKo: '마블',
-    swatchStyle: {
-      background:
-          'radial-gradient(circle at 30% 30%, rgba(120,120,120,0.5) 0 15%, transparent 16%),' +
-          'radial-gradient(circle at 70% 60%, rgba(120,120,120,0.4) 0 20%, transparent 21%),' +
-          'linear-gradient(135deg, #f6f6f6, #e2e2e2)',
-    },
-  },
-  french: {
-    labelKo: '프렌치',
-    swatchStyle: { background: 'linear-gradient(0deg, #fff 0%, #fff 30%, #f7d8e2 30%, #f7d8e2 100%)' },
-  },
-  magnetic: {
-    labelKo: '마그네틱',
-    swatchStyle: { background: 'conic-gradient(from 180deg, #7a8899, #3f4d63, #7a8899)' },
-  },
+  // 옛 스와치 호환: powder는 chrome으로 통합됐다 (새로 만든 스와치는 chrome 키로 저장됨)
   powder: {
     labelKo: '파우더',
     swatchStyle: { background: 'linear-gradient(135deg, #f6e9ee, #ded4e6)' },
@@ -209,21 +184,48 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     labelKo: '매트',
     swatchStyle: { background: '#c9a2ad' },
   },
-  art: {
-    labelKo: '드로잉',
-    swatchStyle: { background: 'linear-gradient(135deg, #de869f 0%, #a98bff 50%, #7cd6d6 100%)' },
-  },
-  //추가: 백엔드 TextureExtractService 키값과 1:1 매핑
   plain_solid: {
     labelKo: '기본 젤컬러',
     swatchStyle: { background: '#f0d8de' },
   },
   magnetic_chrome: {
-    labelKo: '마그네틱 크롬',
+    labelKo: '자석',
     swatchStyle: { background: 'conic-gradient(from 180deg, #7a8899, #3f4d63, #7a8899)' },
   },
-  drawing: {
-    labelKo: '드로잉 아트',
-    swatchStyle: { background: 'linear-gradient(135deg, #fff 60%, #f0e6ea 100%)' },
+  syrup: {
+    labelKo: '시럽',
+    swatchStyle: {
+      background:
+          'radial-gradient(circle at 30% 28%, rgba(255,255,255,0.9) 0 9%, transparent 10%),' +
+          'linear-gradient(135deg, rgba(255,176,198,0.95), rgba(255,220,230,0.8))',
+    },
+  },
+  knit: {
+    labelKo: '니트',
+    swatchStyle: {
+      background:
+          'radial-gradient(circle at 22% 30%, rgba(255,255,255,0.7) 0 3%, transparent 4%),' +
+          'radial-gradient(circle at 58% 22%, rgba(150,110,125,0.45) 0 3%, transparent 4%),' +
+          'radial-gradient(circle at 74% 62%, rgba(255,255,255,0.65) 0 3%, transparent 4%),' +
+          'radial-gradient(circle at 36% 74%, rgba(150,110,125,0.4) 0 3%, transparent 4%),' +
+          'linear-gradient(135deg, #e8c3cf, #d9a9b9)',
+    },
+  },
+  ink: {
+    labelKo: '잉크',
+    swatchStyle: { background: 'linear-gradient(135deg, rgba(255,64,129,0.7), rgba(124,77,255,0.65))' },
+  },
+  // 화면 표기는 "파우더" (키는 chrome — 크롬 파우더 계열)
+  chrome: {
+    labelKo: '파우더',
+    swatchStyle: {
+      background: 'linear-gradient(135deg, #f4f6f8 0%, #aeb6bf 35%, #fafcfd 55%, #8a929c 100%)',
+    },
+  },
+  mercury_chrome: {
+    labelKo: '머큐리 크롬',
+    swatchStyle: {
+      background: 'linear-gradient(135deg, #ffffff 0%, #9aa3ad 30%, #ffffff 50%, #6f7782 80%, #dfe3e8 100%)',
+    },
   },
 }

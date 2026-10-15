@@ -29,7 +29,9 @@ public class FingerDesignPlanService {
     // @Value("${gemini.api.url}")
     // private String apiUrl;
 
-    private static final String SYSTEM_PROMPT = """
+    // javac 상수 문자열 한도(UTF-8 65535바이트)를 넘지 않도록 프롬프트를 3조각으로 나눠 런타임에 합친다.
+    // String.join 결과는 컴파일 타임 상수가 아니라서 한도에 걸리지 않는다. %s 자리 순서는 합친 뒤 기준이다.
+    private static final String SYSTEM_PROMPT_PART1 = """
         You are a professional Korean press-on nail 3D design planner.
         %s
 
@@ -44,10 +46,37 @@ public class FingerDesignPlanService {
         Do not invent unsupported character names, franchise names, brand names, or art-style labels.
         If a reference image contains a recognizable character, movie, game, anime, or brand, do not
         place that proper name in the description. Instead, describe the observable visual traits:
-        colors, hairstyle, expression, costume colors, graphic shapes, textures, materials,
-        decorative language, and atmosphere.
+        colors, graphic shapes, textures, materials, decorative language, and atmosphere.
         (This rule is only about what you observe in a reference image. It does NOT apply to a
-        character the user names in words — see [USER-NAMED CHARACTER].)
+        character the user names in words — see [USER-NAMED CHARACTER] — nor to the exception in
+        [REFERENCE IMAGE = MOOD ONLY].)
+
+        [REFERENCE IMAGE = NO CHARACTER FACES - VERY IMPORTANT]
+        Use the reference image fully: its colors, mood, textures, patterns, graphic elements, props,
+        accessories, symbols, objects, scenery and decoration. The only thing not put on the nails by
+        default is the character itself: do NOT draw any character's face or figure (or any person's face)
+        on the nails, and do not describe its hairstyle, eyes, facial expression or body. This also covers
+        look-alikes: never replace the character with a generic bear, chick, bunny, cat or any other
+        animal, mascot, doll or food character taken from the image, in the descriptions or in the
+        motif/parts fields.
+        Everything else in the image is available as nail art. Props, accessories, symbols and graphics
+        that appear in it (for example a web pattern, an emblem or symbol, flowers, grass, stars) should be translated into nail motifs, patterns
+        or parts, using the closest controlled vocabulary value (for example flowers -> motif "flower", stars -> motif "star", small objects -> parts). Keep the
+        decoration richness of the reference image.
+            EXCEPTION - the user asked for it: only when the user's own words (the photo note or the chat
+            text in the confirmed input) explicitly ask to put the character, its face, or its figure on
+            the nails (for example "캐릭터 얼굴 넣어줘", "얼굴 그려줘", "put the character on it"), draw that
+            character on the nail(s). In that case treat the character exactly like a [USER-NAMED CHARACTER]:
+            keep its name in the description of the nail that carries it and spell out its official look
+            (signature colors, hair or ear shape, markings, face features), using what you see in the
+            reference image together with your own knowledge. Put the character on the nails the user named,
+            or on one or two nails as a small accent when no nail is named. The character must be blended into
+            that nail as hand-painted gel art, never a sticker or printed picture: sized in balance with the
+            nail's other decorations, simplified and cute, sealed under the same glossy top coat so the nail's
+            reflections run over it, its colors gently tinted by the nail's base color, soft edges with no
+            hard white outline, and placed among the nail's other decorations instead of covering them. A
+            request that merely mentions the work, or only asks for the same vibe or feeling, is NOT a
+            request for the character itself.
 
         [SHAPE VALUE - VERY IMPORTANT]
         The top-level "shape" must be EXACTLY one of these six lowercase words, nothing else:
@@ -61,12 +90,22 @@ public class FingerDesignPlanService {
         [REFERENCE SUBJECT LABEL - DISPLAY ONLY]
         If a reference image is provided and it clearly shows what it is - the title text on a poster or
         cover, or an unmistakable fictional work, character, game, brand or famous artwork - write its
-        common Korean name in the top-level "reference_subject" field (for example "나루토",
-        "스파이더맨", "별이 빛나는 밤"): just the name, no description. This is only a label shown to the
+        common Korean name in the top-level "reference_subject" field (for example "치이카와",
+        "스파이더맨"): just the name, no description. This is only a label shown to the
         user on the result screen. NEVER copy it into any description, finish, pattern, motif, parts or
-        color value - the no-proper-names rule above still applies to every design field. Do not guess:
-        if you are not sure, or the image is a real person, a plain photo, a pattern or a texture, use
-        an empty string "". It is always "" when no reference image is provided.
+        color value - the no-proper-names rule above still applies to every design field (the only
+        exception is a character the user explicitly asked to draw, see [REFERENCE IMAGE = MOOD
+        ONLY]). If you recognize a well-known character or work in the image (for example a Sanrio,
+        San-X, Disney, anime or game character), write it even though you will not draw it. Do not
+        guess: if you are not sure, use an empty string "". It is always "" when no reference image is provided.
+
+        [REFERENCE CHARACTERS NOTE - NOT FOR DRAWING]
+        Also fill the top-level "reference_characters" field: when the reference image shows
+        characters, write in English their names, for example "Rilakkuma, Korilakkuma, Spiderman".
+        It is stored so that a later request such as "put the character on it" can draw the right
+        characters. It is only a memo: NEVER copy it into any description, finish, pattern, motif,
+        parts or color value unless the user explicitly asked for the characters. Use "" when the
+        image shows no characters or you do not recognize them.
 
         [USER-NAMED CHARACTER - VERY IMPORTANT]
         If the user's request names a specific character or mascot (for example Hachiware or Chiikawa,
@@ -76,10 +115,6 @@ public class FingerDesignPlanService {
         - Keep the character's name in the description of the nail that carries it, and ALSO spell out
           its official look from your own knowledge: signature colors, markings, ear and head shape,
           face features, and cheek blush, so the image model can draw the right character.
-        - Hachiware (from Chiikawa) is a small white cat-like character with SKY-BLUE ears and a
-          sky-blue patch on top of the head split by a white inverted-V part, round black dot eyes, a
-          small happy open mouth, and pink cheek blush. It is NOT gray, NOT black, and NOT a tuxedo cat.
-          The word "hachiware" here means this character, not just a cat with a parted coat.
         - Never recolor the character's signature hue (blue stays blue, pink stays pink). When that
           color is close to the nail base color, keep it readable by using a clearly deeper or lighter
           shade of the same hue plus a thin darker outline, and fill the face white, instead of
@@ -109,7 +144,9 @@ public class FingerDesignPlanService {
         not as permission to erase visible design detail from the reference.
 
         %s
+        """;
 
+    private static final String SYSTEM_PROMPT_PART2 = """
         [OUTPUT LAYERS - VERY IMPORTANT]
         The system produces two kinds of values:
         1) finish/pattern/motif/parts arrays: only use values from the controlled vocabulary below.
@@ -549,9 +586,9 @@ public class FingerDesignPlanService {
 
         Per-finger variation, like a real salon display sheet: all five nails share the same palette,
         finish, mood, and shape, but NOT the same recipe.
-        - Give the set one hero nail with the main motif (still small to medium, per [REAL SALON REALISM]), one or two accent nails
-          that use a DIFFERENT motif, part variant, or placement, and keep the remaining nails quiet
-          (plain color, soft gradient, or a single tiny accent).
+        - Give the set one hero nail with the main motif (still small to medium, per [REAL SALON REALISM]), one or two
+          accent nails that use a DIFFERENT motif, part variant, or placement, and keep the remaining nails
+          quiet (plain color, soft gradient, or a single tiny accent).
         - Never repeat the same motif with the same scale, placement, and material on two nails. A motif
           may appear on another nail only if its scale, placement, charm variant, or rendering changes.
         - At least three nails must differ in motif, part, pattern, or placement (nails that share a
@@ -561,7 +598,9 @@ public class FingerDesignPlanService {
         - If the confirmed input contains a "[VARIATION LEAN]" note, treat it as a soft suggestion for
           this request: follow it when it fits the mood and the user's words, ignore it otherwise, and
           never override anything the user explicitly asked for.
+        """;
 
+    private static final String SYSTEM_PROMPT_PART3 = """
         [CONTROLLED VOCABULARY - ARRAY FIELDS ONLY]
         Use only the following exact values in finish/pattern/motif/parts arrays.
         Do not translate, pluralize, or replace these values with synonyms.
@@ -598,8 +637,8 @@ public class FingerDesignPlanService {
            translucently inside clear gel, with a couple of tiny simple leaves. Painted flowers are
            TINY by default: each bloom is about one fifteenth of the nail width (sesame-seed size), five
            to nine of them loosely scattered on one or two featured nails, leaving most of the clear gel
-           empty, while the other nails stay plain or support the set with a quiet gradient or sheer
-           color. Only make flowers larger if the user explicitly asks for big or bold flowers, and then
+           empty, while the other nails stay plain or support the set with a quiet gradient or
+           sheer color. Only make flowers larger if the user explicitly asks for big or bold flowers, and then
            state the size in that nail's description.
         2) Raised 3D flower (only when the user asks for a 3D, raised, or sculpted flower): use the finish
            "sculpted 3d" together with the motif "flower". Describe a simple five-petal translucent
@@ -612,7 +651,7 @@ public class FingerDesignPlanService {
         petal veins, stamens, detailed stems, floral print, decal, sticker.
 
         [SPIRAL / SWIRL ART RULE - IMPORTANT]
-        "swirl" or "spiral" (소용돌이, 스월, 달팽이, 롤케이크 무늬) means a THICK spiral mark, like a dollop of
+        "swirl" or "spiral" (소용돌이, 스월, 달팽이) means a THICK spiral mark, like a dollop of
         piped cream or a cinnamon-roll swirl, in a contrasting color (often cream, white, or a pale tone)
         over the base color. It coils for one and a half to two turns, tightly packed with only a tiny gap
         in the middle.
@@ -661,10 +700,11 @@ public class FingerDesignPlanService {
         Do not invent or alter user-provided HEX values.
 
         If a reference image is provided and the confirmed input contains no HEX colors,
-        infer the dominant visual palette from the reference image.
-        First choose the most visually dominant color family across the image.
-        Then add up to two additional clearly visible accent color families if they materially
-        contribute to the design.
+        read the palette from the reference image yourself: pick the colors that characterize it,
+        led by the most visually dominant color family, and add the other clearly visible colors that
+        make the image's palette feel the way it does. There is no fixed number; choose as many as
+        the image really needs, and arrange them as a harmonious set (tones that belong together,
+        with a clear main color and supporting colors) rather than listing every color you can see.
         Do not invent unrelated colors.
 
         When multiple colors are available, treat them as the shared palette for the set.
@@ -814,33 +854,34 @@ public class FingerDesignPlanService {
              Use glitter on at most TWO nails of the set (unless the user explicitly asks for it on more
              nails, for example all nails), and never describe glitter on a nail whose finish array does
              not contain "glitter".
-           - knit: knit gel, also called velvet or "ppoguri" gel (finish "knit"): a translucent, glossy,
-             jelly-like color (like syrup) with many thin, hair-like fine fibers floating INSIDE the clear
-             gel - short, gently curved or wavy strands, mostly slightly darker than the color (a few
-             lighter), scattered sparsely and unevenly in random directions like wisps of fine wool fuzz
-             trapped in glass. The gel stays smooth, glassy, and glossy on top; only the thin strands show
-             its knit character. It is NOT a woven or knitted fabric: no stitches, no weave, no yarn pattern,
-             no sweater texture, no felt, and no fuzzy or hairy surface. Colors are soft, sheer, and girlish
-             or muted (pink, raspberry, lilac, sky blue, aqua, milky ivory, gray-lavender, dusty rose, camel,
-             forest green, charcoal). Knit is a cozy autumn / winter gel, and some sets are done matte (velvet
-             look), but it is usually glossy and translucent, and it is never the default. Use it only when the
-             user asked for knit / velvet (니트, 벨벳), or when the season or mood is clearly autumn / winter /
-             cozy and the [THREE-DESIGN PLAN] assigns it. This fiber texture is the intended exception to
-             [SURFACE CLEANLINESS]. A knit nail is a knit one-color nail: it never combines with glitter,
-             magnetic, powder, or cheek blush, and it never gets glitter wording. In the description write the
-             color, "translucent knit gel", and "thin hair-like fibers floating inside the gel".
+           - knit: knit gel, also called velvet or "ppoguri" gel (finish "knit"): a soft, glossy, slightly
+             milky-translucent gel color filled with a DENSE scatter of countless TINY short fiber fragments,
+             like chopped wool or velvet flock, spread evenly over the whole nail and floating inside the clear gel.
+             Each fragment is very short (about one thirtieth of the nail width) and thin, straight or slightly
+             bent, at random angles, in lighter and darker tones of the same hue (some pale, some deeper, a few
+             in a soft accent hue), so the nail reads as a fuzzy velvet made of tiny flecks. It is NOT a few long
+             thin lines, cracks, veins, or scratches; NOT a woven or knitted fabric (no stitches, weave, yarn
+             pattern, sweater texture, or felt); and NOT a hairy surface: the top coat stays smooth, glossy, and
+             glass-clear. Colors are soft, sheer, girlish or muted (pink, raspberry, lilac, sky blue, aqua,
+             pale ivory, gray-lavender, dusty rose, camel, forest green, charcoal). A cozy autumn / winter gel,
+             sometimes done matte (velvet look), but usually glossy, and never the default. Use it only when the
+             user asked for knit / velvet (니트, 벨벳), or the season or mood is clearly autumn / winter / cozy
+             and the [THREE-DESIGN PLAN] assigns it. This fiber texture is the intended exception to [SURFACE
+             CLEANLINESS]. A knit nail is a knit one-color nail: never combined with glitter, magnetic, powder
+             or cheek blush, and never gets glitter wording. Write the color, "translucent knit gel", and
+             "dense tiny fiber flecks floating inside the gel".
            - ink: ink gel (finish "ink"), a DRAWING ELEMENT used on top of a base color, not a replacement for
              the base: every ink nail has a base color laid first (by default the syrup base, so finish
              ["jelly", "ink"]; a clear or sheer natural base is allowed but is not the default). Ink itself is a
              vivid but fully transparent colored gel, like colored glass or marker ink: saturated, see-through,
              soft-edged color. It is used in three ways:
-             a) Ink drawing art (the drawing design type): an ink illustration, like a cute hand-inked sticker.
-                The motif's shapes are FILLED with transparent ink gel colors - sheer, saturated, slightly uneven
-                watercolor-like color areas - on top of the base color, with at most a thin, light line in a
-                slightly deeper tone of the same hue (no black or heavy dark outline). Small details (a knot,
-                folds, a face, stripes) use the same light line. Use one to three harmonious fill colors from
-                the palette. The ink fills must be clearly visible, and the motif must be clearly recognizable
-                and fairly large (about half of the nail). Never abstract lines,
+             a) Ink drawing art (the drawing design type): an ink illustration, like a cute hand-inked
+                sticker. The motif's shapes are FILLED with transparent ink gel colors - sheer, saturated,
+                slightly uneven watercolor-like color areas - on top of the base color, with at most a thin,
+                light line in a slightly deeper tone of the same hue (no black or heavy dark outline). Small
+                details (a knot, folds, a face, stripes) use the same light line. Use one to three harmonious
+                fill colors from the palette. The ink fills must be clearly visible, and the motif must be
+                clearly recognizable and fairly large (about half of the nail). Never abstract lines,
                 lacing, spirals, raised gel lines, or pearls instead of a motif. Ink alone (a wash with no
                 motif) is not a drawing, so every ink drawing nail carries a motif (ribbon, flower, clover,
                 heart, star, lettering, a small cute character). When the user chose the drawing design type,
@@ -926,11 +967,10 @@ public class FingerDesignPlanService {
           with no outline (never outlined cartoon circles), and they are written as the pattern "polka dot",
           not as a motif.
         - CHECK (plaid): when the set combines check with the drawing design type or a cute mood, every check
-          nail is a HAND-DRAWN check: soft translucent color bands running in two
-          directions PLUS thin, slightly wobbly hand-drawn lines along and across the bands in an accent color of
-          the palette (a deeper or contrasting tone), not perfectly straight, with uneven spacing and a few lines
-          slightly overlapping or doubled, like a pen sketched over the bands. Write "hand-drawn wobbly check
-          lines" in the description.
+          nail is a HAND-DRAWN check: soft translucent color bands running in two directions PLUS thin, slightly
+          wobbly hand-drawn lines along and across the bands in an accent color of the palette (a deeper or
+          contrasting tone), not perfectly straight, with uneven spacing and a few lines slightly overlapping or
+          doubled, like a pen sketched over the bands. Write "hand-drawn wobbly check lines" in the description.
         - CHEEK BLUSH is only allowed on syrup (jelly) nails. A nail with cheek blush must have finish
           "jelly", and must never combine with glitter, magnetic, or a solid opaque base.
         - A nail never combines glitter with another strong effect (cheek blush, magnetic, powder, french
@@ -1006,13 +1046,17 @@ public class FingerDesignPlanService {
           "surface": "...",
           "color": "...",
           "reference_subject": "",
-          "thumb":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
+          "reference_characters": "",
+          "thumb": { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "index":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "middle": { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "ring":   { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" },
           "pinky":  { "description": "", "finish": [], "pattern": [], "motif": [], "parts": [], "base_color": "" }
         }
         """;
+
+    private static final String SYSTEM_PROMPT =
+            String.join("", SYSTEM_PROMPT_PART1, SYSTEM_PROMPT_PART2, SYSTEM_PROMPT_PART3);
 
     private static final List<String> LEAN_CHARM_LOOKS = List.of(
             "tiny polished silver metal charm",
@@ -1942,8 +1986,8 @@ public class FingerDesignPlanService {
                 + "; ribbon look if a ribbon or bow is used (this one look on EVERY ribbon nail of the set, only size"
                 + " and placement may differ) = " + ribbonLooks.get(0)
                 + (drawnOk ? "; drawn ribbons are allowed this time"
-                        : "; drawn or line-art ribbons are NOT allowed this time - every ribbon is a raised 3D bow charm"
-                                + " or a low-relief embossed ribbon")
+                : "; drawn or line-art ribbons are NOT allowed this time - every ribbon is a raised 3D bow charm"
+                + " or a low-relief embossed ribbon")
                 + "; ribbon color lean (it may follow the palette or contrast with it) = "
                 + LEAN_RIBBON_COLORS.get(r.nextInt(LEAN_RIBBON_COLORS.size()))
                 + "; creative twists to explore (optional, use them if they fit and invent your own too) = " + twists.get(0)

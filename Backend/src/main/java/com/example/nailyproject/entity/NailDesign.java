@@ -3,6 +3,7 @@ package com.example.nailyproject.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.DynamicUpdate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -12,6 +13,9 @@ import java.util.List;
 // 이미지 생성 결과
 
 @Entity
+// 확정(status/color_palette)과 크롭 저장(nail_tip_crops_json)처럼 서로 다른 요청이 같은 행의 서로 다른 컬럼을
+// 거의 동시에 갱신한다. 전체 컬럼 UPDATE면 늦게 끝난 쪽이 낡은 값(DRAFT 등)으로 덮어쓰므로, 바뀐 컬럼만 UPDATE한다.
+@DynamicUpdate
 @Table(name = "nail_designs")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
