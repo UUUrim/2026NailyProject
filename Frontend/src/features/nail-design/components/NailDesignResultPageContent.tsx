@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState } from 'react'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { FavoriteFolderModal } from '@/shared/components/FavoriteFolderModal'
@@ -11,7 +11,7 @@ import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { useNailDesignResultPage } from '@/features/nail-design/hooks/useNailDesignResultPage'
 import { INITIAL_PREFERENCES } from '@/shared/constants/designPreferences'
 import type { NailShapeId } from '@/shared/constants/nailShapes'
-import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
+import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
 
@@ -100,13 +100,12 @@ export function NailDesignResultPageContent() {
         )
     }
 
-    const allKeywords = context ? Array.from(new Set([...context.keywords, ...context.revisionKeywords])) : []
+    // 마지막 결과 이미지에 반영된 키워드만 보여준다 (수정 요청 문장 원문은 칩으로 넣지 않는다)
+    const allKeywords = context ? Array.from(new Set(context.keywords)) : []
 
-    // 반영된 추천 컬러 — 웹은 한 줄(DOM 순서 그대로), 모바일 6열 그리드에선 다른 화면들과 같이
-    // 열=색상군, 행=명도 단계가 되도록 CSS order로 자리만 바꾼다.
-    const mobilePaletteOrder = new Map(
-        arrangeRecommendedColors(context?.handSummary?.recommendedColors ?? [], { columns: 6 }).map((hex, i) => [hex, i]),
-    )
+    // 반영된 추천 컬러 — 다른 화면들과 같은 순서(가장 연한 색에서 출발해 비슷한 색끼리 잇는 TSP 경로).
+    // 웹은 한 줄, 모바일은 6열 그리드로 이 순서를 그대로 흘려 넣는다.
+    const recommendedPalette = sortRecommendedColors(context?.handSummary?.recommendedColors ?? [])
 
     return (
         <AppShell mainClassName="design-result-page">
@@ -180,14 +179,13 @@ export function NailDesignResultPageContent() {
                 {context &&
                     (context.handSummary ||
                         context.referenceImageUrl ||
-                        context.keywords.length > 0 ||
-                        context.revisionKeywords.length > 0) && (
+                        context.keywords.length > 0) && (
                         <section className="design-result-v2__origin">
                             <p className="design-result-v2__detail-label">How It Was Made</p>
 
                             {context.handSummary && (
                                 <div className="design-result-v2__origin-block">
-                                    <h2>{userName ? `${userName} 님의 손 분석 결과를 반영했어요.` : '내 손 분석 결과를 반영했어요.'}</h2>
+                                    <h2>{userName ? `${userName}님의 손 분석 결과를 반영했어요.` : '내 손 분석 결과를 반영했어요.'}</h2>
                                     <div className="design-result-v2__origin-hand design-result-v2__origin-hand--scan-auto">
                                         <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
                                             <span className="design-result-v2__origin-stat-label">피부 톤</span>
@@ -216,12 +214,12 @@ export function NailDesignResultPageContent() {
                                                 <span className="design-result-v2__origin-stat-value">{context.handSummary.shapeLabel}</span>
                                             </div>
                                         </div>
-                                        {context.handSummary.recommendedColors && context.handSummary.recommendedColors.length > 0 && (
+                                        {recommendedPalette.length > 0 && (
                                             <div className="design-result-v2__origin-stat design-result-v2__origin-stat--palette">
                                                 <span className="design-result-v2__origin-stat-label">반영된 추천 컬러</span>
                                                 {/* 추천 컬러 전체를 보여주고, 프롬프트 Overall style에 쓰인 색만 체크 표시 (헥스값은 노출하지 않음) */}
                                                 <ul className="design-result-v2__origin-palette" aria-label="추천 컬러">
-                                                    {context.handSummary.recommendedColors.map((hex) => {
+                                                    {recommendedPalette.map((hex) => {
                                                         const used = (context.handSummary?.usedColors ?? []).some(
                                                             (u) => u.toLowerCase() === hex.toLowerCase(),
                                                         )
@@ -229,7 +227,7 @@ export function NailDesignResultPageContent() {
                                                             <li
                                                                 key={hex}
                                                                 className={`design-result-v2__origin-swatch${used ? ' is-used' : ''}${used && isLightColor(hex) ? ' is-light' : ''}`}
-                                                                style={{ backgroundColor: hex, '--mobile-order': mobilePaletteOrder.get(hex) ?? 0 } as CSSProperties}
+                                                                style={{ backgroundColor: hex }}
                                                                 title={used ? '이 디자인에 반영된 컬러' : undefined}
                                                                 aria-label={used ? '반영된 추천 컬러' : '추천 컬러'}
                                                             >

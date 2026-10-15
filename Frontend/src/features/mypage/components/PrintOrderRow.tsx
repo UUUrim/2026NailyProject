@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { type PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/api'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
-import { PRINT_STATUS_LABEL, Icon, formatDateTimeFull, formatTipExtension } from '@/features/mypage/shared'
+import { PRINT_STATUS_LABEL, getDisplayPrintStatus, Icon, formatDateTimeFull, formatTipExtension } from '@/features/mypage/shared'
 
 type PrintOrderRowProps = {
     order: NailTipPrintOrder
@@ -14,17 +14,18 @@ type PrintOrderRowProps = {
 }
 
 export const PrintOrderRow = memo(function PrintOrderRow({
-    order,
-    activityId: activityIdProp,
-    interactive,
-    activeActivityId,
-    onOpenDetail,
-    onSelectActivity,
-    onHoverActivity,
-}: PrintOrderRowProps) {
+                                                             order,
+                                                             activityId: activityIdProp,
+                                                             interactive,
+                                                             activeActivityId,
+                                                             onOpenDetail,
+                                                             onSelectActivity,
+                                                             onHoverActivity,
+                                                         }: PrintOrderRowProps) {
     const activityId = activityIdProp ?? `print-${order.id}`
     const highlighted = interactive ? activeActivityId === activityId : false
     const timeLabel = formatDateTimeFull(order.orderedAt)
+    const displayStatus = getDisplayPrintStatus(order)
 
     return (
         <button
@@ -55,8 +56,8 @@ export const PrintOrderRow = memo(function PrintOrderRow({
                 </p>
             </div>
             <div className="mypage-x__print-meta-end">
-                <span className={`mypage-x__badge mypage-x__badge--${order.status.toLowerCase()}`}>
-                    {PRINT_STATUS_LABEL[order.status]}
+                <span className={`mypage-x__badge mypage-x__badge--${displayStatus.toLowerCase()}`}>
+                    {PRINT_STATUS_LABEL[displayStatus]}
                 </span>
                 {timeLabel && <span className="mypage-x__item-meta">{timeLabel}</span>}
             </div>

@@ -50,6 +50,30 @@ public class ScanController {
         return ResponseEntity.ok(ApiResponse.success(200, "1단계: 분석 요청이 완료되었습니다.", null));
     }
 
+    /**
+     * 촬영 취소 POST /scans/{scanId}/cancel (짝 손도 함께)
+     * 촬영 도중 경고를 확인하고 페이지를 나갔을 때 프론트가 부른다.
+     */
+    @PostMapping("/{scanId}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancelScan(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long scanId) {
+        scanService.cancelScan(user, scanId);
+        return ResponseEntity.ok(ApiResponse.success(200, "스캔이 취소되었습니다.", null));
+    }
+
+    /**
+     * 분석 결과 확정 POST /scans/{scanId}/confirm (짝 손도 함께)
+     * 분석 결과 화면에 결과가 뜬 뒤 프론트가 부른다. 확정된 스캔만 손 분석 기록에 나온다.
+     */
+    @PostMapping("/{scanId}/confirm")
+    public ResponseEntity<ApiResponse<Void>> confirmResult(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long scanId) {
+        scanService.confirmResult(user, scanId);
+        return ResponseEntity.ok(ApiResponse.success(200, "손 분석 기록이 확정되었습니다.", null));
+    }
+
     @PostMapping("/{scanId}/analyze/result")
     public ResponseEntity<ApiResponse<Void>> receiveAnalyzeResult(
             @PathVariable Long scanId,

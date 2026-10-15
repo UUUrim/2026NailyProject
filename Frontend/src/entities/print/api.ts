@@ -5,12 +5,13 @@ export interface PrintOrderResponse {
     shapeId: string
     shapeLabelKo: string
     tipExtensionMm?: number | null // 출력 화면에서 설정한 팁 연장 길이(mm). null이면 길이 기록 전 예전 주문
-    status: 'QUEUED' | 'MERGING' | 'MERGED' | 'PRINTING' | 'COMPLETED' | 'FAILED'
+    status: 'QUEUED' | 'MERGING' | 'MERGED' | 'WAITING_IN_QUEUE' | 'PRINTING' | 'COMPLETED' | 'FAILED'
     orderedAt: string // "yyyy. M. d. HH:mm:ss"
     leftScanId: number | null
     rightScanId: number | null
     mergedModelUrl?: string | null
     failReason?: string | null
+    queueAhead?: number | null // WAITING_IN_QUEUE/MERGED일 때만: 내 앞에 출력 중/대기 중인 주문 수
 }
 
 /** POST /users/me/prints — 네일팁 출력 신청 기록 */
@@ -42,6 +43,7 @@ export interface PrinterProgress {
     remainingTimeMin: number | null
     nozzleTemp: number | null
     bedTemp: number | null
+    queueSize?: number // 프린터 서버 대기열에 쌓인 (아직 시작 안 한) 작업 수 — 프린터 전체 기준
     message?: string | null // 실패 시 원인
 }
 

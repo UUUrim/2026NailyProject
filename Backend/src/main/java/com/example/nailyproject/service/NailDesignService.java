@@ -59,17 +59,19 @@ public class NailDesignService {
 
     private static final Map<String, String> TEXTURE_KEYWORD_MAP = new LinkedHashMap<>();
     static {
+        // 스와치 베이스 이미지가 있는 재료 키만 (ink는 베이스 이미지 등록 전까지 제외, powder는 chrome으로 통합)
+        TEXTURE_KEYWORD_MAP.put("syrup",        "syrup");
         TEXTURE_KEYWORD_MAP.put("glitter",      "glitter");
-        TEXTURE_KEYWORD_MAP.put("marble",       "marble");
+        TEXTURE_KEYWORD_MAP.put("knit",         "knit");
+        TEXTURE_KEYWORD_MAP.put("velvet",       "knit");
+        TEXTURE_KEYWORD_MAP.put("chrome sheen", "chrome");
+        TEXTURE_KEYWORD_MAP.put("powder",       "chrome");
+        TEXTURE_KEYWORD_MAP.put("aurora",       "chrome");
         TEXTURE_KEYWORD_MAP.put("magnetic",     "magnetic_chrome");
         TEXTURE_KEYWORD_MAP.put("cat eye",      "magnetic_chrome");
         TEXTURE_KEYWORD_MAP.put("mercury",      "mercury_chrome");
-        TEXTURE_KEYWORD_MAP.put("powder",       "powder");
-        TEXTURE_KEYWORD_MAP.put("aurora",       "powder");
         TEXTURE_KEYWORD_MAP.put("matte",        "matte");
         TEXTURE_KEYWORD_MAP.put("3d charm",     "3d_charm");
-        TEXTURE_KEYWORD_MAP.put("drawing",      "drawing");
-        TEXTURE_KEYWORD_MAP.put("doodle",       "drawing");
         TEXTURE_KEYWORD_MAP.put("solid color",  "plain_solid");
     }
 
@@ -80,6 +82,21 @@ public class NailDesignService {
     // application.yml의 naily.image-provider로 바꾸고 재시작하면 됨(런타임 전환 아님).
     @org.springframework.beans.factory.annotation.Value("${naily.image-provider:diffusers}")
     private String imageProvider;
+
+    // gptimage 요청에 background=transparent / output_format=png를 추가할지.
+    // 켜면 프롬프트도 투명 배경용 문구로 바뀐다(흰 배경 / 그림자 / "배경이 비친다" 문구 제거 - 남겨두면 모델이 흰 배경을 그려서
+    // 투명 요청이 무시된다). AR 크롭은 투명 원본의 알파로 만들어지고, 끄면 흰 배경 이미지에서 로컬 누끼를 딴다.
+    @org.springframework.beans.factory.annotation.Value("${naily.gpt-image-transparent:true}")
+    private boolean gptImageTransparent;
+
+    private boolean useTransparentGptImage() {
+        return gptImageTransparent && "gptimage".equalsIgnoreCase(imageProvider);
+    }
+
+    /** 이미지 생성/수정을 투명 배경으로 요청하는 설정인지(RefineService가 수정 요청에도 똑같이 적용한다). */
+    public boolean isTransparentGptImage() {
+        return useTransparentGptImage();
+    }
 
     public NailDesignService(NailDesignRepository nailDesignRepository,
                              UserRepository userRepository,
@@ -192,16 +209,19 @@ public class NailDesignService {
         String imageBase64;
         String aiModel;
         Long seed;
+        // gptimage는 투명 배경 PNG로 생성한다 (AR용 원본). 화면에 보여줄 이미지는 아래에서 흰 배경을 입혀 따로 만든다.
+        boolean transparentImage = false;
         if ("gptimage".equalsIgnoreCase(imageProvider)) {
+            transparentImage = useTransparentGptImage();
             List<byte[]> references = finishReferenceService.referencesFor(referenceFinishes);
             if (references.isEmpty()) {
-                imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto");
+                imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto", transparentImage);
             } else {
                 try {
-                    imageBase64 = gptClientService.generateImageWithReferences(prompt, "1536x1024", "auto", references);
+                    imageBase64 = gptClientService.generateImageWithReferences(prompt, "1536x1024", "auto", references, transparentImage);
                 } catch (Exception e) {
                     System.err.println("[NailDesignService] 레퍼런스 첨부 생성 실패, 텍스트만으로 재시도: " + e.getMessage());
-                    imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto");
+                    imageBase64 = gptClientService.generateImage(prompt, "1536x1024", "auto", transparentImage);
                 }
             }
             aiModel = "gpt-image-2.5-sunburst";
@@ -220,14 +240,26 @@ public class NailDesignService {
         }
 
         // 2. base64 → bytes → S3 업로드
+        //    표시용 이미지는 흰 배경을 입힌 버전, 투명 원본(imageBase64)은 AR 네일팁 크롭에만 쓴다.
         byte[] imageBytes = Base64.getDecoder().decode(imageBase64);
+        String displayBase64 = imageBase64;
+        if (transparentImage) {
+            // 투명 배경을 요청했어도 모델이 무시하고 불투명(흰/오프화이트 배경) 이미지를 줄 수 있다. 어느 쪽인지 남겨둔다.
+            System.out.println("[GptImage] background=transparent 요청 → 응답: " + PngBackground.describeAlpha(imageBytes));
+        }
+        if (transparentImage) {
+            // 모델 출력 그대로(알파 보정 없음): AR 크롭은 투명 원본, 표시용은 거기에 흰 배경을 입힌 것
+            imageBytes = PngBackground.compositeOnWhite(imageBytes);
+            displayBase64 = Base64.getEncoder().encodeToString(imageBytes);
+        }
         String s3Key = "designs/user_" + userId + "/" + UUID.randomUUID() + ".png";
         String s3Url = s3Service.uploadImageBytes(imageBytes, s3Key);
 
 
-        // 4. detect 서버에서 손가락별 네일팁 매트 이미지 추출 → S3 업로드 후 URL 리스트 JSON
+        // 4. 손가락별 네일팁 매트 이미지 추출 → S3 업로드 후 URL 리스트 JSON
         //    (AR 미리보기가 로컬 세그멘테이션 대신 이걸 우선 사용 - nailDesignAsset.ts 참고)
-        String nailTipCropsJson = fetchAndUploadNailTipCrops(userId, imageBase64);
+        //    로컬 누끼는 투명 원본의 알파를 그대로 쓰고, detect 서버 폴백에는 흰 배경 버전을 보낸다.
+        String nailTipCropsJson = fetchAndUploadNailTipCrops(userId, imageBase64, displayBase64);
 
         NailDesign design = NailDesign.builder()
                 .user(user)
@@ -245,9 +277,68 @@ public class NailDesignService {
         return saved;
     }
 
-    private String fetchAndUploadNailTipCrops(Long userId, String imageBase64) {
+    /**
+     * 손가락별 AR 네일팁 크롭을 만들어 S3에 올리고 URL 목록 JSON을 돌려준다(실패하면 null).
+     * 생성(generateDesign)과 수정(RefineService)이 똑같이 쓴다 - 크롭이 없는 디자인은 AR이 프론트의 색 기반 누끼로
+     * 폴백하는데, 이 누끼는 흰색으로 번지는 손톱 끝을 배경으로 오인해서 잘라낸다.
+     *
+     * @param imageBase64    투명 원본(투명 모드) 또는 생성 이미지 - 로컬 누끼가 알파/색으로 손톱을 가른다
+     * @param fallbackBase64 로컬 누끼가 실패했을 때 detect 서버로 보낼 흰 배경 이미지
+     */
+    public String createNailTipCrops(Long userId, String imageBase64, String fallbackBase64) {
+        return fetchAndUploadNailTipCrops(userId, imageBase64, fallbackBase64);
+    }
+
+    /** 크롭 보강을 이미 시도한 디자인(서버가 떠 있는 동안 디자인당 한 번만 - 실패해도 열 때마다 다시 하지 않는다). */
+    private final java.util.Set<Long> cropBackfillTried = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * 네일팁 크롭이 없는 디자인(수정으로 만든 디자인, 크롭 추출이 실패했던 디자인, 옛날 디자인)에 크롭을 만들어 저장한다.
+     * 이런 디자인은 AR이 프론트의 색 기반 누끼로 폴백해서 흰색 손톱 끝이 잘린다. 열어 볼 때 한 번 서버에서 만들어 두면
+     * 다음부터는 저장된 크롭을 그대로 쓴다. 상세 조회 중에 도는 일이라 로컬 누끼만 쓴다(탐지 서버 폴백은 응답이 멈출 수 있다).
+     */
+    private void ensureNailTipCrops(NailDesign design) {
+        if (design.getNailTipCropsJson() != null && !design.getNailTipCropsJson().isBlank()) return;
+        if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) return;
+        if (!cropBackfillTried.add(design.getId())) return;
         try {
-            Map<String, List<String>> parts = nailDetectionService.detectParts(imageBase64, List.of("nail tip"));
+            byte[] bytes = s3Service.downloadImageBytes(design.getImageUrls().get(0));
+            String base64 = Base64.getEncoder().encodeToString(bytes);
+            List<NailSheetSegmenter.Nail> local = nailDetectionService.segmentNailsLocally(base64);
+            if (local == null || local.size() != NailSheetSegmenter.NAIL_COUNT) {
+                System.out.println("[NailTipCrops] designId=" + design.getId() + " 크롭이 없고 로컬 누끼로도 5개를 못 찾아 보강하지 못했습니다.");
+                return;
+            }
+            Long userId = design.getUser().getId();
+            List<String> urls = new ArrayList<>();
+            for (int i = 0; i < local.size(); i++) {
+                String s3Key = "designs/user_" + userId + "/nail-tips-ordered/" + UUID.randomUUID() + "_" + i + ".png";
+                urls.add(s3Service.uploadImageBytes(local.get(i).cropPng(), s3Key));
+            }
+            design.updateNailTipCropsJson(objectMapper.writeValueAsString(urls));
+            nailDesignRepository.save(design);
+            System.out.println("[NailTipCrops] designId=" + design.getId() + " 크롭이 없어 새로 만들어 저장했습니다 (로컬 누끼).");
+        } catch (Exception e) {
+            System.err.println("[NailTipCrops] designId=" + design.getId() + " 크롭 보강 실패: " + e.getMessage());
+        }
+    }
+
+    private String fetchAndUploadNailTipCrops(Long userId, String imageBase64, String fallbackBase64) {
+        try {
+            // 투명(또는 흰) 배경 위 5개 시트라 SAM 없이 픽셀 연산으로 먼저 따고, 5개를 못 찾을 때만 detect 서버로 폴백한다.
+            List<NailSheetSegmenter.Nail> local = nailDetectionService.segmentNailsLocally(imageBase64);
+            if (local != null && local.size() == NailSheetSegmenter.NAIL_COUNT) {
+                System.out.println("[NailTipCrops] 로컬(Java) 누끼 성공: " + local.size() + "개 — detect 서버 호출 안 함");
+                List<String> urls = new ArrayList<>();
+                for (int i = 0; i < local.size(); i++) {
+                    String s3Key = "designs/user_" + userId + "/nail-tips-ordered/" + UUID.randomUUID() + "_" + i + ".png";
+                    urls.add(s3Service.uploadImageBytes(local.get(i).cropPng(), s3Key));
+                }
+                return objectMapper.writeValueAsString(urls);
+            }
+            System.out.println("[NailTipCrops] 로컬 누끼 실패 → detect 서버로 폴백");
+
+            Map<String, List<String>> parts = nailDetectionService.detectParts(fallbackBase64, List.of("nail tip"));
             List<String> crops = parts.get("nail tip");
             System.out.println("[NailTipCrops] 탐지된 크롭 수: " + (crops != null ? crops.size() : "null")); // ★
             if (crops == null || crops.isEmpty()) return null;
@@ -421,7 +512,7 @@ public class NailDesignService {
         try {
             byte[] imgBytes = s3Service.downloadImageBytes(design.getImageUrls().get(0));
             String imgBase64 = Base64.getEncoder().encodeToString(imgBytes);
-            List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNail(imgBase64);
+            List<Map<String, Object>> perNailColors = nailDetectionService.extractColorsPerNailLocalFirst(imgBase64);
             List<String> palette = nailDetectionService.flattenToColorPalette(perNailColors);
             design.updateColorPalette(objectMapper.writeValueAsString(palette));
             nailDesignRepository.save(design);
@@ -466,11 +557,7 @@ public class NailDesignService {
                     for (Map.Entry<String, String> entry : swatchBase64Map.entrySet()) {
                         if (entry.getValue() == null || entry.getValue().isBlank()) continue;
 
-                        // ★ mercury_chrome은 이미 S3 URL — base64 디코딩 없이 바로 저장
-                        if ("mercury_chrome".equals(entry.getKey())) {
-                            swatchUrlMap.put("mercury_chrome", entry.getValue());
-                            continue;
-                        }
+                        // mercury_chrome도 SwatchColorizer가 base64 이미지를 돌려주므로 다른 스와치와 똑같이 S3에 올린다
                         try {
                             byte[] swatchBytes = Base64.getDecoder().decode(entry.getValue());
                             String swatchKey = "designs/user_" + finalUserId
@@ -524,8 +611,14 @@ public class NailDesignService {
         record TimelineEntry(java.time.LocalDateTime time, int order, com.example.nailyproject.dto.response.ChatMessageResponseDto dto) {}
         List<TimelineEntry> timeline = new ArrayList<>();
 
+        String photoRequestContent = PHOTO_REQUEST_TEXT; // 참고 사진 말풍선 문구(코멘트가 있으면 함께 표시)
         for (ChatMessage m : chatMessageRepository.findBySessionOrderBySentAtAsc(design.getSession())) {
             if (cutoff != null && m.getSentAt() != null && m.getSentAt().isAfter(cutoff)) continue;
+            if (m.getRole() == ChatMessage.MessageRole.user && m.getContent() != null
+                    && m.getContent().startsWith(PHOTO_REQUEST_TEXT + "\n")) {
+                if (PHOTO_REQUEST_TEXT.equals(photoRequestContent)) photoRequestContent = m.getContent(); // 첫 번째 것만 사용
+                continue; // 별도 말풍선으로는 보여주지 않음
+            }
             timeline.add(new TimelineEntry(
                     m.getSentAt(),
                     0,
@@ -552,7 +645,7 @@ public class NailDesignService {
                         0,
                         com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
                                 .role("user")
-                                .content("이 사진으로 만들어줘")
+                                .content(photoRequestContent)
                                 .sentAt(referenceTime != null ? referenceTime.format(formatter) : "")
                                 .imageUrls(List.of(d.getReferenceImageUrl()))
                                 .build()
@@ -658,6 +751,8 @@ public class NailDesignService {
 
         boolean isOwner = user != null && design.getUser().getId().equals(user.getId());
         if (!design.isShared() && !isOwner) throw new IllegalArgumentException("공유되지 않은 디자인입니다.");
+
+        if (isOwner) ensureNailTipCrops(design);
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm");
         String formattedDate = design.getGeneratedAt() != null ? design.getGeneratedAt().format(formatter) : "";
@@ -806,11 +901,15 @@ public class NailDesignService {
                 && request.getMode().equalsIgnoreCase("scan-auto")
                 && handScan != null;
 
+        // 사진 기반 생성이면 색은 참고 사진에서 읽는다. 스캔 추천 팔레트를 랜덤으로 확정색에 박으면
+        // 플랜 LLM이 "확정 헥스"를 그대로 따라서 사진의 색감이 무시되므로, 이때는 쉐입/무드만 스캔 값으로 메운다.
+        boolean hasImage = imageBase64 != null && !imageBase64.isBlank();
+
         // scan-auto가 아니면 기존대로 빈 슬롯을 스캔 값으로 메운다.
         // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
         //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
         if (!scanAuto) {
-            fillMissingFromScan(slots, handScan);
+            fillMissingFromScan(slots, handScan, !hasImage);
         }
 
         if (session != null && !scanAuto) {
@@ -819,10 +918,11 @@ public class NailDesignService {
 
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
-                : summarizeSlots(slots, handScan)
-                        + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
-                        + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
-                        + buildUserOwnWordsText(session);
+                : summarizeSlots(slots, handScan, !hasImage)
+                + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
+                + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
+                + buildUserOwnWordsText(session)
+                + buildPhotoNoteText(request.getUserNote());
 
         String previousPlanJson = null;
         if (session != null) {
@@ -843,7 +943,6 @@ public class NailDesignService {
         // motif "없음"을 골라도 그 선택이 무시되는 버그가 있었다(사용자가 직접 재현/확인함).
         // scanId가 프론트에서 매 요청마다 자동으로 함께 오는 경우가 있어서, handScan 존재
         // 여부만으로는 "이번 생성이 스캔 기반 흐름인지"를 판단할 수 없다.
-        boolean hasImage = imageBase64 != null && !imageBase64.isBlank();
         JsonNode plan = fingerDesignPlanService.generatePlan(
                 summary, imageBase64, imageMimeType, previousPlanJson, userSeasonForTrend, scanAuto);
 
@@ -853,6 +952,10 @@ public class NailDesignService {
         if (scanAuto && plan != null && plan.isObject() && scanRecommendedShape(handScan) != null) {
             ((ObjectNode) plan).put("shape", scanRecommendedShape(handScan));
         }
+
+        // 앱이 제공하는 쉐입은 6가지(round/oval/almond/stiletto/ballerina/square)뿐이다. 플랜 LLM이 사진을 보고
+        // "rounded square" 같은 새 이름을 적으면 프롬프트와 AR 3D 템플릿(파일명 매칭)이 어긋나므로, 항상 6가지 중 하나로 정리한다.
+        enforceAppShape(plan, getLiked(slots, "shape"), handScan != null ? scanRecommendedShape(handScan) : null);
 
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
@@ -906,15 +1009,31 @@ public class NailDesignService {
         }
 
         // ★ 마감 질감 레퍼런스(예: 파우더)는 gptimage provider일 때만, 그리고 플랜에 해당 마감이 있을 때만 쓴다.
+        List<String> referenceKeys = collectReferenceKeys(plan);
         List<String> referenceFinishes = "gptimage".equalsIgnoreCase(imageProvider)
-                ? finishReferenceService.availableFinishes(collectReferenceKeys(plan))
+                ? finishReferenceService.availableFinishes(referenceKeys)
                 : List.of();
+        if ("gptimage".equalsIgnoreCase(imageProvider)) {
+            // 레퍼런스 파일이 없으면 조용히 텍스트만으로 생성돼서 "적용이 안 된 줄 몰랐던" 일이 있었다 - 로그로 알린다.
+            List<String> missingReferences = finishReferenceService.configuredButMissing(referenceKeys);
+            if (!missingReferences.isEmpty()) {
+                System.err.println("[FinishReference] 레퍼런스 이미지 파일이 없어 텍스트만으로 생성합니다: " + missingReferences
+                        + " → Backend/src/main/resources/finish-refs/ 를 확인하세요.");
+            }
+            if (!referenceFinishes.isEmpty()) {
+                System.out.println("[FinishReference] 마감 레퍼런스를 첨부해 생성합니다: " + referenceFinishes);
+            }
+        }
 
         String combinedPrompt = buildCombinedPromptFromPlan(plan, noPhrases, fingerDislikesMap, referenceFinishes);
 
         if (session != null) {
             session.updateGeneratedPrompt(combinedPrompt);
         }
+
+        // 사진과 함께 보낸 사용자 코멘트를 채팅 이력에 저장한다 (마이페이지 "채팅 이력 보기"에서 보이도록).
+        // 디자인 생성(저장) 직전에 저장해야 이 디자인의 generatedAt 이전 시점이라 이력 조회에서 잘리지 않는다.
+        savePhotoRequestMessage(session, hasImage, request.getUserNote());
 
         // ★ gen 서버로 이미지 생성 (ComfyUI 대체)
         NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session, referenceFinishes);
@@ -954,7 +1073,7 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
-                .keywords(extractKeywordsFromSlots(slots, session)) //디자인결과화면 선택옵션 단어
+                .keywords(localizeKeywords(mergeKeywords(referenceSubjectKeyword(plan), mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
                 .build();
     }
@@ -1129,6 +1248,11 @@ public class NailDesignService {
     }
 
     private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan) {
+        fillMissingFromScan(slots, handScan, true);
+    }
+
+    /** @param useScanColors false면 색은 건드리지 않는다(사진 기반 생성: 색은 참고 사진에서 읽는다). */
+    private void fillMissingFromScan(Map<String, SlotData> slots, HandScan handScan, boolean useScanColors) {
         if (handScan == null) {
             if (getLiked(slots, "mood").isEmpty()) {
                 addLiked(slots, "mood", pickDefaultMood(slots));
@@ -1145,7 +1269,7 @@ public class NailDesignService {
         // 팔레트를 넘겨도 첫 번째 색이 항상 똑같이 나오는 문제가 있었다. 대신 여기 Java
         // 쪽에서 팔레트 전체(30개)에서 실제로 무작위로 1~3개를 뽑아 확정해버려서, 매
         // 생성마다 색 조합 자체가 달라지도록 한다.
-        if (getLiked(slots, "color").isEmpty()) {
+        if (useScanColors && getLiked(slots, "color").isEmpty()) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
                 List<String> shuffled = new ArrayList<>(palette);
@@ -1210,6 +1334,32 @@ public class NailDesignService {
     }
 
     /**
+     * 사진 기반 생성에서 사용자가 사진과 함께 적은 추가 요청. 사진의 분위기/색감을 기본으로 하되
+     * 이 요청(예: "수채화 느낌을 잘 살려줘")은 사진 해석보다 우선해 반영하도록 plan 생성에 넘긴다.
+     */
+    private static final String PHOTO_REQUEST_TEXT = "이 사진으로 만들어줘";
+
+    /** 사진 기반 생성의 사용자 발화를 "이 사진으로 만들어줘\n<코멘트>" 형태로 저장. 코멘트가 없으면 저장하지 않는다. */
+    private void savePhotoRequestMessage(DesignSession session, boolean hasImage, String note) {
+        if (session == null || !hasImage || note == null || note.isBlank()) return;
+        String trimmed = note.trim();
+        if (trimmed.length() > 300) trimmed = trimmed.substring(0, 300);
+        chatMessageRepository.save(ChatMessage.builder()
+                .session(session)
+                .role(ChatMessage.MessageRole.user)
+                .content(PHOTO_REQUEST_TEXT + "\n" + trimmed)
+                .build());
+    }
+
+    private String buildPhotoNoteText(String note) {
+        if (note == null || note.isBlank()) return "";
+        String trimmed = note.trim();
+        if (trimmed.length() > 300) trimmed = trimmed.substring(0, 300);
+        return "\n[사용자가 참고 사진과 함께 직접 적은 추가 요청 - 사진의 색감/분위기를 바탕으로 하되, 이 요청의 느낌/질감/장식/위치는 최우선으로 반영, 절대 누락 금지]\n- "
+                + trimmed.replace("\n", " ") + "\n";
+    }
+
+    /**
      * 채팅에서 사용자가 직접 입력한 원문을 plan 생성에 그대로 넘긴다. 슬롯(카테고리)으로 변환되는
      * 과정에서 "큐빅 넣어줘" 같은 구체 요청이 누락/희석되는 문제를 막기 위한 안전장치.
      */
@@ -1219,7 +1369,7 @@ public class NailDesignService {
                 .filter(m -> m.getRole() == ChatMessage.MessageRole.user)
                 .map(m -> m.getContent() == null ? "" : m.getContent().trim())
                 .filter(c -> !c.isBlank())
-                .map(c -> c.length() > 300 ? c.substring(0, 300) : c)
+                .map(c -> c.length() > 500 ? c.substring(0, 500) : c) // 선택 요약 + 기타 입력이 함께 오는 메시지가 잘리지 않게 500자
                 .toList();
         if (userMessages.isEmpty()) return "";
         int from = Math.max(0, userMessages.size() - 15);
@@ -1231,6 +1381,11 @@ public class NailDesignService {
     }
 
     private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan) {
+        return summarizeSlots(slots, handScan, true);
+    }
+
+    /** @param useScanPalette false면 "color 후보"(스캔 추천 팔레트)를 넘기지 않는다(사진 기반 생성). */
+    private String summarizeSlots(Map<String, SlotData> slots, HandScan handScan, boolean useScanPalette) {
         StringBuilder sb = new StringBuilder();
         for (String cat : List.of("shape", "mood", "designType", "color", "season", "motif")) {
             List<String> liked = getLiked(slots, cat);
@@ -1256,7 +1411,7 @@ public class NailDesignService {
             }
         }
 
-        if (getLiked(slots, "color").isEmpty() && handScan != null) {
+        if (useScanPalette && getLiked(slots, "color").isEmpty() && handScan != null) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
                 sb.append("color 후보(사용자의 퍼스널컬러 기반 추천 팔레트, mood와 가장 잘 어울리는 것을 고르고 " +
@@ -1324,18 +1479,38 @@ public class NailDesignService {
             if (hasFlower && !fingerHasFinish(node, "sculpted 3d")) paintedFlower = true;
         }
         if (paintedFlower) keys.add(FinishReferenceService.FLOWER_ART);
+        // ★ 우아한 무드 + 체크(plaid) 패턴이 있으면 우아한 체크 레퍼런스를 붙인다.
+        boolean plaidNail = false;
+        for (String finger : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            if (arrayHasValue(plan.path(finger).path("pattern"), "plaid")) plaidNail = true;
+        }
+        if (plaidNail && plan.path("mood").toString().toLowerCase().contains("elegant")) {
+            keys.add(FinishReferenceService.ELEGANT_CHECK);
+        }
         return keys;
     }
 
     /** 손그림(번짐) 꽃이 들어간 손톱인지: 입체 꽃(sculpted 3d)이거나 설명에 큰 꽃을 명시한 경우는 제외. */
+    /** 평면(그린) 리본 손톱인가: 모티프가 리본이고 입체/양각이 아니다. */
+    private boolean isDrawnRibbonNail(JsonNode finger) {
+        if (fingerHasFinish(finger, "sculpted 3d")) return false;
+        if (finger.path("parts").toString().toLowerCase().contains("bow charm")) return false;
+        String motifs = finger.path("motif").toString().toLowerCase();
+        if (!motifs.contains("ribbon") && !motifs.contains("bow")) return false;
+        return !java.util.regex.Pattern.compile("(?i)\\b(?:3d|raised|embossed|sculpted|charm)\\b")
+                .matcher(finger.path("description").asText("")).find();
+    }
+
     private boolean isPaintedFlowerNail(JsonNode finger) {
         if (fingerHasFinish(finger, "sculpted 3d")) return false;
+        // 잉크 드로잉 손톱의 꽃은 "번진 깨알 블롯"이 아니라 색연필로 그린 손그림 꽃이다(잉크 블록에서 따로 지시한다).
+        if (fingerHasFinish(finger, "ink")) return false;
         String description = finger.path("description").asText("");
         // ★ motif 배열이 기준. 설명 문장 보조 판정에서는 색 이름과 겹치는 단어(rose, bloom 등)를 쓰지 않는다 —
         // "muted rose", "warm rose base"를 꽃으로 오인해서 꽃을 요청하지 않은 체크 디자인에 꽃이 그려졌다.
         boolean hasFlower = finger.path("motif").toString().toLowerCase().contains("flower")
                 || java.util.regex.Pattern.compile("(?i)\\b(flowers?|floral|blossoms?|petals?|tulips?|daisy|daisies|peony|peonies)\\b")
-                        .matcher(description).find();
+                .matcher(description).find();
         if (!hasFlower) return false;
         return !java.util.regex.Pattern.compile("(?i)\\b(large|big|oversized|giant|bold|statement)\\b")
                 .matcher(description).find();
@@ -1347,6 +1522,12 @@ public class NailDesignService {
         for (JsonNode n : arr) {
             if (finish.equalsIgnoreCase(n.asText("").trim())) return true;
         }
+        return false;
+    }
+
+    private boolean arrayHasValue(JsonNode arr, String value) {
+        if (arr == null || !arr.isArray()) return false;
+        for (JsonNode n : arr) if (value.equalsIgnoreCase(n.asText("").trim())) return true;
         return false;
     }
 
@@ -1518,6 +1699,8 @@ public class NailDesignService {
                                                List<String> referenceFinishes) {
         boolean powderRef = referenceFinishes.contains(FinishReferenceService.POWDER_FINISH);
         boolean flowerRef = referenceFinishes.contains(FinishReferenceService.FLOWER_ART);
+        boolean elegantCheckRef = referenceFinishes.contains(FinishReferenceService.ELEGANT_CHECK);
+        boolean funkyMood = plan.path("mood").toString().toLowerCase().contains("funky");
         String shape = toPromptText(plan.path("shape").asText("round"));
         String mood    = toPromptText(plan.path("mood").asText(""));
         String season  = toPromptText(plan.path("season").asText(""));
@@ -1530,18 +1713,36 @@ public class NailDesignService {
 
         StringBuilder sb = new StringBuilder();
 
-        sb.append("Create a premium studio product photograph of exactly five individual ")
+        sb.append("Create a realistic close-up product photograph of exactly five individual")
                 .append("press-on nail tips, arranged as one coordinated nail-art set.\n\n");
 
         // ★ 파우더 레퍼런스(흑백 사진)가 첨부된 경우: 광택만 가져오고 색/무늬/모양은 복사하지 않도록 역할을 제한한다.
         if (powderRef) {
-            sb.append("Reference image: the attached grayscale photo is a reference ONLY for the glossiness of ")
-                    .append("the powder finish — the wet, smooth, pearly chrome-like gloss and how light reflects ")
-                    .append("off the curved nail surface. Apply it only to the nails whose description mentions a ")
-                    .append("powder finish. Take only the gloss. Do NOT copy the reference's streaks, swirls, ")
-                    .append("veins, cloudy patches, or texture pattern, nor its nail shape, angle, background, ")
-                    .append("arrangement, or tones; colors, patterns and decorations come only from the nail ")
-                    .append("descriptions below.\n\n");
+            // ★ "은은하고 고른 광택"으로만 적으면 레퍼런스가 있어도 납작한 새틴처럼 나왔다 - 레퍼런스의 핵심은 두껍고
+            // 젖은 듯한 유리 광택과 진주빛으로 번지는 밝은 하이라이트다. 그 "빛 표현"을 목표로 삼되, 줄무늬/색/모양은
+            // 계속 복사하지 못하게 막는다(색과 무늬는 손톱별 설명만 따른다).
+            sb.append("Reference image: the attached grayscale photo shows how a real pearl-powder finish catches ")
+                    .append("light — a thick, wet, glass-like gloss with a luminous mother-of-pearl glow, bright creamy ")
+                    .append("highlights and soft reflected light gliding over the curve of the nail, so the surface has ")
+                    .append("real depth. Reproduce that luminous, wet, light-catching pearl gloss on the nails whose ")
+                    .append("description mentions a powder finish: the sheen must be clearly visible and glossy, never ")
+                    .append("matte, flat satin or chalky. Take only this gloss and the way light plays on it. Do NOT copy ")
+                    .append("the reference's streaks, swirls, veins, cloudy patches, or texture pattern, nor its nail ")
+                    .append("shape, angle, background, arrangement, or tones; colors, patterns and decorations come only ")
+                    .append("from the nail descriptions below.\n\n");
+        }
+
+        // ★ 우아한 체크 레퍼런스(흑백 사진 1장): 체크 패턴의 성격(반투명 대각선 띠와 얇은 선)과 절제된 우아함만 가져오고
+        // 색/리본/큐빅/진주/글리터 그라데이션/네일 모양/두 줄 배치/배경은 복사하지 않는다.
+        if (elegantCheckRef) {
+            sb.append("Reference image (elegant check): the attached grayscale photo shows the character of an elegant check ")
+                    .append("on real nails — translucent diagonal argyle-style bands crossing each other with thin fine lines ")
+                    .append("tracing them, on a sheer glossy base, with a refined, understated, luxurious mood. Use it ONLY as a ")
+                    .append("style reference for the nails whose description mentions a check: the translucent diagonal crossing ")
+                    .append("bands, the thin fine lines, and the elegant restraint. Do NOT copy its colors, bows, rhinestones, ")
+                    .append("pearls, glitter ombré, nail shape, two-row arrangement, plate, or background; colors, decorations, ")
+                    .append("and layout come only from the nail descriptions below, and the check lines carry no glitter unless ")
+                    .append("a description says so.\n\n");
         }
 
         // ★ 꽃 스타일 레퍼런스(컬러 크롭 2장): 붓터치/번짐 스타일만 가져오고 꽃 종류/구도/모양은 복사하지 않는다.
@@ -1572,6 +1773,11 @@ public class NailDesignService {
                 .append(" points straight down toward the bottom of the frame, and the wider")
                 .append(" cuticle end is at the top. Do not rotate or flip any nail —")
                 .append(" all five must share this exact same up/down orientation.");
+        // ★ 쉐입(스퀘어 등)은 "끝(프리엣지)" 모양만 정한다. 이 구분이 없으면 이미지 모델이 큐티클 쪽 위 모서리까지
+        // 각지게 그려서, 큐티클은 항상 부드러운 둥근 곡선이 되도록 명시한다.
+        sb.append(" The nail shape describes ONLY the free edge at the bottom of each nail. The cuticle end at the top")
+                .append(" of every nail is always a soft, rounded arc, whatever the shape is - never squared off,")
+                .append(" flattened or pointed.");
         sb.append("\n\n");
 
         List<String> collectedFinishes = new ArrayList<>();
@@ -1615,17 +1821,56 @@ public class NailDesignService {
                 boolean hasFlatMotif = false;
                 for (JsonNode mo : finger.path("motif")) {
                     String mv = mo.asText("").toLowerCase();
-                    if (!mv.isBlank() && !mv.contains("flower") && !mv.equals("none")) hasFlatMotif = true;
+                    if (!mv.isBlank() && !mv.contains("flower") && !mv.equals("none")
+                            && !mv.contains("dot") && !mv.contains("plaid") && !mv.contains("check") && !mv.contains("gingham")) {
+                        hasFlatMotif = true;
+                    }
                 }
                 boolean isRaisedOrSoft = java.util.regex.Pattern
                         .compile("(?i)3d|raised|embossed|sculpted|charm|bead|watercolor|blot|bleed|blooming")
                         .matcher(fingerDescription).find();
-                if (isDoodle || (hasFlatMotif && !isSpiralNail && !isRaisedOrSoft)) {
+                // ★ 리본은 낙서 말고도 가는 선 스케치 / 미니 리본 트림 / 리본 레이스업처럼 섬세한 평면 표현이 흔하다.
+                // 플래너가 그렇게 쓴 손톱(설명에 fine line-art, mini bows, ribbon lacing 등)에 "유치한 낙서" 문장을 붙이면
+                // 모든 리본이 같은 낙서처럼 나오므로, 그런 손톱에는 섬세한 선화 문장을 대신 붙인다.
+                boolean isFineLineArt = !isDoodle && java.util.regex.Pattern
+                        .compile("(?i)fine\\s+line[- ]?art|line[- ]?art\\s+(?:bow|ribbon)|mini\\s+bows?|ribbon\\s+lacing|ribbon[- ]band|sketch")
+                        .matcher(fingerDescription).find();
+                // ★ 잉크 드로잉 손톱은 아래 잉크 블록의 "잉크 덩어리 + 색연필" 문장이 그림 표현을 정하므로 낙서/선화 문장은 붙이지 않는다.
+                boolean inkNail = fingerHasFinish(finger, "ink");
+                // ★ 도트 손톱: 도트 패턴이거나, 도트가 모티프로 들어왔거나, 프렌치 팁 띠에 도트가 있다고 쓴 손톱.
+                boolean dotNail = arrayHasValue(finger.path("pattern"), "polka dot")
+                        || finger.path("motif").toString().toLowerCase().contains("dot")
+                        || (arrayHasValue(finger.path("pattern"), "french tip")
+                        && java.util.regex.Pattern.compile("(?i)\\bdots?\\b|polka").matcher(fingerDescription).find());
+                // ★ 손으로 그은 체크: 체크 손톱(글리터 체크 제외)의 설명에 wobbly / hand-drawn 선이 있으면 삐뚤빼뚤한 선 문장을 붙인다.
+                boolean handCheckNail = arrayHasValue(finger.path("pattern"), "plaid")
+                        && java.util.regex.Pattern.compile("(?i)wobbl|hand-?drawn[^.]*lines?").matcher(fingerDescription).find();
+                // ★ 드로잉 리본은 리본 스티커 같은 또렷한 선화 한 가지로 고정한다(낙서/흐릿한 색연필/젤펜 변형 없이).
+                boolean ribbonDrawing = isDrawnRibbonNail(finger);
+                if (ribbonDrawing) {
+                    nailsSection.append(" The ribbon is a simple, delicate hand-drawn line-art bow with two loops, a small knot, and two")
+                            .append(" flowing tails (the tails may cross or curl), drawn with a thin, even, light line. " + (inkNail
+                                    ? "The bow's loops, knot, and tails are filled with transparent ink color. "
+                                    : "The loops are empty, not filled. ") + "The line color is the color stated in the")
+                            .append(" description above, or a slightly deeper tone of the ribbon's own color if none is stated; it is")
+                            .append(" never a heavy, dark, or black outline.");
+                } else if (inkNail || dotNail) {
+                    // 잉크/도트 손톱은 아래 전용 블록에서 처리한다(낙서/선화 문장은 붙이지 않는다).
+                } else if (isFineLineArt && hasFlatMotif && !isSpiralNail && !isRaisedOrSoft) {
+                    nailsSection.append(" The drawing is a delicate fine line-art illustration: thin, evenly colored")
+                            .append(" gel-pen lines with clean edges and graceful, balanced proportions (not a naive doodle),")
+                            .append(" in the exact colors stated above, and any sheer color wash stays soft and inside the")
+                            .append(" lines. It never looks like a sticker, decal, or printed clip-art. If the drawing is a")
+                            .append(" named character, keep that character's official signature colors and markings exactly")
+                            .append(" as described.");
+                } else if (isDoodle || (hasFlatMotif && !isSpiralNail && !isRaisedOrSoft)) {
                     nailsSection.append(" The drawing is a naive childlike doodle: a simple outline with slightly")
                             .append(" imperfect proportions, but the line itself is perfectly smooth — a solid,")
                             .append(" evenly colored, evenly glossy stroke like a smooth gel pen, with no grain, no")
                             .append(" bumps, no lumps, and no fuzzy pencil texture. It never looks like a sticker,")
-                            .append(" decal, or printed clip-art.");
+                            .append(" decal, or printed clip-art. If the drawing is a named character, only the line")
+                            .append(" quality is naive: keep that character's official signature colors and markings")
+                            .append(" exactly as described (never recolor it to gray, black, or a generic animal).");
                 }
                 // ★ 소용돌이/스파이럴: 플래너가 얇은 라인으로 쓰는 경우가 있어서 굵고 짧은 형태를 확정 문장으로 덮어쓴다.
                 // 세트 전체에서 입체/수채화 중 한 방식만 쓰고, 동심원이 아니라 중심에서 바깥으로 이어지는 한 줄 나선으로 고정한다.
@@ -1639,8 +1884,8 @@ public class NailDesignService {
                                 .compile("(?i)full[- ]nail|(whole|entire|full) nail|covers? the (whole|entire)")
                                 .matcher(fingerDescription).find();
                         nailsSection.append(fullNail
-                                ? " covering the whole nail,"
-                                : " as a small patch in the center of the nail about half of the nail width across,")
+                                        ? " covering the whole nail,"
+                                        : " as a small patch in the center of the nail about half of the nail width across,")
                                 .append(" painted flat into the gel with a perfectly smooth, even surface, softly feathered")
                                 .append(" edges, and no raised thickness.");
                     } else {
@@ -1652,12 +1897,36 @@ public class NailDesignService {
                             .append(" It is never a thin or hairline stroke, never a long winding line, and never bumpy,")
                             .append(" beaded, or rope-like. This overrides any thinner or longer spiral described above.");
                 }
-                if (java.util.regex.Pattern.compile("(?i)\\bblooming\\b").matcher(fingerDescription).find()) {
-                    nailsSection.append(" The blooming look is made only of soft blurred round dots of pigment inside")
-                            .append(" a milky translucent gel, each dot darker in the center with a feathered halo")
-                            .append(" bleeding outward and fading to nothing at the rim; the dots may line up to")
-                            .append(" trace a curve, ring, or heart outline, but there are no solid filled shapes or")
-                            .append(" crisp edges.");
+                // ★ 도트: 손톱 전체를 차지하는 단독 디자인이거나 프렌치 팁 영역에만 들어간다(다른 요소 주변에 뿌리지 않는다).
+                if (dotNail) {
+                    // ★ 도트는 외곽선 없는 단순한 솔리드 도트다. 손톱 전체를 채우거나 프렌치 팁 띠 안에만 들어간다(군집/한쪽 흩뿌림 금지).
+                    if (java.util.regex.Pattern.compile("(?i)french").matcher(fingerDescription).find()
+                            || arrayHasValue(finger.path("pattern"), "french tip")) {
+                        nailsSection.append(" The dots sit only inside the french tip band at the free edge, evenly spaced in a row or a")
+                                .append(" staggered pair of rows; the rest of the nail has no dots.");
+                    } else {
+                        nailsSection.append(" The dots are the whole design: evenly spaced round dots of one size in a regular staggered")
+                                .append(" grid covering the entire nail from cuticle to tip, with nothing else on the nail.");
+                    }
+                    nailsSection.append(" Each dot is a simple solid filled round dot with no outline (never an outlined cartoon circle);")
+                            .append(" this overrides any cluster, side scatter, or outlined dots described above.");
+                    if (fingerHasFinish(finger, "ink")) {
+                        nailsSection.append(" The dots are made of sheer, saturated transparent ink color, like glass dots over the base color.");
+                    }
+                }
+                if (arrayHasValue(finger.path("pattern"), "blooming")
+                        || java.util.regex.Pattern.compile("(?i)\\bblooming\\b").matcher(fingerDescription).find()) {
+                    // ★ 블루밍: 잉크 한 방울이 젖은 젤에 번진 듯한 "속이 찬" 큰 점들이 손톱 외곽선(프리엣지/옆면)을 따라 이어진다.
+                    nailsSection.append(" The blooming look is made of large soft round dots, each a FILLED blob of ink pigment like a drop")
+                            .append(" of ink spreading in wet gel on the sheer glossy base: the center of every dot is its darkest, most")
+                            .append(" saturated part and the color fades smoothly outward into a blurred, feathered edge. The dots are")
+                            .append(" big (each about one fifth to one quarter of the nail width) and follow the outline of the nail: a")
+                            .append(" row of dots along the curved free edge like a scalloped border or along one side wall, touching or")
+                            .append(" overlapping so they melt into a soft scalloped edge, or a small cluster of four dots forming a")
+                            .append(" blossom near a corner or the tip; never an S-curve or a chain across the middle. The dots are")
+                            .append(" never rings, donuts, hollow or outlined circles, or white fluffy puffs; they are one hue, always a")
+                            .append(" deeper and more saturated tone than the base (never white), with most of the base left clean and no")
+                            .append(" outlines or crisp edges.");
                 }
                 if (fingerHasFinish(finger, "magnetic cat eye")) {
                     nailsSection.append(" The magnetic gel is a round glass-bead glow: a soft, domed, pearly gleam")
@@ -1667,6 +1936,63 @@ public class NailDesignService {
                     if (!java.util.regex.Pattern.compile("(?i)guava|green|pink magnet").matcher(fingerDescription).find()) {
                         nailsSection.append(" The magnetic gleam is silver or champagne gold only — never holographic,")
                                 .append(" rainbow, or multi-color iridescent.");
+                    }
+                }
+                if (handCheckNail) {
+                    nailsSection.append(" The check is hand-drawn: soft translucent color bands in two directions with thin, slightly")
+                            .append(" wobbly hand-drawn lines running along and across the bands in an accent color (a deeper or contrasting")
+                            .append(" tone), not perfectly straight, with uneven spacing and a few lines slightly overlapping or doubled,")
+                            .append(" like a pen sketched over the bands; the lines are thin and light, never a heavy black grid.");
+                }
+                // ★ 니트(벨벳)젤: 컬러 안에 짧은 섬유 조각이 흩어진 질감. 설명만으로는 그냥 매끈한 파스텔로 나온다.
+                if (fingerHasFinish(finger, "knit")) {
+                    // ★ "솜털/울 같은 불투명 컬러"라고 쓰면 니트 스웨터 직물처럼 나왔다 - 레퍼런스(뽀그리젤)는 투명한 시럽 젤 속에
+                    // 가는 머리카락 같은 섬유가 떠 있는 모습이다. 직물/뜨개 질감은 명시적으로 막는다.
+                    nailsSection.append(" Knit (velvet) gel: the soft glossy gel color is filled with hundreds of TINY short fiber")
+                            .append(" fragments, like chopped wool or velvet flock, spread evenly over the whole nail and floating inside")
+                            .append(" the clear gel. Each fragment is very short (about one thirtieth of the nail width) and thin, at")
+                            .append(" random angles, in lighter and darker tones of the same hue with a few in a soft accent hue, so the")
+                            .append(" nail looks like fuzzy velvet made of tiny flecks. They are never a few long thin lines, cracks,")
+                            .append(" veins, or scratches. The surface stays smooth and glossy; it is not a woven or knitted fabric. No")
+                            .append(" large glitter.");
+                }
+                // ★ 잉크젤. 모티프가 있으면 "잉크 일러스트"(또렷한 외곽선 + 투명 잉크 색 채움)고, 없으면 맑은 손톱 위의 투명 워시다.
+                // (선만 있거나 워시만 있으면 잉크를 썼다고 볼 수 없다 - 참고: 외곽선 안을 잉크로 칠한 귀여운 손그림 캐릭터)
+                if (fingerHasFinish(finger, "ink")) {
+                    boolean inkHasMotif = false;
+                    for (JsonNode mo : finger.path("motif")) {
+                        String mv = mo.asText("").trim().toLowerCase();
+                        if (!mv.isEmpty() && !mv.equals("none") && !mv.contains("dot") && !mv.contains("plaid")
+                                && !mv.contains("check") && !mv.contains("gingham")) inkHasMotif = true;
+                    }
+                    if (dotNail) {
+                        // 도트 손톱의 잉크 표현은 위 도트 문장에서 처리한다(일러스트/워시 문장은 붙이지 않는다).
+                    } else if (inkHasMotif) {
+                        nailsSection.append(" This is ink drawing art, like a cute hand-inked illustration sticker: the shapes of the")
+                                .append(" motif described above are filled in with transparent ink gel colors —")
+                                .append(" sheer, saturated, flat-looking color areas with slightly uneven watercolor-like density,")
+                                .append(" clearly visible inside the motif, with at most a thin, light line in a slightly deeper tone of")
+                                .append(" the same hue (no black or heavy dark outline). Small details inside the motif (a knot, folds,")
+                                .append(" a face, stripes) use the same light line. It is drawn on top of the base color described above (not on a bare clear nail),")
+                                .append(" so the ink fills look like colored glass over it. The motif is clearly recognizable and fairly large (about half of")
+                                .append(" the nail). No fuzzy, hairy, feathered, or pencil-textured lines, and no abstract lines,")
+                                .append(" lacing, spirals, or pearls in place of the motif.");
+                        if (finger.path("motif").toString().toLowerCase().contains("flower")) {
+                            nailsSection.append(" The flower is simple: about five rounded petals filled with ink color around a")
+                                    .append(" small center, with a small leaf; this overrides any tiny or smudged flower wording elsewhere.");
+                        }
+                    } else {
+                        nailsSection.append(" The ink is a vivid but fully transparent gel, like colored glass or marker ink, laid over")
+                                .append(" the base color described above: it appears as clean, saturated, see-through washes —")
+                                .append(" soft-edged ribbon-like or wave-like swaths with slightly deeper pooled edges, covering only")
+                                .append(" part of the nail while the rest shows the base color. It is not a milky or pastel blush and")
+                                .append(" not an airbrush gradient over the whole nail.");
+                        if (java.util.regex.Pattern.compile("(?i)plaid|check|gingham").matcher(fingerDescription).find()) {
+                            nailsSection.append(" The ink check is a gingham of wide see-through stripes of one vivid hue running in")
+                                    .append(" two directions over the base color, looking deeper where they cross, with soft hand-painted")
+                                    .append(handCheckNail ? " edges - not a sharp printed grid."
+                                            : " edges and no dark lines between them - not a sharp printed grid.");
+                        }
                     }
                 }
                 // ★ 꽃이 있는 손톱: 크기 지시를 손톱 설명 바로 뒤에 붙여서 확정한다. 전역 "Flower art" 문단만으로는
@@ -1687,13 +2013,15 @@ public class NailDesignService {
                 }
                 if (powderRef && fingerHasFinish(finger, "powder finish")) {
                     if (fingerHasPattern(finger)) {
-                        nailsSection.append(" The glossy pearlescent powder finish sits as a thin transparent layer")
-                                .append(" over the pattern above; the pattern itself is drawn exactly as described,")
-                                .append(" not taken from the reference photo.");
+                        nailsSection.append(" The pearl-powder finish sits as a thin transparent layer over the pattern")
+                                .append(" above, with the same luminous, wet-looking pearl gloss as the reference photo;")
+                                .append(" the pattern itself is drawn exactly as described, not taken from the reference.");
                     } else {
-                        nailsSection.append(" Surface: perfectly smooth, solid, uniform color from cuticle to tip with")
-                                .append(" a subtle even pearly chrome sheen — no streaks, swirls, marbling, veining,")
-                                .append(" or cloudy patches.");
+                        nailsSection.append(" Surface: one even color from cuticle to tip with a luminous, wet-looking")
+                                .append(" pearl-powder gloss — a bright creamy mother-of-pearl highlight gliding along the")
+                                .append(" curve of the nail and soft iridescent light across the whole surface, with real")
+                                .append(" glassy depth like the reference photo; the color itself stays smooth, with no")
+                                .append(" streaks, swirls, marbling, veining, or cloudy patches.");
                     }
                 }
             }
@@ -1744,11 +2072,69 @@ public class NailDesignService {
             }
         }
 
+        // ★ 한 세트의 리본은 전부 같은 룩(같은 색/재질/형태)이어야 한다 - 손톱마다 색이 다른 리본이 나오던 문제.
+        // 리본이 2개 이상의 손톱에 있으면 첫 리본 손톱의 설명을 기준으로 통일하라는 문장을 붙인다(크기/위치만 달라도 됨).
+        int ribbonNails = 0;
+        for (String name : fingerNames) {
+            if (java.util.regex.Pattern.compile("(?i)\\b(?:bow|bows|ribbon|ribbons)\\b")
+                    .matcher(plan.path(name).path("description").asText("")).find()) ribbonNails++;
+        }
+        if (ribbonNails >= 2) {
+            sb.append("Ribbon consistency (very important): every ribbon or bow on these nails is the very same ")
+                    .append("design — identical color, identical material, identical finish, and identical line ")
+                    .append("style, as if cut from one mold or drawn with one pen. Follow the first ribbon described ")
+                    .append("above for all of them. Only the size and position may differ from nail to nail. Never ")
+                    .append("make one ribbon a different color, and never mix a drawn ribbon with a raised 3D one.\n\n");
+        }
+
         sb.append("Composition:\n")
                 .append("Arrange exactly five nail tips in a neat horizontal group, ")
                 .append("similar size and proportion, each nail completely visible, no overlap, ")
-                .append("centered composition, large amount of clean white negative space, ")
+                .append(useTransparentGptImage()
+                        ? "centered composition, large amount of empty negative space around the nails, "
+                        : "centered composition, large amount of clean white negative space, ")
                 .append("tips_only_flatlay presentation.\n\n");
+
+        // ★ 실제 젤네일은 컬러/아트 위에 투명 탑젤을 두껍게 올려 큐어링해서 손톱 전체가 볼록한 유리 돔처럼 된다.
+        // "glossy"라고만 쓰면 모델이 납작한 페인트판 + 얇은 하이라이트로 그려서 광택이 죽었다 -
+        // 두께감, 가장자리에 맺힌 젤, 길게 뻗는 창문형 하이라이트, 아트가 젤 아래에 잠긴 깊이를 구체적으로 지정한다.
+        if (!surface.toLowerCase().contains("matte")) {
+            sb.append("Glossy gel overlay (very important): every nail not described as matte is finished the way a ")
+                    .append("real salon gel manicure is — one or two thick layers of clear top gel are cured over the ")
+                    .append("color and the art, so the whole nail becomes a plump, convex, glass-like dome instead of a ")
+                    .append("flat painted plate. Show it clearly: the gel has visible thickness, gathers into a soft ")
+                    .append("rounded bead along the cuticle, the side walls, and the free edge, and swells smoothly over ")
+                    .append("the curve of the nail. The dome catches the softbox as one long, bright, soft-edged ")
+                    .append("window-shaped highlight running down the length of the nail, with a thin crisp rim of ")
+                    .append("reflected light along one edge, and the color and any flat art underneath look slightly ")
+                    .append("magnified and sunk beneath the clear glassy layer, with the wet depth of a drop of syrup. ")
+                    .append("The shine is juicy and liquid, never a flat sticker-like surface, never dull satin, never ")
+                    .append("hard plastic. This dome is only a surface treatment: it never changes the nail's color, ")
+                    .append("adds no glitter, and creates no new decoration.\n\n");
+        }
+
+        // ★ 결과가 "AI/CGI 티"(과하게 크고 플라스틱 같은 파츠, 납작한 채도 높은 단색, 디지털 그라데이션)로 나왔다.
+        // 실제 샵 포트폴리오는 파츠/모티프가 작고 절제되며 색이 투명하고 채도가 낮다 - 그 기준을 명시한다.
+        // ★ 펑키 무드는 파츠가 많고 화려한 것이 기본이다 - "작고 절제된" 현실감 문단 대신 화려한 버전을 쓴다.
+        if (funkyMood) {
+            sb.append("Funky nail-art (very important): this is a bold, flashy, richly decorated press-on set from a Korean nail ")
+                    .append("salon's portfolio, photographed as a real product. Charms, pearls, rhinestones, chains, and studs are ")
+                    .append("layered and clustered on most nails, and glossy, chrome, and vivid or high-contrast colors are welcome. ")
+                    .append("Every piece is a real, physically plausible, hand-set resin, metal, or glass object with visible ")
+                    .append("thickness and natural highlights, never a plastic toy or a game asset, and the arrangement stays tidy ")
+                    .append("and clearly readable instead of overlapping into a mess.\n\n");
+        }
+        if (!funkyMood) sb.append("Real nail-art realism (very important): this must look like a photo of a real hand-made press-on ")
+                .append("set from a Korean nail salon's portfolio, not an AI render. Real sets are restrained and ")
+                .append("delicate: charms, pearls, and motifs are SMALL (one charm covers at most about a quarter of ")
+                .append("the nail) and sit off-center, leaving most of the nail as a bare sheer milky base. Colors are ")
+                .append("soft, translucent, and slightly desaturated, never flat saturated candy pigment, and a ")
+                .append("gradient is a soft translucent blend of gel rather than a digital two-color fade. Resin or ")
+                .append("acrylic charms are small, milky or pearly with slightly irregular hand-molded edges, set into ")
+                .append("a small bead of clear gel that blends them into the nail; metal charms are tiny and polished; ")
+                .append("pearls are small round beads; rhinestones are tiny; hand-drawn lines are thin and slightly ")
+                .append("imperfect like real fine-brush or gel-pen strokes. Nothing looks like a plastic toy, a game ")
+                .append("asset, a sticker, or an oversized decoration.\n\n");
 
         sb.append("Photography:\n")
                 .append("Shot as a real macro product photograph on a professional camera ")
@@ -1758,20 +2144,37 @@ public class NailDesignService {
                 .append("art, not a cartoon or plastic-toy look, not a smooth game-asset render.\n\n")
                 .append("Lighting: a soft studio softbox at a low angle wraps gently around the curved ")
                 .append("surface of each nail with soft bounce fill in the shadows — the exact highlight ")
-                .append("shape (a sharp glassy streak for glossy/chrome/jelly finishes, or an even pearly ")
-                .append("chrome sheen over the whole nail with natural reflections for powder finishes, ")
+                .append("shape (a long, bright, window-shaped glassy highlight along the gel dome for glossy/chrome/jelly finishes, or a luminous, wet-looking ")
+                .append("pearly sheen over the whole nail with bright soft reflections gliding along the curve for ")
+                .append("powder finishes, ")
                 .append("without changing the nail's color) ")
                 .append("should follow whatever each nail's own material description above specifies, ")
                 .append("rendered with real-photo specular realism. Where the nail is jelly, milky, or ")
                 .append("translucent, render real light transmission — light glows softly from within ")
-                .append("the clear gel and the white background is faintly visible through the ")
-                .append("translucent edges, like real gel catching light, never a flat opaque pastel ")
-                .append("coating.\n\n")
-                .append("Clean seamless white background, soft gentle shadow beneath each nail, ")
+                .append(useTransparentGptImage()
+                        // 투명 PNG로 받을 때 "배경이 비친다"고 쓰면 모델이 손톱의 흰/맑은 부분을 알파 0으로 뚫어버려
+                        // 손톱 끝이 잘린 채 나온다(AR 크롭에서 흰 그라데이션 끝이 사라지던 원인). 손톱 몸통은 알파가 꽉 차야 한다.
+                        ? "the clear gel, like real gel catching light. The silhouette of every nail stays fully "
+                        + "solid from cuticle to free edge — no part of a nail may be transparent, "
+                        + "semi-transparent, or cut out. Show translucency only as glassy depth and inner "
+                        + "glow inside the nail, and render any white, milky, or clear-looking part (for "
+                        + "example a gradient that fades to white at the tip) as solid milky white.\n\n"
+                        : "the clear gel and the white background is faintly visible through the "
+                        + "translucent edges, like real gel catching light, never a flat opaque pastel "
+                        + "coating.\n\n")
+                .append(useTransparentGptImage()
+                        // 투명 PNG에서는 그림자가 반투명 회색 픽셀로 남아 AR 크롭에 섞이므로 그림자를 요구하지 않는다.
+                        ? "Isolated cut-out on a fully transparent background — no backdrop, floor, or white or colored "
+                        + "fill behind the nails — and no cast shadow, drop shadow, or reflection under or beside the nails, "
+                        : "Clean seamless white background, soft gentle shadow beneath each nail, ")
                 .append("shallow depth of field with tack-sharp macro focus on the nail surfaces, ")
-                .append("true-to-life color rendering. Subtle imperfections typical of real handmade ")
-                .append("gel nail polish — faint visible brush texture, slightly uneven gloss sheen, ")
-                .append("tiny natural variation between the five nails. Unless the design explicitly ")
+                .append("true-to-life color rendering. Only tiny natural imperfections of real handmade ")
+                .append("gel nails (a slightly uneven edge or cuticle line); the color layer itself is smooth and ")
+                .append("even with no texture, grain, crackle, grid, or surface pattern of its own (except the knit fibers or ink check that a nail's own description specifies), and the clear top gel stays smooth, thick, and glossy. ")
+                .append("The five nails are one matched set cured from the same bottle: the base color, ")
+                .append("tone, translucency, and gloss level are exactly the same on every nail, with no ")
+                .append("nail looking pinker, grayer, bluer, lighter, or more transparent than the others — ")
+                .append("only designs that a nail's own description assigns to it may differ. Unless the design explicitly ")
                 .append("calls for glitter, render every reflective or shimmery surface as a smooth, ")
                 .append("continuous, mirror-like gloss — never as scattered glitter specks or sparkle ")
                 .append("dust. This must read as an unedited raw photograph from a real Korean nail ")
@@ -1847,12 +2250,17 @@ public class NailDesignService {
 
     private String getShapeProportion(String shape) {
         return switch (shape.toLowerCase()) {
-            case "stiletto"  -> " with sharp elegant proportions";
-            case "almond"    -> " with slightly elongated proportions";
-            case "ballerina" -> " with long flat-tipped proportions";
-            case "oval"      -> " with soft rounded proportions";
-            case "square"   -> " with clean straight-edged proportions";
-            case "round"    -> " with natural rounded proportions";
+            // ★ 쉐입을 "rounded proportions" 정도로만 쓰면 라운드가 오발(달걀형)로 나왔다. 윤곽을 구체적으로 지정한다.
+            // (스퀘어/발레리나의 "끝(프리엣지)만 각진다"는 팀원 수정 의도는 유지: 큐티클은 항상 둥근 곡선이다.)
+            case "stiletto"  -> " with a long outline whose sides taper evenly into a sharp, narrow point";
+            case "almond"    -> " with a slightly elongated outline whose sides taper gently to a softly pointed, rounded tip";
+            case "ballerina" -> " with a long outline whose sides taper inward and end in a flat, narrower free edge with squared corners";
+            case "oval"      -> " with a gently tapered egg-shaped outline, narrower toward a fully curved free edge";
+            case "square"   -> " with straight parallel side walls and a free edge that is flat and straight across with softly squared corners";
+            case "round"    -> " with a short-to-medium, wide outline: nearly parallel straight side walls and a broad, softly"
+                    + " rounded free edge, like a rounded rectangle or a square whose corners are generously rounded (the"
+                    + " nail is wide, about two thirds as wide as it is long, and keeps its width all the way to the tip),"
+                    + " not a narrow tapered oval or egg shape";
             default -> "";
         };
     }
@@ -1860,7 +2268,8 @@ public class NailDesignService {
     private String buildMaterialSection(String surface, List<String> finishes, List<String> parts) {
         List<String> items = new ArrayList<>();
         boolean isMatte = surface.toLowerCase().contains("matte");
-        items.add(isMatte ? "matte finish" : "glossy gel polish");
+        items.add(isMatte ? "matte finish"
+                : "glossy gel polish under a thick clear top-gel overlay that forms a plump convex glass-like dome");
         // ★ 항상 "시럽젤" 스타일 투명감을 언급 — jelly가 선택 안 돼도 요즘 트렌드인 시럽젤
         // (두껍고 촉촉해 보이는 유리질 투명 젤, 손톱 색이 은은히 비치는) 느낌이 없으면
         // 이미지가 납작한 스티커/오페이크 페인트처럼 나옴.
@@ -1881,8 +2290,11 @@ public class NailDesignService {
         }
 
         if (finishLower.contains("jelly"))          items.add("translucent jelly layers");
-        if (finishLower.contains("glitter"))        items.add("ultra-fine micro glitter on the nails described with glitter — tiny dust-fine, densely " +
-                "scattered sparkles giving a delicate even shimmer, never large flakes or hexagon confetti");
+        if (finishLower.contains("glitter"))        items.add("fine sparkle on the nails described with glitter — only small bright twinkling points of " +
+                "light scattered loosely over a perfectly smooth, clean, evenly colored glossy surface, in the nail's own " +
+                "hue family (soft pink, rose, silver, or champagne). The sparkle adds no texture and no pattern: the color " +
+                "underneath stays one flat smooth tone with nothing drawn or printed on it, and the gel is clear and " +
+                "smooth. No large flakes, chunks, or confetti");
         if (finishLower.contains("chrome"))         items.add("metallic chrome sheen");
         // ★ 자석젤은 유리알 광택이 기본(입자 없음) — 글리터와 구분한다.
         if (finishLower.contains("magnetic cat eye"))
@@ -1890,6 +2302,13 @@ public class NailDesignService {
                     "gleam gathered in the center of the nail with a bright clean highlight, in silver or " +
                     "champagne gold only, never a stripe or swirl, with no visible particles or sparkle");
         if (finishLower.contains("foil"))           items.add("metallic foil accents");
+        if (java.util.regex.Pattern.compile("\\bknit\\b").matcher(finishLower).find())
+            items.add("knit (velvet) gel on the nails described as knit — soft glossy gel color densely filled with hundreds " +
+                    "of tiny short fiber fragments (chopped wool / velvet flock) at random angles floating inside the gel, smooth " +
+                    "glossy top coat, not long lines or cracks and not a woven fabric look");
+        if (java.util.regex.Pattern.compile("\\bink\\b").matcher(finishLower).find())
+            items.add("ink gel on the nails described as ink — vivid but fully transparent ink color like colored glass or " +
+                    "marker ink, used as drawing fills, washes, or checks on top of the base color, juicy glossy dome");
         // ★ "iridescent powder shimmer"였을 때 이미지 모델이 "shimmer"를 잔글리터로 해석해서
         // 매끈한 크롬 파우더 대신 반짝이 가루처럼 나오던 문제 — glitter를 명시적으로 금지.
         if (finishLower.contains("powder finish"))
@@ -1898,11 +2317,13 @@ public class NailDesignService {
             // 부드러운 헤이즈 버전은 새틴처럼 납작하게 나와서 "파우더 느낌이 별로"였음.
             // ★ 부정문을 길게 나열하면 이미지 모델이 오히려 그 개념(자석젤/글리터)을 떠올림 —
             // 짧은 긍정문 위주로 쓰고 글리터 금지만 한 번 명시한다.
-            items.add("full-cover glossy chrome pearlescent powder finish — a smooth, even mother-of-pearl " +
-                    "chrome sheen across the entire nail surface in the nail's own color (never tinting " +
-                    "the base color), sealed under a glossy top coat, no glitter specks");
+            // ★ "smooth, even ... sheen"만 쓰면 광택이 은은하게 죽어서 새틴처럼 납작했다 - 살아 있는 하이라이트를 명시한다.
+            items.add("full-cover pearlescent powder finish with a luminous, wet-looking mother-of-pearl gloss — a " +
+                    "bright creamy pearl highlight gliding along the curve of the nail and soft iridescent light " +
+                    "across the whole surface in the nail's own color (never tinting the base color), sealed under " +
+                    "a thick glass-like glossy top coat with real depth, no glitter specks");
         if (finishLower.contains("sculpted 3d") || partsLower.contains("charm"))
-            items.add("realistic sculpted 3d decorations, dimensional charms");
+            items.add("realistic sculpted 3d decorations, dimensional charms with smooth plump glossy surfaces and no ribs, stripes, or line patterns on bow loops or petals");
         if (partsLower.contains("pearl"))      items.add("realistic pearl beads");
         if (partsLower.contains("rhinestone")) items.add("subtle rhinestone reflections");
         if (partsLower.contains("metal stud")) items.add("realistic metal stud accents");
@@ -1934,6 +2355,274 @@ public class NailDesignService {
         }
         // 세션 없는 경우 (채팅 없이 직접 생성된 디자인)
         return design.getPromptSummary();
+    }
+
+    private static final int MAX_PLAN_KEYWORDS = 8;
+    private static final int MAX_TOTAL_KEYWORDS = 12;
+    // finish/pattern은 이만큼 이상의 손가락에서 쓰였을 때만 키워드로 (한 손가락에만 쓴 보조 디테일은 제외).
+    // motif/parts(눈에 띄는 장식)는 한 손가락이어도 포함한다.
+    private static final int MIN_STYLE_COUNT = 2;
+    // 키워드 비교용: 의미 없이 붙는 일반 단어는 빼고 비교한다 ("snowman art" == "snowman")
+    private static final Set<String> GENERIC_KEYWORD_WORDS = Set.of(
+            "art", "charm", "charms", "pattern", "finish", "design", "motif", "decor", "decoration",
+            "drawing", "painting", "print", "tip", "tips", "nail", "nails", "style", "look", "effect", "mascot", "bead", "beads", "trim", "shape", "shapes");
+    // 디자인 정보가 없는 막연한 말은 키워드로 보여주지 않는다 (예: "trendy"). 화면에 보이면 한 줄씩 추가.
+    private static final Set<String> VAGUE_KEYWORDS = Set.of(
+            "trendy", "nice", "beautiful", "pretty", "stylish", "premium", "luxury",
+            "fashionable", "popular", "aesthetic");
+    // 같은 뜻의 단어는 하나로 본다 ("plaid" == "check pattern")
+    private static final Map<String, String> KEYWORD_SYNONYMS = Map.of(
+            "plaid", "check", "tartan", "check", "gingham", "check", "checkered", "check", "checks", "check",
+            "flower", "floral");
+
+    /**
+     * 디자인 플랜(5개 손가락)에 실제로 쓰인 finish/pattern/motif/parts 값을 키워드로 뽑는다.
+     * 사진 기반 생성은 슬롯(mood/shape 등)이 거의 비어 있어서 키워드가 3개 안팎으로만 나오던 문제 보완.
+     * 여러 손가락에서 많이 쓰인 값을 먼저, 최대 MAX_PLAN_KEYWORDS개.
+     */
+    /**
+     * 참고 사진이 뚜렷한 작품/캐릭터/브랜드(예: "나루토")일 때 플랜의 reference_subject(한글 이름)를 맨 앞 키워드로 쓴다.
+     * 화면 표시 전용 라벨이라 이미지 프롬프트에는 들어가지 않는다. 비어 있거나 너무 길면 쓰지 않는다.
+     */
+    private static final List<String> APP_SHAPES =
+            List.of("round", "oval", "almond", "stiletto", "ballerina", "square");
+
+    /** 임의의 쉐입 표기를 앱의 6가지 중 하나로 대응시킨다. 대응할 수 없으면 null. ("rounded square" -> square, "coffin" -> ballerina) */
+    private String mapToAppShape(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim().toLowerCase();
+        if (s.isEmpty()) return null;
+        if (s.contains("stiletto") || s.contains("pointed") || s.contains("sharp")) return "stiletto";
+        if (s.contains("ballerina") || s.contains("coffin")) return "ballerina";
+        if (s.contains("almond")) return "almond";
+        if (s.contains("squoval") || s.contains("oval")) return "oval";
+        if (s.contains("square")) return "square";
+        if (s.contains("round")) return "round";
+        return null;
+    }
+
+    /**
+     * plan.shape를 앱의 6가지 쉐입 중 하나로 고정한다. 우선순위: 사용자가 고른 쉐입(슬롯) > 플랜이 적은 값을 대응시킨 것 >
+     * 스캔 추천 쉐입 > oval.
+     */
+    private void enforceAppShape(JsonNode plan, List<String> slotShapes, String scanShape) {
+        if (plan == null || !plan.isObject()) return;
+        String chosen = null;
+        for (String s : slotShapes) {
+            chosen = mapToAppShape(s);
+            if (chosen != null) break;
+        }
+        if (chosen == null) chosen = mapToAppShape(plan.path("shape").asText(""));
+        if (chosen == null) chosen = mapToAppShape(scanShape);
+        if (chosen == null) chosen = "oval";
+        String current = plan.path("shape").asText("");
+        if (!chosen.equals(current)) {
+            System.out.println("[NailDesignService] plan.shape 보정: '" + current + "' -> '" + chosen + "'");
+        }
+        ((ObjectNode) plan).put("shape", chosen);
+    }
+
+    private List<String> referenceSubjectKeyword(JsonNode plan) {
+        if (plan == null || !plan.isObject()) return List.of();
+        String subject = plan.path("reference_subject").asText("").trim();
+        if (subject.isEmpty() || subject.length() > 20 || "none".equalsIgnoreCase(subject)) return List.of();
+        return List.of(subject);
+    }
+
+    private List<String> extractPlanKeywords(JsonNode plan) {
+        if (plan == null || !plan.isObject()) return List.of();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        Set<String> decorations = new HashSet<>(); // motif/parts에서 나온 키워드
+        for (String finger : List.of("thumb", "index", "middle", "ring", "pinky")) {
+            JsonNode f = plan.path(finger);
+            if (!f.isObject()) continue;
+            for (String field : List.of("finish", "pattern", "motif", "parts")) {
+                for (String v : toTextList(f.path(field))) {
+                    String key = v.trim().toLowerCase();
+                    if (key.isBlank() || "none".equals(key) || "상관없음".equals(key)) continue;
+                    counts.merge(key, 1, Integer::sum);
+                    if (field.equals("motif") || field.equals("parts")) decorations.add(key);
+                }
+            }
+        }
+        return counts.entrySet().stream()
+                .filter(e -> decorations.contains(e.getKey()) || e.getValue() >= MIN_STYLE_COUNT)
+                .sorted((x, y) -> y.getValue() - x.getValue()) // 안정 정렬: 동률이면 등장 순서 유지
+                .limit(MAX_PLAN_KEYWORDS)
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    /** 키워드 중복 비교용 정규형: 소문자, 일반 단어 제거, 동의어 통일. 비면 원문 소문자. */
+    private String keywordCore(String k) {
+        List<String> words = new ArrayList<>();
+        for (String w : k.trim().toLowerCase().split("[\\s_-]+")) {
+            if (w.isBlank() || GENERIC_KEYWORD_WORDS.contains(w)) continue;
+            words.add(KEYWORD_SYNONYMS.getOrDefault(w, w));
+        }
+        return words.isEmpty() ? k.trim().toLowerCase() : String.join(" ", words);
+    }
+
+    /** 슬롯 키워드 뒤에 플랜 키워드를 붙이되, 같은 뜻(snowman / snowman art, check pattern / plaid)은 먼저 나온 것만 남기고 전체 MAX_TOTAL_KEYWORDS개까지만. */
+    private List<String> mergeKeywords(List<String> primary, List<String> extra) {
+        Set<String> seen = new HashSet<>();
+        List<String> out = new ArrayList<>();
+        for (List<String> list : List.of(primary, extra)) {
+            for (String k : list) {
+                if (k == null || k.isBlank()) continue;
+                if (VAGUE_KEYWORDS.contains(k.trim().toLowerCase())) continue;
+                if (seen.add(keywordCore(k)) && out.size() < MAX_TOTAL_KEYWORDS) out.add(k.trim());
+            }
+        }
+        return out;
+    }
+
+    // ── 키워드 한글화 ─────────────────────────────────────────────────────────
+    // 결과 화면 키워드 칩은 영어 값(슬롯/플랜의 통제 어휘)이므로, 마지막 단계에서 한글로 바꾼다.
+    // 중복 제거(keywordCore)는 영어 기준으로 먼저 끝난 뒤에 적용한다.
+    // 사전에 없는 단어가 하나라도 있으면 그 키워드는 영어 그대로 둔다 (엉뚱한 번역보다 낫다).
+    // 새 키워드가 영어로 뜨면 KO_WORDS(단어) 또는 KO_PHRASES(문구 전체)에 한 줄 추가하면 된다.
+    private static final Map<String, String> KO_PHRASES = Map.ofEntries(
+            Map.entry("warm and cozy", "따뜻/포근"),
+            Map.entry("french tip", "프렌치"),
+            Map.entry("check pattern", "체크"),
+            Map.entry("powder finish", "파우더"),
+            Map.entry("magnetic cat eye", "마그네틱"),
+            Map.entry("cheek blush", "치크"),
+            Map.entry("sculpted 3d", "3D"),
+            Map.entry("polka dot", "도트"),
+            Map.entry("line art", "라인 아트"),
+            Map.entry("color block", "컬러 블록"),
+            Map.entry("bow ribbon", "리본"),
+            Map.entry("bow charm 3d", "리본"),
+            Map.entry("rose gold", "로즈 골드"));
+
+    private static final Map<String, String> KO_WORDS = Map.ofEntries(
+            // 무드
+            Map.entry("lovely", "러블리"), Map.entry("simple", "심플"), Map.entry("modern", "모던"),
+            Map.entry("chic", "시크"), Map.entry("cute", "큐트"), Map.entry("kitsch", "키치"),
+            Map.entry("funky", "펑키"), Map.entry("feminine", "페미닌"), Map.entry("elegant", "우아"),
+            Map.entry("pure", "순수"), Map.entry("delicate", "섬세"), Map.entry("glamorous", "화려"),
+            Map.entry("glam", "글램"), Map.entry("romantic", "로맨틱"), Map.entry("soft", "소프트"),
+            Map.entry("minimal", "미니멀"), Map.entry("natural", "내추럴"), Map.entry("vintage", "빈티지"),
+            Map.entry("dark", "다크"), Map.entry("playful", "유쾌함"),
+            Map.entry("sweet", "스위트"), Map.entry("sophisticated", "세련된"), Map.entry("cool", "쿨"),
+            Map.entry("y2k", "Y2K"), Map.entry("cozy", "포근한"), Map.entry("warm", "따뜻한"),
+            Map.entry("dreamy", "몽환적"), Map.entry("pastel", "파스텔"),
+            // 디자인/마감/패턴
+            Map.entry("glitter", "글리터"), Map.entry("gradient", "그라데이션"), Map.entry("cheek", "치크"),
+            Map.entry("marble", "마블"), Map.entry("french", "프렌치"), Map.entry("magnetic", "마그네틱"),
+            Map.entry("powder", "파우더"), Map.entry("matte", "매트"), Map.entry("glossy", "글로시"),
+            Map.entry("art", "아트"), Map.entry("chrome", "크롬"), Map.entry("jelly", "젤리"),
+            Map.entry("foil", "호일"), Map.entry("syrup", "시럽"), Map.entry("plaid", "체크"),
+            Map.entry("check", "체크"), Map.entry("stripe", "스트라이프"), Map.entry("lace", "레이스"),
+            Map.entry("watercolor", "수채화"), Map.entry("blooming", "블루밍"), Map.entry("speckle", "스펙클"), Map.entry("line", "라인"),
+            Map.entry("dot", "도트"), Map.entry("dots", "도트"), Map.entry("sparkle", "스파클"),
+            // 모티프/파츠
+            Map.entry("star", "별"), Map.entry("ribbon", "리본"), Map.entry("bow", "리본"),
+            Map.entry("floral", "플로럴"), Map.entry("flower", "플라워"), Map.entry("heart", "하트"),
+            Map.entry("crystal", "크리스탈"), Map.entry("pearl", "진주"), Map.entry("swirl", "소용돌이"),
+            Map.entry("butterfly", "나비"), Map.entry("cross", "십자가"), Map.entry("bunny", "토끼"),
+            Map.entry("leaf", "잎"), Map.entry("shell", "조개"), Map.entry("character", "캐릭터"),
+            Map.entry("lettering", "레터링"), Map.entry("rhinestone", "큐빅"), Map.entry("bead", "비즈"),
+            Map.entry("charm", "참"), Map.entry("metal", "메탈"),
+            Map.entry("stud", "스터드"), Map.entry("chain", "체인"), Map.entry("cluster", "클러스터"),
+            Map.entry("snowman", "눈사람"), Map.entry("spider", "거미"), Map.entry("web", "거미줄"),
+            Map.entry("cobweb", "거미줄"), Map.entry("tip", "팁"), Map.entry("3d", "3D"),
+            // 쉐입/길이
+            Map.entry("round", "라운드"), Map.entry("oval", "오발"), Map.entry("almond", "아몬드"),
+            Map.entry("stiletto", "스틸레토"), Map.entry("ballerina", "발레리나"), Map.entry("coffin", "발레리나"),
+            Map.entry("square", "스퀘어"), Map.entry("short", "숏"), Map.entry("medium", "미디엄"),
+            Map.entry("long", "롱"),
+            // 계절
+            Map.entry("spring", "봄"), Map.entry("summer", "여름"), Map.entry("autumn", "가을"),
+            Map.entry("fall", "가을"), Map.entry("winter", "겨울"),
+            // 색 (ColorNameService 이름 + 수식어)
+            Map.entry("white", "화이트"), Map.entry("black", "블랙"), Map.entry("red", "레드"),
+            Map.entry("blue", "블루"), Map.entry("green", "그린"), Map.entry("yellow", "옐로"),
+            Map.entry("orange", "오렌지"), Map.entry("pink", "핑크"), Map.entry("purple", "퍼플"),
+            Map.entry("brown", "브라운"), Map.entry("gray", "그레이"), Map.entry("grey", "그레이"),
+            Map.entry("beige", "베이지"), Map.entry("ivory", "아이보리"), Map.entry("cream", "크림"),
+            Map.entry("navy", "네이비"), Map.entry("teal", "청록"), Map.entry("mint", "민트"),
+            Map.entry("peach", "피치"), Map.entry("coral", "코랄"), Map.entry("rose", "로즈"),
+            Map.entry("lavender", "라벤더"), Map.entry("olive", "올리브"), Map.entry("gold", "골드"),
+            Map.entry("silver", "실버"), Map.entry("magenta", "마젠타"), Map.entry("burgundy", "버건디"),
+            Map.entry("nude", "누드"), Map.entry("clear", "클리어"), Map.entry("deep", "딥"),
+            Map.entry("light", "라이트"), Map.entry("pale", "페일"), Map.entry("muted", "뮤트"),
+            Map.entry("vivid", "비비드"), Map.entry("dusty", "애쉬"), Map.entry("milky", "밀키"),
+            Map.entry("knit", "니트"), Map.entry("ink", "잉크"));
+
+    // 한글로 옮길 때 뜻이 없어 빼는 단어 ("star motif" -> "별")
+    private static final Set<String> KO_DROP_WORDS = Set.of("motif", "finish", "pattern", "design", "mascot", "trim", "shape", "shapes");
+
+    /** 키워드 하나를 한글로. 사전에 없는 단어가 있거나 이미 한글이면 원문 그대로. */
+    private String localizeKeyword(String keyword) {
+        String k = keyword.trim();
+        String lower = k.toLowerCase();
+        if (lower.isEmpty()) return k;
+        if (KO_PHRASES.containsKey(lower)) return KO_PHRASES.get(lower);
+        List<String> out = new ArrayList<>();
+        for (String w : lower.split("[\\s_-]+")) {
+            if (w.isBlank() || KO_DROP_WORDS.contains(w)) continue;
+            String ko = KO_WORDS.get(w);
+            if (ko == null) return k; // 모르는 단어(또는 한글) -> 원문 유지
+            out.add(ko);
+        }
+        return out.isEmpty() ? k : String.join(" ", out);
+    }
+
+    // 한글로 바꾼 뒤에도 남아도 되는 영문 표기 ("3D", "Y2K")
+    private static final java.util.regex.Pattern ALLOWED_LATIN = java.util.regex.Pattern.compile("3D|Y2K");
+
+    /**
+     * 키워드 목록을 한글로 바꾸고, 한글로 바꾼 뒤 같아진 것(예: plaid / check pattern -> 체크)은 하나만 남긴다.
+     * 사전에 없어서 영어가 그대로 남은 키워드는 화면에 영어 단어로 뜨지 않도록 제외한다(서버 로그에는 남긴다 -> 사전에 추가하면 됨).
+     */
+    private List<String> localizeKeywords(List<String> keywords) {
+        Set<String> seen = new LinkedHashSet<>();
+        for (String k : keywords) {
+            if (k == null || k.isBlank()) continue;
+            String ko = localizeKeyword(k);
+            if (ALLOWED_LATIN.matcher(ko).replaceAll("").matches(".*[A-Za-z].*")) {
+                System.out.println("[Keyword] 한글 매핑이 없어 키워드에서 제외: '" + k + "' (KO_WORDS/KO_PHRASES에 추가하면 표시됨)");
+                continue;
+            }
+            seen.add(ko);
+        }
+        return new ArrayList<>(seen);
+    }
+
+    /**
+     * 결과 화면 키워드(최종 이미지 기준): 슬롯 + 플랜(finish/pattern/motif/parts) 키워드에,
+     * 수정(refine)으로 누적된 plan.keywordOverrides(add/remove)를 반영한다.
+     * 생성 직후에는 overrides가 없으므로 슬롯 + 플랜 키워드만 나온다.
+     */
+    public List<String> extractDesignKeywords(Map<String, SlotData> slots, DesignSession session, String planJson) {
+        JsonNode plan = null;
+        if (planJson != null && !planJson.isBlank()) {
+            try { plan = objectMapper.readTree(planJson); } catch (Exception ignored) {}
+        }
+        List<String> base = mergeKeywords(referenceSubjectKeyword(plan),
+                mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)));
+        if (plan == null) return localizeKeywords(base);
+
+        List<String> removes = new ArrayList<>();
+        plan.path("keywordOverrides").path("remove").forEach(n -> removes.add(n.asText("").trim().toLowerCase()));
+        List<String> adds = new ArrayList<>();
+        plan.path("keywordOverrides").path("add").forEach(n -> {
+            String v = n.asText("").trim();
+            if (!v.isBlank()) adds.add(v);
+        });
+
+        List<String> kept = new ArrayList<>();
+        for (String k : base) {
+            String lk = k.toLowerCase();
+            boolean removed = removes.stream().anyMatch(r -> !r.isBlank() && (lk.contains(r) || r.contains(lk)));
+            if (!removed) kept.add(k);
+        }
+        int room = Math.max(0, MAX_TOTAL_KEYWORDS - adds.size());
+        if (kept.size() > room) kept = new ArrayList<>(kept.subList(0, room));
+        return localizeKeywords(mergeKeywords(kept, adds));
     }
 
     public List<String> extractKeywordsFromSlots(Map<String, SlotData> slots, DesignSession session) {

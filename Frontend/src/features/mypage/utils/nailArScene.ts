@@ -4,7 +4,8 @@ import {
   FINGERS,
   clampDesignAspect,
   computeNailPoses,
-  facingOpacity,
+  tipFrame,
+  type NailFit,
   type TrackedHand,
 } from '@/features/mypage/utils/fingerLandmarks'
 import { createFingerTexture, type ShapeTemplate } from '@/features/mypage/utils/nailMeshAsset'
@@ -21,9 +22,11 @@ const MAX_HANDS = 2
 const NAIL_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vViewNormal;
+  varying vec2 vScreen;
   void main() {
     vUv = uv;
     vViewNormal = normalize(normalMatrix * normal);
+    vScreen = (modelMatrix * vec4(position, 1.0)).xy;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
@@ -31,13 +34,17 @@ const NAIL_VERTEX_SHADER = /* glsl */ `
 const NAIL_FRAGMENT_SHADER = /* glsl */ `
   uniform sampler2D map;
   uniform float opacity;
+  // NailPose.cutoff as (normal, -normal . point): the tip shows where
+  // dot(cutoff, (x, y, 1)) >= 0, softened over a pixel.
+  uniform vec3 cutoff;
   varying vec2 vUv;
   varying vec3 vViewNormal;
+  varying vec2 vScreen;
   // View space here is the video canvas: x right, y down, z toward the viewer.
   const vec3 HIGHLIGHT_DIR = normalize(vec3(-0.25, -0.45, 1.6));
   void main() {
     vec4 texel = texture2D(map, vUv);
-    float alpha = texel.a * opacity;
+    float alpha = texel.a * opacity * smoothstep(-0.5, 0.5, dot(cutoff, vec3(vScreen, 1.0)));
     if (alpha < 0.01) discard;
     vec3 n = normalize(vViewNormal);
     float shade = mix(0.8, 1.0, smoothstep(0.0, 0.8, abs(n.z)));
@@ -52,6 +59,7 @@ function createNailMaterial(): THREE.ShaderMaterial {
     uniforms: {
       map: { value: null },
       opacity: { value: 1 },
+      cutoff: { value: new THREE.Vector3(0, 0, 1) },
     },
     vertexShader: NAIL_VERTEX_SHADER,
     fragmentShader: NAIL_FRAGMENT_SHADER,
@@ -146,7 +154,13 @@ export class NailArScene {
     this.renderer.setSize(width, height, false)
   }
 
-  updateFromHands(hands: TrackedHand[], width: number, height: number, mirror: boolean) {
+  updateFromHands(
+    hands: TrackedHand[],
+    width: number,
+    height: number,
+    mirror: boolean,
+    fits?: ReadonlyMap<number, ReadonlyArray<NailFit | null>>,
+  ) {
     this.resize(width, height)
 
     for (const group of this.meshGroups) {
@@ -159,32 +173,40 @@ export class NailArScene {
       const group = this.meshGroups[handIdx]
       if (!group) return
 
-      for (const pose of computeNailPoses(hand, width, height, mirror)) {
+      for (const pose of computeNailPoses(hand, width, height, mirror, fits?.get(hand.id))) {
         const fingerIdx = FINGERS.indexOf(pose.finger)
         const mesh = group[fingerIdx]
         const fingerTexture = this.fingerTextures[fingerIdx]
         if (!mesh || !fingerTexture) continue
 
-        const opacity = facingOpacity(pose.facing)
+        const opacity = pose.opacity
         if (opacity <= 0) continue
 
         // Width comes from the measured hand; length follows the design
         // cutout's own proportions (the press-on tip as it was generated), so
-        // the cutout fills the UV rect exactly instead of being stretched.
+        // the cutout fills the UV rect exactly instead of being stretched -
+        // unless that's too short to cover the nail at all (see tipFrame).
         const widthScale = pose.width / template.naturalWidth
-        const nailLength = pose.width / clampDesignAspect(fingerTexture.aspectRatio)
-        const lengthScale = nailLength / template.naturalLength
+        const { axis, across, normal, length } = tipFrame(pose, pose.width / clampDesignAspect(fingerTexture.aspectRatio))
+        const lengthScale = length / template.naturalLength
 
-        // Local +x (u grows along it) -> pose.across, local +y (cuticle ->
-        // free edge) -> pose.axis, local +z (out of the dome) -> pose.normal.
-        this.basisX.set(pose.across.x, pose.across.y, pose.across.z).multiplyScalar(widthScale)
-        this.basisY.set(pose.axis.x, pose.axis.y, pose.axis.z).multiplyScalar(lengthScale)
-        this.basisZ.set(pose.normal.x, pose.normal.y, pose.normal.z).multiplyScalar(widthScale)
+        // Local +x (u grows along it) -> across, local +y (cuticle -> free
+        // edge) -> axis, local +z (out of the dome) -> normal.
+        this.basisX.set(across.x, across.y, across.z).multiplyScalar(widthScale)
+        this.basisY.set(axis.x, axis.y, axis.z).multiplyScalar(lengthScale)
+        this.basisZ.set(normal.x, normal.y, normal.z).multiplyScalar(widthScale)
         mesh.matrix.makeBasis(this.basisX, this.basisY, this.basisZ)
         mesh.matrix.setPosition(pose.origin.x, pose.origin.y, pose.origin.z)
         mesh.matrixWorldNeedsUpdate = true
 
         mesh.material.uniforms.opacity.value = opacity
+        const { cutoff } = pose
+        if (cutoff) {
+          const constant = -(cutoff.normal.x * cutoff.point.x + cutoff.normal.y * cutoff.point.y)
+          mesh.material.uniforms.cutoff.value.set(cutoff.normal.x, cutoff.normal.y, constant)
+        } else {
+          mesh.material.uniforms.cutoff.value.set(0, 0, 1)
+        }
         mesh.visible = true
       }
     })

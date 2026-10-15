@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PageHeader } from '@/features/mypage/components/PageHeader'
 import { FavBlockToolbar } from '@/features/mypage/components/FavBlockToolbar'
 import { ImageGrid } from '@/features/mypage/components/ImageGrid'
-import { Pagination } from '@/features/mypage/components/Pagination'
+import { Pagination } from '@/shared/components/Pagination'
 import { useMyPageContext } from '../context'
 import { Icon } from '../shared'
 
@@ -259,7 +259,7 @@ export function FavoritesTab() {
                                 title: '찜한 디자인이 없어요',
                                 description: '마음에 드는 디자인에 ♥를 눌러 모아보세요.',
                                 actionLabel: '디자인 둘러보기',
-                                onAction: () => navigate('/mypage/designs'),
+                                onAction: () => navigate('/gallery'),
                               }}
                               options={{ dateMode: 'date' }}
                               designs={designs}

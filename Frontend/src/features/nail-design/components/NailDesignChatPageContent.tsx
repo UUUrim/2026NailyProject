@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
+import { Fragment, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
@@ -10,7 +10,12 @@ import {
     SHAPE_PREVIEW_IMAGES,
     type PreferenceKey,
 } from '@/shared/constants/designPreferences'
-import { useNailDesignChatPage, QMARK_TOKEN, MENU_OPTIONS } from '@/features/nail-design/hooks/useNailDesignChatPage'
+import {
+    useNailDesignChatPage,
+    ANALYSIS_BUTTON_TOKEN,
+    PREFERENCE_NOTE_MAX_LENGTH,
+    PREFERENCE_STEPS,
+} from '@/features/nail-design/hooks/useNailDesignChatPage'
 import '@/styles/design-chat.css'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
@@ -87,35 +92,92 @@ const MENU_ITEMS: {
         label: '내 스캔 정보 기반으로 자동 생성',
         title: '내 스캔 정보로 자동',
         desc: '저장된 손 분석 결과를 바탕으로 어울리는 디자인을 알아서 추천해요.',
-        icon: (
-            <svg viewBox="0 0 24 24" fill="none" width="26" height="26">
-                <path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11.5V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6.5 7C6.7 20 5 17 5 14.2v-2a1.4 1.4 0 0 1 2.8 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-        ),
+        icon: <HandIcon size={26} strokeWidth={1.5} />,
     },
 ]
-function QuestionMarkIcon({ className, size = 16 }: { className?: string; size?: number }) {
+// 손 모양 아이콘 — '내 스캔 정보로 자동' 카드와 입력창의 '손 분석 결과' 버튼이 같이 쓴다
+// (손 그림이 24칸 안에서 왼쪽 위로 치우쳐 있어서(가로 중심 11, 세로 11.5) viewBox를 옮겨 한가운데에 놓는다)
+function HandIcon({ size = 16, strokeWidth = 1.8 }: { size?: number; strokeWidth?: number }) {
     return (
-        <svg
-            width={size}
-            height={size}
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-            className={className}
-            style={{ display: 'inline', verticalAlign: '-3px' }}
-        >
-            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+        <svg width={size} height={size} viewBox="-1 -0.5 24 24" fill="none" aria-hidden="true">
             <path
-                d="M9.5 9.2a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1.2.9-1.2 1.7v.4"
+                d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 11V4.5a1.5 1.5 0 0 1 3 0V11M14 11.5V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6.5 7C6.7 20 5 17 5 14.2v-2a1.4 1.4 0 0 1 2.8 0"
                 stroke="currentColor"
-                strokeWidth="1.8"
+                strokeWidth={strokeWidth}
                 strokeLinecap="round"
+                strokeLinejoin="round"
             />
-            <circle cx="12" cy="16.6" r="1" fill="currentColor" />
         </svg>
     )
 }
+// 말풍선 글 — 줄마다 <p>로 나누고, 손 분석 버튼 자리표시자는 손 아이콘으로 그린다
+function renderBubbleText(text: string) {
+    return text.split('\n').map((line, i) => (
+        <p key={i}>
+            {line.split(ANALYSIS_BUTTON_TOKEN).map((part, j, arr) => (
+                <span key={j}>
+                    {part}
+                    {j < arr.length - 1 && (
+                        <span className="design-chat__analysis-icon-inline">
+                            <HandIcon size={17} />
+                        </span>
+                    )}
+                </span>
+            ))}
+        </p>
+    ))
+}
+
+// 디자인 카드 — 생성 중엔 반짝이·진행 막대를 보여 주다가, 완성 이미지가 들어오면 같은 자리에서 이미지로 바뀐다
+function DesignResultCard({
+    imageUrl,
+    isGenerating,
+    onOpen,
+    onLoad,
+}: {
+    imageUrl: string | null
+    isGenerating: boolean
+    onOpen: (url: string) => void
+    onLoad: () => void
+}) {
+    const [isLoaded, setIsLoaded] = useState(false)
+    // 처음부터 완성된 채로 그려진 카드(대화 복원 등)는 생성 중 표시 없이 이미지만 보여 준다
+    const [startedGenerating] = useState(isGenerating)
+    const showLoading = isGenerating || (startedGenerating && !isLoaded)
+
+    return (
+        <div className={`design-chat__design-card${isLoaded ? ' is-loaded' : ''}`}>
+            {imageUrl && (
+                <img
+                    src={imageUrl}
+                    alt="생성된 네일 디자인"
+                    onLoad={() => {
+                        setIsLoaded(true)
+                        onLoad()
+                    }}
+                    onError={() => setIsLoaded(true)}
+                    onClick={() => onOpen(imageUrl)}
+                />
+            )}
+            <div
+                className={`design-chat__design-card-loading${showLoading ? '' : ' is-hidden'}`}
+                role={showLoading ? 'status' : undefined}
+                aria-hidden={!showLoading}
+            >
+                <span className="design-chat__design-card-sparkles" aria-hidden="true">
+                    {[0, 1, 2].map((i) => (
+                        <svg key={i} viewBox="0 0 24 24">
+                            <path d="M12 2C12.6 7.4 16.6 11.4 22 12C16.6 12.6 12.6 16.6 12 22C11.4 16.6 7.4 12.6 2 12C7.4 11.4 11.4 7.4 12 2Z" />
+                        </svg>
+                    ))}
+                </span>
+                <span className="design-chat__design-card-label">디자인 생성 중</span>
+                <span className="design-chat__design-card-bar" aria-hidden="true" />
+            </div>
+        </div>
+    )
+}
+
 // 사이드바 헤더의 "분석 결과 선택" 드롭다운 — 손 분석 이력(양손 다 촬영된 세션)을
 // 대표 피부색 스와치 + 날짜 + 헥스값으로 보여주고 고를 수 있게 한다.
 function SessionDropdown({
@@ -242,24 +304,41 @@ const ENGLISH_SUBLABEL_STEPS: PreferenceKey[] = ['mood', 'designType', 'motif', 
 function toEnglishTitleCase(value: string): string {
     return value.replace(/\b\w/g, (c) => c.toUpperCase())
 }
+
+// 분위기/디자인 타입/모티프 단계의 "기타" 입력란 안내 문구
+const PREFERENCE_NOTE_PLACEHOLDERS: Partial<Record<PreferenceKey, string>> = {
+    mood: '찾으시는 분위기가 없다면 직접 입력해 주세요(예: 몽환적인). 덧붙이고 싶으신 의견을 입력해도 좋아요.',
+    designType: '찾으시는 디자인 타입이 없다면 직접 입력해 주세요(예: 체크 패턴). 덧붙이고 싶으신 의견을 입력해도 좋아요.',
+    motif: '찾으시는 모티프가 없다면 직접 입력해 주세요(예: 나비). 덧붙이고 싶으신 의견을 입력해도 좋아요.',
+}
+// 컬러 단계의 "기타" 입력란 안내 문구 (색 이름을 적거나, 어울리는 색을 추천해 달라고 해도 된다)
+const COLOR_NOTE_PLACEHOLDER = '컬러를 고르기 어려우시다면 원하시는 요청 사항을 입력해 주세요.'
 export function NailDesignChatPageContent() {
     const {
         navigate,
         canSelectSession,
         userName,
         isInitReady,
-        scanId,
         bubbles,
         activeQuickReply,
         isAwaitingGenerateConfirm,
+        isPreferenceInputLocked,
         selectedInQuickReply,
+        freeformSelectedColors,
+        activeNoteStep,
+        activeNote,
+        hasActiveNote,
+        setPreferenceNote,
+        colorNote,
+        setColorNote,
+        submitColorNote,
         preferenceStepIndex,
-        selectedPhotoFile,
         selectedPhotoPreviewUrl,
         photoInputRef,
         inputValue,
         setInputValue,
         isSending,
+        isGeneratingDesign,
         customColor,
         setCustomColor,
         isQuickReplyCollapsed,
@@ -282,6 +361,7 @@ export function NailDesignChatPageContent() {
         messagesRef,
         chatContainerRef,
         textareaRef,
+        inputbarRef,
         scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
@@ -294,7 +374,9 @@ export function NailDesignChatPageContent() {
         confirmPreferenceStep,
         goToPreviousPreferenceStep,
         handlePhotoFileChange,
-        handlePhotoConfirm,
+        removeSelectedPhoto,
+        hasPhotoAttachment,
+        isPhotoInputLocked,
         handleSubmitInput,
         handleQuickReplyClick,
         closeFreeformPicker,
@@ -311,6 +393,27 @@ export function NailDesignChatPageContent() {
         adjustTextareaHeight,
     } = useNailDesignChatPage()
 
+    // "사진 변경하기"를 눌러 파일 고르기 창이 떠 있는 동안 브라우저는 마우스 위치를 모른다. 창을 닫고 돌아오면
+    // 마지막으로 누른 자리(= 이 버튼 위)에 마우스가 있다고 보고 호버 모양을 띄워 두므로, 눌렀을 때부터
+    // 마우스가 실제로 버튼 위에서 움직이기 전까지는 호버 모양을 끈다.
+    const [isPhotoChangeHoverSuppressed, setIsPhotoChangeHoverSuppressed] = useState(false)
+    // 지금 반영 중인 손 분석 기록의 촬영 날짜 (예: 10월 12일)
+    const scanDateLabel = formatMonthDay(leftAnalysis?.scannedAt ?? rightAnalysis?.scannedAt ?? '')
+    // 선택지 기반 생성에서 지금 선택 창이 몇 번째 단계인지 (1부터, 선택지 단계가 아니면 0)
+    const preferenceStepNumber = activeQuickReply?.id.startsWith('pref-')
+        ? PREFERENCE_STEPS.indexOf(activeQuickReply.id.slice(5) as PreferenceKey) + 1
+        : 0
+    // 입력 칸 안내 문구 — 칸이 좁으면 말줄임표로 줄이도록 textarea 위에 따로 그린다
+    const inputPlaceholder = isPreferenceInputLocked
+        ? '위 선택지에서 골라 주세요.'
+        : isAwaitingGenerateConfirm
+            ? '위 버튼을 눌러 주세요.'
+            : isPhotoInputLocked
+                ? '사진을 첨부해 주세요.'
+                : hasPhotoAttachment
+                    ? '추가적인 요청 사항이 있다면 함께 입력해 주세요.'
+                    : '또는 원하시는 디자인을 바로 입력해 주세요.'
+
     return (
         <AppShell mainClassName="design-chat-page">
             <div className="design-chat-layout">
@@ -320,20 +423,20 @@ export function NailDesignChatPageContent() {
                             <div className="design-chat-sidebar__header-main">
                                 <p className="design-chat-sidebar__eyebrow">Hand Analysis</p>
                                 <div className="design-chat-sidebar__title-row">
-                                    <h2>{userName ? `${userName} 님의 손 분석` : '손 분석 결과'}</h2>
+                                    <h2>{userName ? `${userName}님의 손 분석` : '손 분석 결과'}</h2>
                                     {analysisSummary &&
                                         (canSelectSession ? (
                                             scanSessions.length > 0 && (
                                                 <SessionDropdown
                                                     sessions={scanSessions}
                                                     selectedKey={selectedSessionKey}
-                                                    currentDateLabel={formatMonthDay(leftAnalysis?.scannedAt ?? rightAnalysis?.scannedAt ?? '')}
+                                                    currentDateLabel={scanDateLabel}
                                                     onSelect={(session) => void handleSelectSession(session)}
                                                 />
                                             )
                                         ) : (
                                             <span className="design-chat-sidebar__session-static">
-                                                {formatMonthDay(leftAnalysis?.scannedAt ?? rightAnalysis?.scannedAt ?? '')}
+                                                {scanDateLabel}
                                             </span>
                                         ))}
                                 </div>
@@ -357,7 +460,7 @@ export function NailDesignChatPageContent() {
                                     <p className="design-chat-sidebar__empty-text">
                                         손 스캔 정보가 없습니다.
                                         <br />
-                                        {userName ? `${userName} 님의` : '회원님의'} 손 정보를 바탕으로 맞춤 디자인을 생성하려면,
+                                        {userName ? `${userName}님의` : '회원님의'} 손 정보를 바탕으로 맞춤 디자인을 생성하려면,
                                         먼저 손을 촬영해 주세요.
                                     </p>
                                     <button
@@ -506,36 +609,55 @@ export function NailDesignChatPageContent() {
                                 </div>
                             </div>
                         )}
-                        {bubbles.map((bubble) => (
+                        {bubbles.map((bubble) =>
+                            bubble.isGenerating || bubble.isDesignResult ? (
+                                // 디자인 카드 — 생성 중 카드가 완성되면 같은 자리에 이미지가 뜨고, 글은 그 아래 별도 말풍선으로
+                                <Fragment key={bubble.id}>
+                                    <div className="design-chat__row design-chat__row--assistant">
+                                        <img src="/images/logo.png" alt="" className="design-chat__avatar" />
+                                        <div className="design-chat__design-cards">
+                                            {(bubble.imageUrls && bubble.imageUrls.length > 0 ? bubble.imageUrls : [null]).map(
+                                                (url, i) => (
+                                                    <DesignResultCard
+                                                        key={i}
+                                                        imageUrl={url}
+                                                        isGenerating={Boolean(bubble.isGenerating)}
+                                                        onOpen={(imageUrl) => openZoomedImage(imageUrl, true)}
+                                                        onLoad={scrollMessagesToBottom}
+                                                    />
+                                                ),
+                                            )}
+                                        </div>
+                                    </div>
+                                    {bubble.text && (
+                                        <div className="design-chat__row design-chat__row--assistant">
+                                            <img src="/images/logo.png" alt="" className="design-chat__avatar" />
+                                            <div className="design-chat__bubble design-chat__bubble--assistant">
+                                                {renderBubbleText(bubble.text)}
+                                            </div>
+                                        </div>
+                                    )}
+                                </Fragment>
+                            ) : (
                             <div key={bubble.id} className={`design-chat__row design-chat__row--${bubble.role}`}>
                                 {bubble.role === 'assistant' && (
                                     <img src="/images/logo.png" alt="" className="design-chat__avatar" />
                                 )}
-                                <div className={`design-chat__bubble design-chat__bubble--${bubble.role}`}>
-                                    {bubble.text.split('\n').map((line, i) => (
-                                        <p key={i}>
-                                            {line.split(QMARK_TOKEN).map((part, j, arr) => (
-                                                <span key={j}>
-                                {part}
-                                                    {j < arr.length - 1 && <QuestionMarkIcon />}
-                              </span>
-                                            ))}
-                                        </p>
-                                    ))}
+                                <div
+                                    className={`design-chat__bubble design-chat__bubble--${bubble.role}${
+                                        !bubble.text && bubble.imageUrls?.length ? ' design-chat__bubble--image-only' : ''
+                                    }`}
+                                >
+                                    {bubble.text && renderBubbleText(bubble.text)}
+                                    {/* 사용자가 올린 참고 사진 */}
                                     {bubble.imageUrls && bubble.imageUrls.length > 0 && (
-                                        <div
-                                            className={
-                                                bubble.isDesignResult
-                                                    ? 'design-chat__bubble-images'
-                                                    : 'design-chat__bubble-images design-chat__bubble-images--user-photo'
-                                            }
-                                        >
+                                        <div className="design-chat__bubble-images design-chat__bubble-images--user-photo">
                                             {bubble.imageUrls.map((url, i) => (
                                                 <div key={i} className="design-chat__bubble-image-wrap">
                                                     <img
                                                         src={url}
-                                                        alt={bubble.isDesignResult ? `생성된 네일 디자인 ${i + 1}` : '업로드한 참고 사진'}
-                                                        onClick={() => openZoomedImage(url, Boolean(bubble.isDesignResult))}
+                                                        alt="업로드한 참고 사진"
+                                                        onClick={() => openZoomedImage(url, false)}
                                                         onLoad={scrollMessagesToBottom}
                                                         style={{ cursor: 'zoom-in' }}
                                                     />
@@ -552,8 +674,10 @@ export function NailDesignChatPageContent() {
                                     )}
                                 </div>
                             </div>
-                        ))}
-                        {isSending && (
+                            ),
+                        )}
+                        {/* 채팅 답변을 기다리는 중 — 디자인을 만드는 중엔 대화 안의 생성 중 카드가 대신 보인다 */}
+                        {isSending && !isGeneratingDesign && (
                             <div className="design-chat__row design-chat__row--assistant">
                                 <img src="/images/logo.png" alt="" className="design-chat__avatar" />
                                 <div className="design-chat__bubble design-chat__bubble--assistant design-chat__bubble--typing">
@@ -565,9 +689,14 @@ export function NailDesignChatPageContent() {
                         )}
                     </div>
 
-                    {activeQuickReply && (
-                        <div className="design-chat__quickreply">
-                            <div className="design-chat__quickreply-header">
+                    {/* 사진을 첨부하면 사진 선택 창은 숨긴다 — 사진은 입력창에서 보고 "사진 변경하기"로 바꾼다 */}
+                    {activeQuickReply && !hasPhotoAttachment && (
+                        <div className={`design-chat__quickreply${isQuickReplyCollapsed ? ' is-collapsed' : ''}`}>
+                            <div
+                                className={`design-chat__quickreply-header${
+                                    preferenceStepNumber > 0 ? ' design-chat__quickreply-header--with-steps' : ''
+                                }`}
+                            >
                                 {activeQuickReply.id.startsWith('pref-') && preferenceStepIndex > 0 && (
                                     <button
                                         type="button"
@@ -601,6 +730,25 @@ export function NailDesignChatPageContent() {
                                 >
                                     <p className="design-chat__quickreply-question">{activeQuickReply.question}</p>
                                 </button>
+
+                                {preferenceStepNumber > 0 && (
+                                    <span
+                                        className="design-chat__step-bar"
+                                        role="img"
+                                        aria-label={`${PREFERENCE_STEPS.length}단계 중 ${preferenceStepNumber}단계`}
+                                    >
+                                        <span className="design-chat__step-bar-track" aria-hidden="true">
+                                            {PREFERENCE_STEPS.map((step, i) => (
+                                                <span
+                                                    key={step}
+                                                    className={`design-chat__step-bar-seg${
+                                                        i < preferenceStepNumber - 1 ? ' is-done' : i === preferenceStepNumber - 1 ? ' is-current' : ''
+                                                    }`}
+                                                />
+                                            ))}
+                                        </span>
+                                    </span>
+                                )}
 
                                 <button
                                     type="button"
@@ -690,45 +838,19 @@ export function NailDesignChatPageContent() {
                                         </div>
                                     ) : activeQuickReply.id === 'photo-upload' ? (
                                         <div className="design-chat__photo-upload">
-                                            <input
-                                                ref={photoInputRef}
-                                                type="file"
-                                                accept="image/*"
-                                                className="design-chat__photo-upload-input"
-                                                onChange={(e) => handlePhotoFileChange(e.target.files?.[0] ?? null)}
-                                            />
-
-                                            {selectedPhotoPreviewUrl ? (
-                                                <div className="design-chat__photo-upload-preview">
-                                                    <img src={selectedPhotoPreviewUrl} alt="선택한 참고 사진" />
-                                                    <button
-                                                        type="button"
-                                                        className="design-chat__photo-upload-change"
-                                                        onClick={() => photoInputRef.current?.click()}
-                                                        disabled={isSending}
-                                                    >
-                                                        다른 사진 선택하기
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <button
-                                                    type="button"
-                                                    className="design-chat__photo-upload-dropzone"
-                                                    onClick={() => photoInputRef.current?.click()}
-                                                    disabled={isSending}
-                                                >
-                                                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                                        <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                                                        <circle cx="8.5" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.6" />
-                                                        <path d="M3 16l5-4 4 3 4-5 5 6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                                                    </svg>
-                                                    사진 선택하기
-                                                </button>
-                                            )}
-
-                                            {scanId && (
-                                                <p className="design-chat__photo-upload-note">✓ 내 손 스캔 정보도 함께 반영돼요</p>
-                                            )}
+                                            <button
+                                                type="button"
+                                                className="design-chat__photo-upload-dropzone"
+                                                onClick={() => photoInputRef.current?.click()}
+                                                disabled={isSending}
+                                            >
+                                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                                    <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                                                    <circle cx="8.5" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.6" />
+                                                    <path d="M3 16l5-4 4 3 4-5 5 6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                                                </svg>
+                                                사진 선택하기
+                                            </button>
                                         </div>
                                     ) : activeQuickReply.id.startsWith('freeform-actions') && freeformColorPickerOpen ? (
                                         <div className="design-chat__color-picker">
@@ -741,7 +863,7 @@ export function NailDesignChatPageContent() {
                                             <div className="design-chat__color-main">
                                                 <div className="design-chat__color-grid">
                                                     {colorPickerPalette.map((hex, idx) => {
-                                                        const selected = selectedInQuickReply.includes(hex)
+                                                        const selected = freeformSelectedColors.includes(hex)
                                                         return (
                                                             <button
                                                                 key={`${hex}-${idx}`}
@@ -776,9 +898,9 @@ export function NailDesignChatPageContent() {
                                                 </div>
                                             </div>
 
-                                            {selectedInQuickReply.length > 0 && (
+                                            {freeformSelectedColors.length > 0 && (
                                                 <div className="design-chat__color-selected">
-                                                    {selectedInQuickReply.map((hex) => (
+                                                    {freeformSelectedColors.map((hex) => (
                                                         <span key={hex} className="design-chat__color-chip">
                                                             <span className="design-chat__color-chip-swatch" style={{ background: hex }} />
                                                             <button
@@ -798,11 +920,11 @@ export function NailDesignChatPageContent() {
                                                 type="button"
                                                 className="design-chat__quickreply-confirm"
                                                 onClick={handleFreeformColorPickerConfirm}
-                                                disabled={isSending || selectedInQuickReply.length === 0}
-                                                aria-label={`선택한 컬러 ${selectedInQuickReply.length}개로 선택`}
+                                                disabled={isSending || freeformSelectedColors.length === 0}
+                                                aria-label={`선택한 컬러 ${freeformSelectedColors.length}개로 선택`}
                                             >
                                                 <span className="design-chat__quickreply-confirm-swatches" aria-hidden="true">
-                                                    {selectedInQuickReply.map((hex) => (
+                                                    {freeformSelectedColors.map((hex) => (
                                                         <span
                                                             key={hex}
                                                             className="design-chat__quickreply-confirm-swatch"
@@ -891,12 +1013,13 @@ export function NailDesignChatPageContent() {
                                                     analysisSummary?.shapeId != null &&
                                                     option.value === analysisSummary.shapeId
 
-                                                // motif 단계에서 "없음"과 다른 모티프는 서로 배타적이므로,
+                                                // motif 단계에서 "없음"과 다른 모티프(기타 입력 포함)는 서로 배타적이므로,
                                                 // 반대쪽이 이미 선택되어 있으면 클릭 자체를 막아 헷갈리지 않게 한다.
                                                 const isMotifMutuallyExclusiveBlocked =
                                                     activeQuickReply.id === 'pref-motif' &&
                                                     !selected &&
-                                                    ((option.value === MOTIF_NONE_VALUE && selectedInQuickReply.length > 0) ||
+                                                    ((option.value === MOTIF_NONE_VALUE &&
+                                                            (selectedInQuickReply.length > 0 || hasActiveNote)) ||
                                                         (option.value !== MOTIF_NONE_VALUE && selectedInQuickReply.includes(MOTIF_NONE_VALUE)))
 
                                                 // 라벨 전체가 hex인지가 아니라, 라벨 안에 hex가 포함되어 있는지로 검사
@@ -1034,11 +1157,65 @@ export function NailDesignChatPageContent() {
                                         </div>
                                     )}
 
-                                    {isMultiConfirmVisible && (
+                                    {activeNoteStep && (
+                                        <label className="design-chat__quickreply-note">
+                                            <span className="design-chat__quickreply-note-label">기타 입력</span>
+                                            <input
+                                                type="text"
+                                                className="design-chat__quickreply-note-input"
+                                                value={activeNote}
+                                                maxLength={PREFERENCE_NOTE_MAX_LENGTH}
+                                                placeholder={
+                                                    activeNoteStep === 'motif' && selectedInQuickReply.includes(MOTIF_NONE_VALUE)
+                                                        ? "'없음'을 선택하시면 기타 모티프는 입력하실 수 없어요."
+                                                        : PREFERENCE_NOTE_PLACEHOLDERS[activeNoteStep]
+                                                }
+                                                onChange={(e) => setPreferenceNote(activeNoteStep, e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                                                    e.preventDefault()
+                                                    if (isMultiConfirmVisible && !isSending) confirmPreferenceStep(selectedInQuickReply)
+                                                }}
+                                                disabled={
+                                                    isSending ||
+                                                    (activeNoteStep === 'motif' && selectedInQuickReply.includes(MOTIF_NONE_VALUE))
+                                                }
+                                            />
+                                        </label>
+                                    )}
+
+                                    {activeQuickReply.id === 'pref-color' && (
+                                        <>
+                                            <label className="design-chat__quickreply-note">
+                                                <span className="design-chat__quickreply-note-label">기타 입력</span>
+                                                <input
+                                                    type="text"
+                                                    className="design-chat__quickreply-note-input"
+                                                    value={colorNote}
+                                                    maxLength={100}
+                                                    placeholder={COLOR_NOTE_PLACEHOLDER}
+                                                    onChange={(e) => setColorNote(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+                                                        e.preventDefault()
+                                                        submitColorNote()
+                                                    }}
+                                                    disabled={isSending}
+                                                />
+                                            </label>
+                                        </>
+                                    )}
+
+                                    {(isMultiConfirmVisible ||
+                                        (activeQuickReply.id === 'pref-color' && colorNote.trim().length > 0)) && (
                                         <button
                                             type="button"
                                             className="design-chat__quickreply-confirm"
-                                            onClick={() => confirmPreferenceStep(selectedInQuickReply)}
+                                            onClick={() => {
+                                                // 컬러 단계에서 기타 입력을 적어 둔 채 누르면, 고른 색과 기타 입력을 함께 보낸다
+                                                if (activeQuickReply.id === 'pref-color' && colorNote.trim()) submitColorNote()
+                                                else confirmPreferenceStep(selectedInQuickReply)
+                                            }}
                                             disabled={isSending}
                                             aria-label={
                                                 activeQuickReply.id === 'pref-color'
@@ -1057,15 +1234,21 @@ export function NailDesignChatPageContent() {
                                                     ))}
                                                 </span>
                                             ) : (
-                                                `${selectedInQuickReply
-                                                    .map(
-                                                        (value) =>
-                                                            activeQuickReply.options.find((o) => o.value === value)?.label ?? value,
-                                                    )
-                                                    .map((label) => `'${label}'`)
-                                                    .join(', ')} `
+                                                `${[
+                                                    ...selectedInQuickReply
+                                                        .map(
+                                                            (value) =>
+                                                                activeQuickReply.options.find((o) => o.value === value)?.label ?? value,
+                                                        )
+                                                        .map((label) => `'${label}'`),
+                                                    ...(hasActiveNote ? ['기타 의견'] : []),
+                                                ].join(', ')} `
                                             )}
-                                            선택
+                                            {activeQuickReply.id === 'pref-color' && colorNote.trim()
+                                                ? selectedInQuickReply.length > 0
+                                                    ? '함께 보내기'
+                                                    : '이 내용으로 색상 추천받기'
+                                                : '선택'}
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                                 <path
                                                     d="M5 12h12M13 6l6 6-6 6"
@@ -1078,78 +1261,129 @@ export function NailDesignChatPageContent() {
                                         </button>
                                     )}
 
-                                    {activeQuickReply.id === 'photo-upload' && selectedPhotoFile && (
-                                        <button
-                                            type="button"
-                                            className="design-chat__quickreply-confirm"
-                                            onClick={handlePhotoConfirm}
-                                            disabled={isSending || !selectedPhotoPreviewUrl}
-                                        >
-                                            🎨 이 사진으로 생성하기
-                                        </button>
-                                    )}
                                 </>
                             )}
                         </div>
                     )}
 
-                    <div className="design-chat__inputbar">
-            <textarea
-                ref={textareaRef}
-                className="design-chat__input"
-                placeholder={isAwaitingGenerateConfirm ? '위 버튼 중 하나를 선택해 주세요' : '또는 원하는 디자인 직접 입력'}
-                value={inputValue}
-                onChange={(e) => {
-                    setInputValue(e.target.value)
-                    adjustTextareaHeight()
-                }}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSubmitInput()
-                    }
-                }}
-                disabled={isSending || isAwaitingGenerateConfirm}
-            />
-                        <div className="design-chat__inputbar-row">
-                            <button
-                                type="button"
-                                className="design-chat__icon-btn"
-                                aria-label="분석 결과 다시 보기"
-                                onClick={handleToggleAnalysisPanel}
-                            >
-                                <QuestionMarkIcon size={20} />
-                            </button>
+                    {/* 사진 기반 흐름의 파일 고르기 — 선택 창의 "사진 선택하기"와 입력창의 "사진 변경하기"가 함께 쓴다 */}
+                    <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="design-chat__photo-upload-input"
+                        onChange={(e) => handlePhotoFileChange(e.target.files?.[0] ?? null)}
+                    />
 
-                            <div className="design-chat__inputbar-actions">
+                    <div
+                        ref={inputbarRef}
+                        className={`design-chat__inputbar${hasPhotoAttachment ? ' design-chat__inputbar--with-attachment' : ''}`}
+                    >
+                        {/* 사진 기반 흐름에서 고른 참고 사진 — 보내기 전까지 입력 칸 위에 첨부된 채로 보인다.
+                            ×로 빼거나, 옆의 "사진 변경하기"로 다른 사진으로 바꾼다 */}
+                        {hasPhotoAttachment && selectedPhotoPreviewUrl && (
+                            <div className="design-chat__input-attachment-row">
+                                <div className="design-chat__input-attachment">
+                                    <img
+                                        src={selectedPhotoPreviewUrl}
+                                        alt="첨부한 참고 사진"
+                                        onClick={() => openZoomedImage(selectedPhotoPreviewUrl, false)}
+                                    />
+                                    <button
+                                        type="button"
+                                        className="design-chat__input-attachment-remove"
+                                        aria-label="첨부한 사진 빼기"
+                                        onClick={removeSelectedPhoto}
+                                        disabled={isSending}
+                                    >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                                        </svg>
+                                    </button>
+                                </div>
                                 <button
                                     type="button"
-                                    className="design-chat__icon-btn"
-                                    aria-label="사진 첨부"
-                                    onClick={() => handleMenuSelect(MENU_OPTIONS[2])}
+                                    className={`design-chat__input-attachment-change${
+                                        isPhotoChangeHoverSuppressed ? ' is-hover-suppressed' : ''
+                                    }`}
+                                    onClick={() => {
+                                        setIsPhotoChangeHoverSuppressed(true)
+                                        photoInputRef.current?.click()
+                                    }}
+                                    onPointerMove={() => setIsPhotoChangeHoverSuppressed(false)}
+                                    onPointerLeave={() => setIsPhotoChangeHoverSuppressed(false)}
+                                    disabled={isSending}
                                 >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                                        <circle cx="8.5" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.6" />
+                                        <path d="M3 16l5-4 4 3 4-5 5 6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
                                     </svg>
-                                </button>
-                                <button
-                                    type="button"
-                                    className="design-chat__icon-btn design-chat__icon-btn--send"
-                                    aria-label="전송"
-                                    onClick={handleSubmitInput}
-                                    disabled={isSending || isAwaitingGenerateConfirm || !inputValue.trim()}
-                                >
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                        <path
-                                            d="M4 12l16-7-6.5 16-2.5-6.5L4 12z"
-                                            stroke="currentColor"
-                                            strokeWidth="1.6"
-                                            strokeLinejoin="round"
-                                        />
-                                    </svg>
+                                    사진 변경하기
                                 </button>
                             </div>
-                        </div>
+                        )}
+                        <button
+                            type="button"
+                            className={`design-chat__analysis-btn${showAnalysisPanel ? ' is-active' : ''}`}
+                            aria-label="손 분석 결과 기록 보기"
+                            aria-expanded={showAnalysisPanel}
+                            title={showAnalysisPanel ? '손 분석 결과 닫기' : '손 분석 결과 기록 보기'}
+                            onClick={handleToggleAnalysisPanel}
+                        >
+                            <HandIcon size={22} strokeWidth={1.7} />
+                        </button>
+
+                        <textarea
+                            ref={textareaRef}
+                            className="design-chat__input"
+                            rows={1}
+                            // 화면엔 아래 .design-chat__input-placeholder가 보이고, 이 값은 스크린 리더용으로 남겨 둔다
+                            placeholder={inputPlaceholder}
+                            value={inputValue}
+                            onChange={(e) => {
+                                setInputValue(e.target.value)
+                                adjustTextareaHeight()
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault()
+                                    handleSubmitInput()
+                                }
+                            }}
+                            disabled={isSending || isAwaitingGenerateConfirm || isPreferenceInputLocked || isPhotoInputLocked}
+                        />
+                        {!inputValue && (
+                            <span className="design-chat__input-placeholder" aria-hidden="true">
+                                {inputPlaceholder}
+                            </span>
+                        )}
+
+                        {/* 메인 디자인 섹션 채팅 데모(.chat-demo__send)와 같은 분홍 배경 + 위쪽 화살표, 모양은 둥근 사각형 */}
+                        <button
+                            type="button"
+                            className="design-chat__send"
+                            aria-label="전송"
+                            onClick={handleSubmitInput}
+                            disabled={
+                                isSending ||
+                                isAwaitingGenerateConfirm ||
+                                isPreferenceInputLocked ||
+                                isPhotoInputLocked ||
+                                (!inputValue.trim() && !hasPhotoAttachment)
+                            }
+                        >
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path
+                                    d="M12 19V5M6 11l6-6 6 6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2.2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                />
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </div>

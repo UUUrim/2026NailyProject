@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -84,32 +85,36 @@ public class UserHistoryController {
      * 내 손 분석 기록 목록 GET /users/me/scan-sessions
      * 양손 최종 measurements.json 하나가 한 줄이다. 마이페이지/출력/디자인 채팅이 공통으로 쓴다.
      * (손 한쪽씩의 DB 기록을 시각으로 짝지어 만들지 않는다)
+     * 분석 결과 화면에 결과가 뜬 뒤 확정된 스캔만 나온다 - 촬영/분석 도중 나간 스캔은 파일이 있어도 빠진다.
      */
     @GetMapping("/scan-sessions")
     public ResponseEntity<ApiResponse<List<ScanSessionDto>>> getMyScanSessions(
             @AuthenticationPrincipal User user) {
 
-        List<ScanSessionDto> data = scanResultFileService.sessions(user.getId()).stream()
-                .map(s -> ScanSessionDto.builder()
-                        .key(s.leftScanId() + "-" + s.rightScanId())
-                        .leftScanId(s.leftScanId())
-                        .rightScanId(s.rightScanId())
-                        .scannedAt(s.scannedAt().format(FORMATTER))
-                        .status(sessionStatus(user, s.leftScanId(), s.rightScanId()))
-                        .shape(s.recommendedShape())
-                        .recommendedShape(s.recommendedShape())
-                        .skinToneHex(s.skinToneHex())
-                        .recommendedColors(s.recommendedColors())
-                        .tone(s.tone())
-                        .warmness(s.warmness())
-                        .brightness(s.brightness())
-                        .saturation(s.saturation())
-                        .avgLengthMm(s.avgLengthMm())
-                        .avgWidthMm(s.avgWidthMm())
-                        .avgCurve(s.avgCurveMm())
-                        .avgFreeEdgeMm(s.avgFreeEdgeMm())
-                        .build())
-                .collect(Collectors.toList());
+        List<ScanSessionDto> data = new ArrayList<>();
+        for (ScanResultFileService.SessionSummary s : scanResultFileService.sessions(user.getId())) {
+            List<HandScan> hands = handScans(user, s.leftScanId(), s.rightScanId());
+            if (!hands.stream().allMatch(HandScan::isResultConfirmed)) continue;
+            data.add(ScanSessionDto.builder()
+                    .key(s.leftScanId() + "-" + s.rightScanId())
+                    .leftScanId(s.leftScanId())
+                    .rightScanId(s.rightScanId())
+                    .scannedAt(s.scannedAt().format(FORMATTER))
+                    .status(sessionStatus(hands))
+                    .shape(s.recommendedShape())
+                    .recommendedShape(s.recommendedShape())
+                    .skinToneHex(s.skinToneHex())
+                    .recommendedColors(s.recommendedColors())
+                    .tone(s.tone())
+                    .warmness(s.warmness())
+                    .brightness(s.brightness())
+                    .saturation(s.saturation())
+                    .avgLengthMm(s.avgLengthMm())
+                    .avgWidthMm(s.avgWidthMm())
+                    .avgCurve(s.avgCurveMm())
+                    .avgFreeEdgeMm(s.avgFreeEdgeMm())
+                    .build());
+        }
 
         return ResponseEntity.ok(ApiResponse.success(200, "손 분석 기록 조회 성공.", data));
     }
@@ -118,11 +123,17 @@ public class UserHistoryController {
             HandScan.ScanStatus.FAILED, HandScan.ScanStatus.READY, HandScan.ScanStatus.ANALYZING,
             HandScan.ScanStatus.MEASURED, HandScan.ScanStatus.GENERATING_STL, HandScan.ScanStatus.COMPLETED);
 
-    /** 두 손의 DB 상태 중 가장 덜 끝난 것. 파일이 있는데 DB 행이 없으면(예전 데이터) MEASURED. */
-    private String sessionStatus(User user, long leftId, long rightId) {
-        List<HandScan.ScanStatus> statuses = Stream.of(leftId, rightId)
+    /** 기록 한 줄의 두 손 DB 행 (예전 데이터는 행이 없을 수 있다) */
+    private List<HandScan> handScans(User user, long leftId, long rightId) {
+        return Stream.of(leftId, rightId)
                 .map(id -> handScanRepository.findByIdAndUserId(id, user.getId()))
                 .flatMap(Optional::stream)
+                .toList();
+    }
+
+    /** 두 손의 DB 상태 중 가장 덜 끝난 것. 파일이 있는데 DB 행이 없으면(예전 데이터) MEASURED. */
+    private String sessionStatus(List<HandScan> hands) {
+        List<HandScan.ScanStatus> statuses = hands.stream()
                 .map(HandScan::getStatus)
                 .filter(Objects::nonNull)
                 .toList();

@@ -25,6 +25,15 @@ const HANDEDNESS_BLEND = 0.15
 const MATCH_DISTANCE = 0.25
 // Forget a hand that hasn't been seen for this long (ms).
 const TRACK_TIMEOUT_MS = 500
+// HandLandmarker runs with low detection thresholds (see handLandmarker.ts) so
+// it can find curled-finger poses; a brand-new hand must show up in this many
+// frames before it's drawn, so a one-frame false detection never flashes nails.
+const CONFIRM_FRAMES = 3
+// It also loses curled-finger hands now and then - on a still claw photo,
+// every other frame whatever its thresholds - and a frame without the hand
+// blinks every nail off. A confirmed hand missing for up to this long (ms) is
+// still output, where it was last seen.
+const HOLD_MS = 250
 
 function smoothingAlpha(cutoff: number, dt: number) {
   const tau = 1 / (2 * Math.PI * cutoff)
@@ -81,11 +90,15 @@ function anchorOf(landmarks: NormalizedLandmark[]) {
 }
 
 type Track = {
+  id: number
+  frames: number
   image: OneEuroFilter
   world: OneEuroFilter | null
   handedness: number
   lastSeen: number
   anchor: { x: number; y: number }
+  /** What was output for this hand the last time it was detected. */
+  last: TrackedHand | null
 }
 
 /**
@@ -97,11 +110,9 @@ type Track = {
  */
 export class HandTracker {
   private tracks: Track[] = []
-  private lastTime = 0
+  private nextId = 1
 
   update(result: HandLandmarkerResult, timestampMs: number): TrackedHand[] {
-    const dt = this.lastTime > 0 ? Math.min(0.25, Math.max(1e-3, (timestampMs - this.lastTime) / 1000)) : 1 / 30
-    this.lastTime = timestampMs
     this.tracks = this.tracks.filter((t) => timestampMs - t.lastSeen <= TRACK_TIMEOUT_MS)
 
     const available = new Set(this.tracks)
@@ -126,6 +137,9 @@ export class HandTracker {
       let smoothedWorld: ArrayLike<number> | null = null
       if (track) {
         available.delete(track)
+        // Time since this hand's own last detection - more than a frame when
+        // it was missed in between.
+        const dt = Math.min(0.25, Math.max(1e-3, (timestampMs - track.lastSeen) / 1000))
         smoothedImage = track.image.filter(flatten(landmarks), dt)
         if (worldLandmarks) {
           if (!track.world) track.world = new OneEuroFilter(flatten(worldLandmarks), WORLD_FILTER)
@@ -134,11 +148,14 @@ export class HandTracker {
         track.handedness += HANDEDNESS_BLEND * (handedness - track.handedness)
       } else {
         track = {
+          id: this.nextId++,
+          frames: 0,
           image: new OneEuroFilter(flatten(landmarks), IMAGE_FILTER),
           world: worldLandmarks ? new OneEuroFilter(flatten(worldLandmarks), WORLD_FILTER) : null,
           handedness,
           lastSeen: timestampMs,
           anchor,
+          last: null,
         }
         this.tracks.push(track)
         smoothedImage = flatten(landmarks)
@@ -146,19 +163,26 @@ export class HandTracker {
       }
       track.lastSeen = timestampMs
       track.anchor = anchor
+      track.frames += 1
+      if (track.frames < CONFIRM_FRAMES) return
 
-      output.push({
+      track.last = {
+        id: track.id,
         landmarks: unflatten(smoothedImage, landmarks),
         worldLandmarks: worldLandmarks && smoothedWorld ? unflatten(smoothedWorld, worldLandmarks) : null,
         handedness: track.handedness,
-      })
+      }
+      output.push(track.last)
     })
+
+    for (const track of available) {
+      if (track.last && timestampMs - track.lastSeen <= HOLD_MS) output.push(track.last)
+    }
 
     return output
   }
 
   reset() {
     this.tracks = []
-    this.lastTime = 0
   }
 }

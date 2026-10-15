@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation, useNavigationType } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { getNailShape } from '@/shared/constants/nailShapes'
-import { getScanResult, type ScanResultResponse } from '@/entities/scan/api'
+import { confirmScanResult, getScanResult, type ScanResultResponse } from '@/entities/scan/api'
+import { MY_SCAN_SESSIONS_QUERY_KEY } from '@/entities/scan/queries'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
-import { arrangeRecommendedColors } from '@/shared/utils/colorSort'
+import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
@@ -85,7 +87,7 @@ export function useHandScanResultPage() {
     const [showFingerModal, setShowFingerModal] = useState(snapshot?.showFingerModal ?? false)
     const [userName, setUserName] = useState(snapshot?.userName ?? '')
     // 분석 결과를 아직 기다리는 중인지(폴링이 끝나지 않았는지) — 이 사이에 페이지를 벗어나면
-    // 분석이 완료되지 않아 결과가 저장되지 않고, 손 촬영을 다시 해야 한다.
+    // 결과가 화면에 뜨지 않아 손 분석 기록으로 확정되지 않고, 손 촬영을 다시 해야 한다.
     const [isAnalyzing, setIsAnalyzing] = useState(false)
 
     const TERMINAL_STATUSES = ['MEASURED', 'COMPLETED', 'FAILED']
@@ -257,9 +259,25 @@ export function useHandScanResultPage() {
     const rightFailed = !rightScanId || rightResult?.status === 'FAILED'
     const scanFailed = !isLoading && leftFailed && rightFailed && !!(leftScanId || rightScanId)
 
+    // 분석 결과가 화면에 뜬 뒤에야 손 분석 기록으로 확정한다 — 촬영/분석 도중 나간 스캔은 기록에 남지 않는다.
+    // 양손 최종 결과 파일이 없으면 서버가 확정을 거절한다. 이미 확정된 스캔을 다시 확정해도 그대로라
+    // 마이페이지에서 다시 보러 왔을 때 또 불려도 괜찮다.
+    const queryClient = useQueryClient()
+    const confirmRef = useRef<Promise<void> | null>(null)
+    const confirmScanId = leftScanId ?? rightScanId
+    const isResultShown = !isLoading && !scanFailed && result != null
+    useEffect(() => {
+        if (!isResultShown || !confirmScanId || confirmRef.current) return
+        confirmRef.current = confirmScanResult(confirmScanId)
+            .then(() => queryClient.invalidateQueries({ queryKey: MY_SCAN_SESSIONS_QUERY_KEY }))
+            .catch((e) => console.error('[HandScanResult] 손 분석 기록 확정 실패', e))
+    }, [isResultShown, confirmScanId, queryClient])
+
     // 이 페이지에서는 더 이상 쉐입을 고르거나 출력 신청을 하지 않고, 네일팁 출력 페이지로
     // 넘어가서 진행한다. 이 분석 결과를 바로 이어서 고를 수 있도록 scanId를 함께 전달한다.
-    const handleGoToPrint = () => {
+    // 출력 페이지는 손 분석 기록 목록에서 이 스캔을 찾아 고르므로, 기록 확정이 끝난 뒤에 넘어간다.
+    const handleGoToPrint = async () => {
+        await confirmRef.current
         navigate('/print', {
             state: { leftScanId, rightScanId },
         })
@@ -271,14 +289,13 @@ export function useHandScanResultPage() {
     const skinToneAnalysis =
         skinToneAnalysisFromMetrics(result?.tone ?? null, result?.warmness ?? null, result?.brightness ?? null, result?.saturation ?? null) ??
         (result?.skinToneHex ? analyzeSkinTone(result.skinToneHex) : null)
-    // .skin-tone-palette-grid 는 6열 row-major 그리드 (열 = 색상군, 행 = 명도 단계, 진한 색은 맨 아랫줄)
-    const skinTonePalette = arrangeRecommendedColors(
+    // .skin-tone-palette-grid(6열)에 정렬 순서 그대로 흘려 넣는다 — 비슷한 색끼리 잇는 TSP 경로, 연한 색 → 진한 색
+    const skinTonePalette = sortRecommendedColors(
         result?.recommendedColors && result.recommendedColors.length > 0
             ? result.recommendedColors
             : result?.skinToneHex
                 ? generateSkinTonePalette(result.skinToneHex, 30)
                 : [],
-        { columns: 6 }
     )
 
     // 왼손 5손가락 + 오른손 5손가락 = 실제 10손가락

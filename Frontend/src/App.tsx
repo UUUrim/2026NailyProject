@@ -2,11 +2,11 @@ import { lazy, Suspense, type ReactNode } from 'react'
 import { RootLayout } from '@/shared/layout/RootLayout.tsx'
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute'
 import { HomePage } from '@/pages/HomePage'
+import { GalleryPage } from '@/pages/GalleryPage'
 import { HandScanPage } from '@/pages/HandScanPage'
 import { HandScanResultPage } from '@/pages/HandScanResultPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { MyPage } from '@/pages/MyPage'
-import { NailDesignPreferencePage } from '@/pages/NailDesignPreferencePage'
 import { NailDesignChatPage } from '@/pages/NailDesignChatPage'
 import { NailDesignResultPage } from '@/pages/NailDesignResultPage'
 import { PrintPage } from '@/pages/PrintPage'
@@ -58,6 +58,8 @@ function App() {
                     <Route path="favorites" element={tab(<FavoritesTab />)} />
                 </Route>
                 <Route path="/process" element={<ProcessGuidePage />} />
+                {/* 둘러보기(갤러리)는 로그인 없이 볼 수 있다 — 찜/좋아요를 누를 때만 로그인을 안내한다 */}
+                <Route path="/gallery" element={<GalleryPage />} />
                 <Route path="/preview/print" element={<PrintPagePreview />} />
                 <Route path="/preview/scan-result" element={<HandScanResultPagePreview />} />
 
@@ -66,7 +68,6 @@ function App() {
                     <Route path="/scan/hand" element={<HandScanPage />} />
                     <Route path="/scan/result" element={<HandScanResultPage />} />
                     <Route path="/print" element={<PrintPage />} />
-                    <Route path="/design/preferences" element={<NailDesignPreferencePage />} />
                     <Route path="/design/chat" element={<NailDesignChatPage />} />
                     <Route path="/design/result" element={<NailDesignResultPage />} />
                 </Route>
