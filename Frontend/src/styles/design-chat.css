@@ -492,7 +492,7 @@
 
 .design-chat-sidebar__empty-text {
     margin: 0;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     font-weight: 600;
     color: #786a6a;
     line-height: 1.6;
@@ -651,6 +651,204 @@
     }
 }
 
+/* ── 디자인 카드 ──
+   생성을 시작하면 대화 안에 "디자인 생성 중" 카드를 띄우고, 완성되면 같은 카드에 이미지를 채운다.
+   생성 이미지는 1536x1024(3:2)이고 최대 350px 너비로 보여 준다 */
+.design-chat__design-cards {
+    flex: 0 1 auto;
+    display: grid;
+    gap: 0.5rem;
+    width: min(350px, 78%);
+}
+
+.design-chat__design-card {
+    position: relative;
+    aspect-ratio: 3 / 2;
+    overflow: hidden;
+    border-radius: 12px;
+    background:
+        radial-gradient(120% 90% at 15% 0%, #fff 0%, rgba(255, 255, 255, 0) 60%),
+        linear-gradient(140deg, #fdf5f8 0%, #fbe9ef 55%, #f7dce6 100%);
+}
+
+/* 테두리는 이미지 위에 겹쳐 그린다 — 생성 중엔 연분홍, 이미지가 뜨면 옅은 회색 */
+.design-chat__design-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(222, 134, 159, 0.18);
+    pointer-events: none;
+    transition: box-shadow 0.6s ease;
+}
+
+.design-chat__design-card.is-loaded::after {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+/* 완성 이미지 — 다 받아지면 생성 중 표시 위로 서서히 나타난다 */
+.design-chat__design-card img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    cursor: zoom-in;
+    transition: opacity 0.6s ease;
+}
+
+.design-chat__design-card.is-loaded img {
+    opacity: 1;
+}
+
+/* 생성 중 표시 — 이미지가 나타나면 함께 사라진다 */
+.design-chat__design-card-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
+    transition:
+        opacity 0.5s ease,
+        visibility 0s linear 0.5s;
+}
+
+.design-chat__design-card-loading.is-hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+/* 비스듬히 천천히 지나가는 빛 */
+.design-chat__design-card-loading::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.7) 50%, transparent 70%);
+    transform: translateX(-100%);
+    animation: design-chat-shine 2.4s ease-in-out infinite;
+}
+
+/* 크기가 다른 반짝이 세 개가 번갈아 반짝인다 */
+.design-chat__design-card-sparkles {
+    position: relative;
+    width: 46px;
+    height: 46px;
+}
+
+.design-chat__design-card-sparkles svg {
+    position: absolute;
+    fill: var(--naily-pink, #de869f);
+    animation: design-chat-twinkle 1.8s ease-in-out infinite;
+}
+
+.design-chat__design-card-sparkles svg:nth-child(1) {
+    left: 2px;
+    top: 10px;
+    width: 30px;
+    height: 30px;
+}
+
+.design-chat__design-card-sparkles svg:nth-child(2) {
+    right: 0;
+    top: 0;
+    width: 15px;
+    height: 15px;
+    fill: #eba9bb;
+    animation-delay: 0.4s;
+}
+
+.design-chat__design-card-sparkles svg:nth-child(3) {
+    right: 3px;
+    bottom: 0;
+    width: 10px;
+    height: 10px;
+    fill: #f2c3d0;
+    animation-delay: 0.8s;
+}
+
+.design-chat__design-card-label {
+    position: relative;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #c4657f;
+}
+
+/* 끝없이 흐르는 얇은 진행 막대 */
+.design-chat__design-card-bar {
+    position: relative;
+    width: 76px;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(222, 134, 159, 0.2);
+}
+
+.design-chat__design-card-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -40%;
+    width: 40%;
+    border-radius: inherit;
+    background: var(--naily-pink, #de869f);
+    animation: design-chat-progress 1.4s ease-in-out infinite;
+}
+
+@keyframes design-chat-shine {
+    to {
+        transform: translateX(100%);
+    }
+}
+
+@keyframes design-chat-twinkle {
+    0%, 100% {
+        opacity: 0.5;
+        transform: scale(0.72) rotate(0deg);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1) rotate(18deg);
+    }
+}
+
+@keyframes design-chat-progress {
+    to {
+        left: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .design-chat__design-card-loading::before,
+    .design-chat__design-card-sparkles svg,
+    .design-chat__design-card-bar::after {
+        animation: none;
+    }
+
+    .design-chat__design-card-bar::after {
+        left: 30%;
+    }
+}
+
+/* 사진만 담은 내 말풍선 — 분홍 바탕·안쪽 여백 없이 사진만 보인다 (글은 그 아래 별도 말풍선) */
+.design-chat__bubble--image-only {
+    padding: 0;
+    background: none;
+}
+
+.design-chat__bubble--image-only .design-chat__bubble-images {
+    margin-top: 0;
+}
+
+.design-chat__bubble--image-only .design-chat__bubble-images img {
+    max-width: 220px;
+}
+
 .design-chat__bubble-images {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -687,6 +885,15 @@
     /* ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
     scrollbar-width: thin;
     scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+}
+
+/* 접었을 때 — 질문 한 줄만 남으므로 질문 아래 간격을 없애고 위아래 안쪽 여백을 같게 한다 */
+.design-chat__quickreply.is-collapsed {
+    padding-bottom: 1.1rem;
+}
+
+.design-chat__quickreply.is-collapsed .design-chat__quickreply-header {
+    margin-bottom: 0;
 }
 
 .design-chat__quickreply::-webkit-scrollbar {
@@ -764,6 +971,73 @@
     color: #1a1a1a;
 }
 
+/* 선택지 기반 생성 스텝바 — 제목 옆에 6단계 중 몇 번째인지 (지난 단계는 연한 핑크, 지금 단계는 길고 진한 핑크) */
+.design-chat__step-bar {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+}
+
+.design-chat__step-bar-track {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.design-chat__step-bar-seg {
+    width: 10px;
+    height: 4px;
+    border-radius: 999px;
+    background: #ececec;
+    transition:
+        width 0.25s,
+        background 0.25s;
+}
+
+.design-chat__step-bar-seg.is-done {
+    background: #f2c3d0;
+}
+
+.design-chat__step-bar-seg.is-current {
+    width: 20px;
+    background: var(--naily-pink, #de869f);
+}
+
+/* 좁은 화면 — 제목 옆에 두면 제목이 여러 줄로 꺾이므로 스텝바를 제목 바로 아래 줄로 내린다
+   (← 버튼과 접기 버튼은 두 줄 가운데에 맞춘다) */
+@media (max-width: 640px) {
+    .design-chat__quickreply-header--with-steps {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas:
+            'back title chevron'
+            'back step chevron';
+        column-gap: 0;
+        row-gap: 0.4rem;
+    }
+
+    .design-chat__quickreply-header--with-steps .design-chat__quickreply-back-btn {
+        grid-area: back;
+        align-self: center;
+        margin-right: 0.6rem;
+    }
+
+    .design-chat__quickreply-header--with-steps .design-chat__quickreply-header-toggle {
+        grid-area: title;
+    }
+
+    .design-chat__quickreply-header--with-steps .design-chat__step-bar {
+        grid-area: step;
+        justify-self: start;
+    }
+
+    .design-chat__quickreply-header--with-steps .design-chat__quickreply-chevron-btn {
+        grid-area: chevron;
+        align-self: center;
+        margin-left: 0.6rem;
+    }
+}
+
 .design-chat__quickreply-list {
     display: flex;
     flex-direction: column;
@@ -780,13 +1054,37 @@
     align-items: center;
     gap: 0.4rem;
     text-align: center;
-    border: 1px solid #f2f2f2;
+    border: 1px solid #e4e4e4;
     border-radius: 12px;
     padding: 0.9rem 0.4rem;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s,
+        box-shadow 0.2s,
+        transform 0.2s;
 }
 
 .design-chat__quickreply-list--grid3 .design-chat__quickreply-item:last-child {
-    border-bottom: 1px solid #f2f2f2;
+    border-bottom: 1px solid #e4e4e4;
+}
+
+/* 카드 호버 — 세로 목록의 왼쪽 막대·밀림 대신, 테두리가 핑크로 물들고 살짝 떠오르며 그림자가 진다
+   (글자는 세로 목록 호버와 같이 더 진한 검정·굵게) */
+.design-chat__quickreply-list--grid3 .design-chat__quickreply-item:hover:not(:disabled) {
+    padding-left: 0.4rem;
+    background: #fdf0f4;
+    border-color: #eeb0c2;
+    color: #111;
+    box-shadow: 0 6px 14px rgba(222, 134, 159, 0.2);
+    transform: translateY(-2px);
+}
+
+/* 고른 선택지 — 배경과 함께 테두리도 진한 핑크로 (위 :last-child·호버 규칙보다 뒤에 둬야 테두리가 그대로 남는다) */
+.design-chat__quickreply-list--grid3 .design-chat__quickreply-item.is-selected,
+.design-chat__quickreply-list--grid3 .design-chat__quickreply-item.is-selected:hover:not(:disabled) {
+    background: #f9e4ec;
+    border-color: var(--naily-pink, #de869f);
 }
 
 .design-chat__quickreply-list--grid3 .design-chat__quickreply-item-label {
@@ -825,7 +1123,10 @@
     text-align: left;
     font-family: inherit;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition:
+        background 0.15s ease,
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
 }
 
 .design-chat__menu-item:nth-child(-n+2) {
@@ -838,6 +1139,13 @@
 
 .design-chat__menu-item:hover {
     background: rgba(222, 134, 159, 0.06);
+}
+
+/* 호버 — 선택지 카드처럼 살짝 떠오르며 그림자가 진다 (그림자가 이웃 칸 위로 드리우도록 앞으로 올린다) */
+.design-chat__menu-item:hover:not(:disabled) {
+    z-index: 1;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(222, 134, 159, 0.2);
 }
 
 .design-chat__menu-item:disabled {
@@ -1015,16 +1323,31 @@
     color: #333;
     text-align: left;
     cursor: pointer;
-    border-bottom: 1px solid #f2f2f2;
-    transition: background 0.15s;
+    border-bottom: 1px solid #e4e4e4;
+    transition:
+        background 0.15s,
+        color 0.15s,
+        box-shadow 0.15s,
+        padding-left 0.15s;
 }
 
 .design-chat__quickreply-item:last-child {
     border-bottom: none;
 }
 
-.design-chat__quickreply-item:hover {
-    background: var(--naily-pink-light, #fdf5f8);
+/* 세로 목록 호버 — 카드 호버와 같은 연분홍 바탕에 왼쪽 핑크 막대, 글자는 더 진한 검정·굵게,
+   번호는 핑크로 채워지고 살짝 오른쪽으로 밀린다 */
+.design-chat__quickreply-item:hover:not(:disabled) {
+    background: #fdf0f4;
+    color: #111;
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--naily-pink, #de869f);
+    padding-left: 0.6rem;
+}
+
+.design-chat__quickreply-item:hover:not(:disabled) .design-chat__quickreply-index {
+    background: var(--naily-pink, #de869f);
+    color: #fff;
 }
 
 .design-chat__quickreply-item.is-selected {
@@ -1032,7 +1355,7 @@
     font-weight: 600;
 }
 
-.design-chat__quickreply-item.is-selected:hover {
+.design-chat__quickreply-item.is-selected:hover:not(:disabled) {
     background: #f7d9e5;
 }
 
@@ -1080,6 +1403,9 @@
     font-size: 0.75rem;
     font-weight: 700;
     flex-shrink: 0;
+    transition:
+        background 0.15s,
+        color 0.15s;
 }
 
 .design-chat__quickreply-confirm {
@@ -1092,21 +1418,53 @@
     height: 40px;
     border: none;
     border-radius: 10px;
-    background: var(--naily-pink, #de869f);
+    /* 메인 색 #DE869F 하나로 만든 그라데이션 — 같은 색상·채도에서 밝기만 바꿔(회색을 섞지 않아 탁하지 않다)
+       연한 #F1BBCA → 메인 #DE869F → 조금 깊은 #D56283 으로 흐른다. 위쪽에 옅은 흰 광택을 한 겹 얹는다.
+       색 층은 버튼보다 넓게 깔아 두고, 마우스를 올리면 깊은 쪽으로 천천히 밀려 색이 흘러가 보인다 */
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0) 55%),
+        linear-gradient(100deg, #f1bbca 0%, #de869f 50%, #d56283 100%);
+    background-size:
+        100% 100%,
+        135% 100%;
+    background-position:
+        0 0,
+        0% 50%;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        0 6px 18px rgba(222, 134, 159, 0.32);
     color: #fff;
     font-size: 0.875rem;
-    font-weight: 600;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(170, 70, 100, 0.25);
     cursor: pointer;
-    transition: background 0.15s;
+    transition:
+        background-position 0.45s ease,
+        box-shadow 0.2s,
+        transform 0.15s;
 }
 
 .design-chat__quickreply-confirm:hover {
-    background: var(--naily-pink-hover, #d0768f);
+    background-position:
+        0 0,
+        100% 50%;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.45),
+        0 8px 22px rgba(222, 134, 159, 0.42);
+}
+
+.design-chat__quickreply-confirm:active {
+    transform: translateY(1px);
 }
 
 .design-chat__quickreply-confirm:disabled {
     opacity: 0.6;
     cursor: default;
+    background-position:
+        0 0,
+        0% 50%;
+    box-shadow: none;
+    transform: none;
 }
 
 .design-chat__quickreply-confirm-swatches {
@@ -1130,7 +1488,7 @@
     gap: 0.6rem;
     margin-top: 0.75rem;
     padding: 0.35rem 0.4rem 0.35rem 0.75rem;
-    border: 1px solid #f2f2f2;
+    border: 1px solid #e4e4e4;
     border-radius: 12px;
     background: #fff;
     cursor: text;
@@ -1141,12 +1499,13 @@
     border-color: var(--naily-pink, #de869f);
 }
 
+/* "기타 입력" 배지 — 칸이 눈에 띄도록 핑크 바탕에 흰 글씨 (선택 버튼보다는 한 톤 연하게) */
 .design-chat__quickreply-note-label {
     flex-shrink: 0;
-    padding: 0.2rem 0.55rem;
+    padding: 0.2rem 0.6rem;
     border-radius: 999px;
-    background: var(--naily-pink-light, #fdf5f8);
-    color: var(--naily-pink-hover, #d0768f);
+    background: #eba3b8;
+    color: #fff;
     font-size: 0.75rem;
     font-weight: 700;
 }
@@ -1161,10 +1520,11 @@
     font-family: inherit;
     font-size: 0.8125rem;
     color: #1a1a1a;
+    text-overflow: ellipsis;
 }
 
 .design-chat__quickreply-note-input::placeholder {
-    color: #b8b8b8;
+    color: #8a8a8a;
 }
 
 .design-chat__quickreply-note-input:disabled {
@@ -1173,29 +1533,160 @@
 
 /* ── 입력창 ── */
 
+/* 입력창 — 평소엔 [손 분석][입력 칸][전송] 한 줄. 글이 한 줄을 넘으면 useNailDesignChatPage의
+   fitTextarea가 data-expanded를 붙여 입력 칸을 위 줄 전체로 올리고 버튼은 아래 줄 양끝으로 내린다.
+   (fitTextarea가 한 줄 배치의 입력 칸 너비를 계산하므로 두 배치의 좌우 여백·간격은 같게 둔다)
+   손 분석 버튼은 입력창 왼쪽 끝 ~ 글자 시작(12 + 32 + 4 + 6 = 54px)의 가운데에 온다 — 버튼 중심(12 + 16 = 28px)을
+   수치상 가운데(27px)보다 1px 오른쪽에 둬서, 둥근 왼쪽 끝 때문에 왼쪽으로 쏠려 보이지 않게 했다.
+   전송 버튼은 오른쪽 끝에서 10 + 16 = 26px에 중심이 온다 */
 .design-chat__inputbar {
     flex-shrink: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: 'tool input send';
+    align-items: end;
+    column-gap: 4px;
     background: #fff;
     border: 1px solid #eee;
+    /* 위쪽 선택 창(.design-chat__quickreply)과 같은 둥글기 */
     border-radius: 18px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.07);
-    padding: 0.9rem 1rem 0.7rem;
+    padding: 9px 10px 9px 12px;
+}
+
+.design-chat__inputbar[data-expanded] {
+    grid-template-areas:
+        'input input input'
+        'tool . send';
+    row-gap: 0.4rem;
+    padding-top: 12px;
+}
+
+/* 참고 사진을 첨부해 둔 동안 — 맨 위에 큰 사진, 그 아래 입력 칸이 한 줄 전체, 맨 아래 버튼 줄
+   (글 길이와 상관없이 늘 이 배치라, 펼친 배치 [data-expanded]일 때도 같게 둔다) */
+.design-chat__inputbar--with-attachment,
+.design-chat__inputbar--with-attachment[data-expanded] {
+    grid-template-areas:
+        'attach attach attach'
+        'input input input'
+        'tool . send';
+    row-gap: 0.4rem;
+    padding-top: 14px;
+}
+
+/* 첨부 사진 줄 — 사진 왼쪽 끝을 입력 글자 시작(입력창 안쪽 여백 12 + 입력 칸 안쪽 여백 6)에 맞추고,
+   사진 오른쪽 아래에 "사진 변경하기"를 둔다 (칸이 좁으면 버튼이 사진 아래로 내려간다) */
+.design-chat__input-attachment-row {
+    grid-area: attach;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.6rem;
+    margin: 0 0 0.3rem 6px;
+}
+
+/* 첨부 사진 — 화면 폭과 상관없이 크기 고정 */
+.design-chat__input-attachment {
+    position: relative;
+    flex: 0 0 auto;
+    width: 160px;
+    height: 160px;
+}
+
+.design-chat__input-attachment img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 16px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    cursor: zoom-in;
+}
+
+/* 첨부한 사진 빼기 — 사진 오른쪽 위 안쪽의 ×  */
+.design-chat__input-attachment-remove {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(30, 30, 30, 0.6);
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.design-chat__input-attachment-remove svg {
+    width: 10px;
+    height: 10px;
+}
+
+.design-chat__input-attachment-remove:hover {
+    background: rgba(30, 30, 30, 0.92);
+}
+
+.design-chat__input-attachment-remove:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.design-chat__input-attachment-change {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid #e4e4e4;
+    border-radius: 999px;
+    background: #fff;
+    color: #333;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        border-color 0.15s,
+        background 0.15s,
+        color 0.15s;
+}
+
+.design-chat__input-attachment-change svg {
+    color: var(--naily-pink, #de869f);
+}
+
+/* 파일 고르기 창에서 돌아온 직후엔 마우스가 실제로 움직이기 전까지 호버 모양을 띄우지 않는다 (is-hover-suppressed) */
+.design-chat__input-attachment-change:hover:not(:disabled):not(.is-hover-suppressed) {
+    border-color: #eeb0c2;
+    background: #fdf0f4;
+    color: #111;
+}
+
+.design-chat__input-attachment-change:disabled {
+    cursor: default;
+    opacity: 0.5;
 }
 
 .design-chat__input {
+    grid-area: input;
     display: block;
     box-sizing: border-box;
-    width: 100%;
-    height: 52px;
-    min-height: 52px;
+    min-width: 0;
+    /* 한 줄 높이 — useNailDesignChatPage의 INPUT_MIN_HEIGHT와 맞춘다 */
+    height: 32px;
+    min-height: 32px;
     border: none;
     outline: none;
     resize: none;
+    background: transparent;
     font-family: inherit;
     font-size: 0.9rem;
-    line-height: 1.4;
+    line-height: 22px;
     color: #1a1a1a;
-    padding: 0.25rem 0.1rem 0.75rem;
+    padding: 5px 6px;
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
@@ -1208,8 +1699,28 @@
     display: none; /* Chrome/Safari/Edge */
 }
 
+/* 기본 안내 문구는 스크린 리더용으로만 두고 숨긴다 (보이는 건 아래 .design-chat__input-placeholder).
+   줄바꿈되면 Chrome이 안내 문구 높이까지 scrollHeight에 넣어 빈 칸이 여러 줄로 늘어나므로 한 줄로 고정 */
 .design-chat__input::placeholder {
-    color: #b8b8b8;
+    color: transparent;
+    white-space: nowrap;
+}
+
+/* 보이는 안내 문구 — 입력 칸과 같은 칸에 겹쳐 그리고, 좁은 화면에선 말줄임표로 줄인다
+   (textarea의 기본 안내 문구는 말줄임표가 안 된다) */
+.design-chat__input-placeholder {
+    grid-area: input;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 32px;
+    padding: 5px 6px;
+    font-size: 0.9rem;
+    line-height: 22px;
+    color: #8a8a8a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
 }
 
 .design-chat__input:disabled {
@@ -1217,64 +1728,77 @@
     color: #b8b8b8;
 }
 
-.design-chat__inputbar-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.design-chat__inputbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.design-chat__icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+/* 손 분석 결과 기록 버튼 — 분홍 손 아이콘만 */
+.design-chat__analysis-btn {
+    grid-area: tool;
+    display: grid;
+    place-items: center;
     width: 32px;
     height: 32px;
-    border-radius: 999px;
+    padding: 0;
     border: none;
+    border-radius: 50%;
     background: none;
-    color: #999;
+    color: var(--naily-pink, #de869f);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s;
 }
 
-.design-chat__icon-btn:hover {
+.design-chat__analysis-btn:hover,
+.design-chat__analysis-btn.is-active {
     background: var(--naily-pink-light, #fdf5f8);
+}
+
+.design-chat__analysis-btn:focus-visible {
+    outline: 2px solid var(--naily-pink, #de869f);
+    outline-offset: 2px;
+}
+
+/* 첫 인사 말풍선 안에서 입력창의 손 아이콘 버튼을 가리킬 때 쓰는 같은 아이콘 */
+.design-chat__analysis-icon-inline {
+    display: inline-flex;
+    margin: 0 0.1em;
+    vertical-align: -0.25em;
     color: var(--naily-pink, #de869f);
 }
 
-/* 사진 첨부 등 아이콘 버튼 비활성 (전송 버튼은 아래 --send:disabled 스타일을 따로 쓴다) */
-.design-chat__icon-btn:disabled:not(.design-chat__icon-btn--send),
-.design-chat__icon-btn:disabled:not(.design-chat__icon-btn--send):hover {
-    background: none;
-    color: #d6d6d6;
-    cursor: default;
-}
-
-.design-chat__icon-btn--send {
+/* 전송 — 메인 디자인 섹션 채팅 데모(.chat-demo__send)의 분홍 배경 + 위쪽 화살표를 둥근 사각형에 담는다 */
+.design-chat__send {
+    grid-area: send;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 11px;
     background: var(--naily-pink, #de869f);
     color: #fff;
+    cursor: pointer;
+    transition: background 0.15s;
 }
 
-.design-chat__icon-btn--send:hover {
+.design-chat__send svg {
+    width: 16px;
+    height: 16px;
+}
+
+.design-chat__send:hover {
     background: var(--naily-pink-hover, #d0768f);
-    color: #fff;
 }
 
-.design-chat__icon-btn--send:disabled {
+.design-chat__send:disabled {
     background: #f0d5dd;
-    color: #fff;
     cursor: default;
 }
 
 @media (max-width: 640px) {
     .design-chat__bubble {
         max-width: 88%;
+    }
+
+    .design-chat__design-cards {
+        width: min(350px, 88%);
     }
 
     .design-chat-layout {
@@ -1588,12 +2112,12 @@
 
 .design-chat__photo-upload-dropzone {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     width: 100%;
-    padding: 2rem 1rem;
+    padding: 0.8rem 1rem;
     border: 1.5px dashed #f0c9d6;
     border-radius: 14px;
     background: var(--naily-pink-light, #fdf5f8);
@@ -1607,43 +2131,4 @@
 .design-chat__photo-upload-dropzone:hover {
     border-color: var(--naily-pink, #de869f);
     background: #fcebf1;
-}
-
-.design-chat__photo-upload-preview {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.6rem;
-}
-
-.design-chat__photo-upload-preview img {
-    width: 100%;
-    max-height: 220px;
-    object-fit: contain;
-    border-radius: 12px;
-    background: #f5f5f5;
-    border: 1px solid #eee;
-}
-
-.design-chat__photo-upload-change {
-    border: 1px solid #eee;
-    border-radius: 999px;
-    background: #fff;
-    padding: 0.4rem 0.9rem;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: #333;
-    cursor: pointer;
-}
-
-.design-chat__photo-upload-change:hover {
-    background: var(--naily-pink-light, #fdf5f8);
-    color: var(--naily-pink, #de869f);
-}
-
-.design-chat__photo-upload-note {
-    margin: 0;
-    font-size: 0.75rem;
-    color: #8a8a8a;
-    text-align: center;
 }
