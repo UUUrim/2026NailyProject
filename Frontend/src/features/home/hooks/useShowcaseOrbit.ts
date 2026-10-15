@@ -17,11 +17,14 @@ const RINGS: OrbitRing[] = [
     { count: 18, scale: 1, opacity: 1, speed: 0.027, offset: 0 },
 ]
 
-/** 가장 안쪽 줄의 반지름 — 화면 대각선 절반에 대한 비율 (가운데 글자를 피하도록 더 커질 수 있다) */
+/** 줄 사이 빈틈을 정하는 기준 반지름 — 화면 대각선 절반에 대한 비율 (가운데 글자를 피하도록 더 커질 수 있다) */
 const INNER_RADIUS = 0.34
 
-/** 안쪽 줄과 두 번째 줄의 중심 사이 거리(같은 비율). 이때 두 줄의 카드 사이에 보이는 빈틈을 모든 줄 사이에 똑같이 쓴다 */
+/** 기준 반지름일 때 안쪽 줄과 두 번째 줄의 중심 사이 거리(같은 비율). 이때 두 줄의 카드 사이에 보이는 빈틈을 모든 줄 사이에 똑같이 쓴다 */
 const FIRST_RING_STEP = 0.19
+
+/** 가장 안쪽 줄은 기준 반지름보다 이 비율만큼 안으로 당기고, 바깥 두 줄도 같은 빈틈을 두고 따라 들어온다 (가운데 글자와는 겹치지 않는 선까지) */
+const INNER_RING_PULL = 0.93
 
 const INTRO_MS = 1400
 
@@ -117,11 +120,12 @@ export function useShowcaseOrbit() {
             const textRadius = Math.hypot(center.offsetWidth / 2, center.offsetHeight / 2) * 0.82
             const baseCardWidth = cards[0]?.offsetWidth ?? 0
             const halfLengths = RINGS.map((ring) => (baseCardWidth * ring.scale) / 2)
-            const innerRadius = Math.max(INNER_RADIUS * halfDiagonal, textRadius + halfLengths[0])
+            const minInnerRadius = textRadius + halfLengths[0]
+            const baseRadius = Math.max(INNER_RADIUS * halfDiagonal, minInnerRadius)
             // 카드는 긴 변이 중심을 향하므로, 줄 사이에 실제로 보이는 빈틈 = 중심 사이 거리 − 양쪽 카드 길이의 절반.
             // 바깥 줄일수록 카드가 커서 같은 중심 거리로는 빈틈이 좁아지니, 빈틈을 기준으로 반지름을 쌓는다.
-            const edgeGap = innerRadius * (FIRST_RING_STEP / INNER_RADIUS) - halfLengths[0] - halfLengths[1]
-            radii = [innerRadius]
+            const edgeGap = baseRadius * (FIRST_RING_STEP / INNER_RADIUS) - halfLengths[0] - halfLengths[1]
+            radii = [Math.max(baseRadius * INNER_RING_PULL, minInnerRadius)]
             for (let r = 1; r < RINGS.length; r += 1) {
                 radii.push(radii[r - 1] + halfLengths[r - 1] + edgeGap + halfLengths[r])
             }
