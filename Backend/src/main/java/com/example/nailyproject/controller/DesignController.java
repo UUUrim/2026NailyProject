@@ -147,9 +147,11 @@ public class DesignController {
     @PatchMapping("/{designId}/confirm")
     public ResponseEntity<ApiResponse<Void>> confirmDesign(
             @AuthenticationPrincipal User user,
-            @PathVariable Long designId) {
+            @PathVariable Long designId,
+            // 확정하는 순간 채팅 화면에 보이던 대화 — 이 디자인의 채팅 이력으로 저장한다 (본문 없이 와도 된다)
+            @RequestBody(required = false) com.example.nailyproject.dto.request.DesignConfirmRequestDto request) {
 
-        nailDesignService.confirmDesign(user, designId);
+        nailDesignService.confirmDesign(user, designId, request != null ? request.getChatTranscript() : null);
 
         return ResponseEntity.ok(
                 ApiResponse.success(200, "디자인이 확정되었습니다.", null)

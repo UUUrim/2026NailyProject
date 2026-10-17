@@ -197,6 +197,22 @@ export const apiClient = {
         )
     },
 
+    // keepalive: 탭을 닫거나 페이지를 떠나는 순간에 보내는 요청도 끝까지 가게 한다 (본문 64KB까지)
+    put<T>(
+        path: string,
+        body?: unknown,
+        requireAuth = true,
+        onUnauthorized: UnauthorizedBehavior = 'logout',
+        options: { keepalive?: boolean } = {},
+    ) {
+        return request<T>(
+            path,
+            { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined, keepalive: options.keepalive },
+            requireAuth,
+            onUnauthorized,
+        )
+    },
+
     delete<T>(path: string, body?: unknown, requireAuth = true, onUnauthorized: UnauthorizedBehavior = 'logout') {
         return request<T>(
             path,

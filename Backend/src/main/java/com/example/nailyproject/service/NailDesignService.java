@@ -50,6 +50,7 @@ public class NailDesignService {
     private final GptClientService gptClientService;
     private final FinishReferenceService finishReferenceService;
     private final ScanResultFileService scanResultFileService;
+    private final KeywordTranslationService keywordTranslationService;
     // 색상
 //    private final JsonColorMapper jsonColorMapper;
 
@@ -115,7 +116,8 @@ public class NailDesignService {
                              TextureSwatchService textureSwatchService,
                              GptClientService gptClientService,
                              FinishReferenceService finishReferenceService,
-                             ScanResultFileService scanResultFileService) {
+                             ScanResultFileService scanResultFileService,
+                             KeywordTranslationService keywordTranslationService) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -134,6 +136,7 @@ public class NailDesignService {
         this.gptClientService = gptClientService;
         this.finishReferenceService = finishReferenceService;
         this.scanResultFileService = scanResultFileService;
+        this.keywordTranslationService = keywordTranslationService;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -495,7 +498,8 @@ public class NailDesignService {
     /**
      * 채팅에서 "네, 이 디자인으로 할게요"를 눌렀을 때 호출
      */
-    public void confirmDesign(User user, Long designId) {
+    public void confirmDesign(User user, Long designId,
+                              List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> chatTranscript) {
         NailDesign design = nailDesignRepository.findById(designId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 디자인을 찾을 수 없습니다."));
 
@@ -503,8 +507,22 @@ public class NailDesignService {
             throw new IllegalArgumentException("본인의 디자인만 확정할 수 있습니다.");
         }
 
+        // 확정하는 순간 채팅 화면에 보이던 대화를 이 디자인의 채팅 이력으로 저장한다 (화면 표시용 — GPT 대화·생성에는 안 쓴다)
+        boolean transcriptSaved = false;
+        if (chatTranscript != null && !chatTranscript.isEmpty()) {
+            try {
+                design.updateChatTranscriptJson(
+                        objectMapper.writeValueAsString(resolveTranscriptReferencePhotos(design, chatTranscript)));
+                transcriptSaved = true;
+            } catch (JsonProcessingException e) {
+                System.err.println("[ChatTranscript] 채팅 화면 대화 저장 실패: " + e.getMessage());
+            }
+        }
+
         if (design.getStatus() == NailDesign.DesignStatus.DRAFT) {
             design.updateStatus(NailDesign.DesignStatus.CONFIRMED);
+            nailDesignRepository.save(design);
+        } else if (transcriptSaved) {
             nailDesignRepository.save(design);
         }
 
@@ -598,6 +616,11 @@ public class NailDesignService {
             throw new IllegalArgumentException("본인의 디자인만 조회할 수 있습니다.");
         }
 
+        // 확정할 때 채팅 화면 대화를 저장해 뒀으면 그대로 돌려준다 (실제로 나눈 대화 화면과 똑같이 다시 그리기 위함).
+        // 저장된 게 없는 예전 디자인은 아래처럼 서버에 남은 메시지와 생성 이력으로 이력을 조립한다.
+        List<com.example.nailyproject.dto.response.ChatMessageResponseDto> savedTranscript = readSavedChatTranscript(design);
+        if (savedTranscript != null) return savedTranscript;
+
         if (design.getSession() == null) return List.of();
 
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
@@ -670,6 +693,87 @@ public class NailDesignService {
                         .thenComparingInt(TimelineEntry::order))
                 .map(TimelineEntry::dto)
                 .toList();
+    }
+
+    // 채팅 화면 대화의 참고 사진 자리 — 프론트는 사진 미리보기(data URL, 수 MB)를 보내지 않고 이 값만 보낸다
+    private static final String REFERENCE_PHOTO_PLACEHOLDER = "reference-photo";
+
+    /**
+     * 채팅 화면 대화의 참고 사진 자리표시자를 이 세션에서 실제로 올린 참고 사진(S3) URL로 바꾼다.
+     * 사진을 여러 번 올렸으면 뒤에서부터(가장 최근 것끼리) 짝짓는다 — 생성에 실패한 앞쪽 시도는 사진 URL이 남지 않아서.
+     * 짝이 없는 자리표시자는 버리고, 그래서 글도 이미지도 없어진 말풍선은 뺀다.
+     */
+    private List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> resolveTranscriptReferencePhotos(
+            NailDesign design, List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> transcript) {
+        List<String> photoUrls = design.getSession() == null ? List.of()
+                : nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(design.getSession().getId()).stream()
+                .filter(d -> design.getGeneratedAt() == null || d.getGeneratedAt() == null
+                        || !d.getGeneratedAt().isAfter(design.getGeneratedAt()))
+                .map(NailDesign::getReferenceImageUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .distinct()
+                .toList();
+        long placeholderCount = transcript.stream()
+                .filter(entry -> entry.getImageUrls() != null)
+                .flatMap(entry -> entry.getImageUrls().stream())
+                .filter(REFERENCE_PHOTO_PLACEHOLDER::equals)
+                .count();
+        int photoIndex = (int) (photoUrls.size() - placeholderCount);
+
+        List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> resolved = new ArrayList<>();
+        for (com.example.nailyproject.dto.request.ChatTranscriptEntryDto entry : transcript) {
+            List<String> imageUrls = null;
+            if (entry.getImageUrls() != null) {
+                imageUrls = new ArrayList<>();
+                for (String url : entry.getImageUrls()) {
+                    if (REFERENCE_PHOTO_PLACEHOLDER.equals(url)) {
+                        if (photoIndex >= 0 && photoIndex < photoUrls.size()) imageUrls.add(photoUrls.get(photoIndex));
+                        photoIndex++;
+                    } else if (url != null && !url.startsWith("data:")) {
+                        imageUrls.add(url);
+                    }
+                }
+            }
+            boolean hasContent = (entry.getContent() != null && !entry.getContent().isBlank())
+                    || (imageUrls != null && !imageUrls.isEmpty())
+                    || (entry.getColorSwatches() != null && !entry.getColorSwatches().isEmpty());
+            if (!hasContent) continue;
+            resolved.add(new com.example.nailyproject.dto.request.ChatTranscriptEntryDto(
+                    entry.getRole(), entry.getContent() != null ? entry.getContent() : "", imageUrls,
+                    entry.getColorSwatches(), entry.getColorsInline(), entry.getTextAfterColors(),
+                    entry.getDesignResult(), entry.getHistoryOnly(), entry.getChatOnly(),
+                    entry.getHistorySection(), entry.getGenerationMethod()));
+        }
+        return resolved;
+    }
+
+    /** 확정 때 저장한 채팅 화면 대화를 이력 응답 형태로 읽는다. 저장된 게 없거나 읽지 못하면 null. */
+    private List<com.example.nailyproject.dto.response.ChatMessageResponseDto> readSavedChatTranscript(NailDesign design) {
+        String json = design.getChatTranscriptJson();
+        if (json == null || json.isBlank()) return null;
+        try {
+            List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> entries = objectMapper.readValue(json,
+                    new com.fasterxml.jackson.core.type.TypeReference<List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto>>() {});
+            return entries.stream()
+                    .map(entry -> com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
+                            .role(entry.getRole())
+                            .content(entry.getContent() != null ? entry.getContent() : "")
+                            .sentAt("")
+                            .imageUrls(entry.getImageUrls())
+                            .colorSwatches(entry.getColorSwatches())
+                            .colorsInline(entry.getColorsInline())
+                            .textAfterColors(entry.getTextAfterColors())
+                            .designResult(entry.getDesignResult())
+                            .historyOnly(entry.getHistoryOnly())
+                            .chatOnly(entry.getChatOnly())
+                            .historySection(entry.getHistorySection())
+                            .generationMethod(entry.getGenerationMethod())
+                            .build())
+                    .toList();
+        } catch (JsonProcessingException e) {
+            System.err.println("[ChatTranscript] 저장된 채팅 화면 대화를 읽지 못해 예전 방식으로 이력을 만듭니다: " + e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -1035,6 +1139,14 @@ public class NailDesignService {
         // 디자인 생성(저장) 직전에 저장해야 이 디자인의 generatedAt 이전 시점이라 이력 조회에서 잘리지 않는다.
         savePhotoRequestMessage(session, hasImage, request.getUserNote());
 
+        // 결과 화면 키워드(영어 슬롯·플랜 값)를 미리 모아, 사전에 없는 말의 한글 번역(GPT)을 이미지를 만드는 동안 끝내 둔다
+        List<String> resultKeywords = mergeKeywords(referenceSubjectKeyword(plan),
+                mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)));
+        List<String> translationCandidates = new ArrayList<>(resultKeywords);
+        translationCandidates.addAll(extractKeywordsFromSlots(slots, session)); // slotKeywords (resultKeywords는 개수 제한이 있다)
+        if (scanAuto) translationCandidates.addAll(scanReflectionValues(plan));
+        prefetchKeywordTranslations(translationCandidates);
+
         // ★ gen 서버로 이미지 생성 (ComfyUI 대체)
         NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session, referenceFinishes);
 
@@ -1073,8 +1185,12 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
-                .keywords(localizeKeywords(mergeKeywords(referenceSubjectKeyword(plan), mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
+                .keywords(localizeKeywords(resultKeywords)) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
+                .keywordColors(extractKeywordColors(slots))
+                // 선택지 기반 결과 화면이 "기타" 의견에서 나온 키워드를 자유 입력과 같은 방식으로 보여 줄 때 쓴다 (표시 전용)
+                .slotKeywords(extractSlotKeywords(slots, session))
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
+                .referenceImageUrl(nailDesign.getReferenceImageUrl())
                 .build();
     }
 
@@ -1606,6 +1722,20 @@ public class NailDesignService {
                 .filter(hex -> overallStyleHexes.contains(normalizeHex(hex)))
                 .toList();
 
+        List<String> reflection = scanReflectionValues(plan);
+        return DesignGenerateResponseDto.ScanAutoReflection.builder()
+                .recommendedColors(palette)
+                .usedColors(used)
+                .shape(cleanPlanValue(plan.path("shape").asText("")))
+                .mood(localizeReflection(reflection.get(0)))
+                .designType(localizeReflection(reflection.get(1)))
+                .motif(localizeReflection(reflection.get(2)))
+                .season(localizeReflection(reflection.get(3)))
+                .build();
+    }
+
+    /** scan-auto "반영된 스타일"의 원래(영어) 값 — 무드, 디자인 타입, 모티프, 계절 순 (없으면 null). */
+    private List<String> scanReflectionValues(JsonNode plan) {
         LinkedHashSet<String> designTypes = new LinkedHashSet<>();
         LinkedHashSet<String> motifs = new LinkedHashSet<>();
         for (String f : List.of("thumb", "index", "middle", "ring", "pinky")) {
@@ -1617,17 +1747,25 @@ public class NailDesignService {
                 for (JsonNode n : finger.path(field)) addIfMeaningful(motifs, n.asText(""));
             }
         }
+        return Arrays.asList(
+                cleanPlanValue(plan.path("mood").asText("")),
+                designTypes.isEmpty() ? cleanPlanValue(plan.path("designType").asText("")) : String.join(", ", designTypes),
+                motifs.isEmpty() ? cleanPlanValue(plan.path("motif").asText("")) : String.join(", ", motifs),
+                cleanPlanValue(plan.path("season").asText("")));
+    }
 
-        return DesignGenerateResponseDto.ScanAutoReflection.builder()
-                .recommendedColors(palette)
-                .usedColors(used)
-                .shape(cleanPlanValue(plan.path("shape").asText("")))
-                .mood(cleanPlanValue(plan.path("mood").asText("")))
-                .designType(designTypes.isEmpty() ? cleanPlanValue(plan.path("designType").asText(""))
-                        : String.join(", ", designTypes))
-                .motif(motifs.isEmpty() ? cleanPlanValue(plan.path("motif").asText(""))
-                        : String.join(", ", motifs))
-                .build();
+    /**
+     * 결과 화면 "반영된 스타일" 표시용: "glitter, chrome" 같은 플랜 값을 결과 키워드와 같은 한글 표기로 바꾼다 ("글리터, 크롬").
+     * 한글로 못 바꾼 값은 뺀다(결과 키워드와 같은 규칙). 남는 게 없으면 null. 표시 전용이라 플랜/프롬프트는 건드리지 않는다.
+     */
+    private String localizeReflection(String value) {
+        if (value == null) return null;
+        List<String> parts = Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isBlank() && !"none".equalsIgnoreCase(s))
+                .toList();
+        List<String> localized = localizeKeywords(parts);
+        return localized.isEmpty() ? null : String.join(", ", localized);
     }
 
     /** 스캔의 추천 쉐입 - 로컬 최종 measurements.json 값, 없으면 DB 값. 없거나 공백이면 null. */
@@ -2480,8 +2618,9 @@ public class NailDesignService {
     // ── 키워드 한글화 ─────────────────────────────────────────────────────────
     // 결과 화면 키워드 칩은 영어 값(슬롯/플랜의 통제 어휘)이므로, 마지막 단계에서 한글로 바꾼다.
     // 중복 제거(keywordCore)는 영어 기준으로 먼저 끝난 뒤에 적용한다.
-    // 사전에 없는 단어가 하나라도 있으면 그 키워드는 영어 그대로 둔다 (엉뚱한 번역보다 낫다).
-    // 새 키워드가 영어로 뜨면 KO_WORDS(단어) 또는 KO_PHRASES(문구 전체)에 한 줄 추가하면 된다.
+    // 사전에 없는 단어가 하나라도 있으면 그 키워드는 사전으로 옮기지 않고(엉뚱한 조합보다 낫다) 통째로
+    // KeywordTranslationService에 맡긴다 — DB(keyword_translations)에 저장된 번역, 없으면 GPT로 한 번 번역해 저장한다.
+    // 자주 나오는 말은 KO_WORDS(단어) 또는 KO_PHRASES(문구 전체)에 넣어 두면 DB·GPT를 거치지 않는다.
     private static final Map<String, String> KO_PHRASES = Map.ofEntries(
             Map.entry("warm and cozy", "따뜻/포근"),
             Map.entry("french tip", "프렌치"),
@@ -2509,6 +2648,7 @@ public class NailDesignService {
             Map.entry("sweet", "스위트"), Map.entry("sophisticated", "세련된"), Map.entry("cool", "쿨"),
             Map.entry("y2k", "Y2K"), Map.entry("cozy", "포근한"), Map.entry("warm", "따뜻한"),
             Map.entry("dreamy", "몽환적"), Map.entry("pastel", "파스텔"),
+            Map.entry("anime", "애니"), Map.entry("oriental", "오리엔탈"), Map.entry("innocent", "청순"),
             // 디자인/마감/패턴
             Map.entry("glitter", "글리터"), Map.entry("gradient", "그라데이션"), Map.entry("cheek", "치크"),
             Map.entry("marble", "마블"), Map.entry("french", "프렌치"), Map.entry("magnetic", "마그네틱"),
@@ -2537,6 +2677,8 @@ public class NailDesignService {
             // 계절
             Map.entry("spring", "봄"), Map.entry("summer", "여름"), Map.entry("autumn", "가을"),
             Map.entry("fall", "가을"), Map.entry("winter", "겨울"),
+            Map.entry("christmas", "크리스마스"), Map.entry("halloween", "할로윈"),
+            Map.entry("wedding", "웨딩"), Map.entry("vacation", "바캉스"),
             // 색 (ColorNameService 이름 + 수식어)
             Map.entry("white", "화이트"), Map.entry("black", "블랙"), Map.entry("red", "레드"),
             Map.entry("blue", "블루"), Map.entry("green", "그린"), Map.entry("yellow", "옐로"),
@@ -2574,22 +2716,75 @@ public class NailDesignService {
     // 한글로 바꾼 뒤에도 남아도 되는 영문 표기 ("3D", "Y2K")
     private static final java.util.regex.Pattern ALLOWED_LATIN = java.util.regex.Pattern.compile("3D|Y2K");
 
+    // 사전으로 옮긴 뒤에도 영어가 남았는지 ("3D", "Y2K"는 영어로 둬도 된다)
+    private static boolean hasLatin(String text) {
+        return ALLOWED_LATIN.matcher(text).replaceAll("").matches(".*[A-Za-z].*");
+    }
+
+    /** 사전으로 한글이 안 되는 키워드 조각들 — KeywordTranslationService(저장된 번역 → GPT)에 맡길 것 */
+    private List<String> unmappedKeywordParts(Collection<String> keywords) {
+        List<String> parts = new ArrayList<>();
+        for (String k : keywords) {
+            if (k == null || k.isBlank()) continue;
+            for (String part : splitJoinedKeyword(k)) {
+                if ("none".equalsIgnoreCase(part.trim()) || ColorNameService.isHex(part)) continue;
+                if (hasLatin(localizeKeyword(part))) parts.add(part);
+            }
+        }
+        return parts;
+    }
+
+    /** 사전에 없는 말의 번역을 미리 시작해 둔다(기다리지 않는다) — 이미지를 만들기 전에 불러 두면 그동안 끝난다. */
+    public void prefetchKeywordTranslations(Collection<String> keywords) {
+        keywordTranslationService.prefetch(unmappedKeywordParts(keywords));
+    }
+
+    /** 키워드 조각 하나를 한글로: 사전 먼저, 없으면 번역 저장소(translated). 둘 다 없거나 칩으로 쓸 뜻이 없는 말이면 null */
+    private String toKorean(String part, Map<String, String> translated) {
+        String ko = localizeKeyword(part);
+        if (!hasLatin(ko)) return ko;
+        String saved = translated.get(KeywordTranslationService.normalize(part));
+        return saved == null || saved.isBlank() ? null : saved;
+    }
+
     /**
      * 키워드 목록을 한글로 바꾸고, 한글로 바꾼 뒤 같아진 것(예: plaid / check pattern -> 체크)은 하나만 남긴다.
-     * 사전에 없어서 영어가 그대로 남은 키워드는 화면에 영어 단어로 뜨지 않도록 제외한다(서버 로그에는 남긴다 -> 사전에 추가하면 됨).
+     * 사전에 없는 말은 저장된 번역(없으면 GPT 번역)을 쓰고, 그래도 한글이 없으면 화면에 영어 단어로 뜨지 않도록 제외한다.
      */
     private List<String> localizeKeywords(List<String> keywords) {
+        Map<String, String> translated = keywordTranslationService.translate(unmappedKeywordParts(keywords));
         Set<String> seen = new LinkedHashSet<>();
         for (String k : keywords) {
             if (k == null || k.isBlank()) continue;
-            String ko = localizeKeyword(k);
-            if (ALLOWED_LATIN.matcher(ko).replaceAll("").matches(".*[A-Za-z].*")) {
-                System.out.println("[Keyword] 한글 매핑이 없어 키워드에서 제외: '" + k + "' (KO_WORDS/KO_PHRASES에 추가하면 표시됨)");
-                continue;
+            for (String part : splitJoinedKeyword(k)) {
+                String ko = toKorean(part, translated);
+                if (ko == null) {
+                    System.out.println("[Keyword] 사전에도 번역에도 없어 키워드에서 제외: '" + part + "'");
+                    continue;
+                }
+                seen.add(ko);
             }
-            seen.add(ko);
         }
         return new ArrayList<>(seen);
+    }
+
+    // 여러 값을 이어 쓴 슬롯 값 ("funky and glamorous", "pure & innocent", "chic/modern")을 값마다 나누는 구분자
+    private static final java.util.regex.Pattern KEYWORD_JOINER =
+            java.util.regex.Pattern.compile("\\s+(?:and|or)\\s+|\\s*[&/,]\\s*");
+
+    /**
+     * 채팅 슬롯 추출 규칙이 "화려한" -> "funky and glamorous"처럼 무드를 이어 쓴 문구로 저장하는데, 통째로는 사전에 없어서
+     * ("and") 키워드에서 빠지고 펑키도 안 보였다. 값마다 나눠 "펑키", "화려"로 바꾼다.
+     * "warm and cozy"처럼 문구 전체가 KO_PHRASES에 있으면 나누지 않는다. 표시 전용 (슬롯·플랜·프롬프트는 그대로).
+     */
+    private List<String> splitJoinedKeyword(String keyword) {
+        String k = keyword.trim();
+        if (KO_PHRASES.containsKey(k.toLowerCase())) return List.of(k);
+        List<String> parts = Arrays.stream(KEYWORD_JOINER.split(k))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .toList();
+        return parts.isEmpty() ? List.of(k) : parts;
     }
 
     /**
@@ -2598,13 +2793,25 @@ public class NailDesignService {
      * 생성 직후에는 overrides가 없으므로 슬롯 + 플랜 키워드만 나온다.
      */
     public List<String> extractDesignKeywords(Map<String, SlotData> slots, DesignSession session, String planJson) {
+        return localizeKeywords(rawDesignKeywords(slots, session, planJson));
+    }
+
+    /** extractDesignKeywords·extractSlotKeywords가 쓸 말의 번역을 미리 시작해 둔다 — 수정(RefineService)이 이미지를 고치기 전에 부른다. */
+    public void prefetchDesignKeywordTranslations(Map<String, SlotData> slots, DesignSession session, String planJson) {
+        List<String> candidates = new ArrayList<>(rawDesignKeywords(slots, session, planJson));
+        candidates.addAll(extractKeywordsFromSlots(slots, session));
+        prefetchKeywordTranslations(candidates);
+    }
+
+    /** extractDesignKeywords의 한글로 옮기기 전(영어) 목록 */
+    private List<String> rawDesignKeywords(Map<String, SlotData> slots, DesignSession session, String planJson) {
         JsonNode plan = null;
         if (planJson != null && !planJson.isBlank()) {
             try { plan = objectMapper.readTree(planJson); } catch (Exception ignored) {}
         }
         List<String> base = mergeKeywords(referenceSubjectKeyword(plan),
                 mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)));
-        if (plan == null) return localizeKeywords(base);
+        if (plan == null) return base;
 
         List<String> removes = new ArrayList<>();
         plan.path("keywordOverrides").path("remove").forEach(n -> removes.add(n.asText("").trim().toLowerCase()));
@@ -2622,7 +2829,7 @@ public class NailDesignService {
         }
         int room = Math.max(0, MAX_TOTAL_KEYWORDS - adds.size());
         if (kept.size() > room) kept = new ArrayList<>(kept.subList(0, room));
-        return localizeKeywords(mergeKeywords(kept, adds));
+        return mergeKeywords(kept, adds);
     }
 
     public List<String> extractKeywordsFromSlots(Map<String, SlotData> slots, DesignSession session) {
@@ -2646,5 +2853,45 @@ public class NailDesignService {
             }
         }
         return keywords;
+    }
+
+    /**
+     * 슬롯(무드/디자인 타입/모티프/계절/쉐입/컬러)만으로 만든 결과 화면 키워드 — 플랜 키워드(마감/패턴/파츠)와
+     * 수정 overrides는 섞지 않는다. 선택지 기반 결과 화면이 수정 후에도 "고른 값"만 보여줄 때 쓴다(표시 전용).
+     */
+    public List<String> extractSlotKeywords(Map<String, SlotData> slots, DesignSession session) {
+        return localizeKeywords(extractKeywordsFromSlots(slots, session));
+    }
+
+    /**
+     * 결과 화면 컬러 키워드의 원래 hex — extractKeywordsFromSlots가 키워드로 넣는 색(color 슬롯)을
+     * 키워드와 같은 한글 표기로 짝지어 준다. 결과 화면은 이 이름의 키워드 칩을 색 스와치 칩으로 바꿔 그린다.
+     * 한글로 못 바꾼 색은 키워드에서도 빠지므로(localizeKeywords) 여기서도 뺀다.
+     */
+    public List<DesignGenerateResponseDto.KeywordColor> extractKeywordColors(Map<String, SlotData> slots) {
+        List<DesignGenerateResponseDto.KeywordColor> result = new ArrayList<>();
+        Set<String> seenNames = new HashSet<>();
+        try {
+            Map<String, String> englishNameByHex = new LinkedHashMap<>();
+            for (String value : getLiked(slots, "color")) {
+                if (!ColorNameService.isHex(value)) continue;
+                String hex = value.trim().toUpperCase();
+                englishNameByHex.putIfAbsent(hex.startsWith("#") ? hex : "#" + hex, colorNameService.resolveColorName(value));
+            }
+            Map<String, String> translated = keywordTranslationService.translate(unmappedKeywordParts(englishNameByHex.values()));
+            for (Map.Entry<String, String> entry : englishNameByHex.entrySet()) {
+                String name = toKorean(entry.getValue(), translated);
+                if (name == null || !seenNames.add(name)) continue;
+                result.add(DesignGenerateResponseDto.KeywordColor.builder()
+                        .hex(entry.getKey())
+                        .name(name)
+                        .build());
+            }
+        } catch (Exception e) {
+            // 표시용 정보라 실패해도 생성 응답은 그대로 내려간다 (컬러는 키워드 글자로만 보인다)
+            System.err.println("[Keyword] 컬러 키워드 hex 정리 실패: " + e.getMessage());
+            return new ArrayList<>();
+        }
+        return result;
     }
 }

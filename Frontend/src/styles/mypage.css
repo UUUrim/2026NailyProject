@@ -54,13 +54,11 @@
   border-radius: var(--mp-radius-lg);
   padding: 1.35rem 1.1rem;
   box-shadow: var(--mp-shadow);
-  /* 창이 작아 사이드바가 넘칠 때: 채팅/분석 패널과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__sidebar::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__sidebar::-webkit-scrollbar-track {
@@ -69,11 +67,22 @@
 
 .mypage-x__sidebar::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__sidebar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__sidebar-profile {
@@ -1301,13 +1310,11 @@
   padding-right: 0.8rem;
   /* 스크롤바 위치를 패널 안쪽 여백 밖으로 살짝 밀어내 오른쪽으로 옮긴다 */
   margin-right: -0.8rem;
-  /* 채팅 ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__scanx-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__scanx-scroll::-webkit-scrollbar-track {
@@ -1316,11 +1323,22 @@
 
 .mypage-x__scanx-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__scanx-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__scanx-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__scanx-head {
@@ -3284,13 +3302,11 @@
   margin-bottom: 0.65rem;
   padding: 0.1rem;
   padding-right: 0.4rem;
-  /* 채팅 ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__fav-folder-grid::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__fav-folder-grid::-webkit-scrollbar-track {
@@ -3299,11 +3315,22 @@
 
 .mypage-x__fav-folder-grid::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__fav-folder-grid::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__fav-folder-grid {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__fav-folder-card {
@@ -3991,8 +4018,24 @@
   gap: 0.7rem;
 }
 
-.mypage-x__chat-history-date {
+/* 채팅 이력 맨 위 — 날짜와 생성 방식 표시 (오른쪽은 닫기 버튼 자리) */
+.mypage-x__chat-history-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   padding-right: 1.9rem;
+}
+
+.mypage-x__chat-history-method {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #fbe9ef;
+  color: #c2577a;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .mypage-x__chat-history-scroll {
@@ -4001,13 +4044,11 @@
   overflow-y: auto;
   padding-right: 0.4rem;
   margin-right: -0.2rem;
-  /* 채팅 ? 패널과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__chat-history-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__chat-history-scroll::-webkit-scrollbar-track {
@@ -4016,11 +4057,22 @@
 
 .mypage-x__chat-history-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__chat-history-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__chat-history-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__modal-actions {

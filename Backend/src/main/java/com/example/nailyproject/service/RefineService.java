@@ -463,6 +463,12 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
+        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
+        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
+                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
+        // 결과 화면 키워드 중 사전에 없는 말의 한글 번역(GPT)을 이미지를 고치는 동안 끝내 둔다
+        nailDesignService.prefetchDesignKeywordTranslations(slots, session, nextPlanJson);
+
         // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄.
         //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
         //    합성본이라 모델이 흰 배경을 그대로 그려 불투명으로 줄 수도 있는데, 그러면 아래 크롭 단계가 서버 누끼로 처리한다.
@@ -503,10 +509,6 @@ public class RefineService {
         // 흰색으로 번지는 손톱 끝이 잘린다.
         String nailTipCropsJson = nailDesignService.createNailTipCrops(user.getId(), editedBase64, displayBase64);
 
-        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
-        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
-                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
-
         // 5. 새 NailDesign 저장 (플랜은 그대로 유지, 수정 지시문을 프롬프트로 기록)
         NailDesign newDesign = NailDesign.builder()
                 .user(user)
@@ -537,6 +539,8 @@ public class RefineService {
                 .imageUrls(newDesign.getImageUrls())
                 .details(nailDesignService.buildDetails(newDesign))
                 .keywords(nailDesignService.extractDesignKeywords(slots, session, nextPlanJson))
+                .keywordColors(nailDesignService.extractKeywordColors(slots))
+                .slotKeywords(nailDesignService.extractSlotKeywords(slots, session))
                 .build();
     }
 

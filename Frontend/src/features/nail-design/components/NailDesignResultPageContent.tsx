@@ -9,6 +9,7 @@ import { DesignImageDetailModal, Icon as MypageImageIcon } from '@/features/mypa
 import { NailArTryOnModal } from '@/features/mypage/components/NailArTryOnModal'
 import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { useNailDesignResultPage } from '@/features/nail-design/hooks/useNailDesignResultPage'
+import { cleanKeywordChip } from '@/features/nail-design/utils/keywordChip'
 import { INITIAL_PREFERENCES } from '@/shared/constants/designPreferences'
 import type { NailShapeId } from '@/shared/constants/nailShapes'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
@@ -44,6 +45,7 @@ export function NailDesignResultPageContent() {
         shared,
         shape,
         nailTipCropUrls,
+        detailLoading,
         detailsWithSwatches,
         handleToggleLike,
         confirmLikeWithFolder,
@@ -100,8 +102,44 @@ export function NailDesignResultPageContent() {
         )
     }
 
-    // 마지막 결과 이미지에 반영된 키워드만 보여준다 (수정 요청 문장 원문은 칩으로 넣지 않는다)
-    const allKeywords = context ? Array.from(new Set(context.keywords)) : []
+    // 마지막 결과 이미지에 반영된 키워드만 보여준다 (선택지 기반이면 고른 값만, 수정 요청 문장 원문은 칩으로 넣지 않는다).
+    // 컬러 키워드는 색 스와치 + 색 이름 칩으로 따로 그린다.
+    // 칩마다 끝에 붙은 "느낌의/분위기로" 같은 군더더기를 떼고, 그것만 남은 칩("느낌의")은 뺀다 (어디서 온 키워드든)
+    const allKeywords = context
+        ? Array.from(new Set(context.keywords.map(cleanKeywordChip).filter((chip): chip is string => !!chip)))
+        : []
+    const colorKeywords = context?.colors ?? []
+    const hasStyleKeywords = allKeywords.length > 0 || colorKeywords.length > 0
+
+    // 스캔 기반 자동 생성의 "반영된 스타일" — 무드·디자인·모티프·계절감 값을 칸 이름 없이 키워드 하나씩 칩으로
+    // (서버가 여러 값을 ", "로 이어 보낸다)
+    const handSummary = context?.handSummary
+    const reflectedStyleKeywords = handSummary
+        ? Array.from(
+            new Set(
+                [handSummary.reflectedMood, handSummary.reflectedDesignType, handSummary.reflectedMotif, handSummary.reflectedSeason]
+                    .flatMap((value) => (value ?? '').split(','))
+                    .map((value) => cleanKeywordChip(value))
+                    .filter((value): value is string => !!value),
+            ),
+        )
+        : []
+
+    const styleKeywordChips = (
+        <>
+            {allKeywords.map((keyword) => (
+                <span className="design-result-v2__keyword-chip" key={keyword}>
+                    {keyword}
+                </span>
+            ))}
+            {colorKeywords.map((color) => (
+                <span className="design-result-v2__keyword-chip design-result-v2__keyword-chip--color" key={`color-${color.hex}`}>
+                    <span className="design-result-v2__keyword-swatch" style={{ backgroundColor: color.hex }} aria-hidden="true" />
+                    {color.name}
+                </span>
+            ))}
+        </>
+    )
 
     // 반영된 추천 컬러 — 다른 화면들과 같은 순서(가장 연한 색에서 출발해 비슷한 색끼리 잇는 TSP 경로).
     // 웹은 한 줄, 모바일은 6열 그리드로 이 순서를 그대로 흘려 넣는다.
@@ -157,10 +195,12 @@ export function NailDesignResultPageContent() {
                             {/* 공유 상태 배지 — 이미지 상세모달과 동일한 ShareStatusBadge 컴포넌트를 그대로 재사용 */}
                             {shared && <ShareStatusBadge shared={shared} className="mypage-x__modal-share-corner" />}
 
+                            {/* 쉐입·손톱팁 정보가 오기 전에 열면 도중에 AR이 다시 시작되므로 상세 조회가 끝난 뒤에 연다 */}
                             <button
                                 type="button"
                                 className="design-result-v2__ar-chip"
                                 onClick={() => setArPreviewOpen(true)}
+                                disabled={detailLoading}
                             >
                                 {ModalActionIcons.ar}
                                 <span>AR 미리보기</span>
@@ -179,13 +219,17 @@ export function NailDesignResultPageContent() {
                 {context &&
                     (context.handSummary ||
                         context.referenceImageUrl ||
-                        context.keywords.length > 0) && (
+                        hasStyleKeywords) && (
                         <section className="design-result-v2__origin">
                             <p className="design-result-v2__detail-label">How It Was Made</p>
 
                             {context.handSummary && (
                                 <div className="design-result-v2__origin-block">
-                                    <h2>{userName ? `${userName}님의 손 분석 결과를 반영했어요.` : '내 손 분석 결과를 반영했어요.'}</h2>
+                                    <h2>
+                                        {userName
+                                            ? `${userName}님의 손 분석 결과를 반영하여 디자인을 생성했어요.`
+                                            : '내 손 분석 결과를 반영하여 디자인을 생성했어요.'}
+                                    </h2>
                                     <div className="design-result-v2__origin-hand design-result-v2__origin-hand--scan-auto">
                                         <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
                                             <span className="design-result-v2__origin-stat-label">피부 톤</span>
@@ -242,27 +286,15 @@ export function NailDesignResultPageContent() {
                                                 </ul>
                                             </div>
                                         )}
-                                        {(context.handSummary.reflectedMood ||
-                                            context.handSummary.reflectedDesignType ||
-                                            context.handSummary.reflectedMotif) && (
+                                        {reflectedStyleKeywords.length > 0 && (
                                             <div className="design-result-v2__origin-stat design-result-v2__origin-stat--reflected">
                                                 <span className="design-result-v2__origin-stat-label">반영된 스타일</span>
                                                 <div className="design-result-v2__origin-keywords">
-                                                    {context.handSummary.reflectedMood && (
-                                                        <span className="design-result-v2__keyword-chip">
-                                                            무드: {context.handSummary.reflectedMood}
+                                                    {reflectedStyleKeywords.map((keyword) => (
+                                                        <span className="design-result-v2__keyword-chip" key={keyword}>
+                                                            {keyword}
                                                         </span>
-                                                    )}
-                                                    {context.handSummary.reflectedDesignType && (
-                                                        <span className="design-result-v2__keyword-chip">
-                                                            디자인: {context.handSummary.reflectedDesignType}
-                                                        </span>
-                                                    )}
-                                                    {context.handSummary.reflectedMotif && (
-                                                        <span className="design-result-v2__keyword-chip">
-                                                            모티프: {context.handSummary.reflectedMotif}
-                                                        </span>
-                                                    )}
+                                                    ))}
                                                 </div>
                                             </div>
                                         )}
@@ -272,7 +304,7 @@ export function NailDesignResultPageContent() {
 
                             {context.referenceImageUrl && context.source === 'photo' ? (
                                 <div className="design-result-v2__origin-block">
-                                    <h2>참고 사진을 반영했어요</h2>
+                                    <h2>첨부하신 사진을 참고하여 디자인을 생성했어요.</h2>
                                     <div className="design-result-v2__origin-photo-row">
                                         <div className="design-result-v2__origin-photo design-result-v2__origin-photo--lg">
                                             <img
@@ -282,28 +314,21 @@ export function NailDesignResultPageContent() {
                                                 style={{ cursor: 'zoom-in' }}
                                             />
                                         </div>
-                                        {allKeywords.length > 0 && (
+                                        {hasStyleKeywords && (
                                             <>
                                                 <div className="design-result-v2__origin-divider" aria-hidden="true" />
                                                 <div className="design-result-v2__origin-keywords design-result-v2__origin-keywords--inline">
-                                                    {allKeywords.map((keyword) => (
-                                                        <span className="design-result-v2__keyword-chip" key={keyword}>
-                                      {keyword}
-                                    </span>
-                                                    ))}
+                                                    {styleKeywordChips}
                                                 </div>
                                             </>
                                         )}
                                     </div>
-                                    <p className="design-result-v2__origin-desc">
-                                        업로드하신 참고 사진의 분위기와 색감을 반영하여 디자인을 생성했어요.
-                                    </p>
                                 </div>
                             ) : (
                                 <>
                                     {context.referenceImageUrl && (
                                         <div className="design-result-v2__origin-block">
-                                            <h2>참고 사진을 반영했어요</h2>
+                                            <h2>첨부하신 사진을 참고하여 디자인을 생성했어요.</h2>
                                             <div className="design-result-v2__origin-photo">
                                                 <img
                                                     src={context.referenceImageUrl}
@@ -312,22 +337,13 @@ export function NailDesignResultPageContent() {
                                                     style={{ cursor: 'zoom-in' }}
                                                 />
                                             </div>
-                                            <p className="design-result-v2__origin-desc">
-                                                업로드하신 참고 사진의 분위기와 색감을 반영하여 디자인을 생성했어요.
-                                            </p>
                                         </div>
                                     )}
 
-                                    {allKeywords.length > 0 && (
+                                    {hasStyleKeywords && (
                                         <div className="design-result-v2__origin-block">
                                             <h2>{context.source === 'freeform' ? '대화에서 나눈 스타일을 반영하여 디자인을 생성했어요.' : '선택하신 옵션을 반영하여 디자인을 생성했어요.'}</h2>
-                                            <div className="design-result-v2__origin-keywords">
-                                                {allKeywords.map((keyword) => (
-                                                    <span className="design-result-v2__keyword-chip" key={keyword}>
-                                    {keyword}
-                                  </span>
-                                                ))}
-                                            </div>
+                                            <div className="design-result-v2__origin-keywords">{styleKeywordChips}</div>
                                         </div>
                                     )}
                                 </>
