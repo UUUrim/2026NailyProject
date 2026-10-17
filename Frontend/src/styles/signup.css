@@ -90,7 +90,8 @@
 }
 
 .auth-split__sparkle--1 { top: 8.8rem; left: 14rem; }
-.auth-split__sparkle--2 { top: 11.4rem; left: 14rem; font-size: 0.7rem; animation-delay: 0.8s; }
+/* 작은 반짝이는 '스캔한 손톱 그대로' 글자 끝과 겹치지 않게 그 바로 오른쪽에 둔다 */
+.auth-split__sparkle--2 { top: 11.4rem; left: 15.1rem; font-size: 0.7rem; animation-delay: 0.8s; }
 
 @keyframes authTwinkle {
   0%, 100% { opacity: 0.25; transform: scale(0.75); }
@@ -151,7 +152,7 @@
   flex-shrink: 0;
 }
 
-/* 디자인 이미지(design1.png)는 원본 비율(768x512 = 3:2) 그대로 보여줘서
+/* 디자인 이미지(design-*.webp, 1536x1024)는 원본 비율(3:2) 그대로 보여줘서
    object-fit: cover가 위아래 여백까지 끌고 오는 크롭 없이 이미지 꽉 채우게 한다 */
 .auth-split__frame--photo {
   aspect-ratio: 3 / 2;
@@ -172,7 +173,7 @@
   mix-blend-mode: soft-light;
 }
 
-/* 네일리 정체성 카드: 스캔 / 출력 / 진단 / 디자인 — 사진 카드보다 세로 길이를 조금 줄인다 */
+/* 네일리 정체성 카드: 손 스캔 / 네일 팁 출력 / AI 디자인 / AR 미리보기 — 사진 카드보다 세로 길이를 조금 줄인다 */
 .auth-split__feature {
   display: flex;
   flex-direction: column;
@@ -199,6 +200,17 @@
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.65);
   box-shadow: 0 6px 14px rgba(43, 31, 39, 0.1);
+}
+
+/* 메인 인트로 섹션 아이콘(.story-intro__step-icon과 같은 선) — 크기는 다른 카드 아이콘(26px)에 맞춘다 */
+.auth-split__feature-icon--story svg {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .auth-split__feature-title {

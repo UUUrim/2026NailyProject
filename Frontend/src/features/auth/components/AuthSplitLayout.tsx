@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { STORY_STEP_ICONS } from '@/features/home/components/story/storyStepIcons'
 import { AuthNav } from '@/shared/layout/AuthNav'
 
 type AuthSplitLayoutProps = {
@@ -13,6 +14,8 @@ type FeatureItem = {
     title: string
     caption: string
     icon: ReactNode
+    // 'story' — 메인 인트로 섹션 아이콘(선 굵기·색을 CSS로 입힌다)
+    iconStyle?: 'story'
 }
 type MarqueeItem = PhotoItem | FeatureItem
 
@@ -29,24 +32,6 @@ const ScanIcon = (
     </svg>
 )
 
-const AnalyzeIcon = (
-    <svg viewBox="0 0 24 24" fill="none" width="26" height="26" aria-hidden="true">
-        <path d="M4 19h16M7 19V10M12 19V5M17 19v-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-)
-
-const PrintIcon = (
-    <svg viewBox="0 0 24 24" fill="none" width="26" height="26" aria-hidden="true">
-        <path
-            d="M7 8V4h10v4M6 17h12a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z"
-            stroke="currentColor"
-            strokeWidth="1.7"
-            strokeLinejoin="round"
-        />
-        <rect x="8" y="14" width="8" height="6" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-)
-
 // 마이페이지의 디자인 아이콘과 동일한 그림(사각 프레임 + 산 모양 + 점)을 가져오되,
 // 다른 카드 아이콘들과 같은 스타일(width/height/aria-hidden)로 맞췄다.
 const DesignIcon = (
@@ -57,18 +42,33 @@ const DesignIcon = (
     </svg>
 )
 
+// 왼쪽 줄: 손 스캔 · AI 디자인 생성 / 오른쪽 줄: 네일 팁 출력 · AR 미리보기 (출력·AR 아이콘은 메인 인트로 섹션과 같은 그림)
 const MARQUEE_COLUMN_A: MarqueeItem[] = [
-    { type: 'photo', src: '/images/auth-split/design1.png' },
+    { type: 'photo', src: '/images/auth-split/design-swan.webp' },
     { type: 'feature', accent: 'a', title: '손 스캔', caption: '길이·너비·곡률 정밀 분석', icon: ScanIcon },
-    { type: 'photo', src: '/images/auth-split/design1.png' },
-    { type: 'feature', accent: 'd', title: '네일 팁 제작', caption: '3D 프린터로 내 손에 꼭 맞는 네일 팁 출력', icon: PrintIcon },
+    { type: 'photo', src: '/images/auth-split/design-clover.webp' },
+    { type: 'feature', accent: 'b', title: 'AI 디자인 생성', caption: 'AI로 완성하는 나만의 디자인', icon: DesignIcon },
 ]
 
 const MARQUEE_COLUMN_B: MarqueeItem[] = [
-    { type: 'photo', src: '/images/auth-split/design1.png' },
-    { type: 'feature', accent: 'c', title: '피부 톤 맞춤 진단', caption: '나에게 어울리는 색상과 손톱 모양 추천', icon: AnalyzeIcon },
-    { type: 'photo', src: '/images/auth-split/design1.png' },
-    { type: 'feature', accent: 'b', title: 'AI 디자인 생성', caption: 'AI로 완성하는 나만의 디자인', icon: DesignIcon },
+    { type: 'photo', src: '/images/auth-split/design-sky.webp' },
+    {
+        type: 'feature',
+        accent: 'd',
+        title: '네일 팁 출력',
+        caption: '3D 프린터로 내 손에 꼭 맞는 네일 팁 출력',
+        icon: STORY_STEP_ICONS.print,
+        iconStyle: 'story',
+    },
+    { type: 'photo', src: '/images/auth-split/design-gothic.webp' },
+    {
+        type: 'feature',
+        accent: 'c',
+        title: 'AR 미리보기',
+        caption: '내 손 위에 디자인을 입혀 미리 확인',
+        icon: STORY_STEP_ICONS.ar,
+        iconStyle: 'story',
+    },
 ]
 
 function MarqueeColumn({ items, direction }: { items: MarqueeItem[]; direction: 'up' | 'down' }) {
@@ -84,7 +84,9 @@ function MarqueeColumn({ items, direction }: { items: MarqueeItem[]; direction: 
                         </span>
                     ) : (
                         <span className={`auth-split__frame auth-split__feature auth-split__feature--${item.accent}`} key={`${item.title}-${i}`}>
-                            <span className="auth-split__feature-icon">{item.icon}</span>
+                            <span className={`auth-split__feature-icon${item.iconStyle === 'story' ? ' auth-split__feature-icon--story' : ''}`}>
+                                {item.icon}
+                            </span>
                             <strong className="auth-split__feature-title">{item.title}</strong>
                             <span className="auth-split__feature-caption">{item.caption}</span>
                         </span>
