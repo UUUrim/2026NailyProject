@@ -194,7 +194,7 @@ export function HandScanResultPageContent() {
 
             {isLoading ? (
                 <section className="scan-result-section" aria-hidden="true">
-                    <h2>추천 네일팁 쉐입</h2>
+                    <h2>추천 네일 팁 쉐입</h2>
                     <div className="scan-shape-highlight scan-shape-highlight--skeleton">
                         <div className="scan-shape-highlight__top">
                             <div className="scan-shape-highlight__body">
@@ -207,7 +207,7 @@ export function HandScanResultPageContent() {
                 </section>
             ) : (
                 <section className="scan-result-section">
-                    <h2>추천 네일팁 쉐입</h2>
+                    <h2>추천 네일 팁 쉐입</h2>
                     {recommended ? (
                         <RecommendedShapeCard shape={recommended} userName={userName} />
                     ) : (
@@ -305,7 +305,7 @@ export function HandScanResultPageContent() {
             </section>
 
             <div className="scan-result-actions">
-                <NextStepButton label="네일팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
+                <NextStepButton label="네일 팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
             </div>
 
             {showFingerModal && apiFingers.length > 0 && (

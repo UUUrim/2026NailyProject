@@ -49,7 +49,7 @@ export const PrintOrderRow = memo(function PrintOrderRow({
                 )}
             </div>
             <div className="mypage-x__scan-info">
-                <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일팁 출력</p>
+                <p className="mypage-x__print-shape">{order.shapeLabelKo} 네일 팁 출력</p>
                 <p className="mypage-x__print-length">
                     {order.tipExtensionMm != null && '연장 길이 '}
                     {formatTipExtension(order.tipExtensionMm)}

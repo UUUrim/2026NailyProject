@@ -41,7 +41,7 @@ export function ScansTab() {
             <EmptyState
                 icon="hand"
                 title="손 분석 이력이 없어요"
-                description="손을 스캔하면 퍼스널컬러와 맞춤 네일팁 쉐입을 추천해드려요."
+                description="손을 스캔하면 어울리는 네일 팁 쉐입과 컬러를 추천해드려요."
                 actionLabel="손 촬영하러 가기"
                 onAction={() => navigate('/scan/hand')}
             />

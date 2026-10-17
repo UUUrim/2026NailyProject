@@ -285,7 +285,7 @@ export function HandScanPageContent() {
                         })
                     }
                 >
-                  네일팁 출력하러 가기
+                  네일 팁 출력하러 가기
                 </PillButton>
               </div>
             </section>
@@ -305,8 +305,7 @@ export function HandScanPageContent() {
               title="손 촬영 및 스캔"
               description={
                 <>
-                  두 카메라가 동시에 촬영하여 손톱 형태와 곡률을 분석합니다.<br />
-                  왼손 다섯 손가락을 먼저 촬영한 뒤, 오른손 다섯 손가락을 이어서 촬영합니다.
+                  두 대의 카메라가 동시에 촬영해 손가락별 손톱의 형태와 곡률을 측정하고, 피부 톤을 분석합니다.
                 </>
               }
               align="center"

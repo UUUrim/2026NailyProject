@@ -186,7 +186,7 @@ export function HandScanResultPagePreviewContent() {
             </section>
 
             <div className="scan-result-actions">
-                <NextStepButton label="네일팁 출력하러 가기" onClick={() => {}} />
+                <NextStepButton label="네일 팁 출력하러 가기" onClick={() => {}} />
             </div>
 
             {showFingerModal && (

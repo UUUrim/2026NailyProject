@@ -202,9 +202,9 @@ export function MyPageModals({
 
                 return (
                     <ScanXModalShell
-                        ariaLabel="네일팁 출력 상세"
+                        ariaLabel="네일 팁 출력 상세"
                         eyebrow="Nail Tips Print"
-                        title="네일팁 출력"
+                        title="네일 팁 출력"
                         subtitle={subtitle}
                         onClose={closePrintDetail}
                     >
@@ -235,7 +235,7 @@ export function MyPageModals({
                         )}
                         <section className="mypage-x__scanx-shape">
                             <div className="mypage-x__scanx-shape-copy">
-                                <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>
+                                <p className="mypage-x__scanx-kicker">신청한 네일 팁 쉐입</p>
                                 <strong>{shapeLabel}</strong>
                                 {shapeEn && <span>{shapeEn}</span>}
                                 <p className="mypage-x__scanx-shape-length">
@@ -258,8 +258,8 @@ export function MyPageModals({
                       <i aria-hidden="true">{Icon.summaryIcon}</i>
                     </span>
                             {printDetailOrder.tipExtensionMm != null
-                                ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일팁 10개(양손) 출력을 신청했어요.`
-                                : `${shapeLabel} 쉐입(기본 길이)으로 네일팁 10개(양손) 출력을 신청했어요.`}
+                                ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일 팁 10개(양손) 출력을 신청했어요.`
+                                : `${shapeLabel} 쉐입(기본 길이)으로 네일 팁 10개(양손) 출력을 신청했어요.`}
                         </p>
 
                         <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">

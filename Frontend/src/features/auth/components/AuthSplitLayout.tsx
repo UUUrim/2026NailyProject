@@ -61,7 +61,7 @@ const MARQUEE_COLUMN_A: MarqueeItem[] = [
     { type: 'photo', src: '/images/auth-split/design1.png' },
     { type: 'feature', accent: 'a', title: '손 스캔', caption: '길이·너비·곡률 정밀 분석', icon: ScanIcon },
     { type: 'photo', src: '/images/auth-split/design1.png' },
-    { type: 'feature', accent: 'd', title: '네일팁 제작', caption: '3D 프린터로 내 손에 꼭 맞는 네일팁 출력', icon: PrintIcon },
+    { type: 'feature', accent: 'd', title: '네일 팁 제작', caption: '3D 프린터로 내 손에 꼭 맞는 네일 팁 출력', icon: PrintIcon },
 ]
 
 const MARQUEE_COLUMN_B: MarqueeItem[] = [
@@ -115,7 +115,7 @@ export function AuthSplitLayout({ children }: AuthSplitLayoutProps) {
                 <h2 className="auth-split__headline">
                     스캔한 손톱 그대로
                     <br />
-                    나만의 네일팁 완성
+                    나만의 네일 팁 완성
                 </h2>
                 <span className="auth-split__sparkle auth-split__sparkle--1">✦</span>
                 <span className="auth-split__sparkle auth-split__sparkle--2">✧</span>

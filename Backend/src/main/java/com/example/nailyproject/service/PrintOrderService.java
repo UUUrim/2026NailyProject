@@ -183,7 +183,7 @@ public class PrintOrderService {
         // 한 손 출력은 지원하지 않는다 - 병합 결과(양손 3MF)만 S3에 올라가고, 한 손용 병합 엔드포인트는 없다.
         if (order.getLeftScanId() == null || order.getRightScanId() == null) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
-            order.updateFailReason("네일팁 출력은 양손 스캔이 모두 필요합니다. 양손을 스캔한 뒤 다시 신청해 주세요.");
+            order.updateFailReason("네일 팁 출력은 양손 스캔이 모두 필요합니다. 양손을 스캔한 뒤 다시 신청해 주세요.");
             printOrderRepository.save(order);
             return;
         }

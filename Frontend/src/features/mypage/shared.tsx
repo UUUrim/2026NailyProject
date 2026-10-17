@@ -39,8 +39,8 @@ export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   MERGING: '손톱 모델을 하나로 합치고 있어요.',
   MERGED: '모델 병합이 끝났어요. 곧 출력이 시작돼요.',
   WAITING_IN_QUEUE: '다른 출력이 끝나는 대로 이어서 시작돼요.',
-  PRINTING: '네일팁을 출력하고 있어요.',
-  COMPLETED: '네일팁 출력이 완료되었어요.',
+  PRINTING: '네일 팁을 출력하고 있어요.',
+  COMPLETED: '네일 팁 출력이 완료되었어요.',
   FAILED: '출력 중 문제가 발생했어요.',
 }
 
@@ -243,7 +243,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { id: 'timeline', label: '활동 타임라인', icon: 'timeline' },
       { id: 'scans', label: '손 분석', icon: 'hand' },
-      { id: 'prints', label: '네일팁 출력', icon: 'print' },
+      { id: 'prints', label: '네일 팁 출력', icon: 'print' },
       { id: 'designs', label: '디자인', icon: 'design' },
       { id: 'favorites', label: '찜 목록', icon: 'heart' },
     ],
@@ -268,7 +268,7 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   timeline: {
     subtitle: 'Timeline',
     title: '활동 타임라인',
-    description: '날짜별로 손 분석, 네일팁 출력, 디자인 생성 활동을 한눈에 살펴보세요.',
+    description: '날짜별로 손 분석, 네일 팁 출력, 디자인 생성 활동을 한눈에 살펴보세요.',
   },
   scans: {
     subtitle: 'Hand Analysis',
@@ -282,8 +282,8 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   },
   prints: {
     subtitle: 'Nail Tips Print',
-    title: '네일팁 출력 내역',
-    description: '3D 네일팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
+    title: '네일 팁 출력 내역',
+    description: '3D 네일 팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
   },
   favorites: {
     subtitle: 'Liked',
