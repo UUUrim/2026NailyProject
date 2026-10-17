@@ -50,6 +50,11 @@ export function formatTipExtension(mm: number | null | undefined): string {
   return mm != null ? `+${Number(mm).toFixed(1).replace(/\.0$/, '')}mm` : '기본 길이'
 }
 
+// 원형 프로필 글자 — 디자인 채팅 사이드바 프로필과 같이 닉네임(없으면 이름) 첫 글자를 대문자로. 프로필을 불러오기 전엔 '?'
+export function profileInitial(profile: { nickname?: string | null; name?: string | null } | null | undefined): string {
+  return (profile?.nickname || profile?.name || '').trim().charAt(0).toUpperCase() || '?'
+}
+
 // 손 스캔 분석 상태 (네일팁 출력 관련 상태는 출력 이력에서만 표시)
 export const SCAN_STATUS_LABEL: Record<string, string> = {
   READY: '분석 대기 중',
@@ -184,7 +189,7 @@ export const Icon = {
       <svg viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.35-9.5-8.8C.8 8 2 4.5 5.4 4a4.9 4.9 0 0 1 6.6 2 4.9 4.9 0 0 1 6.6-2c3.4.5 4.6 4 3.9 7.2C19 15.65 12 20 12 20z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>
   ),
   print: (
-      <svg viewBox="0 0 24 24" fill="none"><path d="M7 8V4h10v4M6 17h12a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><rect x="8" y="14" width="8" height="6" stroke="currentColor" strokeWidth="1.6" /></svg>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14M8 4v4h8V4M11 8v2l1 1.5 1-1.5V8M8 20v-3.5C8 14.6 9.8 13 12 13s4 1.6 4 3.5V20M4 20h16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
   calendar: (
       <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" stroke="currentColor" strokeWidth="1.6" /><path d="M8 3.5v3M16 3.5v3M3.5 9.5h17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>

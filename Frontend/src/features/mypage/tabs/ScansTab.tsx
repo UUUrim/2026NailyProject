@@ -22,6 +22,7 @@ export function ScansTab() {
     openScanDetail,
     handleActivityHover,
     handleActivitySelect,
+    openDeleteScanModal,
   } = useMyPageContext()
 
   return (
@@ -60,6 +61,7 @@ export function ScansTab() {
                                 onOpenDetail={openScanDetail}
                                 onSelectActivity={handleActivitySelect}
                                 onHoverActivity={handleActivityHover}
+                                onDelete={openDeleteScanModal}
                             />
                         ))}
                       </div>

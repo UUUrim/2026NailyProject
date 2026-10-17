@@ -170,6 +170,7 @@ public class NailDesignService {
         }
 
         NailDesign nailDesign = generateDesign(user.getId(), promptResult.prompt(), promptResult.negativePrompt(), session);
+        if (session != null) session.recordDesignScan(handScan);
 
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
@@ -1149,6 +1150,8 @@ public class NailDesignService {
 
         // ★ gen 서버로 이미지 생성 (ComfyUI 대체)
         NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session, referenceFinishes);
+        // 디자인 생성에 쓰인 손 분석 기록 — 채팅 이력에서 지워도 남아, 마이페이지가 이 기록을 지우지 못하게 한다
+        if (session != null && handScan != null) session.recordDesignScan(handScan);
 
         nailDesign.updateDesignPlan(plan.toString());
 

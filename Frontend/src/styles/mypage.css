@@ -18,7 +18,7 @@
 }
 
 .mypage-x-page {
-  --mp-page-max: 1240px;
+  --mp-page-max: 1280px;
   max-width: var(--mp-page-max);
   margin: 0 auto;
   padding-bottom: 3rem;
@@ -37,13 +37,13 @@
   /* 스크롤과 무관하게 화면에 완전히 고정. 그리드의 첫 트랙(268px)은 고정폭이라
      사이드바를 흐름에서 빼도 그대로 자리를 잡아 두고, left는 가운데 정렬된
      .mypage-x-page(최대 var(--mp-page-max)) 콘텐츠 영역의 좌측 안쪽에 맞춘다.
-     top = 고정 헤더 높이(6.75rem) + 페이지 상단 패딩(2rem) → 오른쪽 콘텐츠 영역의
+     top = 공통 헤더 높이(--app-header-height) + 페이지 상단 패딩(2rem) → 오른쪽 콘텐츠 카드의
      상단과 정확히 맞고, sticky 헤더에 가려지지 않는다. */
   position: fixed;
-  top: 8.75rem;
-  left: max(1.5rem, calc((100vw - var(--sbw, 0px) - var(--mp-page-max, 1240px)) / 2 + 1.5rem));
+  top: calc(var(--app-header-height, 6.25rem) + 2rem);
+  left: max(1.5rem, calc((100vw - var(--sbw, 0px) - var(--mp-page-max, 1280px)) / 2 + 1.5rem));
   width: 268px;
-  max-height: calc(100svh - 8.75rem - 1.5rem);
+  max-height: calc(100svh - var(--app-header-height, 6.25rem) - 2rem - 1.5rem);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -117,25 +117,27 @@
   white-space: nowrap;
 }
 
+/* 원형 프로필 — 디자인 채팅 사이드바 프로필(.dcw-profile__avatar)과 같은 색·그림자, 글자는 원 지름의 0.4배 */
 .mypage-x__avatar {
   flex-shrink: 0;
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  background: linear-gradient(145deg, var(--mp-pink), var(--mp-pink-deep));
+  background: linear-gradient(145deg, #eba3b8, #d27393);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 800;
-  box-shadow: 0 6px 16px rgba(222, 134, 159, 0.35);
+  box-shadow: 0 4px 12px rgba(222, 134, 159, 0.3);
 }
 
 .mypage-x__avatar--lg {
   width: 80px;
   height: 80px;
   font-size: 2rem;
+  box-shadow: 0 6px 18px rgba(222, 134, 159, 0.3);
 }
 
 .mypage-x__nav {
@@ -892,7 +894,7 @@
   gap: 1rem;
 }
 
-/* 열 수 고정 그리드 — 디자인 이력 탭은 4열(한 페이지 16개 = 4행), 타임라인은 3열.
+/* 열 수 고정 그리드 — 디자인 이력 탭은 4열(한 페이지 20개 = 5행), 찜 탭은 4열(전체 16개 = 4행, 폴더별 20개 = 5행), 타임라인은 3열.
    칸 폭을 (그리드 폭 - 사이 간격) / 열 수로 잡아 평소엔 정확히 그 열 수로 채우고,
    그리드가 좁아져 칸이 120px 아래로 내려가면(휴대폰, 타임라인 오른쪽 영역 등)
    열 수를 줄여서 팁이 너무 작아지지 않게 한다.
@@ -1169,6 +1171,135 @@
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+/* ── 목록 카드의 더보기 메뉴 (손 분석 기록 ⋯ / 출력 내역 ⋮) ──
+   카드가 통째로 버튼이라 그 안에 버튼을 넣을 수 없어서, 카드를 감싼 틀에 더보기 버튼을 겹쳐 둔다.
+   누르면 '…삭제하기' 항목이 드롭다운으로 뜨고, 그걸 누르면 삭제 확인 창이 뜬다. */
+.mypage-x__row-shell {
+  position: relative;
+}
+
+/* 더보기 버튼·드롭다운에 마우스를 올려도 카드는 올라온 모양 그대로 */
+.mypage-x__row-shell:hover > .mypage-x__scan-row,
+.mypage-x__row-shell:hover > .mypage-x__print-row {
+  border-color: #f0d5dd;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
+}
+
+/* 출력 내역 카드는 오른쪽 끝(상태·날짜 옆)에 ⋮ 자리를 비워 둔다 */
+.mypage-x__row-shell--print > .mypage-x__print-row {
+  padding-right: 3.5rem;
+}
+
+.mypage-x__row-menu {
+  position: absolute;
+  right: 0.85rem;
+  z-index: 1;
+  width: 2rem;
+  height: 2rem;
+  transition: transform 0.18s;
+}
+
+/* 열린 드롭다운이 아래 카드들 위로 올라오게 */
+.mypage-x__row-menu.is-open {
+  z-index: 30;
+}
+
+/* 손 분석 기록 카드는 오른쪽 아래 (위쪽 날짜 아래 빈자리) */
+.mypage-x__row-shell--scan > .mypage-x__row-menu {
+  bottom: 0.9rem;
+}
+
+.mypage-x__row-shell--print > .mypage-x__row-menu {
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+}
+
+.mypage-x__row-shell:hover > .mypage-x__row-menu {
+  transform: translateY(-1px);
+}
+
+.mypage-x__row-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #b3a0a7;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s;
+}
+
+.mypage-x__row-menu-trigger:hover,
+.mypage-x__row-menu.is-open .mypage-x__row-menu-trigger {
+  background: #fff0f4;
+  color: var(--mp-pink-deep);
+}
+
+.mypage-x__row-menu-trigger:focus-visible,
+.mypage-x__row-menu-item:focus-visible {
+  outline: 2px solid rgba(222, 134, 159, 0.6);
+  outline-offset: 2px;
+}
+
+/* 드롭다운 — 정렬 메뉴(mypage-x__sort-menu)와 같은 모양 */
+.mypage-x__row-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 150px;
+  padding: 0.35rem;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgba(222, 134, 159, 0.18);
+  box-shadow: 0 14px 34px rgba(180, 90, 120, 0.16);
+  animation: mp-row-menu-in 0.14s ease-out;
+}
+
+@keyframes mp-row-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.mypage-x__row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #555;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mypage-x__row-menu-item svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+
+.mypage-x__row-menu-item--danger {
+  color: #c94a4a;
+}
+
+.mypage-x__row-menu-item--danger:hover {
+  background: #fff3f3;
 }
 
 /* ── 손 분석/출력 상세 모달 ── */

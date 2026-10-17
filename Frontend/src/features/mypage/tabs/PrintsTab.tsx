@@ -21,6 +21,7 @@ export function PrintsTab() {
     openPrintDetail,
     handleActivityHover,
     handleActivitySelect,
+    openDeletePrintModal,
   } = useMyPageContext()
 
   return (
@@ -57,6 +58,7 @@ export function PrintsTab() {
                                 onOpenDetail={openPrintDetail}
                                 onSelectActivity={handleActivitySelect}
                                 onHoverActivity={handleActivityHover}
+                                onDelete={openDeletePrintModal}
                             />
                         ))}
                       </div>

@@ -28,6 +28,8 @@ public class DesignSession {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    // 이 채팅에서 디자인을 만들 때 반영한 손 분석 기록 (양손 중 생성 요청에 실린 쪽 스캔). 디자인을 만들어야 정해지고,
+    // 채팅 이력에서 지워도 남는다 - 마이페이지가 디자인 생성에 쓰인 기록을 지우지 못하게 하는 데 쓴다.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "hand_scan_id", nullable = true) //false ->true변경
     private HandScan handScan;
@@ -76,7 +78,8 @@ public class DesignSession {
     @Column(name = "title_edited")
     private Boolean titleEdited;
 
-    // 이 채팅에 반영한 손 분석 기록 (ScanSessionDto.key = "{왼손scanId}-{오른손scanId}") — 이력을 분석 기록별로 묶는다
+    // 이 채팅에 반영한 손 분석 기록 (ScanSessionDto.key = "{왼손scanId}-{오른손scanId}") — 이력을 분석 기록별로 묶는다.
+    // 채팅을 이력에서 지워도 남는다 (clearChatHistory)
     @Column(name = "scan_key", length = 64)
     private String scanKey;
 
@@ -103,14 +106,19 @@ public class DesignSession {
     }
 
     /**
-     * 채팅 이력에서 지운다 — 채팅 화면 상태·이름·반영 기록만 비워 사이드바 이력과 검색에서 빠지게 한다.
+     * 채팅 이력에서 지운다 — 채팅 화면 상태·이름만 비워 사이드바 이력과 검색에서 빠지게 한다.
      * 세션 자체(GPT 대화 기록, 이 세션으로 만든 디자인과 그 채팅 이력)는 마이페이지 등에서 쓰므로 그대로 둔다.
+     * 반영한 손 분석 기록(scanKey)은 남긴다 - 이 채팅으로 만든 디자인이 남아 있으면 마이페이지에서 그 기록을 지우지 못하게 한다.
      */
     public void clearChatHistory() {
         this.chatState = null;
         this.title = null;
         this.titleEdited = null;
-        this.scanKey = null;
+    }
+
+    /** 디자인 생성에 반영한 손 분석 기록 */
+    public void recordDesignScan(HandScan handScan) {
+        this.handScan = handScan;
     }
 
     public void updateRefineKeywords(String refineKeywords) {

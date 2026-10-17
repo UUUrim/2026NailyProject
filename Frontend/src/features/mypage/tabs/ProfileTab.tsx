@@ -1,5 +1,6 @@
 import { getPasswordRuleChecks, isPasswordValid } from '@/shared/utils/passwordRules'
 import { PageHeader } from '@/features/mypage/components/PageHeader'
+import { profileInitial } from '@/features/mypage/shared'
 import { useMyPageContext } from '../context'
 
 export function ProfileTab() {
@@ -56,7 +57,7 @@ export function ProfileTab() {
         />
         <div className="mypage-x__profile-card">
           <div className="mypage-x__avatar mypage-x__avatar--lg" aria-hidden="true">
-            {profile?.nickname.charAt(0) ?? '?'}
+            {profileInitial(profile)}
           </div>
           <div className="mypage-x__profile-body">
             <h2>{profile?.nickname ?? '-'}</h2>

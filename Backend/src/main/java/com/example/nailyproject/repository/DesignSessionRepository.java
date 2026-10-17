@@ -24,4 +24,21 @@ public interface DesignSessionRepository extends JpaRepository<DesignSession, Lo
             + "and (lower(s.title) like :pattern escape '!' or lower(s.chatState) like :pattern escape '!') "
             + "order by s.updatedAt desc")
     List<DesignSession> searchChats(@Param("userId") Long userId, @Param("pattern") String pattern);
+
+    // ── 마이페이지 손 분석 기록 삭제 가능 여부: 채팅 이력이 있거나 그 기록으로 만든 디자인이 남아 있으면 지울 수 없다 ──
+
+    // 채팅 이력(사이드바와 같이 저장된 채팅만, 지운 채팅 제외)에 반영한 손 분석 기록 키
+    @Query("select distinct s.scanKey from DesignSession s "
+            + "where s.user.id = :userId and s.chatState is not null and s.scanKey is not null")
+    List<String> findChatScanKeys(@Param("userId") Long userId);
+
+    // 남아 있는 디자인을 만든 채팅에 반영한 손 분석 기록 키 — 사이드바에서 지운 채팅도 키는 남아 있어 함께 잡힌다
+    // (디자인 없이 대화만 하다 지운 채팅이나, 디자인을 마이페이지에서 다 지운 채팅은 잡히지 않는다)
+    @Query("select distinct s.scanKey from NailDesign d join d.session s "
+            + "where d.user.id = :userId and s.scanKey is not null")
+    List<String> findDesignScanKeys(@Param("userId") Long userId);
+
+    // 남아 있는 디자인을 만들 때 쓴 손 스캔 id (DesignSession.recordDesignScan)
+    @Query("select distinct h.id from NailDesign d join d.session s join s.handScan h where d.user.id = :userId")
+    List<Long> findDesignScanIds(@Param("userId") Long userId);
 }

@@ -24,6 +24,8 @@ export type ScanSession = {
   avgCurve: number | null
   // 손톱이 손가락 살 끝보다 평균 몇 mm 나와 있는지 - 네일팁 출력 화면의 "내 손톱 끝" 위치. 예전 스캔은 null
   avgFreeEdgeMm?: number | null
+  // 마이페이지에서 지울 수 있는지 — 채팅 이력이 없고 그 기록으로 만든 디자인도 남아 있지 않은 기록만 (백엔드가 판별)
+  deletable?: boolean
 }
 
 export type FingerStat = {

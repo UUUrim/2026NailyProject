@@ -112,6 +112,11 @@ export async function getMyScanSessions(): Promise<ScanSession[]> {
     return res.data
 }
 
+/** DELETE /users/me/scan-sessions/{key} — 손 분석 기록 삭제 (채팅 이력이 없고 그 기록으로 만든 디자인도 남아 있지 않은 기록만) */
+export async function deleteScanSession(key: string): Promise<void> {
+    await apiClient.delete(`/users/me/scan-sessions/${encodeURIComponent(key)}`)
+}
+
 /** GET /users/me/scans — 내 손 스캔 전체 이력 */
 export async function getMyScans(): Promise<ScanHistoryItem[]> {
     const res = await apiClient.get<ScanHistoryItem[]>('/users/me/scans')
