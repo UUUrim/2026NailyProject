@@ -1,3 +1,4 @@
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
     getDefaultTipExtensionMm,
     TIP_EXTENSION_MAX_MM,
@@ -29,6 +30,9 @@ const RULER_TICKS_MM = Array.from(
     { length: TIP_EXTENSION_MAX_MM - TIP_EXTENSION_MIN_MM + 1 },
     (_, i) => TIP_EXTENSION_MIN_MM + i,
 )
+
+// print.css의 --thumb와 같은 값 - 썸 지름
+const THUMB_PX = 22
 
 function toPercent(mm: number): number {
     return ((mm - TIP_EXTENSION_MIN_MM) / (TIP_EXTENSION_MAX_MM - TIP_EXTENSION_MIN_MM)) * 100
@@ -80,6 +84,80 @@ type Props = {
 export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, measuredFreeEdgeMm, disabled = false }: Props) {
     const defaultMm = getDefaultTipExtensionMm(shapeId)
     const isDefault = valueMm === defaultMm
+
+    // 썸을 잡고 끄는 드래그 - 포인터를 캡처해 두면 마우스/터치 모두, 포인터가 슬라이더 밖으로 나가도 계속 따라온다.
+    // 썸 중심은 양 끝에서 썸 반지름만큼 안쪽까지만 움직이므로 그만큼 들인 폭으로 mm를 계산한다.
+    const inputWrapRef = useRef<HTMLDivElement>(null)
+    const inputRef = useRef<HTMLInputElement>(null)
+    const grabOffsetRef = useRef(0)
+    const [dragging, setDragging] = useState(false)
+    // 썸 위에 마우스가 올라와 있는지 - 드래그를 놓은 직후엔 포인터가 썸 위에 그대로 있어도
+    // 호버 모양을 풀어 두고, 포인터가 썸을 벗어난 뒤에야 다시 반응하게 한다
+    const [thumbHover, setThumbHover] = useState(false)
+    const hoverReleasedRef = useRef(false)
+
+    const getThumbCenterX = (rectLeft: number, rectWidth: number): number =>
+        rectLeft + THUMB_PX / 2 + ((rectWidth - THUMB_PX) * toPercent(valueMm)) / 100
+
+    const mmFromPointer = (clientX: number): number => {
+        const wrap = inputWrapRef.current
+        if (!wrap) return valueMm
+        const rect = wrap.getBoundingClientRect()
+        const half = THUMB_PX / 2
+        const usable = rect.width - THUMB_PX
+        if (usable <= 0) return valueMm
+        const ratio = Math.min(1, Math.max(0, (clientX - grabOffsetRef.current - rect.left - half) / usable))
+        return Math.round(TIP_EXTENSION_MIN_MM + ratio * (TIP_EXTENSION_MAX_MM - TIP_EXTENSION_MIN_MM))
+    }
+
+    const handleDragStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+        if (disabled || (e.pointerType === 'mouse' && e.button !== 0)) return
+        const wrap = inputWrapRef.current
+        if (!wrap) return
+        const rect = wrap.getBoundingClientRect()
+        const thumbCenterX = getThumbCenterX(rect.left, rect.width)
+        // 썸을 직접 잡았으면 잡은 지점 그대로 따라가고, 레일을 눌렀으면 그 자리로 썸이 이동한다
+        grabOffsetRef.current = Math.abs(e.clientX - thumbCenterX) <= THUMB_PX / 2 ? e.clientX - thumbCenterX : 0
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        inputRef.current?.focus({ preventScroll: true })
+        setDragging(true)
+        setThumbHover(false)
+        const next = mmFromPointer(e.clientX)
+        if (next !== valueMm) onChange(next)
+    }
+
+    const handleDragMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+        if (!dragging) {
+            // 마우스/펜만 호버가 있다 (터치는 손가락을 떼면 올라와 있는 포인터가 없다)
+            if (disabled || e.pointerType === 'touch') return
+            const rect = e.currentTarget.getBoundingClientRect()
+            const overThumb = Math.abs(e.clientX - getThumbCenterX(rect.left, rect.width)) <= THUMB_PX / 2
+            if (hoverReleasedRef.current) {
+                if (overThumb) return
+                hoverReleasedRef.current = false
+            }
+            setThumbHover(overThumb)
+            return
+        }
+        const next = mmFromPointer(e.clientX)
+        if (next !== valueMm) onChange(next)
+    }
+
+    const handleDragEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+        if (!dragging) return
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+        setDragging(false)
+        // 놓은 자리에 포인터가 그대로 있어도 호버 모양(확대)과 포커스 링을 풀어 준다
+        hoverReleasedRef.current = true
+        setThumbHover(false)
+        inputRef.current?.blur()
+    }
+
+    const handlePointerLeave = () => {
+        hoverReleasedRef.current = false
+        setThumbHover(false)
+    }
 
     // 내 손톱 길이 - 실측 평균이 없으면 성인 평균 손톱 길이를 기준으로 보여 준다
     const hasMeasured = measuredLengthMm != null && Number.isFinite(Number(measuredLengthMm)) && Number(measuredLengthMm) > 0
@@ -164,11 +242,21 @@ export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, 
                                 기본
                             </span>
                         </div>
-                        <div className="print-length-panel__input-wrap">
+                        <div
+                            ref={inputWrapRef}
+                            className={`print-length-panel__input-wrap${dragging ? ' is-dragging' : ''}${thumbHover ? ' is-thumb-hover' : ''}`}
+                            onPointerDown={handleDragStart}
+                            onPointerMove={handleDragMove}
+                            onPointerUp={handleDragEnd}
+                            onPointerCancel={handleDragEnd}
+                            onPointerLeave={handlePointerLeave}
+                            onLostPointerCapture={() => setDragging(false)}
+                        >
                             <div className="print-length-panel__rail">
                                 <span className="print-length-panel__rail-fill" style={{ width: `${toPercent(valueMm)}%` }} />
                             </div>
                             <input
+                                ref={inputRef}
                                 type="range"
                                 className="print-length-panel__range"
                                 min={TIP_EXTENSION_MIN_MM}

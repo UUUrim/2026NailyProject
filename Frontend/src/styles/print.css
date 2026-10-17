@@ -536,9 +536,21 @@
     transform: translate(-50%, -2.5px) rotate(45deg);
 }
 
+/* 드래그는 래퍼가 포인터 이벤트로 직접 처리한다 - range 입력은 키보드·접근성과 썸 모양만 맡는다 */
 .print-length-panel__input-wrap {
     position: relative;
     height: var(--thumb);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.print-length-panel__input-wrap.is-dragging {
+    cursor: grabbing;
+}
+
+.print-length-panel.is-locked .print-length-panel__input-wrap {
+    cursor: default;
 }
 
 .print-length-panel__rail {
@@ -569,7 +581,7 @@
     background: transparent;
     -webkit-appearance: none;
     appearance: none;
-    cursor: pointer;
+    pointer-events: none;
 }
 
 .print-length-panel__range:focus {
@@ -617,20 +629,22 @@
     transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
-.print-length-panel__range:not(:disabled):hover::-webkit-slider-thumb {
+/* 호버·드래그 모양은 :hover/:active 대신 래퍼의 클래스로 준다 - range 입력이 포인터 이벤트를 받지 않고,
+   드래그를 놓은 뒤 포인터가 썸 위에 남아 있어도 호버를 풀어야 해서 JS가 상태를 직접 관리한다 */
+.print-length-panel__input-wrap.is-thumb-hover .print-length-panel__range::-webkit-slider-thumb {
     transform: scale(1.08);
 }
 
-.print-length-panel__range:not(:disabled):hover::-moz-range-thumb {
+.print-length-panel__input-wrap.is-thumb-hover .print-length-panel__range::-moz-range-thumb {
     transform: scale(1.08);
 }
 
-.print-length-panel__range:not(:disabled):active::-webkit-slider-thumb {
+.print-length-panel__input-wrap.is-dragging .print-length-panel__range::-webkit-slider-thumb {
     cursor: grabbing;
     transform: scale(1.12);
 }
 
-.print-length-panel__range:not(:disabled):active::-moz-range-thumb {
+.print-length-panel__input-wrap.is-dragging .print-length-panel__range::-moz-range-thumb {
     cursor: grabbing;
     transform: scale(1.12);
 }
