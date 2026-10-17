@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { StoryFeature } from '@/features/home/components/story/StoryFeature'
-import { ShowcaseImage } from '@/features/home/components/story/ShowcaseImage'
 import { DESIGN_DEMO, STORY_STEPS } from '@/features/home/constants/home'
 import { useStepLoop } from '@/features/home/hooks/useStepLoop'
+// 생성 중 카드는 실제 채팅 화면의 디자인 카드(design-chat__design-card) 스타일을 그대로 쓴다
+import '@/styles/design-chat.css'
 
 const LOGO = '/images/logo.png'
 
 // i+1단계가 시작되는 시각(ms), 마지막 값은 한 바퀴 길이
-// 0 방식 선택 창(커서가 다가감) → 1 '채팅으로 자유롭게' 클릭 → 2 입력 칸 활성 → 3 타이핑 → 4 전송 → 5 '…' → 6 생성 중 → 7 완성
-const CHAT_TIMELINE = [1500, 2300, 2800, 5700, 6400, 7300, 8600, 13000]
+// 0 방식 선택 창(커서가 다가감) → 1 '채팅으로 자유롭게' 클릭 → 2 입력 칸 활성 → 3 타이핑 → 4 전송 → 5 생성 중 → 6 완성
+// (타이핑 칸은 요청 문장을 다 친 뒤 잠깐 멈췄다가 보낼 만큼 둔다)
+const CHAT_TIMELINE = [1500, 2300, 2800, 5150, 5850, 7850, 12250]
 
-const TYPE_MS_PER_CHAR = 80
+const TYPE_MS_PER_CHAR = 60
 
 // 실제 채팅 화면(NailDesignChatPageContent)의 4가지 생성 방식 선택 창과 같은 아이콘·제목
 const MENU_ITEMS: { value: string; title: string; desc: string; icon: ReactElement }[] = [
@@ -164,6 +166,13 @@ function AssistantRow({ children }: { children: ReactNode }) {
   )
 }
 
+/** 입력 칸 안내 문구 — 실제 채팅처럼 요청을 보낸 뒤엔 기다려 달라고 하고, 디자인이 완성되면 비운다 */
+function inputPlaceholder(step: number) {
+  if (step < 4) return '원하시는 디자인을 입력해 주세요'
+  if (step < 6) return '디자인을 만들고 있어요. 잠시만 기다려 주세요.'
+  return ''
+}
+
 const CheckIcon = (
   <svg viewBox="0 0 16 16" aria-hidden="true">
     <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -216,30 +225,30 @@ function DesignDemo({ playing }: { playing: boolean }) {
           ) : (
             <div ref={phaseRef} className="chat-demo__phase" key="chat">
               <AssistantRow>
-                <p className="chat-demo__bubble chat-demo__bubble--ai">원하는 디자인을 자유롭게 입력해 주세요.</p>
+                <p className="chat-demo__bubble chat-demo__bubble--ai">원하시는 디자인을 자유롭게 입력해 주세요.</p>
               </AssistantRow>
 
               {step >= 4 && <p className="chat-demo__bubble chat-demo__bubble--user">{DESIGN_DEMO.request}</p>}
 
-              {step === 5 && (
+              {step >= 5 && (
                 <AssistantRow>
-                  <span className="chat-demo__typing">
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                </AssistantRow>
-              )}
-
-              {step >= 6 && (
-                <AssistantRow>
-                  <div className={`chat-demo__result${step >= 7 ? ' is-done' : ''}`}>
-                    <div className="chat-demo__image">
-                      <span className="chat-demo__generating">
-                        <span className="chat-demo__spinner" />
-                        디자인 생성 중
-                      </span>
-                      <ShowcaseImage src={DESIGN_DEMO.image} placeholder="" />
+                  <div className={`chat-demo__result${step >= 6 ? ' is-done' : ''}`}>
+                    {/* 실제 채팅의 생성 중 카드(DesignChatConversation의 DesignResultCard)와 같은 구조 */}
+                    <div className={`design-chat__design-card${step >= 6 ? ' is-loaded' : ''}`}>
+                      <img src={DESIGN_DEMO.image} alt="" draggable={false} />
+                      <div className={`design-chat__design-card-loading${step >= 6 ? ' is-hidden' : ''}`}>
+                        <span className="design-chat__design-card-backdrop">
+                          <span className="design-chat__design-card-aurora">
+                            <span className="design-chat__design-card-blob design-chat__design-card-blob--pink" />
+                            <span className="design-chat__design-card-blob design-chat__design-card-blob--lilac" />
+                            <span className="design-chat__design-card-blob design-chat__design-card-blob--mint" />
+                          </span>
+                          <span className="design-chat__design-card-grid" />
+                          <span className="design-chat__design-card-grain" />
+                        </span>
+                        <span className="design-chat__design-card-label">디자인 생성 중</span>
+                        <span className="design-chat__design-card-bar" />
+                      </div>
                     </div>
                     <p className="chat-demo__bubble chat-demo__bubble--ai">{DESIGN_DEMO.reply}</p>
                   </div>
@@ -261,7 +270,7 @@ function DesignDemo({ playing }: { playing: boolean }) {
             ) : (
               <span className="chat-demo__placeholder">
                 {step === 2 && <i className="chat-demo__caret" />}
-                원하는 디자인을 입력해 주세요
+                <span className="chat-demo__placeholder-text">{inputPlaceholder(step)}</span>
               </span>
             )}
             <span className={`chat-demo__send${step === 4 ? ' is-pressed' : ''}`}>
