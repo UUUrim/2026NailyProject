@@ -7,15 +7,15 @@ import {
 import { NAIL_BASELINE } from '@/shared/utils/nailMetrics'
 import { NailLengthPreview } from '@/features/print/components/NailLengthPreview'
 
-// "+5mm"라는 숫자만으로는 실제로 어느 정도 길이인지 감이 잘 안 와서, 구간마다 이름과
-// 한 줄 설명을 붙여 준다. 같은 +8mm라도 원래 손톱이 짧은 사람에겐 훨씬 길게 느껴지므로,
+// "+5mm"라는 숫자만으로는 실제로 어느 정도 길이인지 감이 잘 안 와서, 구간마다 이름을
+// 붙여 준다. 같은 +8mm라도 원래 손톱이 짧은 사람에겐 훨씬 길게 느껴지므로,
 // 구간은 mm 절대값이 아니라 "내 손톱 길이 대비 연장 비율"로 나눈다. 비율 경계(30%/65%/100%)는
 // 평균 손톱(NAIL_BASELINE 11.5mm)일 때 예전 절대 기준(3/7/11mm까지)과 똑같이 떨어지도록 잡았다.
 const LENGTH_TIERS = [
-    { maxRatio: 0.3, label: '숏', description: '일상생활에 부담 없는 짧고 깔끔한 길이예요.' },
-    { maxRatio: 0.65, label: '미디엄', description: '데일리로 무난하게 어울리는 자연스러운 길이예요.' },
-    { maxRatio: 1, label: '롱', description: '손가락이 길고 가늘어 보이는 존재감 있는 길이예요.' },
-    { maxRatio: Infinity, label: '엑스트라 롱', description: '화려하지만 타이핑 등 일상생활이 조금 불편할 수 있어요.' },
+    { maxRatio: 0.3, label: '숏' },
+    { maxRatio: 0.65, label: '미디엄' },
+    { maxRatio: 1, label: '롱' },
+    { maxRatio: Infinity, label: '엑스트라 롱' },
 ] as const
 
 // 실측값이 비정상적으로 작거나 크면(측정 오류) 미리보기 비율이 극단적으로 틀어지지 않게 묶어 둔다
@@ -216,13 +216,24 @@ export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, 
                     </strong>
                     <span className="print-length-panel__tier">{tier.label}</span>
                 </div>
-                <p className="print-length-panel__desc">{tier.description}</p>
                 <p className="print-length-panel__total">
-                    완성 길이 약 <strong>{totalLengthMm.toFixed(1)}mm</strong>
-                    <span className="print-length-panel__total-sep" aria-hidden="true">·</span>
+                    완성 길이: 약 <strong>{totalLengthMm.toFixed(1)}mm</strong>
                     <span className="print-length-panel__total-ratio">
-                        {hasMeasured ? '지금 내 손톱보다' : '평균 손톱보다'} <strong>{lengthMultiple}배</strong> 더 길어요
+                        ({hasMeasured ? '내 손톱의' : '평균 손톱의'} <strong>{lengthMultiple}배</strong>)
                     </span>
+                </p>
+                <p className="print-length-panel__note">
+                    {InfoIcon}
+                    {hasMeasured ? (
+                        <span>
+                            스캔한 내 손톱 길이(평균 {Number(measuredLengthMm).toFixed(1)}mm)에 연장 길이만큼 더해서 출력해요.
+                        </span>
+                    ) : (
+                        <span>
+                            스캔한 내 손톱 길이에 연장 길이만큼 더해서 출력해요. 손톱 길이 측정값이 없어 미리보기와
+                            길이 단계는 평균 손톱 길이<strong>({NAIL_BASELINE.length.mean}mm)</strong> 기준으로 보여 드려요.
+                        </span>
+                    )}
                 </p>
 
                 <div className="print-length-panel__slider-row">
@@ -298,21 +309,6 @@ export function NailLengthPanel({ shapeId, valueMm, onChange, measuredLengthMm, 
                     </button>
                 </div>
             </div>
-
-            <p className="print-length-panel__note">
-                {InfoIcon}
-                {hasMeasured ? (
-                    <span>
-                        스캔한 내 손톱 길이<strong>(평균 {Number(measuredLengthMm).toFixed(1)}mm)</strong>에 연장 길이만큼
-                        더해서 출력해요.
-                    </span>
-                ) : (
-                    <span>
-                        스캔한 내 손톱 길이에 연장 길이만큼 더해서 출력해요. 손톱 길이 측정값이 없어 미리보기와
-                        길이 단계는 평균 손톱 길이<strong>({NAIL_BASELINE.length.mean}mm)</strong> 기준으로 보여 드려요.
-                    </span>
-                )}
-            </p>
         </div>
     )
 }

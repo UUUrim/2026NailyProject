@@ -157,7 +157,7 @@ export function PrintPageContent() {
                                         className="print-session-card__detail-btn"
                                         onClick={() => setDetailSession(session)}
                                     >
-                                        상세보기
+                                        상세 보기
                                     </button>
                                 </div>
                             )

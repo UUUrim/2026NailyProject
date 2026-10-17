@@ -235,7 +235,7 @@
 
 /* ── 길이 조절 (NailLengthPanel) ── */
 
-/* 왼쪽 미리보기 + 오른쪽 조절 UI를 한 카드로 묶고, 맨 아래 안내 문구는 두 칸에 걸쳐 놓는다 */
+/* 왼쪽 미리보기 + 오른쪽 조절 UI를 한 카드로 묶는다 */
 .print-length-panel {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -328,9 +328,11 @@
     height: 0;
     border-top: 1.5px dashed #de869f;
 }
+/* '연장 길이'부터 슬라이더까지 한 덩어리를 왼쪽 쉐입 미리보기 카드 높이의 가운데에 둔다 */
 .print-length-panel__control {
     display: flex;
     flex-direction: column;
+    justify-content: center;
     min-width: 0;
 }
 
@@ -418,20 +420,13 @@
     white-space: nowrap;
 }
 
-.print-length-panel__desc {
-    margin: 0.3rem 0 0;
-    font-size: 0.8rem;
-    color: #8a727c;
-    line-height: 1.5;
-}
-
-/* 내 손톱 + 연장 = 완성 길이, 내 손톱 대비 얼마나 길어지는지 */
+/* 내 손톱 + 연장 = 완성 길이, 내 손톱 대비 몇 배인지 */
 .print-length-panel__total {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 0 0.3rem;
-    margin: 0.35rem 0 0;
+    margin: 0.75rem 0 0;
     font-size: 0.78rem;
     color: #8a727c;
     line-height: 1.5;
@@ -443,11 +438,7 @@
     font-weight: 800;
 }
 
-.print-length-panel__total-sep {
-    color: #d9c3cb;
-}
-
-/* 좁은 화면에서 줄바꿈되더라도 "지금 내 손톱보다 65% 더 길어요"는 한 덩어리로 넘긴다 */
+/* 좁은 화면에서 줄바꿈되더라도 "(내 손톱의 1.6배)"는 한 덩어리로 넘긴다 */
 .print-length-panel__total-ratio {
     white-space: nowrap;
 }
@@ -456,7 +447,7 @@
     display: flex;
     align-items: flex-start;
     gap: 0.7rem;
-    margin-top: 0.55rem;
+    margin-top: 1.15rem;
     transition: opacity 0.15s ease;
 }
 
@@ -698,15 +689,12 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* 완성 길이 바로 아래 안내 문구 - 배경 없이 아이콘 + 글자만 */
 .print-length-panel__note {
-    grid-column: 1 / -1;
     display: flex;
     align-items: flex-start;
     gap: 0.45rem;
-    margin: 0;
-    padding: 0.65rem 0.85rem;
-    border-radius: 12px;
-    background: #fff8fb;
+    margin: 0.2rem 0 0;
     font-size: 0.76rem;
     color: #8a727c;
     line-height: 1.5;

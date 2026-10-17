@@ -163,7 +163,7 @@ export function PrintPagePreviewContent() {
                     </span>
                                     </button>
                                     <button type="button" className="print-session-card__detail-btn" disabled>
-                                        상세보기
+                                        상세 보기
                                     </button>
                                 </div>
                             )
