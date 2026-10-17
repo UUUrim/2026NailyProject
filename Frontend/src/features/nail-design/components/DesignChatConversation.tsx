@@ -256,6 +256,7 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
         handleDesignCardShown,
         isAwaitingGenerateConfirm,
         isPreferenceInputLocked,
+        isReopenedAfterConfirm,
         selectedInQuickReply,
         freeformSelectedColors,
         activeNoteStep,
@@ -333,6 +334,7 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
     // 디자인을 만드는 동안(생성·수정, 모든 생성 방식)은 입력이 막히므로 기다려 달라는 문구로 통일한다.
     // 골라야만 넘어가는 선택 창(선택지 기반 단계 / 디자인 확인 / 바로 생성 확인 / 이어서 수정·새로 만들기)은 같은 문구를 쓴다.
     // (선택지 기반은 디자인이 나오기 전까지 입력이 막혀 있지만, "위 선택지에서…"는 선택 창이 떠 있을 때만 보여 준다)
+    // 디자인을 확정한 뒤 다시 연 채팅은 마지막 디자인을 수정할 수 있다고 안내하고,
     // 수정 요청을 받는 때(수정 모드, 선택지 기반으로 만든 뒤 돌아와 입력이 열린 때)는 수정 내용을 적으라고 안내하고,
     // 자유 입력으로 채팅하는 중(제안 선택 창이 없을 때)엔 안내 문구를 띄우지 않는다.
     // (선택지를 다 고른 뒤 서버 답장을 기다리는 동안도 디자인을 만드는 과정이라 같은 문구를 쓴다)
@@ -346,11 +348,13 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
                     ? '추가적인 요청 사항이 있다면 함께 입력해 주세요.'
                     : isSuggestionPanelOpen
                         ? '직접 입력하셔도 좋아요.'
-                        : mode === 'revise' || (mode === 'preference' && !isPreferenceInputLocked)
-                            ? '수정하고 싶은 내용을 입력해 주세요.'
-                            : mode === 'freeform'
-                                ? ''
-                                : '또는 원하시는 디자인을 바로 입력해 주세요.'
+                        : isReopenedAfterConfirm
+                            ? '수정하고 싶으신 부분을 자유롭게 말씀해 주세요.'
+                            : mode === 'revise' || (mode === 'preference' && !isPreferenceInputLocked)
+                                ? '수정하고 싶은 내용을 입력해 주세요.'
+                                : mode === 'freeform'
+                                    ? ''
+                                    : '또는 원하시는 디자인을 바로 입력해 주세요.'
 
     return (
         <>

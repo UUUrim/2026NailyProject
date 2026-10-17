@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { UserProfileResponse } from '@/entities/user/api'
 import { searchChats, type ChatSummary } from '@/features/nail-design/api/chat'
 import type { ChatHistoryGroup } from '@/features/nail-design/hooks/useDesignChatWorkspace'
+import type { ChatDesignStatus } from '@/features/nail-design/hooks/designChatRuntime'
 import { formatRecordDate, type HandRecordPreview } from '@/features/nail-design/utils/handAnalysisSummary'
 import { HandIcon } from '@/features/nail-design/components/ChatBubbleParts'
 
@@ -11,7 +12,20 @@ import { HandIcon } from '@/features/nail-design/components/ChatBubbleParts'
 // 손 분석 기록별 채팅 이력(기록 줄: 결과 보기 · 화살표: 펼치기/접기 · +: 새 채팅), 맨 아래 프로필. 넓은 화면에서는 접으면 아이콘만 남는 좁은 줄이 되고,
 // 좁은 화면에서는 채팅 위로 덮어 여는 서랍이 된다.
 
-type IconName = 'search' | 'add' | 'sidebar' | 'close' | 'lock' | 'chevron' | 'pencil' | 'trash' | 'arrow'
+type IconName =
+    | 'search'
+    | 'add'
+    | 'sidebar'
+    | 'close'
+    | 'lock'
+    | 'chevron'
+    | 'pencil'
+    | 'trash'
+    | 'arrow'
+    | 'more'
+    | 'user'
+    | 'image'
+    | 'logout'
 
 function SidebarIcon({ name, size = 20 }: { name: IconName; size?: number }) {
     const stroke = {
@@ -63,6 +77,34 @@ function SidebarIcon({ name, size = 20 }: { name: IconName; size?: number }) {
                 </>
             )}
             {name === 'arrow' && <path d="M5 12h12M13 6l6 6-6 6" {...stroke} />}
+            {name === 'more' && (
+                // 가로 점 셋 — 프로필 옆 계정 메뉴
+                <>
+                    <circle cx="5.5" cy="12" r="1.5" fill="currentColor" />
+                    <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                    <circle cx="18.5" cy="12" r="1.5" fill="currentColor" />
+                </>
+            )}
+            {name === 'user' && (
+                <>
+                    <circle cx="12" cy="8.5" r="3.8" {...stroke} />
+                    <path d="M5 19.5c1.4-3.2 4-4.8 7-4.8s5.6 1.6 7 4.8" {...stroke} />
+                </>
+            )}
+            {name === 'image' && (
+                // 액자 — 디자인 이력
+                <>
+                    <rect x="4" y="5" width="16" height="14" rx="2.5" {...stroke} />
+                    <circle cx="9" cy="10" r="1.5" {...stroke} />
+                    <path d="m4.5 17 4.5-4 3.5 3 3-2.5 4 3.5" {...stroke} />
+                </>
+            )}
+            {name === 'logout' && (
+                <>
+                    <path d="M10 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" {...stroke} />
+                    <path d="M14 8l4 4-4 4M18 12H9.5" {...stroke} />
+                </>
+            )}
         </svg>
     )
 }
@@ -106,11 +148,18 @@ function skinToneCardBackground(hex: string | null): CSSProperties | undefined {
     return { background: `linear-gradient(145deg, ${hex}22 0%, #fff 48%, ${hex}14 100%), #fff` }
 }
 
-// 채팅 이력 한 줄 — 누르면 그 채팅을 열고, 연필(또는 두 번 누르기)로 이름을 바꾸고, 휴지통으로 지운다
+const DESIGN_STATUS_LABELS: Record<ChatDesignStatus, string> = {
+    generating: '디자인 생성 중',
+    done: '디자인 생성 완료',
+}
+
+// 채팅 이력 한 줄 — 누르면 그 채팅을 열고, 연필(또는 두 번 누르기)로 이름을 바꾸고, 휴지통으로 지운다.
+// 연필·휴지통은 줄에 마우스를 올렸을 때만 보이고, 그 밖엔 줄 오른쪽 끝에 디자인 상태 점(만드는 중 분홍 깜빡임 / 보지 않는 동안 다 만듦 초록)을 띄운다.
 function ChatHistoryItem({
     chat,
     isActive,
     isOpening,
+    designStatus,
     onOpen,
     onRename,
     onDelete,
@@ -118,6 +167,7 @@ function ChatHistoryItem({
     chat: ChatSummary
     isActive: boolean
     isOpening: boolean
+    designStatus: ChatDesignStatus | undefined
     onOpen: () => void
     onRename: (title: string) => void
     onDelete: () => void
@@ -169,7 +219,11 @@ function ChatHistoryItem({
     }
 
     return (
-        <li className={`dcw-chat-item${isActive ? ' is-active' : ''}${isOpening ? ' is-opening' : ''}`}>
+        <li
+            className={`dcw-chat-item${isActive ? ' is-active' : ''}${isOpening ? ' is-opening' : ''}${
+                designStatus ? ' has-status' : ''
+            }`}
+        >
             <button
                 type="button"
                 className="dcw-chat-item__open"
@@ -179,7 +233,15 @@ function ChatHistoryItem({
                 title={title}
             >
                 <span className="dcw-chat-item__title">{title}</span>
+                {designStatus && <span className="dcw-sr-only"> ({DESIGN_STATUS_LABELS[designStatus]})</span>}
             </button>
+            {designStatus && (
+                <span
+                    className={`dcw-chat-item__status is-${designStatus}`}
+                    title={DESIGN_STATUS_LABELS[designStatus]}
+                    aria-hidden="true"
+                />
+            )}
             <span className="dcw-chat-item__actions">
                 <button type="button" className="dcw-chat-item__action" onClick={startEditing} aria-label={`'${title}' 채팅 이름 바꾸기`} title="이름 바꾸기">
                     <SidebarIcon name="pencil" size={15} />
@@ -195,6 +257,167 @@ function ChatHistoryItem({
                 </button>
             </span>
         </li>
+    )
+}
+
+// 로그아웃 확인 창 — 아래 채팅 삭제 확인 창과 같은 모양. 디자인을 만드는 중인 채팅이 있으면 그 사실도 알려 준다
+// (로그아웃하면 숨겨 두고 진행하던 채팅을 모두 내린다 — designChatRuntime)
+function LogoutConfirm({
+    hasGeneratingDesign,
+    onCancel,
+    onConfirm,
+}: {
+    hasGeneratingDesign: boolean
+    onCancel: () => void
+    onConfirm: () => void
+}) {
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onCancel()
+        }
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
+    }, [onCancel])
+
+    return createPortal(
+        <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label="로그아웃 확인">
+            <button type="button" className="mypage-x__modal-backdrop" aria-label="닫기" onClick={onCancel} />
+            <div className="mypage-x__modal-panel mypage-x__confirm-panel">
+                <button type="button" className="mypage-x__modal-close mypage-x__modal-close--plain" onClick={onCancel} aria-label="닫기">
+                    ✕
+                </button>
+                <div className="mypage-x__confirm-icon" aria-hidden="true">
+                    <SidebarIcon name="logout" size={24} />
+                </div>
+                <h2 className="mypage-x__confirm-title">로그아웃할까요?</h2>
+                <p className="mypage-x__confirm-desc">
+                    {hasGeneratingDesign ? (
+                        <>
+                            지금 디자인을 만들고 있는 채팅이 있어요.
+                            <br />
+                            로그아웃하면 이 화면에서 이어서 볼 수 없어요.
+                        </>
+                    ) : (
+                        <>다시 로그인하면 채팅 이력에서 이어서 대화할 수 있어요.</>
+                    )}
+                </p>
+                <div className="mypage-x__modal-actions">
+                    <button type="button" onClick={onCancel}>
+                        취소
+                    </button>
+                    <button type="button" className="mypage-x__modal-action--accent" onClick={onConfirm}>
+                        <span>로그아웃</span>
+                    </button>
+                </div>
+            </div>
+        </div>,
+        document.body,
+    )
+}
+
+// 맨 아래 프로필 — 아바타·이름은 마이페이지 프로필로, 오른쪽 ⋯는 계정 메뉴(마이페이지 · 디자인 이력 · 로그아웃).
+// 메뉴는 프로필 줄 위로 열리고, 바깥을 누르거나 Esc를 누르면 닫힌다.
+function SidebarProfile({
+    nickname,
+    email,
+    avatarLetter,
+    hasGeneratingDesign,
+    onGoToProfile,
+    onGoToMyPage,
+    onGoToDesigns,
+    onLogout,
+}: {
+    nickname: string
+    email: string | null
+    avatarLetter: string
+    hasGeneratingDesign: boolean
+    onGoToProfile: () => void
+    onGoToMyPage: () => void
+    onGoToDesigns: () => void
+    onLogout: () => void
+}) {
+    const [isMenuOpen, setIsMenuOpen] = useState(false)
+    const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false)
+    const rootRef = useRef<HTMLDivElement | null>(null)
+
+    useEffect(() => {
+        if (!isMenuOpen) return
+        const handlePointerDown = (e: PointerEvent) => {
+            if (!rootRef.current?.contains(e.target as Node)) setIsMenuOpen(false)
+        }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') setIsMenuOpen(false)
+        }
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+        }
+    }, [isMenuOpen])
+
+    const choose = (action: () => void) => () => {
+        setIsMenuOpen(false)
+        action()
+    }
+
+    return (
+        <div className={`dcw-profile${isMenuOpen ? ' is-menu-open' : ''}`} ref={rootRef}>
+            <button type="button" className="dcw-profile__link" onClick={onGoToProfile} title="내 프로필">
+                <span className="dcw-profile__avatar" aria-hidden="true">
+                    {avatarLetter}
+                </span>
+                <span className="dcw-profile__text">
+                    <span className="dcw-profile__name">{nickname || '회원'}</span>
+                    {email && <span className="dcw-profile__email">{email}</span>}
+                </span>
+            </button>
+            <button
+                type="button"
+                className="dcw-profile__more"
+                onClick={() => setIsMenuOpen((prev) => !prev)}
+                aria-label="계정 메뉴"
+                aria-haspopup="menu"
+                aria-expanded={isMenuOpen}
+                title="계정 메뉴"
+            >
+                <SidebarIcon name="more" size={18} />
+            </button>
+
+            {isMenuOpen && (
+                <div className="dcw-profile__menu" role="menu" aria-label="계정 메뉴">
+                    <button type="button" role="menuitem" className="dcw-profile__menu-item" onClick={choose(onGoToMyPage)}>
+                        <SidebarIcon name="user" size={17} />
+                        마이페이지
+                    </button>
+                    <button type="button" role="menuitem" className="dcw-profile__menu-item" onClick={choose(onGoToDesigns)}>
+                        <SidebarIcon name="image" size={17} />
+                        디자인 이력
+                    </button>
+                    <span className="dcw-profile__menu-divider" role="separator" />
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className="dcw-profile__menu-item dcw-profile__menu-item--logout"
+                        onClick={choose(() => setIsLogoutConfirmOpen(true))}
+                    >
+                        <SidebarIcon name="logout" size={17} />
+                        로그아웃
+                    </button>
+                </div>
+            )}
+
+            {isLogoutConfirmOpen && (
+                <LogoutConfirm
+                    hasGeneratingDesign={hasGeneratingDesign}
+                    onCancel={() => setIsLogoutConfirmOpen(false)}
+                    onConfirm={() => {
+                        setIsLogoutConfirmOpen(false)
+                        onLogout()
+                    }}
+                />
+            )}
+        </div>
     )
 }
 
@@ -376,8 +599,11 @@ type DesignChatSidebarProps = {
     onCloseMobile: () => void
     // 손 분석 기록이 없을 때 "손 촬영하러 가기"
     onGoToScan: () => void
-    // 맨 아래 프로필 — 마이페이지 프로필로
+    // 맨 아래 프로필 — 아바타·이름은 마이페이지 프로필로, ⋯ 메뉴는 마이페이지 · 디자인 이력 · 로그아웃
     onGoToProfile: () => void
+    onGoToMyPage: () => void
+    onGoToDesigns: () => void
+    onLogout: () => void
     onNewChat: () => void
     isFreshChat: boolean
     // 손 분석
@@ -400,6 +626,8 @@ type DesignChatSidebarProps = {
     historyGroups: ChatHistoryGroup[]
     isHistoryLoading: boolean
     activeSessionId: number | null
+    // 채팅별 디자인 상태 점 — 만드는 중(지금 보는 채팅 포함) / 보지 않는 동안 다 만듦
+    designStatusBySession: ReadonlyMap<number, ChatDesignStatus>
     openingSessionId: number | null
     onOpenChat: (chat: ChatSummary) => void
     onRenameChat: (sessionId: number, title: string) => void
@@ -418,6 +646,9 @@ export function DesignChatSidebar({
     onCloseMobile,
     onGoToScan,
     onGoToProfile,
+    onGoToMyPage,
+    onGoToDesigns,
+    onLogout,
     onNewChat,
     isFreshChat,
     canSelectSession,
@@ -433,6 +664,7 @@ export function DesignChatSidebar({
     historyGroups,
     isHistoryLoading,
     activeSessionId,
+    designStatusBySession,
     openingSessionId,
     onOpenChat,
     onRenameChat,
@@ -606,6 +838,7 @@ export function DesignChatSidebar({
                                 chat={chat}
                                 isActive={chat.sessionId === activeSessionId}
                                 isOpening={chat.sessionId === openingSessionId}
+                                designStatus={designStatusBySession.get(chat.sessionId)}
                                 onOpen={() => onOpenChat(chat)}
                                 onRename={(title) => onRenameChat(chat.sessionId, title)}
                                 onDelete={() => setChatToDelete(chat)}
@@ -803,16 +1036,16 @@ export function DesignChatSidebar({
                 />
             )}
 
-            {/* 맨 아래 프로필 — 누르면 마이페이지 프로필로 */}
-            <button type="button" className="dcw-profile" onClick={onGoToProfile} title="내 프로필">
-                <span className="dcw-profile__avatar" aria-hidden="true">
-                    {avatarLetter}
-                </span>
-                <span className="dcw-profile__text">
-                    <span className="dcw-profile__name">{nickname || '회원'}</span>
-                    {profile?.email && <span className="dcw-profile__email">{profile.email}</span>}
-                </span>
-            </button>
+            <SidebarProfile
+                nickname={nickname}
+                email={profile?.email ?? null}
+                avatarLetter={avatarLetter}
+                hasGeneratingDesign={[...designStatusBySession.values()].includes('generating')}
+                onGoToProfile={onGoToProfile}
+                onGoToMyPage={onGoToMyPage}
+                onGoToDesigns={onGoToDesigns}
+                onLogout={onLogout}
+            />
         </aside>
     )
 }

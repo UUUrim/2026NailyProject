@@ -1,7 +1,8 @@
 import { useDesignChatWorkspace } from '@/features/nail-design/hooks/useDesignChatWorkspace'
 import { DesignChatSidebar } from '@/features/nail-design/components/DesignChatSidebar'
-import { DesignChatConversation } from '@/features/nail-design/components/DesignChatConversation'
+import { DesignChatSlot } from '@/features/nail-design/components/DesignChatHost'
 import { HandAnalysisPanel } from '@/features/nail-design/components/HandAnalysisPanel'
+import { useAuth } from '@/shared/hooks/useAuth'
 import '@/styles/design-chat.css'
 import '@/styles/design-chat-workspace.css'
 import '@/styles/nail-design.css'
@@ -11,6 +12,7 @@ import '@/styles/mypage.css'
 // 가운데는 채팅, 오른쪽은 "분석 결과 상세 보기"로 여는 손 분석 결과 패널.
 export function NailDesignChatPageContent() {
     const workspace = useDesignChatWorkspace()
+    const { logout } = useAuth()
     const {
         currentRecordPreview,
         isAnalysisPanelOpen,
@@ -33,6 +35,13 @@ export function NailDesignChatPageContent() {
                 onCloseMobile={() => setIsMobileSidebarOpen(false)}
                 onGoToScan={() => workspace.goTo('/scan/hand')}
                 onGoToProfile={() => workspace.goTo('/mypage/profile')}
+                onGoToMyPage={() => workspace.goTo('/mypage')}
+                onGoToDesigns={() => workspace.goTo('/mypage/designs')}
+                onLogout={() => {
+                    // 마이페이지 로그아웃과 같게 — 토큰을 지우고 홈으로
+                    logout()
+                    workspace.goTo('/')
+                }}
                 onNewChat={() => workspace.startNewChat()}
                 isFreshChat={workspace.isFreshChat}
                 canSelectSession={workspace.canSelectSession}
@@ -48,6 +57,7 @@ export function NailDesignChatPageContent() {
                 historyGroups={workspace.historyGroups}
                 isHistoryLoading={workspace.isHistoryLoading}
                 activeSessionId={workspace.activeSessionId}
+                designStatusBySession={workspace.designStatusBySession}
                 openingSessionId={workspace.openingSessionId}
                 onOpenChat={(chat) => void workspace.openChat(chat)}
                 onRenameChat={(sessionId, title) => void workspace.renameChatTitle(sessionId, title)}
@@ -87,24 +97,9 @@ export function NailDesignChatPageContent() {
                     </div>
                 )}
 
-                {/* 디자인을 만드는 중에 다른 채팅으로 옮긴 채팅은 숨겨 둔 채(isBackground) 계속 만들고, 지금 채팅만 보인다.
-                    숨겨 둔 채팅은 숨길 때의 손 분석 기록을 그대로 받고, 사이드바에 상태를 알리지 않는다 (저장 알림은 받는다). */}
-                {workspace.conversations.map(({ chat, analysis, isBackground }) => (
-                    <DesignChatConversation
-                        key={chat.instanceKey}
-                        initialSnapshot={chat.snapshot}
-                        regenerate={chat.regenerate}
-                        isContextReady={isBackground ? true : workspace.isContextReady}
-                        userName={userName}
-                        canSelectSession={workspace.canSelectSession}
-                        analysis={analysis}
-                        onSessionReady={isBackground ? undefined : workspace.handleSessionReady}
-                        onSaved={workspace.handleChatSaved}
-                        onStatusChange={isBackground ? undefined : workspace.setStatus}
-                        onStartNewChat={() => workspace.startNewChat()}
-                        isBackground={isBackground}
-                    />
-                ))}
+                {/* 지금 채팅 — 채팅은 앱 맨 위의 DesignChatHost가 그리고 여기에 붙여 보여 준다. 답변·디자인을 기다리는 채팅은
+                    다른 채팅을 열거나 이 화면을 떠나도 숨겨 둔 채 계속 진행된다 */}
+                <DesignChatSlot instanceKey={workspace.activeChat.instanceKey} />
             </main>
 
             {isAnalysisPanelOpen && (

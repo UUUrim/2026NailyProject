@@ -91,11 +91,6 @@ const MONTHLY_TRENDING_COLORS = sortRecommendedColors([
 ])
 import { ApiError } from '@/shared/utils/apiClient'
 import { ensureSupportedImage } from '@/shared/utils/imageFormat'
-import {
-    registerBackgroundChatGuard,
-    registerChatSessionGuard,
-    shouldBypassBeforeUnload,
-} from '@/shared/utils/chatSessionGuard'
 
 // ── 타입 ──────────────────────────────────────────────────────────────────
 
@@ -272,15 +267,6 @@ function buildProvisionalChatTitle(snapshot: ConversationSnapshot): string | nul
     )
 }
 
-// 답변을 기다리거나 디자인을 만드는 동안 다른 곳으로 옮기려 할 때의 확인 문구
-const LEAVE_WHILE_GENERATING_MESSAGE =
-    '디자인을 만드는 중이에요. 지금 이동하면 만들고 있는 디자인은 이 채팅에 남지 않아요. 그래도 이동할까요?'
-const LEAVE_WHILE_REPLYING_MESSAGE =
-    '네일리가 답변을 준비하는 중이에요. 지금 이동하면 이 답변은 이 채팅에 남지 않아요. 그래도 이동할까요?'
-// 디자인을 만드는 중에 다른 채팅으로 옮겨 숨긴 채 계속 만드는 채팅이 있을 때 페이지를 떠나려 하면
-const LEAVE_WHILE_BACKGROUND_GENERATING_MESSAGE =
-    '다른 채팅에서 디자인을 만드는 중이에요. 지금 이동하면 만들고 있는 디자인은 그 채팅에 남지 않아요. 그래도 이동할까요?'
-
 /** 서버에 저장해 둔 채팅 상태를 스냅샷으로 되돌린다. 형식이 맞지 않으면 null */
 export function deserializeConversationSnapshot(raw: unknown): ConversationSnapshot | null {
     if (!raw || typeof raw !== 'object') return null
@@ -325,16 +311,22 @@ export function unmarkConversationDeleted(sessionId: number) {
     deletedSessionIds.delete(sessionId)
 }
 
+export function isConversationDeleted(sessionId: number) {
+    return deletedSessionIds.has(sessionId)
+}
+
 export function getLiveConversationSnapshot(): ConversationSnapshot | null {
     return liveConversationSnapshot
 }
 // "수정하고 싶어요" / "이어서 수정할게요"를 골랐을 때 네일리가 보내는 안내
 const REVISE_PROMPT_MESSAGE = '컬러, 스타일, 모티프 등 수정하고 싶으신 부분을 자유롭게 말씀해 주세요!'
+// 디자인 확정 — 누르면 이 답을 채팅에 남기고 결과 화면으로 넘어간다
+const DESIGN_ACCEPT_LABEL = '좋아요! 이 디자인으로 할게요.'
 const DESIGN_FEEDBACK_QUICK_REPLY: QuickReply = {
     id: 'design-feedback',
     question: '이 디자인 마음에 드시나요?',
     options: [
-        { value: 'accept', label: '좋아요! 이 디자인으로 할게요.', icon: 'party' },
+        { value: 'accept', label: DESIGN_ACCEPT_LABEL, icon: 'party' },
         { value: 'revise', label: '수정하고 싶어요.', icon: 'pencil' },
     ],
     multi: false,
@@ -418,6 +410,9 @@ const STEP_QUESTIONS: Record<PreferenceKey, string> = {
 }
 // 디자인 생성 후 완성 멘트 — 모든 생성 방식(선택지·자유 입력·사진·스캔 자동)이 같이 쓴다 (수정 후 멘트는 따로)
 const DESIGN_COMPLETE_MESSAGE = '네일을 완성했어요! 이런 디자인은 어떠세요?'
+const REVISE_COMPLETE_MESSAGE = '말씀하신 대로 수정했어요! 어떠세요?'
+// 디자인을 만들던 중에 페이지를 떠나(새로고침·탭 닫기) 생성이 멈춘 채팅을 다시 열었을 때
+const GENERATION_INTERRUPTED_MESSAGE = '디자인 생성이 중단됐어요. 원하시는 생성 방식을 다시 선택해 주세요.'
 
 // 채팅 화면의 대화를 확정 때 저장할 형태로 바꾼다 — 생성 중 카드는 빼고, 참고 사진 미리보기(data URL, 수 MB)는
 // 자리표시자로 보낸다(서버가 실제로 올라간 사진 URL로 바꿔 저장한다)
@@ -487,6 +482,41 @@ function splitRestoredPreferenceReplies(bubbles: ChatBubble[]): ChatBubble[] {
     )
 }
 
+// 답변·디자인을 기다리던 중에 새로고침·탭 닫기로 떠나 멈춘 채팅 — 다시 열었을 때 이어 갈 수 있게 멈춘 자리를 정리한다.
+// 생성 중 카드는 빼고, 실패했을 때처럼 멈췄다고 알린 뒤 다시 고를 선택 창을 띄운다.
+// (isGeneratingDesign: 디자인 이미지 생성·수정 요청을 보내 둔 상태였는지)
+function buildInterruptedSnapshot(snapshot: ConversationSnapshot, isGeneratingDesign: boolean): ConversationSnapshot {
+    const hasGeneratingCard = snapshot.bubbles.some((bubble) => bubble.isGenerating)
+    const bubbles = snapshot.bubbles.filter((bubble) => !bubble.isGenerating)
+    const withMessage = (text: string, marks?: Pick<ChatBubble, 'historySection'>): ChatBubble[] => [
+        ...bubbles,
+        { id: makeId(), role: 'assistant', text, ...marks },
+    ]
+    // 완성 이미지는 받아 카드에 채웠고 나타나기만 기다리던 때 — 디자인은 다 만들어졌다
+    if (isGeneratingDesign && !hasGeneratingCard) {
+        return {
+            ...snapshot,
+            bubbles: withMessage(snapshot.mode === 'revise' ? REVISE_COMPLETE_MESSAGE : DESIGN_COMPLETE_MESSAGE),
+            activeQuickReply: DESIGN_FEEDBACK_QUICK_REPLY,
+        }
+    }
+    // 수정하던 디자인은 그대로 두고, 이 디자인으로 할지 다시 수정할지 고르게 한다
+    if (snapshot.mode === 'revise' && snapshot.lastDesign) {
+        return { ...snapshot, bubbles: withMessage('디자인 수정이 중단됐어요.'), activeQuickReply: DESIGN_FEEDBACK_QUICK_REPLY }
+    }
+    // 새로 만들던 중 (선택지 기반에서 고른 내용을 보내고 답장을 기다리던 때 포함) — 생성 방식부터 다시 고른다
+    if (isGeneratingDesign || snapshot.mode === 'preference') {
+        return {
+            ...snapshot,
+            bubbles: withMessage(GENERATION_INTERRUPTED_MESSAGE, { historySection: 'method' }),
+            activeQuickReply: MENU_QUICK_REPLY,
+            mode: 'menu',
+        }
+    }
+    // 자유 입력 답변을 기다리던 때
+    return { ...snapshot, bubbles: withMessage('답변을 받기 전에 대화가 중단됐어요. 다시 말씀해 주세요.') }
+}
+
 function buildPreferenceQuickReply(step: PreferenceKey): QuickReply {
     const limit = STEP_LIMIT[step]
     return {
@@ -520,13 +550,18 @@ export type ConversationAnalysis = {
     summary: HandAnalysisSummary | null
 }
 
-// 채팅이 사이드바에 알려 주는 진행 상황 — 다른 채팅으로 옮기기 전 확인과, 분석 기록을 바꿀 때 새 채팅을 열지 정하는 데 쓴다
+// 채팅이 알려 주는 진행 상황 (designChatRuntime이 모은다) — 채팅을 화면에서 내릴 때 숨겨 둔 채 계속할지, "새 채팅"을
+// 다시 눌렀을 때 새로 열지 정하고, 사이드바 채팅 이력의 상태 점(디자인을 만드는 중 / 보지 않는 동안 다 만듦)을 띄우는 데 쓴다
 export type ConversationStatus = {
+    sessionId: number | null
     // 사용자가 한 번이라도 말했는지 (이때부터 채팅 이력에 저장된다)
     hasProgress: boolean
     // 답변을 기다리거나 디자인을 만드는 중인지
     isBusy: boolean
+    // 디자인을 만드는 중인지 (선택지 기반에서 고른 내용을 보내고 답장을 기다리는 동안도 포함)
     isGeneratingDesign: boolean
+    // 이 채팅에서 만든 디자인 수 — 다 만든 뒤 늘었으면 생성에 성공한 것이다
+    designCount: number
 }
 
 type UseNailDesignChatPageParams = {
@@ -542,11 +577,12 @@ type UseNailDesignChatPageParams = {
     analysis: ConversationAnalysis
     onSessionReady?: (sessionId: number) => void
     onSaved?: (summary: ChatSummary) => void
+    // 화면에 있든 숨겨 두었든 늘 알린다
     onStatusChange?: (status: ConversationStatus) => void
     // "처음부터 새로 만들게요" — 새 채팅을 연다
     onStartNewChat?: () => void
-    // 디자인을 만드는 중에 다른 채팅으로 옮겨 화면에서만 숨긴 채팅 — 그대로 계속 만들고 저장하되, 사이드바 상태·뒤로가기
-    // 복원·채팅 전환 확인에는 끼어들지 않는다 (페이지를 떠나는 이동에만 묻는다)
+    // 답변·디자인을 기다리는 중에 다른 채팅·다른 페이지로 옮겨 화면에서만 숨긴 채팅 — 그대로 계속 진행하고 저장하되,
+    // 채팅 화면(지금 채팅 표시)·뒤로가기 복원에는 끼어들지 않는다
     isBackground?: boolean
 }
 
@@ -600,7 +636,7 @@ export function useNailDesignChatPage({
                 {
                     id: makeId(),
                     role: 'assistant',
-                    text: '디자인 생성이 중단됐어요. 원하시는 생성 방식을 다시 선택해 주세요.',
+                    text: GENERATION_INTERRUPTED_MESSAGE,
                     historySection: 'method',
                 },
             ]
@@ -1098,12 +1134,16 @@ export function useNailDesignChatPage({
         if (latestSnapshotRef.current) persistSnapshot(latestSnapshotRef.current, options)
     }
 
+    // 새로고침·탭 닫기로 떠날 때 멈춘 자리를 정리해 저장하는 데 쓴다 (handlePageHide)
+    const busyRef = useRef({ isSending, isGeneratingDesign })
+
     // 렌더될 때마다 지금 상태를 스냅샷으로 남기고(뒤로가기 복원용), 잠시 뒤 서버에 저장한다
     useEffect(() => {
         const snapshot = buildSnapshot()
         // 뒤로가기 복원은 화면에 떠 있는 채팅만 — 숨겨 둔 채팅이 덮어쓰지 않게 한다 (서버 저장은 그대로 한다)
         if (!isBackground) liveConversationSnapshot = snapshot
         latestSnapshotRef.current = snapshot
+        busyRef.current = { isSending, isGeneratingDesign }
         if (isFirstSnapshotRef.current) {
             isFirstSnapshotRef.current = false
             lastSavedPayloadRef.current = buildSavePayload(snapshot).payloadJson
@@ -1117,9 +1157,22 @@ export function useNailDesignChatPage({
         }, SAVE_DEBOUNCE_MS)
     })
 
-    // 다른 채팅으로 옮기거나 페이지를 떠나면 기다리던 저장을 바로 보낸다 (탭을 닫을 때는 keepalive로)
+    // 채팅이 내려가면(언마운트) 기다리던 저장을 바로 보낸다. 페이지를 아예 떠날 때(새로고침·탭 닫기)는 keepalive로 보내고,
+    // 답변·디자인을 기다리던 중이었으면 그 진행은 여기서 멈추므로 멈춘 자리를 정리해 저장한다 (buildInterruptedSnapshot)
     useEffect(() => {
-        const handlePageHide = () => flushPendingSave({ keepalive: true })
+        const handlePageHide = (e: PageTransitionEvent) => {
+            const snapshot = latestSnapshotRef.current
+            if (!snapshot) return
+            if (saveTimerRef.current) {
+                window.clearTimeout(saveTimerRef.current)
+                saveTimerRef.current = null
+            }
+            const { isSending: wasSending, isGeneratingDesign: wasGenerating } = busyRef.current
+            // 뒤로/앞으로 캐시(bfcache)에 남는 이동이면 페이지가 그대로 살아 돌아오므로 정리하지 않는다
+            persistSnapshot(wasSending && !e.persisted ? buildInterruptedSnapshot(snapshot, wasGenerating) : snapshot, {
+                keepalive: true,
+            })
+        }
         window.addEventListener('pagehide', handlePageHide)
         return () => {
             window.removeEventListener('pagehide', handlePageHide)
@@ -1128,44 +1181,37 @@ export function useNailDesignChatPage({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
-    // 사이드바에 진행 상황을 알린다 (다른 채팅으로 옮기기 전 확인, 분석 기록을 바꿀 때 새 채팅을 열지 판단)
+    // 진행 상황을 알린다 — 화면에 있든 숨겨 두었든 늘 (designChatRuntime: 채팅을 내릴 때 숨겨 둔 채 계속할지,
+    // "새 채팅"을 다시 눌렀을 때 새로 열지, 사이드바 채팅 이력의 상태 점)
     const onStatusChangeRef = useRef(onStatusChange)
     useEffect(() => {
         onStatusChangeRef.current = onStatusChange
     })
-    // 숨겨 둔 채팅은 알리지 않고, 다시 화면에 띄울 때 지금 상황을 알린다
+    const designCount = useMemo(() => bubbles.filter((bubble) => bubble.isDesignResult).length, [bubbles])
+    // 선택지 기반에서 고른 내용을 보내고 답장을 기다리는 동안도 디자인을 만드는 과정이다 (입력창 안내 문구와 같은 기준)
+    const isMakingDesign = isGeneratingDesign || (mode === 'preference' && isSending)
     useEffect(() => {
-        if (!isBackground) onStatusChangeRef.current?.({ hasProgress, isBusy: isSending, isGeneratingDesign })
-    }, [hasProgress, isSending, isGeneratingDesign, isBackground])
+        onStatusChangeRef.current?.({
+            sessionId,
+            hasProgress,
+            isBusy: isSending,
+            isGeneratingDesign: isMakingDesign,
+            designCount,
+        })
+    }, [sessionId, hasProgress, isSending, isMakingDesign, designCount])
 
-    // 채팅은 계속 저장되므로 평소엔 페이지를 떠나도 묻지 않는다. 답변을 기다리거나 디자인을 만드는 동안에만
-    // 떠나면 그 결과가 채팅에 남지 않는다고 확인한다 — 새로고침/탭 닫기(beforeunload)와 사이드바 이동(가드) 모두.
+    // 채팅은 계속 저장되고, 답변·디자인을 기다리는 채팅은 다른 채팅이나 다른 페이지로 옮겨도 숨겨 둔 채 계속 진행되므로
+    // (designChatRuntime) 앱 안에서 옮길 때는 묻지 않는다. 그 진행을 멈추는 건 새로고침·탭 닫기뿐이라 그때만 확인한다.
     // (beforeunload의 커스텀 문구는 브라우저 보안 정책상 표시되지 않고 브라우저 기본 확인 문구만 뜬다.)
-    // 디자인을 만드는 중에 다른 채팅으로 옮겨 숨겨 둔 채팅은 채팅을 바꿔도 계속 만들어지므로, 페이지를 떠나는 이동에만 묻는다.
-    const [backgroundGuardId] = useState(makeId)
     useEffect(() => {
         if (!isSending) return
-
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (shouldBypassBeforeUnload()) return // 이미 우리 확인창에서 동의받은 이동이면 중복으로 안 물어봄
             e.preventDefault()
             e.returnValue = '' // 크롬 등 일부 브라우저는 빈 문자열 지정이 필요함
         }
         window.addEventListener('beforeunload', handleBeforeUnload)
-        if (isBackground) {
-            registerBackgroundChatGuard(backgroundGuardId, () => window.confirm(LEAVE_WHILE_BACKGROUND_GENERATING_MESSAGE))
-        } else {
-            registerChatSessionGuard(() =>
-                window.confirm(isGeneratingDesign ? LEAVE_WHILE_GENERATING_MESSAGE : LEAVE_WHILE_REPLYING_MESSAGE),
-            )
-        }
-
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload)
-            if (isBackground) registerBackgroundChatGuard(backgroundGuardId, null)
-            else registerChatSessionGuard(null)
-        }
-    }, [isSending, isGeneratingDesign, isBackground, backgroundGuardId])
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+    }, [isSending])
 
     // ── 공통: 디자인 생성 후 이동 ───────────────────────────────────────────
     const resolveShapeId = (preferences: NailDesignPreferences): NailShapeId => {
@@ -1869,7 +1915,7 @@ export function useNailDesignChatPage({
                 },
             })
 
-            completeGeneratingCard(generatingCardId, data.imageUrls, '말씀하신 대로 수정했어요! 어떠세요?')
+            completeGeneratingCard(generatingCardId, data.imageUrls, REVISE_COMPLETE_MESSAGE)
             revealPending = true
 
         } catch (e) {
@@ -2047,6 +2093,12 @@ export function useNailDesignChatPage({
     const isPreferenceInputLocked =
         mode === 'preference' && (!!activeQuickReply?.id.startsWith('pref-') || !lastDesign)
 
+    // 디자인을 확정하고 결과 화면으로 넘어간 뒤, 이력이나 뒤로가기로 이 채팅을 다시 연 상태 — 마지막 말풍선이 확정 답이다.
+    // 이때 입력한 문장은 생성 방식과 상관없이 마지막 디자인의 수정 요청으로 받는다 (handleSubmitInput)
+    const lastShownBubble = [...bubbles].reverse().find((bubble) => !bubble.historyOnly)
+    const isReopenedAfterConfirm =
+        !!lastDesign && !activeQuickReply && lastShownBubble?.role === 'user' && lastShownBubble.text === DESIGN_ACCEPT_LABEL
+
     const handleSubmitInput = () => {
         const text = inputValue.trim()
         if ((!text && !hasPhotoAttachment) || isSending || isPreferenceInputLocked || isPhotoInputLocked) return
@@ -2058,10 +2110,10 @@ export function useNailDesignChatPage({
         clearInput()
         setActiveQuickReply(null)
 
-        // 선택지 기반으로 디자인이 나온 뒤에 입력한 문장은 자유 입력으로 넘기지 않고 그 디자인의 수정 요청으로 받는다
-        // ("수정하고 싶어요"를 누른 것과 같다)
-        if (mode === 'preference') setMode('revise')
-        if (mode === 'revise' || mode === 'preference') {
+        // 선택지 기반으로 디자인이 나온 뒤에, 또는 디자인을 확정한 뒤 다시 연 채팅에서 입력한 문장은 자유 입력으로 넘기지 않고
+        // 마지막 디자인의 수정 요청으로 받는다 ("수정하고 싶어요"를 누른 것과 같다)
+        if (mode === 'preference' || isReopenedAfterConfirm) setMode('revise')
+        if (mode === 'revise' || mode === 'preference' || isReopenedAfterConfirm) {
             pushUser(text)
             void handleReviseSubmit(text)
             return
@@ -2233,6 +2285,7 @@ export function useNailDesignChatPage({
         handleDesignCardShown,
         isAwaitingGenerateConfirm,
         isPreferenceInputLocked,
+        isReopenedAfterConfirm,
         selectedInQuickReply,
         freeformSelectedColors,
         activeNoteStep,
