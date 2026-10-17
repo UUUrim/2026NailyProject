@@ -25,6 +25,7 @@ import { ApiError } from '@/shared/utils/apiClient'
 import { downloadImage } from '@/shared/utils/downloadImage'
 import '@/styles/mypage.css'
 import '@/styles/design-chat.css'
+import '@/styles/ar-preview-button.css'
 
 type FolderRef = { folderId: number; name: string }
 
@@ -65,7 +66,7 @@ type Props = {
   showLike?: boolean
   /** 공유 상태 배지 + 공유하기 버튼을 보여줄지 (기본 true) */
   showShare?: boolean
-  /** AR로 미리보기 버튼을 보여줄지 (기본 true) */
+  /** AR 미리보기 버튼을 보여줄지 (기본 true) */
   showAr?: boolean
   /** 이미지 다운로드 버튼을 보여줄지 (기본 true) */
   showDownload?: boolean
@@ -454,7 +455,7 @@ export function DesignImageDetailModal({
                 aria-controls="design-image-detail-panel"
               >
                 {ModalActionIcons.details}
-                <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
+                <span>{showDesignDetails ? '상세 닫기' : '이미지 상세 보기'}</span>
               </button>
             )}
           </div>
@@ -502,12 +503,12 @@ export function DesignImageDetailModal({
             {showAr && (
               <button
                 type="button"
-                className="mypage-x__modal-action--accent"
+                className="ar-preview-btn--badge"
                 onClick={() => setArTryOnImageUrl(viewImageUrl)}
                 disabled={detailLoading}
               >
                 {ModalActionIcons.ar}
-                <span>AR로 미리보기</span>
+                <span>AR 미리보기</span>
               </button>
             )}
           </div>
