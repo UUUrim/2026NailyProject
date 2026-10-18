@@ -70,6 +70,8 @@ export interface DesignGenerateResponse {
     /** 수정 요청이 아니라서 이미지를 바꾸지 않았을 때 서버가 주는 안내 메시지 (있으면 새 이미지가 아님) */
     assistantMessage?: string | null
     assistantOptions?: string[] | null
+    /** 수정 대신 "방금 디자인으로 확정할래"처럼 지금 디자인을 그대로 쓰겠다고 했을 때 true — 확정 선택지를 맨 위에 띄운다 */
+    confirmSuggested?: boolean | null
     /** 사진 기반 생성일 때 올린 참고 사진의 S3 URL — 채팅 화면의 사진 미리보기를 이 주소로 바꿔 저장한다 */
     referenceImageUrl?: string | null
 }

@@ -120,6 +120,21 @@ public class RefineService {
             user seemed to want, e.g. "전체적으로 색을 더 연하게", "글리터 추가해줘", "약지 장식 바꿔줘".
             When "isEditRequest" is true, set "replyOptions" to an empty array.
 
+            [When the user wants to keep the current design - VERY IMPORTANT]
+            The user is in the middle of revising, but may change their mind and decide they like the
+            CURRENT image as it is and want to finish with it, instead of asking for a change. Examples:
+            "아니야 방금 네일로 확정할래", "아니 그냥 확정", "그냥 이걸로 할게", "수정 안 할래", "이대로 할게요",
+            "지금 게 마음에 들어", "방금 거 좋아요", "됐어 이걸로 저장해줘".
+            In that case do NOT edit: set "isEditRequest" to false, "editInstruction" to an empty string,
+            and set "wantsToConfirm" to true. In "replyToUser" write ONE short, friendly KOREAN sentence
+            that tells the user they can finish by tapping the confirm button below, e.g. "지금 디자인이
+            마음에 드셨군요! 아래 '방금 디자인으로 확정할게요'를 누르시면 이 디자인으로 저장해 드릴게요."
+            Never say that you already saved it - saving happens only when the user taps that button.
+            Still fill "replyOptions" with 2 to 3 short edit requests, in case the user changes their mind.
+            If the message ALSO asks for a concrete change ("확정하기 전에 색만 연하게 해줘"), it is an
+            edit request: handle it as a normal edit and set "wantsToConfirm" to false.
+            In every other case set "wantsToConfirm" to false.
+
             [Three kinds of edit requests - VERY IMPORTANT]
             Before writing editInstruction, decide which kind the user's request is. This decides how
             much of the rest you lock down.
@@ -337,6 +352,7 @@ public class RefineService {
             Respond ONLY with the JSON below. No markdown, pure JSON only.
             {
                 "isEditRequest": true,
+                "wantsToConfirm": false,
                 "replyToUser": "",
                 "replyOptions": [],
                 "keywordsAdd": ["star charm"],
@@ -421,6 +437,8 @@ public class RefineService {
         boolean isEditRequest = resultJson.path("isEditRequest").asBoolean(true);
         String editInstruction = resultJson.path("editInstruction").asText("").trim();
         String replyToUser = resultJson.path("replyToUser").asText("").trim();
+        // 수정 대신 "방금 디자인으로 확정할래"처럼 지금 디자인을 그대로 쓰겠다는 뜻인지
+        boolean wantsToConfirm = resultJson.path("wantsToConfirm").asBoolean(false);
         System.out.println("[RefineService] (gpt-image) isEditRequest=" + isEditRequest
                 + " editInstruction: " + editInstruction);
 
@@ -432,11 +450,17 @@ public class RefineService {
         boolean looksLikeInstruction = instructionLower.startsWith("in this five-nail")
                 || instructionLower.startsWith("the first image is the nail set");
         if (!isEditRequest || editInstruction.isBlank() || !looksLikeInstruction) {
-            String reply = replyToUser.isBlank()
-                    ? "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
-                    + "(예: \"약지 하트를 별로 바꿔줘\", \"전체적으로 색을 더 연하게\")"
-                    : replyToUser;
-            return replyWithoutEdit(session, prevDesign, reply, parseReplyOptions(resultJson.path("replyOptions")));
+            String reply;
+            if (!replyToUser.isBlank()) {
+                reply = replyToUser;
+            } else if (wantsToConfirm) {
+                reply = "지금 디자인이 마음에 드셨군요! 아래 '방금 디자인으로 확정할게요'를 누르시면 이 디자인으로 저장해 드릴게요.";
+            } else {
+                reply = "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
+                        + "(예: \"약지 하트를 별로 바꿔줘\", \"전체적으로 색을 더 연하게\")";
+            }
+            return replyWithoutEdit(session, prevDesign, reply,
+                    parseReplyOptions(resultJson.path("replyOptions")), wantsToConfirm);
         }
 
         // 쉐입 변경 요청이면 새 쉐입 키워드(round/oval/almond/square/stiletto/ballerina)
@@ -637,7 +661,7 @@ public class RefineService {
      * assistantMessage가 있으면 프론트는 새 이미지 대신 이 메시지를 채팅에 보여준다.
      */
     private DesignGenerateResponseDto replyWithoutEdit(DesignSession session, NailDesign prevDesign, String reply,
-                                                       List<String> options) {
+                                                       List<String> options, boolean wantsToConfirm) {
         chatMessageRepository.save(ChatMessage.builder()
                 .session(session).role(ChatMessage.MessageRole.assistant).content(reply).build());
         return DesignGenerateResponseDto.builder()
@@ -647,6 +671,7 @@ public class RefineService {
                 .imageUrls(prevDesign.getImageUrls())
                 .assistantMessage(reply)
                 .assistantOptions(options)
+                .confirmSuggested(wantsToConfirm)
                 .build();
     }
 

@@ -322,6 +322,12 @@ export function getLiveConversationSnapshot(): ConversationSnapshot | null {
 const REVISE_PROMPT_MESSAGE = '컬러, 스타일, 모티프 등 수정하고 싶으신 부분을 자유롭게 말씀해 주세요!'
 // 디자인 확정 — 누르면 이 답을 채팅에 남기고 결과 화면으로 넘어간다
 const DESIGN_ACCEPT_LABEL = '좋아요! 이 디자인으로 할게요.'
+// 수정 제안 선택지 안에서 띄우는 확정 선택지 — 수정하려다 "그냥 방금 디자인으로 할래"로 마음을 바꾼 사용자를 위한 것.
+// 누르면 DESIGN_ACCEPT_LABEL과 똑같이 확정하고 결과 화면으로 넘어간다.
+const DESIGN_CONFIRM_FROM_REVISE_LABEL = '방금 디자인으로 확정할게요.'
+const DESIGN_CONFIRM_FROM_REVISE_VALUE = '__confirm_current_design__'
+// 확정 답으로 보는 말풍선 문장들 (확정 뒤 다시 연 채팅인지 판단할 때 쓴다)
+const DESIGN_ACCEPT_LABELS = [DESIGN_ACCEPT_LABEL, DESIGN_CONFIRM_FROM_REVISE_LABEL]
 const DESIGN_FEEDBACK_QUICK_REPLY: QuickReply = {
     id: 'design-feedback',
     question: '이 디자인 마음에 드시나요?',
@@ -590,18 +596,18 @@ type UseNailDesignChatPageParams = {
 const SAVE_DEBOUNCE_MS = 700
 
 export function useNailDesignChatPage({
-    initialSnapshot,
-    regenerate,
-    isContextReady,
-    userName,
-    canSelectSession,
-    analysis,
-    onSessionReady,
-    onSaved,
-    onStatusChange,
-    onStartNewChat,
-    isBackground = false,
-}: UseNailDesignChatPageParams) {
+                                          initialSnapshot,
+                                          regenerate,
+                                          isContextReady,
+                                          userName,
+                                          canSelectSession,
+                                          analysis,
+                                          onSessionReady,
+                                          onSaved,
+                                          onStatusChange,
+                                          onStartNewChat,
+                                          isBackground = false,
+                                      }: UseNailDesignChatPageParams) {
     const navigate = useNavigate()
 
     // 이력에서 연 채팅·뒤로가기로 돌아온 채팅은 스냅샷 그대로 이어서 하고, 새 세션을 만들거나 인사말을 다시 붙이지 않는다.
@@ -1874,11 +1880,26 @@ export function useNailDesignChatPage({
                 // (직접 입력도 계속 가능 — mode가 'revise'로 유지된다)
                 const suggestions = (data.assistantOptions ?? []).filter((s) => s.trim().length > 0)
                 if (suggestions.length > 0) {
+                    // 화면 라벨에만 문장부호를 붙이고, 수정 요청으로 보내는 값은 서버가 준 문장 그대로 둔다
+                    const reviseOptions: QuickReplyOption[] = suggestions.map((s) => ({
+                        value: s,
+                        label: withSentencePunctuation(s),
+                    }))
+                    // 지금 디자인을 그대로 확정하는 선택지는 항상 함께 둔다.
+                    // 사용자가 "방금 디자인으로 확정할래"처럼 말했으면(confirmSuggested) 맨 위에, 아니면 맨 아래에 둔다.
+                    const confirmOption: QuickReplyOption = {
+                        value: DESIGN_CONFIRM_FROM_REVISE_VALUE,
+                        label: DESIGN_CONFIRM_FROM_REVISE_LABEL,
+                        icon: 'party',
+                    }
                     setActiveQuickReply({
                         id: 'revise-suggestions',
-                        question: '다음과 같이 수정해 보는 건 어떠세요? 직접 입력하셔도 좋아요.',
-                        // 화면 라벨에만 문장부호를 붙이고, 수정 요청으로 보내는 값은 서버가 준 문장 그대로 둔다
-                        options: suggestions.map((s) => ({ value: s, label: withSentencePunctuation(s) })),
+                        question: data.confirmSuggested
+                            ? '이 디자인으로 확정할까요? 다른 수정을 원하시면 골라 주시거나 직접 입력하셔도 좋아요.'
+                            : '다음과 같이 수정해 보는 건 어떠세요? 직접 입력하셔도 좋아요.',
+                        options: data.confirmSuggested
+                            ? [confirmOption, ...reviseOptions]
+                            : [...reviseOptions, confirmOption],
                         multi: false,
                         limit: 1,
                         layout: 'list',
@@ -2097,7 +2118,10 @@ export function useNailDesignChatPage({
     // 이때 입력한 문장은 생성 방식과 상관없이 마지막 디자인의 수정 요청으로 받는다 (handleSubmitInput)
     const lastShownBubble = [...bubbles].reverse().find((bubble) => !bubble.historyOnly)
     const isReopenedAfterConfirm =
-        !!lastDesign && !activeQuickReply && lastShownBubble?.role === 'user' && lastShownBubble.text === DESIGN_ACCEPT_LABEL
+        !!lastDesign &&
+        !activeQuickReply &&
+        lastShownBubble?.role === 'user' &&
+        DESIGN_ACCEPT_LABELS.includes(lastShownBubble.text)
 
     const handleSubmitInput = () => {
         const text = inputValue.trim()
@@ -2161,6 +2185,11 @@ export function useNailDesignChatPage({
             return
         }
         if (activeQuickReply?.id === 'revise-suggestions') {
+            // "방금 디자인으로 확정할게요" — "좋아요! 이 디자인으로 할게요."를 누른 것과 똑같이 확정한다
+            if (option.value === DESIGN_CONFIRM_FROM_REVISE_VALUE) {
+                handleDesignFeedback({ ...option, value: 'accept' })
+                return
+            }
             // 선택지를 눌렀으면 그 문장을 수정 요청으로 그대로 보낸다
             setActiveQuickReply(null)
             pushUser(option.label)
