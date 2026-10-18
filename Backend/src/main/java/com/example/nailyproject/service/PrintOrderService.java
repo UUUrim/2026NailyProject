@@ -24,6 +24,7 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -40,6 +41,7 @@ public class PrintOrderService {
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm");
     private static final List<String> FINGER_ORDER = List.of("thumb", "index", "middle", "ring", "pinky");
+    private static final String CANCELED_MESSAGE = "사용자가 출력을 취소했습니다.";
 
     // printer/server.py 주소 — 로컬 PC에서 돌리는 걸 ngrok으로 터널링한 공개 URL을 여기 넣는다.
     // (COMFY_URL, analysis.server.url과 같은 패턴)
@@ -244,6 +246,11 @@ public class PrintOrderService {
         PrintOrder order = printOrderRepository.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 출력 주문을 찾을 수 없습니다."));
 
+        // 사용자가 이미 취소한(또는 취소 중인) 주문의 늦은 콜백은 무시한다 (취소가 병합 결과나 실패로 덮이지 않게)
+        if (isCancelled(order.getStatus())) {
+            return;
+        }
+
         boolean success = payload.path("success").asBoolean(false);
         if (!success) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
@@ -326,7 +333,37 @@ public class PrintOrderService {
         PrintOrder order = printOrderRepository.findById(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 출력 주문을 찾을 수 없습니다."));
 
+        // 취소가 끝난 주문의 늦은 콜백(PRINTING/완료/실패 등)은 모두 무시한다 (취소가 완료로 덮이면 안 된다)
+        if (order.getStatus() == PrintOrder.PrintStatus.CANCELED) {
+            return;
+        }
+
+        String status = payload.path("status").asText("PRINTING");
         boolean success = payload.path("success").asBoolean(false);
+
+        // 취소 중(CANCELING)인 주문 - 프린터가 멈추는 중이다.
+        //  · 취소 콜백, 실패 콜백(프린터가 멈추며 실패로 보고했거나 상태를 확인하지 못함) -> CANCELED (사용자가 원한 결과)
+        //  · 취소 요청이 닿기 전에 이미 끝까지 출력된 경우(COMPLETED) -> 실제로 출력이 끝난 것이라 COMPLETED
+        //  · 늦게 도착한 PRINTING / WAITING_IN_QUEUE 콜백 -> 무시 (취소 중인 주문을 출력 중으로 되돌리지 않는다)
+        if (order.getStatus() == PrintOrder.PrintStatus.CANCELING) {
+            if (success && "COMPLETED".equals(status)) {
+                order.updateStatus(PrintOrder.PrintStatus.COMPLETED);
+                printOrderRepository.save(order);
+            } else if (!success || "CANCELED".equals(status)) {
+                markCanceled(order);
+            }
+            return;
+        }
+
+        // printer 서버는 취소를 success=false + status=CANCELED로 알린다. 취소는 실패(FAILED)와 구분해야 해서
+        // success 검사보다 먼저 확인한다. 이미 끝난 주문(완료/실패)은 취소로 바꾸지 않는다.
+        if ("CANCELED".equals(status)) {
+            if (!isFinished(order.getStatus())) {
+                markCanceled(order);
+            }
+            return;
+        }
+
         if (!success) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
             order.updateFailReason(payload.path("message").asText("출력 시작 실패"));
@@ -334,7 +371,6 @@ public class PrintOrderService {
             return;
         }
 
-        String status = payload.path("status").asText("PRINTING");
         if ("WAITING_IN_QUEUE".equals(status)) {
             // printer 서버가 병합 직후 자동 출력 요청을 큐에 넣었다는 신호 — 앞 출력이 끝나고
             // 슬라이싱/업로드가 끝나 PRINTING 콜백이 올 때까지 "프린터 대기 중"으로 둔다.
@@ -358,6 +394,11 @@ public class PrintOrderService {
                 stale.updateStatus(PrintOrder.PrintStatus.COMPLETED);
                 printOrderRepository.save(stale);
             }
+            // 취소 중이던 주문도 마찬가지다: 다음 작업이 시작됐다면 앞 작업은 이미 멈췄고 취소 콜백만 유실된 것이다.
+            for (PrintOrder stale : printOrderRepository.findByStatusAndIdNot(
+                    PrintOrder.PrintStatus.CANCELING, order.getId())) {
+                markCanceled(stale);
+            }
         }
         printOrderRepository.save(order);
     }
@@ -372,17 +413,136 @@ public class PrintOrderService {
 
     /**
      * 출력 내역 삭제 DELETE /users/me/prints/{orderId}
-     * 출력 중(PRINTING)인 주문만 빼고 지울 수 있다. 내역에서만 빠지고 행은 남는다 - 아직 진행 중인 주문은
-     * printer 서버 콜백과 대기 순번 계산이 계속 쓰고, printer 서버에 취소 기능이 없어 출력도 그대로 진행된다.
+     * 끝난 주문(완료/실패/취소)만 지울 수 있다. 내역에서만 빠지고 행은 남는다.
+     * 진행 중인 주문은 지워도 내역에서만 숨겨질 뿐 병합/출력이 그대로 이어지므로, 먼저 출력을 취소하게 한다.
      */
     public void deletePrintOrder(User user, Long orderId) {
         PrintOrder order = printOrderRepository.findById(orderId)
                 .filter(o -> o.getUser().getId().equals(user.getId()) && !o.isHistoryDeleted())
                 .orElseThrow(() -> new IllegalArgumentException("해당 출력 내역을 찾을 수 없습니다."));
-        if (order.getStatus() == PrintOrder.PrintStatus.PRINTING) {
-            throw new IllegalStateException("출력 중인 내역은 삭제할 수 없습니다.");
+        if (order.getStatus() == PrintOrder.PrintStatus.CANCELING) {
+            throw new IllegalStateException("취소가 진행 중입니다. 프린터가 멈추면 삭제할 수 있습니다.");
+        }
+        if (!isFinished(order.getStatus())) {
+            throw new IllegalStateException("진행 중인 출력은 삭제할 수 없습니다. 먼저 출력을 취소해 주세요.");
         }
         order.deleteHistory();
+    }
+
+    private static boolean isFinished(PrintOrder.PrintStatus status) {
+        return status == PrintOrder.PrintStatus.COMPLETED
+                || status == PrintOrder.PrintStatus.FAILED
+                || status == PrintOrder.PrintStatus.CANCELED;
+    }
+
+    // 취소 중이거나 취소가 끝난 주문
+    private static boolean isCancelled(PrintOrder.PrintStatus status) {
+        return status == PrintOrder.PrintStatus.CANCELING || status == PrintOrder.PrintStatus.CANCELED;
+    }
+
+    private void markCanceled(PrintOrder order) {
+        order.updateStatus(PrintOrder.PrintStatus.CANCELED);
+        order.updateFailReason(CANCELED_MESSAGE);
+        printOrderRepository.save(order);
+    }
+
+    private PrintOrder findOwnedOrder(User user, Long orderId, String notOwnerMessage) {
+        PrintOrder order = printOrderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("해당 출력 주문을 찾을 수 없습니다."));
+        if (!order.getUser().getId().equals(user.getId())) {
+            throw new IllegalArgumentException(notOwnerMessage);
+        }
+        return order;
+    }
+
+    /**
+     * 출력 취소 POST /users/me/prints/{orderId}/cancel
+     *  - QUEUED(STL 생성을 기다리는 중): printer 서버에 아직 아무것도 시키지 않았으므로 바로 취소한다.
+     *  - MERGING/MERGED/WAITING_IN_QUEUE/PRINTING: printer 서버에 취소를 요청한다.
+     *      · 대기 중이거나 병합 중이던 주문 -> 바로 취소된다.
+     *      · 프린터가 출력 중인 주문 -> 정지 명령을 보내고 CANCELING(취소 중)이 된다. 프린터가 멈추면
+     *        printer 서버가 보내는 취소 콜백(receivePrintResult)으로 CANCELED가 된다.
+     *        프론트는 CANCELING인 동안 취소/일시정지/재개 버튼을 막으면 된다.
+     *  printer 서버에 연결하지 못하면 상태를 바꾸지 않고 오류를 돌려준다 (프린터는 계속 출력 중일 수 있다).
+     */
+    public PrintOrderResponseDto cancelPrintOrder(User user, Long orderId) {
+        PrintOrder order = findOwnedOrder(user, orderId, "본인의 출력 주문만 취소할 수 있습니다.");
+        PrintOrder.PrintStatus current = order.getStatus();
+        if (current == PrintOrder.PrintStatus.CANCELING) {
+            throw new IllegalStateException("이미 취소를 진행하고 있습니다. 프린터가 멈출 때까지 잠시 기다려 주세요.");
+        }
+        if (isFinished(current)) {
+            throw new IllegalStateException("이미 끝난 주문은 취소할 수 없습니다.");
+        }
+        if (current == PrintOrder.PrintStatus.QUEUED) {
+            markCanceled(order);
+            return toDto(order);
+        }
+
+        // 병합 중이던 주문은 아직 printer 서버 큐에 없다. preCancel로 "취소됨" 표시를 남겨서
+        // 병합이 끝난 뒤 큐에 들어가지 않게 한다.
+        boolean preCancel = current == PrintOrder.PrintStatus.MERGING || current == PrintOrder.PrintStatus.MERGED;
+        JsonNode result = callPrinterControl("/print/cancel", order, preCancel);
+        if ("current".equals(result.path("kind").asText(""))) {
+            // 프린터가 출력 중이던 주문: 정지 명령을 보낸 상태 - 멈췄다는 콜백이 올 때까지 "취소 중"
+            order.updateStatus(PrintOrder.PrintStatus.CANCELING);
+            printOrderRepository.save(order);
+        } else {
+            markCanceled(order);
+        }
+        return toDto(order);
+    }
+
+    /** 출력 일시정지 POST /users/me/prints/{orderId}/pause - 지금 출력 중(PRINTING)인 주문만 */
+    public PrintOrderResponseDto pausePrintOrder(User user, Long orderId) {
+        return controlPrinting(user, orderId, "/print/pause");
+    }
+
+    /** 일시정지 재개 POST /users/me/prints/{orderId}/resume */
+    public PrintOrderResponseDto resumePrintOrder(User user, Long orderId) {
+        return controlPrinting(user, orderId, "/print/resume");
+    }
+
+    // 일시정지/재개는 주문 상태(PRINTING)를 바꾸지 않는다. 일시정지 여부는 프린터 상태(gcodeState=PAUSE)로 본다.
+    private PrintOrderResponseDto controlPrinting(User user, Long orderId, String path) {
+        PrintOrder order = findOwnedOrder(user, orderId, "본인의 출력 주문만 조작할 수 있습니다.");
+        if (order.getStatus() != PrintOrder.PrintStatus.PRINTING) {
+            throw new IllegalStateException("출력 중인 주문만 일시정지하거나 재개할 수 있습니다.");
+        }
+        callPrinterControl(path, order, false);
+        return toDto(order);
+    }
+
+    /**
+     * printer/server.py의 /print/pause, /print/resume, /print/cancel 호출.
+     * printer 서버는 항상 200으로 답하고 성공 여부를 success로 알린다. 실패하면 사용자에게 보일 문구로
+     * IllegalStateException을 던진다.
+     */
+    private JsonNode callPrinterControl(String path, PrintOrder order, boolean preCancel) {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("orderId", order.getId());
+        if (preCancel) {
+            requestBody.put("preCancel", true);
+        }
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.set("ngrok-skip-browser-warning", "true");
+            var response = restTemplate.exchange(printerServerUrl + path, HttpMethod.POST,
+                    new HttpEntity<>(requestBody, headers), String.class);
+            JsonNode body = objectMapper.readTree(response.getBody());
+            if (!body.path("success").asBoolean(false)) {
+                String message = body.path("message").asText("프린터 서버가 요청을 처리하지 못했습니다.");
+                throw new IllegalStateException(message.length() > 200 ? message.substring(0, 200) : message);
+            }
+            return body;
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (ResourceAccessException e) {
+            throw new IllegalStateException("프린터 서버에 연결할 수 없습니다. 프린터 서버가 켜져 있는지 확인해 주세요.");
+        } catch (Exception e) {
+            throw new IllegalStateException("프린터 서버가 요청을 처리하지 못했습니다. 다시 시도해 주세요.");
+        }
     }
 
     public void completePrintOrder(User user, Long orderId) {
@@ -390,6 +550,12 @@ public class PrintOrderService {
                 .orElseThrow(() -> new IllegalArgumentException("해당 출력 주문을 찾을 수 없습니다."));
         if (!order.getUser().getId().equals(user.getId())) {
             throw new IllegalArgumentException("본인의 출력 주문만 완료 처리할 수 있습니다.");
+        }
+        // 취소된(또는 취소 중인) 주문은 완료로 바꾸지 않는다. 프론트의 진행 상황 위젯이 프린터의 FINISH/진행률 100%를
+        // 보고 이 API를 부르는데, 그 때문에 취소한 주문이 완료로 덮이면 안 된다. 오류로 응답하면 위젯이
+        // "프린터 상태를 가져오지 못했어요"로 보이므로 오류 없이 상태를 그대로 둔다.
+        if (isCancelled(order.getStatus())) {
+            return;
         }
         order.updateStatus(PrintOrder.PrintStatus.COMPLETED);
         printOrderRepository.save(order);
@@ -415,6 +581,8 @@ public class PrintOrderService {
             return PrinterProgressResponseDto.builder()
                     .success(body.path("success").asBoolean(false))
                     .queueSize(body.hasNonNull("queueSize") ? body.get("queueSize").asInt() : 0)
+                    .gcodeState(body.path("gcodeState").asText(null))
+                    .currentOrderId(body.hasNonNull("currentOrderId") ? body.get("currentOrderId").asLong() : null)
                     .state(body.path("state").asText(null))
                     .percentage(body.hasNonNull("percentage") ? body.get("percentage").asInt() : null)
                     .remainingTimeMin(body.hasNonNull("remainingTimeMin") ? body.get("remainingTimeMin").asInt() : null)
@@ -436,7 +604,8 @@ public class PrintOrderService {
         if (order.getStatus() == PrintOrder.PrintStatus.WAITING_IN_QUEUE
                 || order.getStatus() == PrintOrder.PrintStatus.MERGED) {
             queueAhead = (int) printOrderRepository.countByStatusInAndIdLessThan(
-                    List.of(PrintOrder.PrintStatus.PRINTING, PrintOrder.PrintStatus.WAITING_IN_QUEUE),
+                    List.of(PrintOrder.PrintStatus.PRINTING, PrintOrder.PrintStatus.WAITING_IN_QUEUE,
+                            PrintOrder.PrintStatus.CANCELING),
                     order.getId());
         }
         return PrintOrderResponseDto.builder()

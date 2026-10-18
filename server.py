@@ -36,6 +36,9 @@ Usage:
     GET  /print/status        — 프린터 현재 상태/진행률 (Spring Boot 폴링용)
     POST /print/merge-both    — 양손 로컬 STL 병합 → 양손 3MF를 S3에 업로드 → 콜백
     POST /print/start         — 슬라이싱 + 프린터 출력 시작
+    POST /print/pause         — 지금 출력 중인 주문 일시정지   {"orderId": ...}
+    POST /print/resume        — 일시정지된 주문 재개           {"orderId": ...}
+    POST /print/cancel        — 출력 중이면 프린터를 멈추고, 대기 중이면 큐에서 뺀다 {"orderId": ...}
 """
 
 import asyncio
@@ -300,6 +303,11 @@ def _slice_and_print_local(local_3mf: str, output_dir: str, callback_url: str):
     """
     try:
         order_id = _order_id_from_callback(callback_url)
+        # 병합하는 사이 사용자가 취소했으면(preCancel) 큐에 넣지 않는다
+        if order_id in _CANCEL_REQUESTED:
+            _CANCEL_REQUESTED.discard(order_id)
+            _post_canceled(callback_url)
+            return
         order_dir = os.path.join(output_dir, f"order_{order_id}")
         os.makedirs(order_dir, exist_ok=True)
         job_3mf = os.path.join(order_dir, "input_for_slicing.3mf")
@@ -316,6 +324,34 @@ def _order_id_from_callback(callback_url: str) -> str:
     """콜백 주소(.../prints/<주문ID>/print-result)에서 주문 ID를 꺼낸다. 없으면 시각으로 대체."""
     m = re.search(r"/prints/(\d+)/", callback_url or "")
     return m.group(1) if m else time.strftime("t%Y%m%d_%H%M%S")
+
+
+# ── 출력 제어 (일시정지 / 재개 / 취소) ────────────────────────
+# 사용자가 취소를 요청한 주문 ID(문자열). 출력 중인 작업은 폴링이 이 값을 보고 프린터를 멈춘 뒤
+# 취소 콜백을 보내고, 대기 중인 작업은 큐 워커가 꺼낼 때 건너뛴다.
+_CANCEL_REQUESTED: set = set()
+
+
+def _cancel_requested(callback_url: str) -> bool:
+    return _order_id_from_callback(callback_url) in _CANCEL_REQUESTED
+
+
+def _post_canceled(callback_url: str):
+    """사용자가 취소한 주문을 백엔드에 알린다. success=False로 보내는 이유: 백엔드는 success=True이면서
+    모르는 status가 오면 PRINTING으로 처리하기 때문이다. 취소는 status=CANCELED로 구분한다."""
+    try:
+        requests.post(callback_url, json={
+            "success": False, "status": "CANCELED", "message": "사용자가 출력을 취소했습니다."}, timeout=15)
+    except Exception as e:
+        print(f"[Cancel] 취소 콜백 전송 실패: {e}")
+
+
+def _stop_printer_quietly():
+    """프린터에 정지 명령을 보낸다. 실패해도 예외를 올리지 않는다(폴링이 다음 주기에 다시 보낸다)."""
+    try:
+        _get_printer().stop_print()
+    except Exception as e:
+        print(f"[Cancel] stop_print 실패(다음 폴링에서 재시도): {e}")
 
 def _run_merge_both_hands(userid, left_session, right_session,
                            left_shapes, right_shapes, callback_url, print_callback_url=None):
@@ -350,6 +386,10 @@ def _run_slice_and_print(merged_model_url, output_dir, callback_url, local_3mf=N
         if local_3mf is None:
             local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
             _download_3mf_from_url(merged_model_url, local_3mf)
+        # 다운로드하는 사이 취소됐으면 슬라이싱/업로드를 시작하지 않는다
+        if _cancel_requested(callback_url):
+            _post_canceled(callback_url)
+            return
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
 
         # 출력 시작 콜백
@@ -392,12 +432,26 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
             gcode = str(status.get("gcodeState", "")).upper()
             pct = status.get("percentage")
             pct = pct if isinstance(pct, (int, float)) else 0
-            last_percentage = max(last_percentage, pct)
             print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
 
             stage_active = bool(stage) and "IDLE" not in stage and "UNKNOWN" not in stage
-            if gcode in ACTIVE_GCODE or stage_active:
+            if not has_started and (gcode in ACTIVE_GCODE or stage_active):
                 has_started = True
+                # 직전 출력이 끝난 뒤에도 프린터는 진행률 100%를 들고 있다. 그 값이 이번 출력의
+                # 진행률로 섞이면, 중간에 취소돼도 "95% 이상"으로 보여 완료로 오판한다.
+                last_percentage = 0
+
+            # 사용자가 취소를 요청한 주문: 프린터를 멈추고, 멈춘 것이 확인되면 취소로 알린다.
+            # 출력이 막 시작되는 순간에는 stop 명령이 먹지 않을 수 있어서, 멈출 때까지 폴링마다 다시 보낸다.
+            if _cancel_requested(callback_url) and not (has_started and gcode == "FINISH"):
+                _stop_printer_quietly()
+                if has_started and gcode in ("FAILED", "IDLE") and not stage_active:
+                    _post_canceled(callback_url)
+                    return
+                if not has_started and time.time() - start >= startup_grace_sec:
+                    _post_canceled(callback_url)   # 출력이 시작되지 않은 채 취소됨
+                    return
+                continue
 
             if not has_started:
                 # 아직 예열/업로드 처리 중이거나 시작 명령이 먹지 않은 상태
@@ -406,6 +460,10 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
                           f"프린터 상태를 확인해 주세요. (단계={stage}, gcode={gcode})")
                     return
                 continue
+
+            # 진행률은 이번 출력이 시작된 뒤 RUNNING일 때만 반영한다 (PREPARE 등에서는 이전 값이 남아 있을 수 있다)
+            if gcode == "RUNNING":
+                last_percentage = max(last_percentage, pct)
 
             if gcode == "FINISH":
                 requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
@@ -549,6 +607,17 @@ def _print_queue_worker():
     while True:
         job = _print_job_queue.get()
         callback_url = job["callbackUrl"]
+        order_id = _order_id_from_callback(callback_url)
+        # 대기 중에 취소된 작업은 쿨다운도 기다리지 않고 건너뛴다. (취소 콜백은 취소 요청 때 이미 보냈다)
+        # resume 작업은 프린터가 실제로 출력 중인 작업이라 건너뛰지 않고, 폴링이 프린터를 멈춘다.
+        if not job.get("resume") and order_id in _CANCEL_REQUESTED:
+            with _print_queue_lock:
+                if job in _pending_jobs:
+                    _pending_jobs.remove(job)
+                _save_print_queue_state()
+            _CANCEL_REQUESTED.discard(order_id)
+            _print_job_queue.task_done()
+            continue
         # 대기 목록(_pending_jobs)에 남겨 둔 채로 기다린다: 서버가 재시작돼도 복구된다.
         # (재시작 후 상태 확인만 이어가는 resume 작업은 새 출력이 아니라서 기다리지 않는다)
         if not job.get("resume"):
@@ -556,8 +625,19 @@ def _print_queue_worker():
         with _print_queue_lock:
             if job in _pending_jobs:
                 _pending_jobs.remove(job)
-            _current_job = job
-            _save_print_queue_state()
+            # 쿨다운을 기다리는 사이 취소 요청이 들어왔는지 잠금 안에서 다시 확인한다
+            # (취소 요청도 같은 잠금 안에서 처리해서, 어느 한쪽만 보는 일이 없다)
+            if not job.get("resume") and order_id in _CANCEL_REQUESTED:
+                _CANCEL_REQUESTED.discard(order_id)
+                _save_print_queue_state()
+                skip = True
+            else:
+                _current_job = job
+                _save_print_queue_state()
+                skip = False
+        if skip:
+            _print_job_queue.task_done()
+            continue
         try:
             print(f"[PrintQueue] 출력 시작 (대기 {_print_job_queue.qsize()}개 남음)")
             if job.get("resume"):
@@ -574,6 +654,7 @@ def _print_queue_worker():
                 pass
         finally:
             _last_job_finished_at = time.time()
+            _CANCEL_REQUESTED.discard(order_id)   # 이 주문의 취소 요청은 여기서 끝
             with _print_queue_lock:
                 _current_job = None
                 _save_print_queue_state()
@@ -1705,6 +1786,13 @@ class MergeBothMeasurementsRequest(BaseModel):
 class StartPrintRequest(BaseModel):
     mergedModelUrl: str; outputDir: str; callbackUrl: str
 
+class PrintControlRequest(BaseModel):
+    # 조작할 출력 주문 ID. 현재 출력 중이거나(일시정지/재개/취소) 대기 중인(취소) 주문만 조작할 수 있다.
+    # Spring이 숫자로 보내도 받도록 int도 허용한다 (pydantic v2는 숫자를 문자열로 자동 변환하지 않는다).
+    orderId: str | int
+    # 취소 전용: 아직 큐에 없는 주문(병합 중)도 "이 주문은 취소됨"으로 표시해 둔다. 병합이 끝나면 큐에 넣지 않는다.
+    preCancel: bool = False
+
 
 # ══════════════════════════════════════════════════════════════
 # 엔드포인트
@@ -2078,12 +2166,30 @@ def test_side_capture():
 
 # ── 프린터 ───────────────────────────────────────────────────
 
+def _current_order_id():
+    with _print_queue_lock:
+        return _order_id_from_callback(_current_job["callbackUrl"]) if _current_job else None
+
+
+def _find_print_job_locked(order_id: str):
+    """주문 ID로 작업을 찾는다 (호출하는 쪽이 _print_queue_lock을 잡고 있어야 한다).
+    반환: ("current" | "queued" | None, job). 재시작 후 이어서 감시 중인 resume 작업은 이미 프린터가
+    출력 중인 작업이라 대기가 아니라 current로 본다."""
+    if _current_job and _order_id_from_callback(_current_job["callbackUrl"]) == order_id:
+        return "current", _current_job
+    for j in _pending_jobs:
+        if _order_id_from_callback(j["callbackUrl"]) == order_id:
+            return ("current" if j.get("resume") else "queued"), j
+    return None, None
+
+
 @app.get("/print/status")
 def print_status():
     try:
         return {
             "success": True,
             "queueSize": _print_job_queue.qsize(),  # ← 추가
+            "currentOrderId": _current_order_id(),  # 지금 출력(또는 준비) 중인 주문 ID, 없으면 None
             **_fetch_printer_status()
         }
     except Exception as e:
@@ -2113,6 +2219,76 @@ def start_print(request: StartPrintRequest):
         "queuePosition": _print_job_queue.qsize(),
         "message": f"출력 대기열에 추가되었습니다. (앞에 {waiting}개 대기 중)"
     }
+
+@app.post("/print/pause")
+def pause_print(request: PrintControlRequest):
+    """지금 출력 중인 주문을 일시정지한다. 응답은 항상 200이고 성공 여부는 success로 구분한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, _ = _find_print_job_locked(order_id)
+    if kind != "current":
+        return {"success": False, "message": "지금 출력 중인 주문이 아닙니다."}
+    try:
+        printer = _get_printer()
+        gcode = str(printer.get_state()).upper()
+        if gcode == "PAUSE":
+            return {"success": True, "message": "이미 일시정지 상태입니다."}
+        if gcode != "RUNNING":
+            return {"success": False, "message": f"출력 중일 때만 일시정지할 수 있습니다. (현재 상태: {gcode})"}
+        ok = printer.pause_print()
+    except Exception as e:
+        return {"success": False, "message": f"프린터에 명령을 보내지 못했습니다: {e}"}
+    return {"success": bool(ok), "message": "일시정지를 요청했습니다." if ok else "일시정지 명령이 거부됐습니다."}
+
+
+@app.post("/print/resume")
+def resume_print(request: PrintControlRequest):
+    """일시정지된 주문을 다시 출력한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, _ = _find_print_job_locked(order_id)
+    if kind != "current":
+        return {"success": False, "message": "지금 출력 중인 주문이 아닙니다."}
+    try:
+        printer = _get_printer()
+        gcode = str(printer.get_state()).upper()
+        if gcode == "RUNNING":
+            return {"success": True, "message": "이미 출력 중입니다."}
+        if gcode != "PAUSE":
+            return {"success": False, "message": f"일시정지 상태일 때만 재개할 수 있습니다. (현재 상태: {gcode})"}
+        ok = printer.resume_print()
+    except Exception as e:
+        return {"success": False, "message": f"프린터에 명령을 보내지 못했습니다: {e}"}
+    return {"success": bool(ok), "message": "재개를 요청했습니다." if ok else "재개 명령이 거부됐습니다."}
+
+
+@app.post("/print/cancel")
+def cancel_print(request: PrintControlRequest):
+    """주문을 취소한다.
+      - 대기 중(queued): 큐에서 빼고 바로 취소 콜백을 보낸다.
+      - 출력 중(current): 프린터에 정지 명령을 보낸다. 프린터가 멈춘 것이 확인되면 폴링이 취소 콜백을 보낸다.
+    찾기, 취소 표시, 큐에서 빼기를 한 번의 잠금 안에서 처리해서 큐 워커와 엇갈리지 않게 한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, job = _find_print_job_locked(order_id)
+        if kind is None:
+            if request.preCancel:
+                # 병합 중이라 아직 큐에 없다 - 병합이 끝나는 시점에 _slice_and_print_local이 이 표시를 보고 건너뛴다
+                _CANCEL_REQUESTED.add(order_id)
+                return {"success": True, "kind": "pending", "message": "병합 중인 주문을 취소했습니다."}
+            return {"success": False, "message": "대기 중이거나 출력 중인 주문이 아닙니다."}
+        _CANCEL_REQUESTED.add(order_id)
+        if kind == "queued":
+            if job in _pending_jobs:
+                _pending_jobs.remove(job)
+            _save_print_queue_state()
+    if kind == "queued":
+        _post_canceled(job["callbackUrl"])
+        return {"success": True, "kind": "queued", "message": "대기 중인 주문을 취소했습니다."}
+    _stop_printer_quietly()
+    return {"success": True, "kind": "current",
+            "message": "출력 취소를 요청했습니다. 프린터가 멈추면 취소로 반영됩니다."}
+
 
 # ── 카메라 인덱스 설정 (웹 UI에서 카메라 선택용) ─────────────
 @app.get("/camera/config")

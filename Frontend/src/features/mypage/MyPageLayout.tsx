@@ -123,6 +123,10 @@ export function MyPageLayout() {
     closeDeleteRecordModal,
     confirmDeleteScan,
     confirmDeletePrint,
+    applyPrintOrderUpdate,
+    reprintOrder,
+    isReprinting,
+    reprintError,
   } = useMyPageData()
 
   // 현재 URL 경로에서 활성 탭을 파생시킨다 — 예전엔 useState(section)로 관리했지만, 이제
@@ -597,6 +601,10 @@ export function MyPageLayout() {
             printDetailScan={printDetailScan}
             isLoadingPrintDetail={isLoadingPrintDetail}
             closePrintDetail={closePrintDetail}
+            onPrintOrderUpdated={applyPrintOrderUpdate}
+            onReprint={reprintOrder}
+            isReprinting={isReprinting}
+            reprintError={reprintError}
             scanToDelete={scanToDelete}
             printToDelete={printToDelete}
             isDeletingRecord={isDeletingRecord}

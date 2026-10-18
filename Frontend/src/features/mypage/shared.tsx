@@ -23,6 +23,34 @@ export const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   PRINTING: '출력 중',
   COMPLETED: '완료',
   FAILED: '실패',
+  CANCELING: '취소 중',
+  CANCELED: '취소됨',
+}
+
+// 끝난 주문 — 출력 내역 삭제는 이 상태에서만 할 수 있다 (진행 중인 주문은 먼저 취소해야 한다)
+export const FINISHED_PRINT_STATUSES: ReadonlySet<NailTipPrintOrder['status']> = new Set([
+  'COMPLETED',
+  'FAILED',
+  'CANCELED',
+])
+
+// 아직 프린터가 출력하기 전이라 "출력 취소"만 할 수 있는 상태 (일시정지/재개는 PRINTING에서만)
+export const CANCEL_ONLY_PRINT_STATUSES: ReadonlySet<NailTipPrintOrder['status']> = new Set([
+  'QUEUED',
+  'MERGING',
+  'MERGED',
+  'WAITING_IN_QUEUE',
+])
+
+// 실패 사유 원문(서버/프린터 예외 문구)을 사용자용 안내로 바꾼다. 원문은 "자세히 보기"로만 보여준다.
+export function describePrintFailure(reason: string): string {
+  if (/10060|10061|timed? ?out|timeout|connect|connection|upload|mqtt|ftp|응답|연결/i.test(reason)) {
+    return '프린터와 연결하지 못했어요. 프린터 전원과 네트워크를 확인해주세요.'
+  }
+  if (/slic|슬라이|-101|4294967195|gcode/i.test(reason)) {
+    return '출력 준비 중 슬라이싱 문제가 생겼어요.'
+  }
+  return '출력 중 문제가 생겼어요. 잠시 후 다시 신청해 주세요.'
 }
 
 // 화면에 보여줄 상태. 병합이 끝났어도(MERGED) 앞에 출력 중/대기 중인 주문이 있으면
@@ -42,6 +70,8 @@ export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   PRINTING: '네일 팁을 출력하고 있어요.',
   COMPLETED: '네일 팁 출력이 완료되었어요.',
   FAILED: '출력 중 문제가 발생했어요.',
+  CANCELING: '출력을 멈추고 있어요. 프린터가 멈추면 취소가 끝나요.',
+  CANCELED: '출력이 취소되었어요.',
 }
 
 // 출력 신청 시 설정한 팁 연장 길이 표시 — 길이를 기록하기 전에 신청된 예전 주문(null)은

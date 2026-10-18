@@ -9,15 +9,20 @@ import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { ScanXModalShell } from '@/shared/components/ScanXModalShell'
 import { DesignImageDetailModal, type DesignImageDetailInput } from '@/features/mypage/components/DesignImageDetailModal'
 import { PrinterProgressWidget } from '@/features/mypage/components/PrinterProgressWidget'
+import { PrintOrderActions } from '@/features/mypage/components/PrintOrderActions'
+import { PrintReprintAction } from '@/features/mypage/components/PrintReprintAction'
 import type { SavedDesignResponse, SavedFolderResponse } from '@/entities/design/api'
 import type { ScanSession } from '@/shared/utils/scanDetail'
 import {
     type LikeModalTarget,
     type NailTipPrintOrder,
     type ScanDetail,
+    CANCEL_ONLY_PRINT_STATUSES,
+    FINISHED_PRINT_STATUSES,
     PRINT_STATUS_LABEL,
     PRINT_STATUS_HINT,
     getDisplayPrintStatus,
+    describePrintFailure,
     Icon,
     dateKeyOf,
     formatDateTimeFull,
@@ -26,25 +31,17 @@ import {
     formatTipExtension,
 } from './shared'
 
-// 아직 끝나지 않은 출력 — 내역에서 지워도 printer 서버의 출력은 그대로 진행된다 (출력 중인 PRINTING은 지울 수 없다)
-const PENDING_PRINT_STATUSES: ReadonlySet<NailTipPrintOrder['status']> = new Set([
-    'QUEUED',
-    'MERGING',
-    'MERGED',
-    'WAITING_IN_QUEUE',
-])
-
 // 손 분석 기록·출력 내역 삭제 확인 창 — 찜 폴더 삭제 확인 창(mypage-x__confirm)과 같은 모양
 function RecordDeleteConfirm({
-    ariaLabel,
-    title,
-    description,
-    confirmLabel,
-    error,
-    isBusy,
-    onCancel,
-    onConfirm,
-}: {
+                                 ariaLabel,
+                                 title,
+                                 description,
+                                 confirmLabel,
+                                 error,
+                                 isBusy,
+                                 onCancel,
+                                 onConfirm,
+                             }: {
     ariaLabel: string
     title: ReactNode
     description: ReactNode
@@ -127,6 +124,12 @@ type Props = {
     printDetailScan: ScanDetail | null
     isLoadingPrintDetail: boolean
     closePrintDetail: () => void
+    // 취소/일시정지/재개 요청이 성공했을 때 서버가 돌려준 주문을 목록에 반영한다
+    onPrintOrderUpdated: (order: NailTipPrintOrder) => void
+    // 같은 설정으로 새 출력 주문 만들기 (끝난 주문의 상세에서)
+    onReprint: (order: NailTipPrintOrder) => void | Promise<void>
+    isReprinting: boolean
+    reprintError: string | null
 
     // ── 손 분석 기록 / 출력 내역 삭제 확인 모달 ──
     scanToDelete: ScanSession | null
@@ -158,6 +161,10 @@ export function MyPageModals({
                                  printDetailScan,
                                  isLoadingPrintDetail,
                                  closePrintDetail,
+                                 onPrintOrderUpdated,
+                                 onReprint,
+                                 isReprinting,
+                                 reprintError,
                                  scanToDelete,
                                  printToDelete,
                                  isDeletingRecord,
@@ -299,30 +306,58 @@ export function MyPageModals({
                         onClose={closePrintDetail}
                     >
                         <section className={`mypage-x__printx-status mypage-x__printx-status--${statusKey}`}>
-                            <div className="mypage-x__printx-status-copy">
-                                <p className="mypage-x__scanx-kicker">진행 상태</p>
-                                <strong>{PRINT_STATUS_LABEL[displayStatus]}</strong>
-                                <span className={printDetailOrder.status === 'FAILED' ? 'mypage-x__printx-status-fail' : undefined}>
+                            <div className="mypage-x__printx-status-head">
+                                <div className="mypage-x__printx-status-copy">
+                                    <p className="mypage-x__scanx-kicker">진행 상태</p>
+                                    <strong>{PRINT_STATUS_LABEL[displayStatus]}</strong>
+                                    <span className={printDetailOrder.status === 'FAILED' ? 'mypage-x__printx-status-fail' : undefined}>
                         {printDetailOrder.status === 'FAILED' && printDetailOrder.failReason
-                            ? printDetailOrder.failReason
+                            ? describePrintFailure(printDetailOrder.failReason)
                             : (printDetailOrder.status === 'WAITING_IN_QUEUE' || printDetailOrder.status === 'MERGED') && printDetailOrder.queueAhead != null
                                 ? (printDetailOrder.queueAhead > 0
                                     ? `내 앞에 ${printDetailOrder.queueAhead}개의 출력이 있어요. 끝나는 대로 이어서 시작돼요.`
                                     : '곧 출력이 시작돼요.')
                                 : PRINT_STATUS_HINT[displayStatus]}
                       </span>
-                            </div>
-                            <span className={`mypage-x__badge mypage-x__badge--${statusKey}`}>
+                                    {printDetailOrder.status === 'FAILED' && printDetailOrder.failReason && (
+                                        <details className="mypage-x__printx-fail-detail">
+                                            <summary>자세히 보기</summary>
+                                            <code>{printDetailOrder.failReason}</code>
+                                        </details>
+                                    )}
+                                </div>
+                                <span className={`mypage-x__badge mypage-x__badge--${statusKey}`}>
                       {PRINT_STATUS_LABEL[displayStatus]}
                     </span>
-                        </section>
+                            </div>
 
-                        {printDetailOrder.status === 'PRINTING' && (
-                            <PrinterProgressWidget
-                                orderId={printDetailOrder.id}
-                                onComplete={closePrintDetail}
-                            />
-                        )}
+                            {/* 진행 상황과 취소/일시정지/재개 버튼은 "진행 상태" 카드 안에 둔다 */}
+                            {(printDetailOrder.status === 'PRINTING' || printDetailOrder.status === 'CANCELING') && (
+                                <PrinterProgressWidget
+                                    orderId={printDetailOrder.id}
+                                    orderStatus={printDetailOrder.status}
+                                    onComplete={closePrintDetail}
+                                    onOrderUpdated={onPrintOrderUpdated}
+                                />
+                            )}
+                            {/* 아직 프린터가 출력하기 전(대기·병합 중)인 주문은 취소만 할 수 있다 */}
+                            {CANCEL_ONLY_PRINT_STATUSES.has(printDetailOrder.status) && (
+                                <PrintOrderActions
+                                    orderId={printDetailOrder.id}
+                                    orderStatus={printDetailOrder.status}
+                                    onUpdated={onPrintOrderUpdated}
+                                />
+                            )}
+                            {/* 끝난 주문(완료/실패/취소)은 같은 설정으로 다시 출력할 수 있다 */}
+                            {FINISHED_PRINT_STATUSES.has(printDetailOrder.status) && (
+                                <PrintReprintAction
+                                    order={printDetailOrder}
+                                    busy={isReprinting}
+                                    error={reprintError}
+                                    onReprint={(order) => void onReprint(order)}
+                                />
+                            )}
+                        </section>
                         <section className="mypage-x__scanx-shape">
                             <div className="mypage-x__scanx-shape-copy">
                                 <p className="mypage-x__scanx-kicker">신청한 네일 팁 쉐입</p>
@@ -457,13 +492,7 @@ export function MyPageModals({
                         <>
                             {formatDateTimeFull(printToDelete.orderedAt)}에 신청한 내역이에요.
                             <br />
-                            {PENDING_PRINT_STATUSES.has(printToDelete.status) ? (
-                                <>
-                                    내역만 지워지고, <strong>이미 신청한 출력은 취소되지 않아요.</strong>
-                                </>
-                            ) : (
-                                '삭제한 내역은 되돌릴 수 없어요.'
-                            )}
+                            삭제한 내역은 되돌릴 수 없어요.
                         </>
                     }
                     confirmLabel="내역 삭제"

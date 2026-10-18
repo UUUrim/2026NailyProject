@@ -233,6 +233,42 @@ public class UserHistoryController {
     }
 
     /**
+     * 출력 취소 POST /users/me/prints/{orderId}/cancel
+     * 대기/병합 중이던 주문은 바로 CANCELED가 되고, 출력 중인 주문은 프린터를 멈춘 뒤 CANCELED가 된다.
+     */
+    @PostMapping("/prints/{orderId}/cancel")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> cancelPrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.cancelPrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "출력 취소를 요청했습니다.", data));
+    }
+
+    /** 출력 일시정지 POST /users/me/prints/{orderId}/pause */
+    @PostMapping("/prints/{orderId}/pause")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> pausePrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.pausePrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "일시정지를 요청했습니다.", data));
+    }
+
+    /** 일시정지 재개 POST /users/me/prints/{orderId}/resume */
+    @PostMapping("/prints/{orderId}/resume")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> resumePrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.resumePrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "재개를 요청했습니다.", data));
+    }
+
+    /**
      * 프린터 실시간 진행 상황 조회 GET /users/me/prints/progress
      * printer/server.py의 /print/status를 백엔드가 대신 호출해서 전달한다.
      * 프론트는 출력 중일 때 몇 초 간격으로 이걸 폴링해서 진행률/온도를 보여준다.

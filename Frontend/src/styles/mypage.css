@@ -1529,8 +1529,8 @@
   height: 58px;
   border-radius: 999px;
   box-shadow:
-    0 8px 20px rgba(180, 90, 120, 0.22),
-    inset 0 0 0 3px rgba(255, 255, 255, 0.75);
+          0 8px 20px rgba(180, 90, 120, 0.22),
+          inset 0 0 0 3px rgba(255, 255, 255, 0.75);
 }
 
 .mypage-x__scanx-hero-copy {
@@ -1716,13 +1716,45 @@
 
 .mypage-x__printx-status {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.85rem;
   padding: 0.95rem 1.05rem;
   border-radius: 16px;
   border: 1px solid #dce8f5;
   background: linear-gradient(145deg, #eef6fd 0%, #fff 52%, #e8f2fb 100%);
+}
+
+/* 카드 위쪽: 상태 제목·안내 문구(왼쪽) + 상태 배지(오른쪽) */
+.mypage-x__printx-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+/* 카드 안에 들어온 진행 상황 위젯·버튼: 따로 상자를 두지 않고 카드의 일부로 보이게 한다 */
+.mypage-x__printx-status .printer-progress {
+  padding: 0.85rem 0 0;
+  border: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 0;
+  background: none;
+}
+
+.mypage-x__printx-status .printer-progress--loading,
+.mypage-x__printx-status .printer-progress--error {
+  padding: 0.85rem 0 0;
+}
+
+.mypage-x__printx-status .print-actions {
+  margin-top: 0;
+}
+
+/* 진행 상황 위젯이 없을 때(대기·병합 중)는 버튼 위에 구분선을 둔다 */
+.mypage-x__printx-status-head + .print-actions {
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
 }
 
 .mypage-x__printx-status--queued {
@@ -1758,6 +1790,13 @@
 .mypage-x__printx-status--failed {
   border-color: #f3c9c9;
   background: linear-gradient(145deg, #fdecec 0%, #fff 52%, #fbe3e3 100%);
+}
+
+/* 취소 중 / 취소됨 — 실패(빨강)와 구분되는 차분한 회색 계열 */
+.mypage-x__printx-status--canceling,
+.mypage-x__printx-status--canceled {
+  border-color: #dcdfe4;
+  background: linear-gradient(145deg, #f3f4f6 0%, #fff 52%, #eceef1 100%);
 }
 
 .mypage-x__printx-status-copy {
@@ -1808,6 +1847,11 @@
 
 .mypage-x__printx-status--failed .mypage-x__printx-status-copy span {
   color: #c94a4a;
+}
+
+.mypage-x__printx-status--canceling .mypage-x__printx-status-copy span,
+.mypage-x__printx-status--canceled .mypage-x__printx-status-copy span {
+  color: #6b7480;
 }
 
 /* 실패 사유 — 제목 카드 안에서 힌트 문구 자리를 대신해 빨간 글씨로 노출 */
@@ -2368,6 +2412,12 @@
 .mypage-x__badge--failed {
   background: #fde8e8;
   color: #d23b3b;
+}
+
+.mypage-x__badge--canceling,
+.mypage-x__badge--canceled {
+  background: #eceef1;
+  color: #6b7480;
 }
 
 /* ── 타임라인 (날짜 단위) ── */
@@ -4057,10 +4107,10 @@
   max-width: 8.5rem;
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease;
+          border-color 0.18s ease,
+          transform 0.18s ease,
+          box-shadow 0.18s ease,
+          background 0.18s ease;
 }
 
 .mypage-x__modal-folder-pill-text {
@@ -4595,4 +4645,20 @@
   .mypage-x__hero-actions .mypage-x__cta {
     width: 100%;
   }
+}
+.mypage-x__printx-fail-detail {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: #8a7a80;
+}
+.mypage-x__printx-fail-detail summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.mypage-x__printx-fail-detail code {
+  display: block;
+  margin-top: 0.3rem;
+  font-family: inherit;
+  word-break: break-all;
+  white-space: pre-wrap;
 }
