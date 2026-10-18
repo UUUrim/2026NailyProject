@@ -99,9 +99,14 @@
   height: 16px;
 }
 
-.design-result-v2__ar-chip:hover {
+.design-result-v2__ar-chip:hover:not(:disabled) {
   color: #de869f;
   transform: translateY(-1px);
+}
+
+.design-result-v2__ar-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .design-result-v2__detail-block {
@@ -158,7 +163,7 @@
 
 /* 결과 화면 오른쪽 박스 크기 고정 (마이페이지 상세모달 등 다른 곳의 같은 패널은 그대로) —
    팔레트 박스는 내용과 무관하게(basis 0) 남는 높이를 전부 갖고, 질감 박스는 스와치 한 줄
-   (썸네일 + 두 줄 라벨) 높이로 고정한다. */
+   (썸네일 + 한 줄 라벨) 높이로 고정한다. */
 .design-result-v2__body .design-result-v2__detail-block--palette {
   flex: 1 1 0;
   min-height: 7.5rem;
@@ -166,7 +171,7 @@
 
 .design-result-v2__body .design-result-v2__detail-block--texture {
   flex: 0 0 auto;
-  height: 8.6rem;
+  height: 7.5rem;
 }
 
 /* 스와치가 한 줄에 다 안 들어가면 줄바꿈(박스가 커짐) 대신 가로 스크롤.
@@ -179,8 +184,15 @@
   scrollbar-width: thin;
 }
 
+/* 라벨은 줄바꿈 없이 한 줄 — 칸 폭(3.4rem)보다 긴 라벨("기본 젤컬러")은 그만큼 칸을 넓힌다 */
 .design-result-v2__body .design-result-v2__texture-item {
   flex-shrink: 0;
+  width: auto;
+  min-width: 3.4rem;
+}
+
+.design-result-v2__body .design-result-v2__texture-label {
+  white-space: nowrap;
 }
 
 .design-result-v2__palette-strip {
@@ -423,13 +435,6 @@
   letter-spacing: -0.02em;
 }
 
-.design-result-v2__origin-desc {
-  margin: 0 0 0.85rem;
-  font-size: 0.84rem;
-  color: #7a6570;
-  line-height: 1.55;
-}
-
 .design-result-v2__origin-hand {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -579,6 +584,21 @@
   color: #c45f7e;
   font-size: 0.76rem;
   font-weight: 700;
+}
+
+/* 컬러 키워드: 동그란 색 스와치 + 색 이름 */
+.design-result-v2__keyword-chip--color {
+  gap: 0.4rem;
+  padding-left: 0.4rem;
+}
+
+.design-result-v2__keyword-swatch {
+  flex: 0 0 auto;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
 }
 
 /* scan-auto 결과: 추천 컬러 전체 + 반영된 색 체크 표시.

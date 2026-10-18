@@ -1,7 +1,11 @@
 package com.example.nailyproject.service;
 
 import com.example.nailyproject.dto.SlotData;
+import com.example.nailyproject.dto.request.ChatStateSaveRequestDto;
 import com.example.nailyproject.dto.response.ChatResponseDto;
+import com.example.nailyproject.dto.response.ChatSearchResultDto;
+import com.example.nailyproject.dto.response.ChatStateResponseDto;
+import com.example.nailyproject.dto.response.ChatSummaryDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -182,6 +186,148 @@ public class ChatService {
                          "isComplete": false
                      }
            \s""";
+
+    // ── 디자인 채팅 사이드바의 채팅 이력 ──────────────────────────────────────
+
+    // 채팅 이름 최대 길이 (DesignSession.title 컬럼 길이)
+    private static final int CHAT_TITLE_MAX_LENGTH = 100;
+
+    /** 저장된 채팅 목록 — 최근에 이어 한 순서 */
+    public List<ChatSummaryDto> getChatSummaries(User user) {
+        return designSessionRepository.findChatSummaries(user.getId());
+    }
+
+    /** 이력에서 다시 연 채팅 — 저장해 둔 채팅 화면 상태 그대로 */
+    public ChatStateResponseDto getChatState(User user, Long sessionId) {
+        DesignSession session = findOwnedSession(user, sessionId);
+        JsonNode state = null;
+        if (session.getChatState() != null && !session.getChatState().isBlank()) {
+            try {
+                state = objectMapper.readTree(session.getChatState());
+            } catch (JsonProcessingException e) {
+                System.err.println("[ChatState] 저장된 채팅 화면 상태를 읽지 못했습니다 (sessionId=" + sessionId + "): " + e.getMessage());
+            }
+        }
+        return ChatStateResponseDto.builder()
+                .sessionId(session.getId())
+                .title(session.getTitle())
+                .scanKey(session.getScanKey())
+                .state(state)
+                .build();
+    }
+
+    /** 채팅 화면 상태 저장 — 자동 이름은 사용자가 직접 바꾼 적 없을 때만 반영한다 */
+    @Transactional
+    public ChatSummaryDto saveChatState(User user, Long sessionId, ChatStateSaveRequestDto request) {
+        DesignSession session = findOwnedSession(user, sessionId);
+        if (request.getState() == null || request.getState().isNull()) {
+            throw new IllegalStateException("저장할 채팅 내용이 없습니다.");
+        }
+        String scanKey = request.getScanKey() != null && !request.getScanKey().isBlank() ? request.getScanKey() : null;
+        session.updateChatState(request.getState().toString(), scanKey);
+        String autoTitle = trimChatTitle(request.getAutoTitle());
+        if (autoTitle != null) session.updateAutoTitle(autoTitle);
+        designSessionRepository.save(session);
+        return toChatSummary(session);
+    }
+
+    /** 채팅 이력에서 지우기 — 이 세션으로 만든 디자인은 마이페이지에 그대로 남는다 */
+    @Transactional
+    public void deleteChat(User user, Long sessionId) {
+        DesignSession session = findOwnedSession(user, sessionId);
+        session.clearChatHistory();
+        designSessionRepository.save(session);
+    }
+
+    /** 채팅 이름 직접 바꾸기 */
+    @Transactional
+    public ChatSummaryDto renameChat(User user, Long sessionId, String title) {
+        DesignSession session = findOwnedSession(user, sessionId);
+        String trimmed = trimChatTitle(title);
+        if (trimmed == null) throw new IllegalStateException("채팅 이름을 입력해 주세요.");
+        session.renameTitle(trimmed);
+        designSessionRepository.save(session);
+        return toChatSummary(session);
+    }
+
+    private DesignSession findOwnedSession(User user, Long sessionId) {
+        return designSessionRepository.findByIdAndUserId(sessionId, user.getId())
+                .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
+    }
+
+    private String trimChatTitle(String title) {
+        if (title == null) return null;
+        String trimmed = title.trim().replaceAll("\\s+", " ");
+        if (trimmed.isEmpty()) return null;
+        return trimmed.length() > CHAT_TITLE_MAX_LENGTH ? trimmed.substring(0, CHAT_TITLE_MAX_LENGTH) : trimmed;
+    }
+
+    // 채팅 검색 — 검색어 최대 길이, 결과 최대 개수, 검색어 앞뒤로 보여 줄 글자 수
+    private static final int CHAT_SEARCH_QUERY_MAX_LENGTH = 50;
+    private static final int CHAT_SEARCH_RESULT_LIMIT = 50;
+    private static final int SNIPPET_BEFORE = 14;
+    private static final int SNIPPET_AFTER = 34;
+
+    /**
+     * 채팅 검색 — 채팅 이름이나 채팅 화면에 보이던 말풍선 글에 검색어(단어)가 들어간 채팅.
+     * 이름이 맞는 채팅을 먼저, 그 안에서는 최근에 이어 한 순서로 돌려준다.
+     */
+    @Transactional(readOnly = true)
+    public List<ChatSearchResultDto> searchChats(User user, String rawQuery) {
+        String query = rawQuery == null ? "" : rawQuery.trim().replaceAll("\\s+", " ");
+        if (query.isEmpty()) return List.of();
+        if (query.length() > CHAT_SEARCH_QUERY_MAX_LENGTH) query = query.substring(0, CHAT_SEARCH_QUERY_MAX_LENGTH);
+        String needle = query.toLowerCase();
+        String pattern = "%" + needle.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+
+        List<ChatSearchResultDto> titleMatches = new ArrayList<>();
+        List<ChatSearchResultDto> contentMatches = new ArrayList<>();
+        for (DesignSession session : designSessionRepository.searchChats(user.getId(), pattern)) {
+            boolean titleMatched = session.getTitle() != null && session.getTitle().toLowerCase().contains(needle);
+            String snippet = findChatSnippet(session.getChatState(), needle);
+            if (!titleMatched && snippet == null) continue; // JSON 키 등 화면에 안 보이는 곳에만 들어 있던 경우
+            ChatSearchResultDto result = new ChatSearchResultDto(session.getId(), session.getTitle(), session.getScanKey(),
+                    session.getCreatedAt(), session.getUpdatedAt(), titleMatched, snippet);
+            (titleMatched ? titleMatches : contentMatches).add(result);
+        }
+        List<ChatSearchResultDto> results = new ArrayList<>(titleMatches);
+        results.addAll(contentMatches);
+        return results.size() > CHAT_SEARCH_RESULT_LIMIT ? results.subList(0, CHAT_SEARCH_RESULT_LIMIT) : results;
+    }
+
+    /** 채팅 화면 상태의 말풍선 글에서 검색어가 들어간 부분을 찾는다 — 사용자가 한 말을 먼저. 없으면 null */
+    private String findChatSnippet(String chatStateJson, String needle) {
+        if (chatStateJson == null || chatStateJson.isBlank()) return null;
+        JsonNode bubbles;
+        try {
+            bubbles = objectMapper.readTree(chatStateJson).path("bubbles");
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+        String firstMatch = null;
+        for (JsonNode bubble : bubbles) {
+            // 채팅 화면엔 안 보이는 말풍선(선택지 기반에서 서버로 보낸 요약 문장)은 빼고 찾는다
+            if (bubble.path("historyOnly").asBoolean(false)) continue;
+            for (String field : List.of("text", "textAfterColors")) {
+                String text = bubble.path(field).asText("")
+                        .replace("{{qicon}}", "").replace("{{smile}}", "")
+                        .replaceAll("\\s+", " ").trim();
+                int index = text.toLowerCase().indexOf(needle);
+                if (index < 0) continue;
+                int start = Math.max(0, index - SNIPPET_BEFORE);
+                int end = Math.min(text.length(), index + needle.length() + SNIPPET_AFTER);
+                String snippet = (start > 0 ? "…" : "") + text.substring(start, end) + (end < text.length() ? "…" : "");
+                if ("user".equals(bubble.path("role").asText())) return snippet;
+                if (firstMatch == null) firstMatch = snippet;
+            }
+        }
+        return firstMatch;
+    }
+
+    private ChatSummaryDto toChatSummary(DesignSession session) {
+        return new ChatSummaryDto(session.getId(), session.getTitle(), session.getScanKey(),
+                session.getCreatedAt(), session.getUpdatedAt());
+    }
 
     @Transactional
     public DesignSession createSession(User user) {
@@ -445,6 +591,11 @@ public class ChatService {
         chatMessageRepository.save(ChatMessage.builder()
                 .session(session).role(ChatMessage.MessageRole.assistant).content(reply).build());
 
+        // 이번 답변까지 반영한 뒤에도 아직 안 채워진 필수 카테고리 (화면 표시용 — 생성에는 쓰지 않는다)
+        List<String> remainingCategories = REQUIRED_FOR_COMPLETION.stream()
+                .filter(cat -> !slots.containsKey(cat) || slots.get(cat).getLiked().isEmpty())
+                .toList();
+
         return ChatResponseDto.builder()
                 .reply(reply)
                 .nextQuestionTarget(nextQuestionTarget)
@@ -452,6 +603,7 @@ public class ChatService {
                 .options(options)
                 .optionColors(optionColors)
                 .isComplete(isComplete)
+                .remainingCategories(remainingCategories)
                 .build();
     }
 

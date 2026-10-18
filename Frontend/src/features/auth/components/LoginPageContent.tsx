@@ -23,7 +23,7 @@ export function LoginPageContent() {
           <main className="login-wireframe__main">
             <section className="login-card" aria-label="로그인 폼">
               <h1 className="login-card__title">
-                로그인하고 나만의 네일팁을
+                로그인하고 나만의 네일 팁을
                 <br />
                 만들어 보세요
               </h1>

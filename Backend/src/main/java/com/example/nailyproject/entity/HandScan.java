@@ -48,6 +48,11 @@ public class HandScan {
     @Builder.Default
     private Boolean resultConfirmed = false;
 
+    // 사용자가 마이페이지에서 지운 손 분석 기록. 기록 목록(마이페이지/출력/디자인 채팅)에서만 빠지고 행과 측정 파일은 남긴다 -
+    // 이 스캔으로 신청한 출력 주문 등이 scanId로 계속 참조한다. 이 컬럼이 생기기 전의 스캔은 null(지우지 않음).
+    @Column(name = "history_deleted")
+    private Boolean historyDeleted;
+
     // 분석 값(피부톤, 추천 컬러, 추천 쉐입, 치수 등)은 DB에 저장하지 않는다.
     // 스캔 서버가 만든 로컬 최종 measurements.json을 ScanResultFileService가 읽는다.
     // (예전 컬럼 shape/recommended_shape/skin_tone_hex/recommended_colors/tone/warmness/
@@ -89,6 +94,16 @@ public class HandScan {
     // 분석 결과 화면에 결과가 뜬 뒤 기록으로 확정
     public void confirmResult() {
         this.resultConfirmed = true;
+    }
+
+    // 사용자가 손 분석 기록에서 지웠는지
+    public boolean isHistoryDeleted() {
+        return Boolean.TRUE.equals(historyDeleted);
+    }
+
+    // 손 분석 기록에서 지우기
+    public void deleteHistory() {
+        this.historyDeleted = true;
     }
 
     // 분석 시작

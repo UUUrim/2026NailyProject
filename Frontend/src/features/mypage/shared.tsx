@@ -39,8 +39,8 @@ export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   MERGING: '손톱 모델을 하나로 합치고 있어요.',
   MERGED: '모델 병합이 끝났어요. 곧 출력이 시작돼요.',
   WAITING_IN_QUEUE: '다른 출력이 끝나는 대로 이어서 시작돼요.',
-  PRINTING: '네일팁을 출력하고 있어요.',
-  COMPLETED: '네일팁 출력이 완료되었어요.',
+  PRINTING: '네일 팁을 출력하고 있어요.',
+  COMPLETED: '네일 팁 출력이 완료되었어요.',
   FAILED: '출력 중 문제가 발생했어요.',
 }
 
@@ -48,6 +48,11 @@ export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
 // 쉐입별 기본 길이로 출력됐으므로 그렇게 표시한다.
 export function formatTipExtension(mm: number | null | undefined): string {
   return mm != null ? `+${Number(mm).toFixed(1).replace(/\.0$/, '')}mm` : '기본 길이'
+}
+
+// 원형 프로필 글자 — 디자인 채팅 사이드바 프로필과 같이 닉네임(없으면 이름) 첫 글자를 대문자로. 프로필을 불러오기 전엔 '?'
+export function profileInitial(profile: { nickname?: string | null; name?: string | null } | null | undefined): string {
+  return (profile?.nickname || profile?.name || '').trim().charAt(0).toUpperCase() || '?'
 }
 
 // 손 스캔 분석 상태 (네일팁 출력 관련 상태는 출력 이력에서만 표시)
@@ -184,7 +189,7 @@ export const Icon = {
       <svg viewBox="0 0 24 24" fill="none"><path d="M12 20s-7-4.35-9.5-8.8C.8 8 2 4.5 5.4 4a4.9 4.9 0 0 1 6.6 2 4.9 4.9 0 0 1 6.6-2c3.4.5 4.6 4 3.9 7.2C19 15.65 12 20 12 20z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>
   ),
   print: (
-      <svg viewBox="0 0 24 24" fill="none"><path d="M7 8V4h10v4M6 17h12a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><rect x="8" y="14" width="8" height="6" stroke="currentColor" strokeWidth="1.6" /></svg>
+      <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14M8 4v4h8V4M11 8v2l1 1.5 1-1.5V8M8 20v-3.5C8 14.6 9.8 13 12 13s4 1.6 4 3.5V20M4 20h16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
   calendar: (
       <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" stroke="currentColor" strokeWidth="1.6" /><path d="M8 3.5v3M16 3.5v3M3.5 9.5h17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
@@ -243,7 +248,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { id: 'timeline', label: '활동 타임라인', icon: 'timeline' },
       { id: 'scans', label: '손 분석', icon: 'hand' },
-      { id: 'prints', label: '네일팁 출력', icon: 'print' },
+      { id: 'prints', label: '네일 팁 출력', icon: 'print' },
       { id: 'designs', label: '디자인', icon: 'design' },
       { id: 'favorites', label: '찜 목록', icon: 'heart' },
     ],
@@ -268,7 +273,7 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   timeline: {
     subtitle: 'Timeline',
     title: '활동 타임라인',
-    description: '날짜별로 손 분석, 네일팁 출력, 디자인 생성 활동을 한눈에 살펴보세요.',
+    description: '날짜별로 손 분석, 네일 팁 출력, 디자인 생성 활동을 한눈에 살펴보세요.',
   },
   scans: {
     subtitle: 'Hand Analysis',
@@ -282,13 +287,13 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   },
   prints: {
     subtitle: 'Nail Tips Print',
-    title: '네일팁 출력 내역',
-    description: '3D 네일팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
+    title: '네일 팁 출력 내역',
+    description: '3D 네일 팁 제작 신청 내역이에요. 어떤 분석 결과를 바탕으로 신청했는지 확인할 수 있어요.',
   },
   favorites: {
     subtitle: 'Liked',
     title: '찜 목록',
-    description: 'ㅇㅇ 님이 찜해둔 디자인만 모아놨어요.',
+    description: 'ㅇㅇ님이 찜해둔 디자인만 모아놨어요.',
   },
 }
 

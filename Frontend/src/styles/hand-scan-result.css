@@ -1,5 +1,6 @@
+/* 본문 820px + .root-layout__page 좌우 여백 1.5rem×2 */
 .scan-result-page {
-  max-width: 960px;
+  max-width: calc(820px + 3rem);
 }
 
 /* 제목 카드는 공통 PageHero 컴포넌트(page-hero.css)로 대체됨 */
@@ -42,34 +43,35 @@
   gap: 1rem;
 }
 
+/* 본문 폭(820px)을 3등분한 좁은 카드라 글자·간격을 한 단계 줄여 둔다 */
 .scan-metric-card {
   background: #fff;
   border: 1px solid #eee;
   border-radius: 16px;
-  padding: 1.25rem;
+  padding: 1rem 1.25rem;
 }
 
 .scan-metric-card h3 {
-  margin: 0 0 0.5rem;
-  font-size: 0.9rem;
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
   color: #888;
 }
 
 .scan-metric-card__value {
   margin: 0;
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 700;
 }
 
 .scan-metric-card__compare {
-  margin: 0.35rem 0 0.75rem;
+  margin: 0.2rem 0 0.6rem;
   color: #de869f;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.86rem;
 }
 
 .scan-metric-card__bar {
-  height: 6px;
+  height: 5px;
   background: #f0f0f0;
   border-radius: 999px;
   overflow: hidden;
@@ -83,8 +85,8 @@
 }
 
 .scan-metric-card__hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.8rem;
+  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
   color: #888;
 }
 
@@ -227,8 +229,13 @@
   font-size: 1rem;
 }
 
+/* 제목 바로 아래에 설명 문구가 오면 제목-문구 간격은 좁히고, 문구-팔레트 간격을 넉넉히 둔다 */
+.skin-tone-palette-card h3:has(+ .skin-tone-palette-card__desc) {
+  margin-bottom: 0.3rem;
+}
+
 .skin-tone-palette-card__desc {
-  margin: 0.9rem 0 0;
+  margin: 0 0 1rem;
   font-size: 0.85rem;
   color: #777;
   line-height: 1.5;
@@ -372,16 +379,20 @@
   min-width: 0;
 }
 
+/* "{쉐입 명} {영문명}"을 한 줄에 — 영문명은 쉐입 명 글자 밑선(baseline)에 맞춘다 */
 .scan-shape-highlight__name {
-  margin: 0 0 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.45rem;
+  margin: 0 0 0.5rem;
   font-size: 1.25rem;
   font-weight: 700;
   color: #1a1a1a;
 }
 
 .scan-shape-highlight__label-en {
-  margin: 0 0 0.6rem;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   font-weight: 700;
   color: #b3899a;
   letter-spacing: 0.08em;
@@ -425,29 +436,22 @@
   border-radius: 18px;
 }
 
-/* 추천 이유 — 손톱 분석 문장과 추천 이유를 이어 붙인 설명 한 단락 (아주 연한 핑크 박스) */
+/* 추천 이유 — 손톱 분석 문장과 추천 이유를 이어 붙인 설명 한 단락 (아주 연한 핑크 박스).
+   제목 없이 반짝이 아이콘을 본문 왼쪽에 두고, 아이콘은 본문 첫 줄 높이에 맞춘다. */
 .scan-shape-insight {
   display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
+  align-items: flex-start;
+  gap: 0.5rem;
   padding: 1rem 1.1rem;
   background: #fffafc;
   border: 1px solid #f6dbe4;
   border-radius: 14px;
 }
 
-.scan-shape-insight__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #c26d88;
-}
-
-.scan-shape-insight__label svg {
+.scan-shape-insight__icon {
   flex-shrink: 0;
+  /* 첫 줄(0.92rem × line-height 1.7) 가운데에 오도록 내린다 */
+  margin-top: calc((0.92rem * 1.7 - 15px) / 2);
   color: #de869f;
 }
 
@@ -508,7 +512,7 @@
   display: flex;
   justify-content: center;
   gap: 1.50rem;
-  padding-top: 3rem;
+  padding-top: 1rem;
   margin-bottom: 1rem;
 }
 
@@ -595,9 +599,10 @@
   outline: none;
 }
 
+/* 폭은 가장 긴 줄(예: "길이 13.2mm")에 맞춘다 — 고정 최소 폭을 두면 오른쪽이 휑하게 빈다 */
 .finger-hotspot__tooltip {
-  min-width: 118px;
-  padding: 8px 10px;
+  width: max-content;
+  padding: 8px 12px;
   background: #fff;
   border: 1px solid #de869f;
   border-radius: 10px;

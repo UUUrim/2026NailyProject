@@ -8,7 +8,7 @@ export function SignupLandingPageContent() {
     <AuthSplitLayout>
       <section className="signup-box signup-box--landing">
         <h1 className="signup-box__title">
-          회원가입하고 나만의 네일팁을
+          회원가입하고 나만의 네일 팁을
           <br />
           만들어 보세요
         </h1>

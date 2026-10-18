@@ -49,8 +49,8 @@ export const STORY_STEPS: StoryStep[] = [
 ]
 
 /**
- * 마지막 섹션의 원형 궤도 카드에 들어가는 사용자 디자인 이미지 (생성 이미지와 같은 3:2).
- * 카드 자리(42칸)보다 이미지가 적으면 처음부터 다시 돌아가며 채운다.
+ * 마지막 섹션의 나선형 궤도 카드에 들어가는 사용자 디자인 이미지 (생성 이미지와 같은 3:2).
+ * 카드 자리(120칸)보다 이미지가 적으면 처음부터 다시 돌아가며 채운다.
  * 파일이 없거나 열리지 않는 자리는 번호가 적힌 회색 카드로 보인다.
  */
 export const SHOWCASE_IMAGES: string[] = [
@@ -66,7 +66,7 @@ export const SHOWCASE_IMAGES: string[] = [
 
 // 디자인 섹션 채팅 데모 — 요청 문구와 생성 결과 이미지가 서로 맞아야 한다
 export const DESIGN_DEMO = {
-  image: '/images/showcase/06.png',
+  image: '/images/showcase/11.png',
   request: '리본과 하트를 넣어서 화려한 핑크색 네일을 만들어줘',
   reply: '리본과 하트로 화려한 핑크 네일을 완성했어요!',
 }

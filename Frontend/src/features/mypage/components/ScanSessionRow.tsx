@@ -4,6 +4,7 @@ import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAna
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { type ScanSession } from '@/shared/utils/scanDetail'
 import { formatMetricCurve, formatDateTimeFull } from '@/features/mypage/shared'
+import { RowActionMenu } from '@/features/mypage/components/RowActionMenu'
 
 type ScanSessionRowProps = {
     session: ScanSession
@@ -13,6 +14,8 @@ type ScanSessionRowProps = {
     onOpenDetail: (session: ScanSession) => void
     onSelectActivity: (id: string) => void
     onHoverActivity: (id: string | null) => void
+    // 손 분석 기록 탭 목록에서만 넘긴다 — 지울 수 있는 기록(채팅 이력도, 그 기록으로 만든 디자인도 없는 기록)에 ⋯ 메뉴를 단다
+    onDelete?: (session: ScanSession) => void
 }
 
 export const ScanSessionRow = memo(function ScanSessionRow({
@@ -23,6 +26,7 @@ export const ScanSessionRow = memo(function ScanSessionRow({
     onOpenDetail,
     onSelectActivity,
     onHoverActivity,
+    onDelete,
 }: ScanSessionRowProps) {
     const activityId = activityIdProp ?? `scan-${session.key}`
     const timeLabel = formatDateTimeFull(session.scannedAt)
@@ -50,7 +54,7 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         `곡률 ${formatMetricCurve(session.avgCurve)}`,
     ].join(' · ')
 
-    return (
+    const row = (
         <button
             key={session.key}
             type="button"
@@ -83,5 +87,20 @@ export const ScanSessionRow = memo(function ScanSessionRow({
             </div>
             {timeLabel && <span className="mypage-x__scan-date-end">{timeLabel}</span>}
         </button>
+    )
+
+    if (!onDelete || !session.deletable) return row
+
+    // 카드 버튼 안에 버튼을 넣을 수 없어서 카드 위에 겹쳐 둔다 (오른쪽 아래, 날짜 아래 빈자리)
+    return (
+        <div className="mypage-x__row-shell mypage-x__row-shell--scan">
+            {row}
+            <RowActionMenu
+                orientation="horizontal"
+                triggerLabel={`${timeLabel || '이'} 손 분석 기록 메뉴`}
+                deleteLabel="분석 기록 삭제하기"
+                onDelete={() => onDelete(session)}
+            />
+        </div>
     )
 })

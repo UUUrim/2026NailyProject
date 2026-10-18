@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthNav } from '@/shared/layout/AuthNav'
 import { useAuth } from '@/shared/hooks/useAuth'
-import { confirmLeaveChatIfNeeded, markIntentionalNavigation } from '@/shared/utils/chatSessionGuard'
+import { confirmLeaveChatIfNeeded } from '@/shared/utils/chatSessionGuard'
 import '@/styles/landing.css'
 
 type HeaderProps = {
@@ -18,11 +18,12 @@ export function Header({ overlay = false }: HeaderProps) {
     const handleNavClick = (to: string) => (e: React.MouseEvent) => {
         e.preventDefault()
         if (confirmLeaveChatIfNeeded()) {
-            if (location.pathname === to) {
+            if (location.pathname === to && to !== '/design/chat') {
                 // 이미 같은 경로에 있으면 navigate()는 아무 일도 안 일어난 것처럼 보인다
                 // (React Router가 경로 변화 없음으로 판단). 세션을 진짜로 초기화하려면
                 // 완전한 새로고침이 필요하다.
-                markIntentionalNavigation()
+                // (디자인 채팅은 새로고침하지 않는다 — 뒤에서 만들고 있는 디자인이 멈추지 않게, 채팅 화면이
+                //  이동할 때마다 새로 마운트되어 새 채팅으로 시작한다: NailDesignChatPage)
                 window.location.href = to
             } else {
                 navigate(to)

@@ -32,6 +32,11 @@ export async function getMyPrintOrders(): Promise<PrintOrderResponse[]> {
     return res.data
 }
 
+/** DELETE /users/me/prints/{orderId} — 출력 내역 삭제 (출력 중인 주문 제외. 내역에서만 빠지고 진행 중인 출력은 취소되지 않는다) */
+export async function deletePrintOrder(orderId: number): Promise<void> {
+    await apiClient.delete(`/users/me/prints/${orderId}`)
+}
+
 export async function completePrintOrder(orderId: number): Promise<void> {
     await apiClient.patch(`/prints/${orderId}/complete`)
 }

@@ -101,38 +101,38 @@ export type PreferenceOptionInfo = {
 
 export const PREFERENCE_OPTION_INFO: Partial<Record<PreferenceKey, Record<string, PreferenceOptionInfo>>> = {
   mood: {
-    lovely: { desc: '부드러운 핑크와 화사한 컬러에 하트, 리본, 진주 등의 장식을 더해 사랑스럽고 로맨틱한 분위기.', image: '/images/nail-sample/mood/lovely.png' },
-    simple: { desc: '장식을 최소화한 깔끔한 단색 위주의 디자인.', image: '/images/nail-sample/mood/simple.png' },
-    modern: { desc: '직선과 무채색 계열로 세련되고 도시적인 느낌.', image: '/images/nail-sample/mood/modern.png' },
+    lovely: { desc: '하트, 리본, 진주 등의 장식을 더한, 사랑스럽고 로맨틱한 분위기', image: '/images/nail-sample/mood/lovely.png' },
+    simple: { desc: '장식을 최소화한 깔끔한 단색 위주의 디자인', image: '/images/nail-sample/mood/simple.png' },
+    modern: { desc: '깔끔하고 장식이 적으며, 절제된 세련됨이 돋보이는 스타일', image: '/images/nail-sample/mood/modern.png' },
     chic: { desc: '차분한 컬러와 깔끔하고 절제된 디자인으로 도시적이고 세련된 분위기', image: '/images/nail-sample/mood/chic.png' },
-    cute: { desc: '발랄하고 귀여운 색감과 아기자기한 디테일.', image: '/images/nail-sample/mood/cute.png' },
-    kitsch: { desc: '과감한 색 조합과 유머러스한 패턴이 특징.', image: '/images/nail-sample/mood/kitsch.jpg' },
-    funky: { desc: '튀는 컬러와 대담한 패턴으로 개성 있는 스타일.', image: '/images/nail-sample/mood/funky.jpg' },
-    feminine: { desc: '부드러운 곡선과 로맨틱한 파스텔 톤.', image: '/images/nail-sample/mood/feminine.png' },
-    elegant: { desc: '은은한 광택과 절제된 포인트로 고급스러운 분위기.', image: '/images/nail-sample/mood/elegant.png' },
-    pure: { desc: '화이트·베이지 계열의 맑고 깨끗한 느낌.', image: '/images/nail-sample/mood/pure.png' },
-    delicate: { desc: '가느다란 라인과 정교한 디테일이 돋보이는 스타일.', image: '/images/nail-sample/mood/delicate.png' },
+    cute: { desc: '발랄하고 귀여운 색감과 아기자기한 디테일', image: '/images/nail-sample/mood/cute.png' },
+    kitsch: { desc: '과감한 색 조합과 유머러스한 패턴이 특징', image: '/images/nail-sample/mood/kitsch.png' },
+    funky: { desc: '튀는 컬러와 대담한 패턴으로 개성 있는 스타일', image: '/images/nail-sample/mood/funky.png' },
+    feminine: { desc: '부드러운 곡선과 로맨틱한 파스텔 톤', image: '/images/nail-sample/mood/feminine.png' },
+    elegant: { desc: '은은한 광택과 절제된 포인트로 고급스러운 분위기', image: '/images/nail-sample/mood/elegant.png' },
+    pure: { desc: '화이트·베이지 계열의 맑고 깨끗한 느낌', image: '/images/nail-sample/mood/pure.png' },
+    delicate: { desc: '가느다란 라인과 정교한 디테일이 돋보이는 스타일', image: '/images/nail-sample/mood/delicate.png' },
   },
   designType: {
-    glitter: { desc: '반짝이는 펄·글리터 가루로 화려한 광채를 내는 디자인.', image: '/images/nail-sample/design-type/glitter.png' },
-    gradient: { desc: '두 가지 이상의 색이 자연스럽게 번지듯 이어지는 디자인.', image: '/images/nail-sample/design-type/gradient.png' },
-    cheek: { desc: '손톱 중앙에 볼터치처럼 은은하게 색을 입히는 디자인.', image: '/images/nail-sample/design-type/cheek.png' },
-    marble: { desc: '대리석 무늬처럼 색이 불규칙하게 퍼지는 패턴.', image: '/images/nail-sample/design-type/marble.jpg' },
-    french: { desc: '손톱 끝부분만 다른 컬러로 라인을 그리는 클래식 디자인.', image: '/images/nail-sample/design-type/french.jpg' },
-    magnetic: { desc: '자석 젤로 오로라 같은 입체적인 빛 무늬를 만드는 디자인.', image: '/images/nail-sample/design-type/magnetic.jpg' },
-    powder: { desc: '고운 컬러 파우더를 발라 매트하고 벨벳 같은 광을 내는 디자인.', image: '/images/nail-sample/design-type/powder.jpg' },
-    matte: { desc: '광택 없이 무광으로 마무리해 차분한 느낌을 주는 디자인.', image: '/images/nail-sample/design-type/matte.png' },
-    drawing: { desc: '손그림·스톤 등으로 직접 그림을 그려 넣는 디자인.', image: '/images/nail-sample/design-type/art.png' },
+    glitter: { desc: '반짝이는 펄·글리터 가루로 화려한 광채를 내는 디자인', image: '/images/nail-sample/design-type/glitter.png' },
+    gradient: { desc: '두 가지 이상의 색이 자연스럽게 번지듯 이어지는 디자인', image: '/images/nail-sample/design-type/gradient.png' },
+    cheek: { desc: '손톱 중앙에 볼터치처럼 은은하게 색을 입히는 디자인', image: '/images/nail-sample/design-type/cheek.png' },
+    marble: { desc: '대리석 무늬처럼 색이 불규칙하게 퍼지는 패턴 디자인', image: '/images/nail-sample/design-type/marble.png' },
+    french: { desc: '손톱 끝부분만 다른 컬러로 라인을 그리는 클래식 디자인', image: '/images/nail-sample/design-type/french.png' },
+    magnetic: { desc: '자석 젤로 오로라 같은 입체적인 빛 무늬를 만드는 디자인', image: '/images/nail-sample/design-type/magnetic.png' },
+    powder: { desc: '고운 컬러 파우더를 발라 매트하고 벨벳 같은 광을 내는 디자인', image: '/images/nail-sample/design-type/powder.png' },
+    matte: { desc: '광택 없이 무광으로 마무리해 차분한 느낌을 주는 디자인', image: '/images/nail-sample/design-type/matte.png' },
+    drawing: { desc: '손그림·스톤 등으로 직접 그림을 그려 넣는 디자인', image: '/images/nail-sample/design-type/art.png' },
   },
   motif: {
-    star: { desc: '별 모양 포인트로 반짝이는 느낌.', image: '/images/nail-sample/motif/star.png' },
-    ribbon: { desc: '리본 모양 장식으로 사랑스러운 포인트.', image: '/images/nail-sample/motif/ribbon.png' },
-    floral: { desc: '꽃 패턴으로 화사하고 로맨틱한 느낌.', image: '/images/nail-sample/motif/floral.png' },
-    heart: { desc: '하트 모양으로 사랑스럽고 귀여운 포인트.', image: '/images/nail-sample/motif/heart.png' },
-    crystal: { desc: '크고 작은 큐빅 장식으로 화려한 반짝임.', image: '/images/nail-sample/motif/crystal.png' },
-    pearl: { desc: '진주알의 은은한 광택 장식.', image: '/images/nail-sample/motif/pearl.png' },
-    swirl: { desc: '빙글빙글 돌아가는 곡선 패턴.', image: '/images/nail-sample/motif/swirl.jpg' },
-    'polka dot': { desc: '동글동글한 도트 무늬 포인트.', image: '/images/nail-sample/motif/polka-dot.jpg' },
+    star: { desc: '별 모양 포인트로 반짝이는 느낌', image: '/images/nail-sample/motif/star.png' },
+    ribbon: { desc: '리본 모양 장식으로 사랑스러운 포인트', image: '/images/nail-sample/motif/ribbon.png' },
+    floral: { desc: '꽃 패턴으로 화사하고 로맨틱한 느낌', image: '/images/nail-sample/motif/floral.png' },
+    heart: { desc: '하트 모양으로 사랑스럽고 귀여운 포인트', image: '/images/nail-sample/motif/heart.png' },
+    crystal: { desc: '크고 작은 큐빅 장식으로 화려한 반짝임', image: '/images/nail-sample/motif/crystal.png' },
+    pearl: { desc: '진주알의 은은한 광택 장식', image: '/images/nail-sample/motif/pearl.png' },
+    swirl: { desc: '빙글빙글 돌아가는 곡선 패턴', image: '/images/nail-sample/motif/swirl.png' },
+    'polka dot': { desc: '동글동글한 도트 무늬 포인트', image: '/images/nail-sample/motif/polka-dot.png' },
     // '없음'은 말 그대로 모티프를 넣지 않겠다는 선택지라 설명 툴팁이 필요 없어 의도적으로 비워둔다.
   },
 }
@@ -162,7 +162,8 @@ export type TextureInfo = {
   }
 }
 
-// 디자인 타입(design_type) 키워드 → 결과 페이지 [texture] 패널용 시각 표현
+// 백엔드 스와치/텍스처 키(TextureExtractService·NailDesignService.TEXTURE_KEYWORD_MAP) → 한글 라벨 + CSS 폴백 배경.
+// 결과 페이지 [질감·텍스처] 패널과 갤러리 질감 필터가 이 표로 라벨/색을 찾는다. 재료 키만 둔다(기법은 제외).
 export const TEXTURE_INFO: Record<string, TextureInfo> = {
   glitter: {
     labelKo: '글리터',
@@ -174,33 +175,7 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
           'linear-gradient(135deg, #cfcfcf, #efefef)',
     },
   },
-  gradient: {
-    labelKo: '그라데이션',
-    swatchStyle: { background: 'linear-gradient(135deg, #ffc0d0, #a98bff)' },
-  },
-  cheek: {
-    labelKo: '치크',
-    swatchStyle: {
-      background: 'radial-gradient(circle at 50% 50%, #ff90b3 0%, #ffe3ea 70%)',
-    },
-  },
-  marble: {
-    labelKo: '마블',
-    swatchStyle: {
-      background:
-          'radial-gradient(circle at 30% 30%, rgba(120,120,120,0.5) 0 15%, transparent 16%),' +
-          'radial-gradient(circle at 70% 60%, rgba(120,120,120,0.4) 0 20%, transparent 21%),' +
-          'linear-gradient(135deg, #f6f6f6, #e2e2e2)',
-    },
-  },
-  french: {
-    labelKo: '프렌치',
-    swatchStyle: { background: 'linear-gradient(0deg, #fff 0%, #fff 30%, #f7d8e2 30%, #f7d8e2 100%)' },
-  },
-  magnetic: {
-    labelKo: '마그네틱',
-    swatchStyle: { background: 'conic-gradient(from 180deg, #7a8899, #3f4d63, #7a8899)' },
-  },
+  // 옛 스와치 호환: powder는 chrome으로 통합됐다 (새로 만든 스와치는 chrome 키로 저장됨)
   powder: {
     labelKo: '파우더',
     swatchStyle: { background: 'linear-gradient(135deg, #f6e9ee, #ded4e6)' },
@@ -209,11 +184,6 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     labelKo: '매트',
     swatchStyle: { background: '#c9a2ad' },
   },
-  art: {
-    labelKo: '드로잉',
-    swatchStyle: { background: 'linear-gradient(135deg, #de869f 0%, #a98bff 50%, #7cd6d6 100%)' },
-  },
-  //추가: 백엔드 TextureExtractService 키값과 1:1 매핑
   plain_solid: {
     labelKo: '기본 젤컬러',
     swatchStyle: { background: '#f0d8de' },
@@ -222,8 +192,40 @@ export const TEXTURE_INFO: Record<string, TextureInfo> = {
     labelKo: '자석',
     swatchStyle: { background: 'conic-gradient(from 180deg, #7a8899, #3f4d63, #7a8899)' },
   },
-  drawing: {
-    labelKo: '드로잉 아트',
-    swatchStyle: { background: 'linear-gradient(135deg, #fff 60%, #f0e6ea 100%)' },
+  syrup: {
+    labelKo: '시럽',
+    swatchStyle: {
+      background:
+          'radial-gradient(circle at 30% 28%, rgba(255,255,255,0.9) 0 9%, transparent 10%),' +
+          'linear-gradient(135deg, rgba(255,176,198,0.95), rgba(255,220,230,0.8))',
+    },
+  },
+  knit: {
+    labelKo: '니트',
+    swatchStyle: {
+      background:
+          'radial-gradient(circle at 22% 30%, rgba(255,255,255,0.7) 0 3%, transparent 4%),' +
+          'radial-gradient(circle at 58% 22%, rgba(150,110,125,0.45) 0 3%, transparent 4%),' +
+          'radial-gradient(circle at 74% 62%, rgba(255,255,255,0.65) 0 3%, transparent 4%),' +
+          'radial-gradient(circle at 36% 74%, rgba(150,110,125,0.4) 0 3%, transparent 4%),' +
+          'linear-gradient(135deg, #e8c3cf, #d9a9b9)',
+    },
+  },
+  ink: {
+    labelKo: '잉크',
+    swatchStyle: { background: 'linear-gradient(135deg, rgba(255,64,129,0.7), rgba(124,77,255,0.65))' },
+  },
+  // 화면 표기는 "파우더" (키는 chrome — 크롬 파우더 계열)
+  chrome: {
+    labelKo: '파우더',
+    swatchStyle: {
+      background: 'linear-gradient(135deg, #f4f6f8 0%, #aeb6bf 35%, #fafcfd 55%, #8a929c 100%)',
+    },
+  },
+  mercury_chrome: {
+    labelKo: '머큐리 크롬',
+    swatchStyle: {
+      background: 'linear-gradient(135deg, #ffffff 0%, #9aa3ad 30%, #ffffff 50%, #6f7782 80%, #dfe3e8 100%)',
+    },
   },
 }

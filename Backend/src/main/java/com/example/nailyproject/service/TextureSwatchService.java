@@ -4,110 +4,55 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
- * TextureExtractService가 추출한 {texture, color} 쌍을
- * 텍스처별 프롬프트 템플릿에 매핑하고, NailImageService로 스와치 이미지를 배치 생성한다.
- * 생성 후 NailDetectionService.removeBackground()로 흰 배경을 제거해서
- * 투명 PNG로 S3에 저장한다.
+ * TextureExtractService가 추출한 {texture, color_hex} 쌍으로 스와치 이미지를 만든다.
+ * 이미지는 백엔드 안에서 SwatchColorizer가 직접 만든다 (별도 서버/GPU/모델 없음):
+ * 베이스 이미지 한 장에 hex 색을 입히고, mercury_chrome은 고정 이미지를 그대로 쓴다.
+ * 스와치는 화면용이라 흰 배경 그대로 쓰고 배경 제거는 하지 않는다.
+ *
+ * 베이스 이미지가 없는 텍스처(ink, marble, drawing, 3d_charm)는 스와치를 만들지 않고 건너뛴다.
  */
 @Service
 @RequiredArgsConstructor
 public class TextureSwatchService {
 
-    private final NailImageService nailImageService;
-    private final NailDetectionService nailDetectionService; // ★ 배경 제거용
-    private final S3Service s3Service;
+    private final SwatchColorizer swatchColorizer;
 
-    private static final long SWATCH_SEED = 647744376769594L;
-
-    private static final String TAIL =
-            "nailart, product shot, studio lighting, plain white background, " +
-                    "top-down flat lay view, no shadow, no hands, no fingers, no text, " +
-                    "no watermark, no reflection, perfectly defined sharp circular edges, " +
-                    "high quality, sharp focus";
-
-    private static final Map<String, String> TEMPLATES = Map.of(
-            "glitter",
-            "A circular material swatch sample of glossy {color} " +
-                    "with dense fine glitter suspended in clear base, sparkling texture, " + TAIL,
-
-            "plain_solid",
-            "A circular material swatch sample of a plain soft {color} gel polish, " +
-                    "smooth even solid color fill, subtle single glossy highlight streak on the surface, " +
-                    "simple clean plain nail polish look, no glitter, no pattern, no texture, " + TAIL,
-
-            "matte",
-            "A circular material swatch sample of matte {color} nail polish, " +
-                    "completely flat non-reflective surface, chalky solid matte finish, " +
-                    "absolutely no shine, no gloss, no highlight, no reflection anywhere, " + TAIL,
-
-            "magnetic_chrome",
-            "A circular material swatch sample of {color} base with a magnetic " +
-                    "cat-eye chrome metallic streak of light moving across the surface, " +
-                    "smooth silky metallic texture, NOT glitter, NOT holographic sparkle, " +
-                    "just one smooth light line effect, " + TAIL,
-
-            "powder",
-            "A circular material swatch sample of iridescent chrome powder nail polish, " +
-                    "soft {color} base infused with a pearlescent aurora shimmer, " +
-                    "shifting opal-like reflections of light across the glossy surface, " +
-                    "mirror-like pearl chrome finish, glossy reflective sheen, " + TAIL,
-
-            "marble",
-            "A circular material swatch sample of marble swirl nail polish combining " +
-                    "{color} in organic flowing veined streaks like natural stone marble, " +
-                    "glossy finish, " + TAIL,
-
-            "drawing",
-            "A circular material swatch sample, a clear transparent glossy gel base disc " +
-                    "with a simple hand-drawn doodle painted underneath the glossy surface, " +
-                    "quick loose pen sketch style, imperfect wobbly linework, " +
-                    "minimal thin black outline only, maybe one small area of {color}, " +
-                    "casual doodle illustration, sketchy and unrefined, " +
-                    "the drawing appears embedded within the transparent gel, " + TAIL
-    );
+    private static final Pattern HEX = Pattern.compile("^#?[0-9a-fA-F]{6}$");
 
     /**
-     * 텍스처+컬러 쌍 리스트로 스와치 이미지를 배치 생성 후,
-     * 흰 배경 제거 → base64 맵으로 반환.
+     * 텍스처+컬러 쌍 리스트로 스와치 이미지를 생성해 base64 맵으로 반환한다.
      *
-     * @return { "glitter": "<투명 PNG base64>", "plain_solid": "<투명 PNG base64>", ... }
+     * @return { "syrup": "<PNG base64>", "chrome": "<PNG base64>", ... }  (미지원/실패 텍스처는 빠짐)
      */
     public Map<String, String> generateSwatches(List<Map<String, Object>> texturePairs) {
         Map<String, String> result = new LinkedHashMap<>();
 
         for (Map<String, Object> pair : texturePairs) {
-            String texture = (String) pair.get("texture");
-            if (texture == null || texture.isBlank()) continue;
+            String texture = normalizeKey((String) pair.get("texture"));
+            if (texture == null) continue;
 
-            // mercury_chrome은 diffusers 재현 불가 → 고정 에셋
-            if ("mercury_chrome".equals(texture)) {
-                result.put(texture, getMercuryChromeFixed());
+            if (!swatchColorizer.supports(texture)) {
+                System.out.println("[TextureSwatchService] " + texture + " — 스와치 베이스 이미지 없음, 건너뜀");
                 continue;
             }
+            if (result.containsKey(texture)) continue; // powder → chrome 통합 등으로 생긴 중복
 
-            String template = TEMPLATES.get(texture);
-            if (template == null) {
-                System.err.println("[TextureSwatchService] 알 수 없는 텍스처 키: " + texture + " — 건너뜀");
-                continue;
+            String colorHex = null;
+            if (swatchColorizer.needsColor(texture)) {
+                colorHex = normalizeHex(pair.get("color_hex"));
+                if (colorHex == null) {
+                    System.err.println("[TextureSwatchService] " + texture + " — color_hex 없음/형식 오류("
+                            + pair.get("color_hex") + "), 건너뜀");
+                    continue;
+                }
             }
-
-            String color = pair.get("color") != null ? (String) pair.get("color") : "";
-
-            String prompt = template.replace("{color}", color);
 
             try {
-                // 1. 스와치 이미지 생성
-                String swatchBase64 = nailImageService.generateTextureSwatch(prompt, SWATCH_SEED);
-
-                // ★ 팀원이 /remove-bg 추가하면 아래 주석 해제
-                // String cleanBase64 = nailDetectionService.removeBackground(swatchBase64);
-                // result.put(texture, cleanBase64);
-
-                // 그 전까지는 배경 제거 없이 저장
-                result.put(texture, swatchBase64);
-                System.out.println("[TextureSwatchService] " + texture + " 스와치 생성 + 배경 제거 완료");
+                result.put(texture, swatchColorizer.generate(texture, colorHex));
+                System.out.println("[TextureSwatchService] " + texture + " 스와치 생성 완료");
             } catch (Exception e) {
                 System.err.println("[TextureSwatchService] " + texture + " 실패: " + e.getMessage());
                 // 하나 실패해도 나머지는 계속
@@ -117,10 +62,18 @@ public class TextureSwatchService {
         return result;
     }
 
-    private static final String MERCURY_CHROME_S3_URL =
-            "https://naily-scans.s3.amazonaws.com/assets/mercury_chrome.png";
+    /** powder는 chrome과 합쳐졌다(같은 베이스). 저장 키도 chrome으로 통일한다. */
+    private static String normalizeKey(String texture) {
+        if (texture == null || texture.isBlank()) return null;
+        String key = texture.trim();
+        return "powder".equals(key) ? "chrome" : key;
+    }
 
-    private String getMercuryChromeFixed() {
-        return MERCURY_CHROME_S3_URL;
+    /** "d9a3ab" / "#D9A3AB" → "#D9A3AB". 형식이 틀리면 null. */
+    private static String normalizeHex(Object value) {
+        if (value == null) return null;
+        String s = String.valueOf(value).trim();
+        if (!HEX.matcher(s).matches()) return null;
+        return "#" + s.replace("#", "").toUpperCase();
     }
 }
