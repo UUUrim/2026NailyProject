@@ -416,10 +416,28 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
                 if mx - 20 <= sx <= mx + mw + 20 and my - 20 <= sy <= my + mh + 20:
                     continue
             samples.append(lab[sy, sx])
+    samples = np.array(samples, dtype=np.float32).reshape(-1, 3)
+
+    # 손 양옆 배경이 서로 다른 색/밝기(예: 한쪽은 흰 종이, 반대쪽은 검은 가이드/바닥)이면 평균/표준
+    # 편차가 두 배경을 섞어 버려서, 흰 끝과 배경의 거리(dist)가 전부 작아지고 흰 끝을 못 잡는다.
+    # 이럴 땐 손끝 바로 위쪽 배경(손톱 끝이 닿을 수 있는 5mm 보다 위)을 기준으로 삼는다. 어두운
+    # 단색 바닥에서는 양옆 밝기 편차가 작아서(L std < 20) 이 분기를 타지 않는다 - 기존 동작 그대로.
+    if len(samples) < 8 or samples[:, 0].std() > 20.0:
+        y_a, y_b = max(0, fy - int(11 / mpp)), max(0, fy - int(6 / mpp))
+        x_a, x_b = max(0, cx - int(fw * 0.4)), min(W, cx + int(fw * 0.4))
+        if y_b - y_a >= 4 and x_b - x_a >= 4:
+            block = lab[y_a:y_b:2, x_a:x_b:2].reshape(-1, 3).astype(np.float32)
+            if marker_box is not None:
+                mx, my, mw, mh = marker_box
+                ys, xs = np.mgrid[y_a:y_b:2, x_a:x_b:2]
+                keep = ~((xs >= mx - 20) & (xs <= mx + mw + 20) &
+                         (ys >= my - 20) & (ys <= my + mh + 20)).reshape(-1)
+                block = block[keep]
+            if len(block) >= 8 and block[:, 0].std() <= 20.0:
+                samples = block
     if len(samples) < 8:
         # Not enough clean background — cannot separate the tip safely.
         return {"tip_y": fy, "edges": {}}
-    samples = np.array(samples, dtype=np.float32)
     bg_mean = samples.mean(0)
     bg_std  = samples.std(0)
 
@@ -1111,7 +1129,92 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
 # 5. TOP photo full measurement
 # ─────────────────────────────────────────────────────────────
 
+def grow_shadowed_skin(image: np.ndarray, finger_mask: np.ndarray, mpp: float):
+    """
+    Add the SHADED flank of the finger back to a finger mask.
+
+    segment_finger() keeps only pixels brighter than L=120.  With light coming from
+    one side the opposite flank of the finger falls to L 40-110 while its colour is
+    still plainly skin (a* +8..+26), so the mask loses a strip of finger - on a
+    photo with a white sheet on one side and a dark bar on the other it cut the nail
+    in half, which then threw off the width, the nail axis and the fold search.
+    Dark backgrounds sit at a* ≈ 0, so "warm AND not black" picks the flank only.
+
+    Only a 5 mm ring around the existing mask is considered, and only the blob that
+    stays connected to the finger is kept, so a neighbouring finger or the other
+    hand lying nearby is not swallowed.
+
+    Returns (finger_mask, bbox) — the inputs unchanged-equivalent when nothing grew.
+    """
+    H, W = image.shape[:2]
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+    L, A = lab[:, :, 0], lab[:, :, 1]
+    cnts, _ = cv2.findContours(finger_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return finger_mask, cv2.boundingRect(finger_mask)
+    r = max(3, int(5.0 / mpp))
+    near = cv2.dilate(finger_mask, cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    dark = ((L > 45) & (A > 136)).astype(np.uint8) * 255
+    extra = cv2.bitwise_and(cv2.bitwise_and(dark, near), cv2.bitwise_not(finger_mask))
+    k = max(3, int(0.5 / mpp) | 1)
+    extra = cv2.morphologyEx(extra, cv2.MORPH_OPEN,
+                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    if not extra.any():
+        return finger_mask, cv2.boundingRect(max(cnts, key=cv2.contourArea))
+    kc = max(5, int(1.0 / mpp) | 1)
+    merged = cv2.morphologyEx(cv2.bitwise_or(finger_mask, extra), cv2.MORPH_CLOSE,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kc, kc)))
+    n, lbl = cv2.connectedComponents((merged > 0).astype(np.uint8))
+    ys, xs = np.nonzero(finger_mask)
+    keep = set(np.unique(lbl[ys, xs])) - {0}
+    out = np.isin(lbl, list(keep)).astype(np.uint8) * 255
+    return out, cv2.boundingRect(out)
+
+
 def measure_top(image: np.ndarray, mpp: float,
+                finger_mask: np.ndarray, bbox: tuple,
+                nail_plate_mask: np.ndarray = None,
+                aruco_corners: np.ndarray = None,
+                finger: str = None,
+                guide_y: int = None, guide_tol_mm: float = 3.0,
+                skin_image: np.ndarray = None,
+                skin_ref_image: np.ndarray = None) -> dict:
+    """measure_top 본체(_measure_top)를 부르고, 옆 접힘선(lateral fold)을 못 읽어서 너비를
+    마스크 추정(constant_half)으로 때운 경우에만 그늘진 옆면을 살린 마스크로 한 번 더 잰다.
+
+    한쪽 옆면이 그늘진 사진에서는 마스크가 손가락 반쪽을 잃어 접힘선 탐색 창이 어긋나고
+    너비가 3mm 이상 작게 나온다. 처음부터 마스크를 키우면 잘 되던 사진(그늘 약한 사진)의
+    값이 바뀌므로, 접힘선이 읽혔으면 첫 결과를 그대로 쓰고 실패했을 때만 재시도한다.
+    재시도 결과가 예외 없이 나오면 그것을 채택한다.
+    """
+    kw = dict(nail_plate_mask=nail_plate_mask, aruco_corners=aruco_corners,
+              finger=finger, guide_y=guide_y, guide_tol_mm=guide_tol_mm,
+              skin_image=skin_image, skin_ref_image=skin_ref_image)
+    first = _measure_top(image, mpp, finger_mask, bbox, **kw)
+    if first.get("width_source") == "lateral_folds" or nail_plate_mask is not None:
+        return first
+    grown, gbbox = grow_shadowed_skin(image, finger_mask, mpp)
+    # 마스크가 "눈에 띄게" 잘렸을 때만 다시 잰다: 손톱 구간(윗선에서 22mm)에서 마스크가 10% 이상
+    # 늘어날 때. 기존 40장(밝은 면 위, 그늘 약함)은 전부 3% 이하, 한쪽이 그늘진 새 배경 사진은
+    # 29%였다. 몇 % 수준의 가장자리 번짐으로 재시도하면 접힘선이 그늘진 옆면의 윤곽에 붙어
+    # 오히려 너비가 커진다(기존 사진 131 엄지: 13.8 → 17.0mm).
+    fy0, rows_n = bbox[1], int(22.0 / mpp)
+    base_area = int((finger_mask[fy0:fy0 + rows_n] > 0).sum())
+    if base_area == 0 or int((grown[fy0:fy0 + rows_n] > 0).sum()) < base_area * 1.10:
+        return first
+    try:
+        retry = _measure_top(image, mpp, grown, gbbox, **kw)
+    except Exception:
+        return first
+    # 접힘선을 못 읽은 첫 결과는 어차피 마스크 폭에 기댄 값이라, 잘린 마스크보다 온전한
+    # 마스크에서 나온 값이 더 믿을 만하다 (접힘선이 읽히면 더 좋고, 아니어도 폭이 맞아진다).
+    print(f"  [Mask] shaded flank restored → retry ({retry.get('width_source')}) "
+          f"W {first['width_mm']} → {retry['width_mm']}mm")
+    return retry
+
+
+def _measure_top(image: np.ndarray, mpp: float,
                 finger_mask: np.ndarray, bbox: tuple,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
