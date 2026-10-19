@@ -15,6 +15,10 @@ public class DesignGenerateResponseDto {
     private Details details;
     private List<String> keywords;  // ★ 추가: 슬롯에서 추출한 키워드
 
+    // 서버가 확정해서 이미지 생성에 쓴 네일 쉐입(round/oval/almond/stiletto/ballerina/square).
+    // 프론트가 결과 화면/AR 미리보기에서 사용자 스캔 쉐입이 아니라 이 값을 쓰도록 내려준다.
+    private String shape;
+
     // 채팅 수정 요청(refine)이 실제 수정 요청이 아니거나 이해하지 못해서 이미지를 바꾸지 않았을 때,
     // 사용자에게 보여줄 안내 메시지. 값이 있으면 imageUrls는 기존(바뀌지 않은) 이미지다. 평소에는 null.
     private String assistantMessage;

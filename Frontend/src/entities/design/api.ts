@@ -53,6 +53,8 @@ export interface DesignGenerateResponse {
     generatedPrompt: string
     imageUrls: string[] // 1장
     details?: DesignExtractedDetails
+    /** 서버가 확정해서 이미지 생성에 쓴 쉐입(round/oval/almond/stiletto/ballerina/square) */
+    shape?: string | null
     keywords?: string[]
     scanAutoReflection?: ScanAutoReflection | null
     /** 수정 요청이 아니라서 이미지를 바꾸지 않았을 때 서버가 주는 안내 메시지 (있으면 새 이미지가 아님) */

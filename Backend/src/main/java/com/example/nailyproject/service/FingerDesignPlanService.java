@@ -38,10 +38,9 @@ public class FingerDesignPlanService {
         Based on the confirmed user information below, generate a JSON design plan for five nails:
         thumb, index, middle, ring, and pinky.
 
-        If a reference image is provided, treat the reference image itself as a primary source of
-        design intent. Observe its colors, mood, decoration density, materials, transparency,
-        dimensionality, gloss, composition, and overall visual quality, then translate those visual
-        characteristics into a Korean press-on nail design.
+        If a reference image is provided, treat it as a primary source of design intent. Observe its
+        colors, mood, decoration density, materials, transparency, dimensionality, gloss, composition and
+        overall quality, then translate them into a Korean press-on nail design.
 
         Do not invent unsupported character names, franchise names, brand names, or art-style labels.
         If a reference image contains a recognizable character, movie, game, anime, or brand, do not
@@ -79,13 +78,18 @@ public class FingerDesignPlanService {
             request for the character itself.
 
         [SHAPE VALUE - VERY IMPORTANT]
-        The top-level "shape" must be EXACTLY one of these six lowercase words, nothing else:
-        round, oval, almond, stiletto, ballerina, square.
-        The app only has these six nail shapes. Never write any other shape name or a combination
-        (for example "rounded square", "squoval", "coffin", "tapered", "medium almond"); write the
-        closest of the six instead (coffin -> ballerina, rounded square -> square). If the confirmed
-        input names a shape, use it. If it does not and a reference image or recommended shape is
-        given, pick the closest of the six.
+        The top-level "shape" must be EXACTLY one of: round, oval, almond, stiletto, ballerina, square
+        (lowercase, nothing else). Never write another shape name or a combination ("rounded square",
+        "squoval", "coffin", "tapered", "medium almond"); use the closest of the six (coffin ->
+        ballerina, rounded square -> square). If the confirmed input names a shape, use it; otherwise,
+        when a reference image is given, decide the shape in this order: (1) if the image shows real nails or a hand
+        with a clearly visible nail shape, use the closest of the six; (2) otherwise choose the shape that best suits
+        the image's own mood and style, and do NOT default to oval: soft, cute, sweet, pure or cozy images -> round
+        or oval; feminine, lovely, elegant, dreamy or romantic images -> almond, oval or ballerina; chic, cool, edgy, dark,
+        funky, y2k or glam images -> stiletto or square; simple, modern, clean or
+        preppy images -> square or round. If a recommended shape is given, use it. If the user's own
+        words or photo note name a shape (for example "쉐입은 스틸레토로 해줘"), that shape always wins, even when
+        the reference image shows a different nail shape.
 
         [REFERENCE SUBJECT LABEL - DISPLAY ONLY]
         If a reference image is provided and it clearly shows what it is - the title text on a poster or
@@ -124,576 +128,376 @@ public class FingerDesignPlanService {
           view such as a peeking head or a single ear, but its markings must still match.
 
         [REFERENCE IMAGE PRIORITY - VERY IMPORTANT]
-        When a reference image is provided, inspect not only the individual decorations but also:
-        - dominant color palette and tonal harmony
-        - decoration density and richness
-        - transparency and material layering
-        - surface gloss and reflective highlights
-        - dimensional depth
-        - decorative scale and balance
-        - visual hierarchy and focal points
-        - luxury / editorial product quality
-        - background, spacing, lighting, and photography mood
+        When a reference image is provided, inspect: dominant palette and tonal harmony, decoration
+        density and richness, transparency and material layering, gloss and highlights, dimensional
+        depth, decorative scale and balance, visual hierarchy and focal points, luxury / editorial
+        quality, and background, spacing, lighting and photography mood.
+        The reference sets the minimum visual richness of the set: if it is decorative, glossy, layered,
+        dimensional or luxurious, keep that richness instead of simplifying. If the mood contains
+        "simple" but the reference is visibly rich, do NOT remove the observed decorations; read
+        "simple" as calm and restrained.
 
-        The reference image sets the minimum visual richness for the generated set.
-        If the reference is highly decorative, glossy, layered, dimensional, or luxurious,
-        preserve that level of visual richness instead of simplifying it into a basic nail design.
 
-        If the mood contains "simple" but the reference image is visibly rich and decorative,
-        do NOT remove the observed decorations. Interpret "simple" as a calm or restrained mood,
-        not as permission to erase visible design detail from the reference.
-
+        [REFERENCE IMAGE - RICHNESS AND VARIETY - VERY IMPORTANT]
+        When a reference image is provided and simple mode is off (see [DESIGN RICHNESS]), do not flatten it
+        into a bare palette. Take an inventory of every visual ingredient you can see: colors, finishes
+        (gloss, pearl, glitter, chrome, transparency), textures, shapes and small motifs, ornament types
+        (beads, gems, chains, ribbons, lace, flowers, stars, hearts ...) and decorative styles. Then spread
+        those ingredients over the five nails:
+        - every nail except at most one quiet nail carries at least one ingredient taken from the image;
+        - the nails are not copies: vary the finish, material, size and placement of the image's own ingredients
+          (and use a drawn motif, pattern, wash or 3D piece only when the image shows that kind of thing); never add
+          french tips, polka dots, doodles, hearts or stars that the image does not contain; gems stay accents (see
+          [DESIGN RICHNESS]);
+        - every ornament type and scene element visible in the image appears somewhere in the set, as a motif or a
+          part, never as a character, face or logo (see [REFERENCE IMAGE = MOOD ONLY]);
+        - a decoration-rich image gives richer nails than a calm one, but even a calm image gets a varied
+          set, expressed through finish and material variety (pearl, gloss, glitter, translucency, gradient
+          direction) and a few different small parts.
+        With a reference image, choose the mood from the atmosphere of the image itself (for example a deep blue
+        night with glowing water is delicate / dreamy), not from cute characters in it, and do not add the
+        mood-supporting elements of [MOOD-BASED SUPPORTING ELEMENTS] (hearts, stars, polka dots, plaid ...) unless
+        the image shows them.
+        The image decides the palette, the mood and the kinds of ornament; you decide how to distribute and
+        vary them. Never fall back to one-color or gradient nails with a single repeated accent.
         %s
         """;
 
     private static final String SYSTEM_PROMPT_PART2 = """
         [OUTPUT LAYERS - VERY IMPORTANT]
-        The system produces two kinds of values:
-        1) finish/pattern/motif/parts arrays: only use values from the controlled vocabulary below.
-           These arrays are consumed by downstream processing, so do not invent unsupported values.
-        2) description fields: these are visual instructions that will be passed to the final image
-           generation model. They must turn the selected design elements into concrete visual prose.
+        1) finish/pattern/motif/parts arrays: only values from the controlled vocabulary below (they
+           are consumed by downstream processing; never invent values).
+        2) description fields: visual instructions passed to the final image model; they must turn the
+           selected elements into concrete visual prose.
 
         [DESCRIPTION QUALITY - VERY IMPORTANT]
-        A description must not be a flat list of keywords. It should read like a high-quality visual
-        instruction for a premium nail-product image model.
-
-        Explicitly describe, when relevant:
-        - base color
-        - transparency
-        - gel or jelly depth
-        - surface finish
-        - reflective behavior
-        - highlight shape
-        - dimensionality
-        - material texture
-        - decorative layering
-        - visual hierarchy
-        - interaction between the decoration and the base
-
-        Prefer precise visual language such as:
-        soft, translucent, sheer, milky, luminous, glossy, reflective, iridescent,
-        polished, glassy, smooth, raised, dimensional, sculpted, delicate, intricate,
-        jewelry-like, embedded, layered, pearlescent, mirror-like, seamless.
-
-        The exact number of decorations does not need to be specified. Describe their density,
-        prominence, and visual relationship instead.
-
-        Each nail description may use 2 to 3 sentences when necessary.
-        The first sentence should establish the base, finish, and major pattern.
-        Additional sentences should explain motifs, parts, material behavior, and dimensional detail.
-
-        Avoid repetitive descriptions. Even when the same motif is used on multiple nails,
-        vary the surrounding materials, placement language, transparency, highlights, or pattern
-        relationship so each nail reads as a distinct product design within one coordinated set.
+        A description is never a flat keyword list; it reads like a high-quality instruction for a
+        premium nail-product image model. When relevant, state base color, transparency, gel or syrup
+        depth, surface finish, reflective behavior, highlight shape, dimensionality, material texture,
+        decorative layering, visual hierarchy, and how the decoration interacts with the base. Use
+        precise words (soft, translucent, sheer, luminous, glossy, iridescent, glassy, raised, sculpted,
+        delicate, jewelry-like, layered, pearlescent, seamless). Do not specify exact counts of
+        decorations; describe density, prominence and relationship. Each nail description has 2 to 3
+        sentences: the first sets base, finish and major pattern; the rest explain motifs, parts,
+        material behavior and dimensional detail. Avoid repetition: even with the same motif on several
+        nails, vary the surrounding materials, placement, transparency, highlights or pattern
+        relationship so each nail is a distinct design within one coordinated set.
 
         [DESCRIPTION INTERPRETATION RULES]
-        If a physical 3D part is selected, explicitly describe it as a separate object attached on top
-        of the nail surface. Do not describe it as an embedded pattern unless the user explicitly asks
-        for an embedded effect.
-
-        If powder finish is selected, describe the final polished reflective appearance rather than
-        the powder application material itself.
-
-        If jelly or translucent finish is selected, explicitly mention clear gel depth, translucent
-        edges, or visible light transmission so that the image-generation model does not turn the nail
-        into an opaque pastel surface.
+        - A physical 3D part is described as a separate object attached on top of the nail surface, not
+          an embedded pattern (unless the user asks for an embedded effect).
+        - Powder finish: describe the final polished reflective look, not the powder material.
+        - Syrup or translucent finish: mention clear gel depth, translucent edges or visible light
+          transmission so the image model does not make an opaque pastel surface.
 
         [POWDER FINISH - VERY IMPORTANT]
-        The controlled term "powder finish" refers to nail powder that has been physically rubbed
-        onto a cured or semi-cured gel surface and then sealed under a glossy top coat.
-
-        The word "powder" describes the application method, NOT the final surface texture.
-
-        The final result must look:
-        - completely smooth
-        - highly polished
-        - glass-like
-        - mirror-like
-        - glossy
-        - seamless
-        - reflective
-        - softly pearlescent or subtly chrome-like
-        - an even, thin pearl-chrome veil over the WHOLE nail surface, edge to edge and cuticle to tip,
-          giving a uniform milky mother-of-pearl / soap-bubble iridescent sheen (aurora pearl look).
-          The sheen must stay within the nail's own color family — it adds pearl gloss only and must
-          never change or tint the requested base color.
-        - The glossy top coat adds ordinary natural window-like reflections on top; those reflections
-          are separate from the powder and are not a pigment band.
-        - Powder is NOT magnetic cat-eye: never describe a centered light band, a dark-to-light
-          vertical gradient, a shimmer line, or depth-shifting stripes.
-        - Write powder descriptions in short POSITIVE phrases only, such as "full-cover glossy chrome
-          pearlescent powder finish". Never write negations like "not glitter" or "not cat-eye" inside
-          a description, because the image model may pick up the negated word.
-
-        The powder itself must NOT remain visible as particles.
-        The result should resemble a professional chrome-powder or pearl-powder manicure
-        with a perfectly sealed glossy surface.
-
-        Preferred description language:
-        - smooth powder-rubbed finish sealed under glossy gel
-        - mirror-like glazed sheen
-        - ultra-smooth polished reflection
-        - seamless pearlescent glaze
-        - full-cover glossy chrome pearlescent powder finish
-        - even aurora pearl-chrome veil across the whole nail with a faint iridescent mother-of-pearl sheen in the nail's own color
-        - wet-looking glass-like reflection like real light on a curved surface
-        - chrome-like glazed shine
-        - continuous glossy specular highlights
-        - finely buffed powder sheen
-
-        Never interpret powder finish as:
-        - loose powder
-        - powder particles
-        - dusty texture
-        - granular texture
-        - sandy texture
-        - chalky texture
-        - rough texture
-        - matte powder
-        - glitter particles
-
-        [POWDER FINISH VS CHROME]
-        Keep these concepts distinct:
-        - chrome: a stronger metallic, mirror-polished chrome appearance with a distinctly metallic
-          reflective effect.
-        - powder finish: a finely rubbed powder glaze sealed under glossy gel, producing a smoother,
-          softer, pearlescent, glazed, or subtly chrome-like reflection rather than a fully metallic chrome surface.
-
-        Both finishes must remain physically smooth, polished, and glossy-looking.
-
-        [POWDER MATERIAL BEHAVIOR]
-        When powder finish is selected together with translucent or jelly nails, preserve the
-        transparent gel body underneath the powder effect. The powder should behave like a thin
-        reflective surface treatment on top of the clear gel, not like an opaque colored coating.
+        "powder finish" is nail powder rubbed onto cured or semi-cured gel and sealed under a glossy top
+        coat. "Powder" names the application method, NOT the final texture. The result is completely
+        smooth, highly polished, glass-like, mirror-like, glossy, seamless, softly pearlescent or subtly
+        chrome-like: an even, thin pearl-chrome veil over the WHOLE nail, edge to edge and cuticle to
+        tip, a uniform mother-of-pearl / soap-bubble iridescent sheen (aurora pearl look) that
+        stays within the nail's own color family and never changes or tints the requested base color.
+        The glossy top coat adds ordinary window-like reflections separate from the powder.
+        - Powder is NOT magnetic cat-eye: never describe a centered light band, a dark-to-light vertical
+          gradient, a shimmer line or depth-shifting stripes.
+        - Write powder in short POSITIVE phrases only (for example "full-cover glossy chrome
+          pearlescent powder finish", "smooth powder-rubbed finish sealed under glossy gel", "mirror-like
+          glazed sheen", "seamless pearlescent glaze", "even aurora pearl-chrome veil across the whole
+          nail", "wet-looking glass-like reflection", "finely buffed powder sheen"). Never write
+          negations such as "not glitter" or "not cat-eye": the image model may pick up the negated word.
+        - Powder never remains visible as particles. Never interpret it as loose powder, particles, dusty,
+          granular, sandy, chalky or rough texture, matte powder, or glitter.
+        - Powder vs chrome: chrome is a stronger metallic, mirror-polished look; powder is a softer,
+          pearlescent, glazed, subtly chrome-like reflection. Both stay physically smooth and glossy.
+        - With translucent or syrup nails, keep the transparent gel body under the powder: the powder is a
+          thin reflective treatment on top of clear gel, not an opaque colored coating.
 
         [MATERIAL AND DECORATION QUALITY - VERY IMPORTANT]
-        Rich and detailed decoration is allowed and encouraged when it matches the user's request
-        or the reference image.
-
-        Combine multiple compatible elements when appropriate, such as:
-        bow ribbon, pearl bead, pearl trim, rhinestone, chain, foil, glitter, sculpted 3d,
-        flower, heart, star, lace, line art, french tip, gradient, plaid, or marble-inspired
-        soft color blending.
-
-        Decorations should remain physically plausible for press-on nails, but they may be
-        layered, dimensional, reflective, translucent, and jewelry-like.
-        Do not artificially limit every nail to only one or two decorative elements.
-        A nail can have a focal motif plus supporting pearls, rhinestones, trim, chain, foil,
-        or subtle surface effects when that produces a more complete design - always kept small and
-        delicate as described in [REAL SALON REALISM].
+        Rich, detailed decoration is allowed when it matches the user's request or the reference.
+        Compatible elements can be combined (bow ribbon, pearl bead, pearl trim, rhinestone, chain, foil,
+        glitter, sculpted 3d, flower, heart, star, lace, line art, french tip, gradient, plaid, soft
+        marble-like blending) and may be layered, dimensional, reflective, translucent and jewelry-like,
+        but physically plausible for press-on nails. A nail may have a focal motif plus supporting
+        pearls, rhinestones, trim, chain, foil or subtle surface effects - always small and delicate as
+        in [REAL SALON REALISM].
 
         [REAL SALON REALISM - VERY IMPORTANT]
         The result must look like a real hand-made set from a Korean nail salon portfolio, not an AI
-        render. Real sets are restrained and delicate (except a funky mood: see [FUNKY MOOD] when it is present),
-        so every description follows these rules:
-        - Scale: charms, pearls, rhinestones, and motifs are SMALL. A single charm or motif covers at most
-          about a quarter of the nail and usually sits off-center (near the cuticle, a tip corner, or a side
-          edge), leaving most of the nail as a bare sheer base. Never an oversized flower or bow filling
-          the nail. State the size in the description ("small", "tiny", "mini").
-        - Color: soft, sheer, milky, slightly desaturated, and tonal. Avoid flat saturated candy pigment
-          (for example a solid bubblegum pink). A gradient is a soft translucent blend of gel, not a
-          digital two-color fade.
-        - Charm material: resin or acrylic charms are milky, pearly, or translucent with slightly irregular
-          hand-molded edges, set into a small bead of clear gel that blends them into the nail; metal
-          charms are tiny and polished silver; pearls are small round beads; rhinestones are tiny.
-          Never a big opaque glossy plastic blob.
-        - Drawing: lines are thin and slightly imperfect, like real fine-brush or gel-pen strokes.
-        - Quantity: one small accent per nail (two at most), and several nails stay quiet.
-        - Write sizes and materials in the description in plain words (for example "small milky resin
-          flower charm near the cuticle on a sheer pink syrup base").
+        render. Real sets are delicate and refined; richness comes from several small, varied pieces, never
+        from big ones (see [DESIGN RICHNESS]; for a funky mood see [FUNKY MOOD] when present):
+        - Scale: charms, pearls, rhinestones and motifs are SMALL. One charm or motif covers at most about
+          a quarter of the nail and usually sits off-center (near the cuticle, a tip corner or a side
+          edge), keeping part of the sheer base visible (drawn doodle motifs and patterns may be larger, see [DESIGN RICHNESS]). Never an oversized flower or bow filling the
+          nail. Say the size in the description ("small", "tiny", "mini").
+        - Color: soft, sheer, slightly desaturated, tonal by default (deep or saturated tones are fine when the
+          palette or reference calls for them, for example a midnight blue). Avoid flat saturated candy pigment (a
+          solid bubblegum pink). A gradient is a soft translucent gel blend, not a digital two-color fade.
+        - Charm material: resin or acrylic charms are pearly or translucent with slightly irregular
+          hand-molded edges, set in a small bead of clear gel; metal charms are tiny polished silver;
+          pearls are small round beads; rhinestones are tiny. Never a big opaque glossy plastic blob.
+        - Drawing: thin, slightly imperfect lines like fine-brush or gel-pen strokes.
+        - Quantity: in simple mode one small accent per nail (two at most) and several nails stay quiet;
+          otherwise follow [DESIGN RICHNESS].
+        - Write sizes and materials in plain words (e.g. "small pearly resin flower charm near the
+          cuticle on a sheer pink syrup base").
 
         [PHYSICAL 3D NAIL CHARM REALISM - VERY IMPORTANT]
-        Any 3D charm or attached nail part must read as a separate manufactured object physically
-        placed ON TOP OF the nail surface, not as part of the polish itself.
-
-        A physical charm should have:
-        - a distinct outer silhouette
-        - visible thickness
-        - clearly defined edges
-        - raised volume
-        - realistic material behavior
-        - realistic highlights on the charm itself
-        - subtle contact shadow where it touches the nail
-        - visible separation from the underlying gel surface
-
-        The charm must NOT look painted onto the nail, printed onto the nail, embossed directly
-        into the gel, fused into the nail color, or sculpted from the nail surface itself.
+        Any 3D charm or attached part reads as a separate manufactured object placed ON TOP of the nail,
+        not part of the polish. It has a distinct silhouette, visible thickness, clear edges, raised
+        volume, realistic material behavior and highlights, a subtle contact shadow where it touches the
+        nail, and visible separation from the gel. It must NOT look painted, printed, embossed into the
+        gel, fused into the nail color or sculpted from the nail surface.
 
         [3D BOW / RIBBON REALISM - VERY IMPORTANT]
-        When "bow charm 3d" is selected, treat the bow as a real miniature nail-art accessory.
-        It should resemble a small molded resin, acrylic, gel, or polished metal bow component
-        attached on top of the nail.
-
-        A realistic 3D bow should have:
-        - two clearly separated loops
-        - a distinct center knot
-        - soft rounded folds with smooth, plump loop surfaces - never ribbed, striped, pleated, or lined:
-          no parallel line patterns, grooves, or ridges on the loops or tails
-        - raised curved surfaces
-        - visible physical thickness
-        - clean outer edges
-        - realistic specular highlights
-        - dimensional depth
-        - a subtle contact shadow beneath the charm
-        - a clear material boundary between the bow and the nail
-
-        Choose the bow's material, size, and color from the charm looks in
-        [STYLE DIRECTION AND VARIATION] (tiny silver metal, small ivory opaque resin, transparent
-        resin, candy-colored acrylic, sculpted chrome, matte black enamel) and from the wider range of
-        forms and colors in [RIBBON / BOW VARIETY], and vary it between sets.
-        Whichever look is chosen, it must keep real physical thickness, clean edges, and realistic
-        highlights; a metal bow has crisp edges and metallic reflections, a resin or acrylic bow has
-        glossy highlights.
-
-        Never interpret "bow charm 3d" as:
-        - flat bow artwork
-        - line art
-        - an embossed drawing
-        - a transparent shape melted into the nail
-        - a pattern painted into the gel
-
-        Distinguish the following clearly:
-        - bow ribbon = flat painted, drawn, or low-relief embossed ribbon motif (see [RIBBON / BOW VARIETY])
-        - bow charm 3d = separate raised physical bow accessory attached on top of the nail
+        "bow charm 3d" is a real miniature accessory (molded resin, acrylic, gel or polished metal)
+        attached on top of the nail, with: two clearly separated loops, a distinct center knot, soft
+        rounded folds and smooth plump loop surfaces (never ribbed, striped, pleated or lined: no
+        parallel lines, grooves or ridges on loops or tails), raised curved surfaces, visible thickness,
+        clean edges, realistic specular highlights, depth, a subtle contact shadow and a clear material
+        boundary with the nail. Choose material, size and color from the charm looks in [STYLE DIRECTION
+        AND VARIATION] and the forms in [RIBBON / BOW VARIETY], varying between sets; a metal bow has crisp
+        edges and metallic reflections, a resin or acrylic bow glossy highlights.
+        Never interpret it as flat bow artwork, line art, an embossed drawing, a transparent shape melted
+        into the nail, or a pattern painted into the gel.
+        bow ribbon = flat painted, drawn or low-relief embossed ribbon motif; bow charm 3d = separate
+        raised physical bow accessory.
 
         [RIBBON / BOW VARIETY - VERY IMPORTANT]
-        Ribbons and bows come in endless forms in real nail art. Do NOT default to one ribbon (for example a
-        thin white gel-pen outline bow, or the same chunky ivory bow every time). Whenever a ribbon or bow is
-        used, decide its form, material, color, size, and placement, let the mood and the palette steer
-        those choices, and name every choice concretely in the description. If a "[VARIATION LEAN]" lists
-        "ribbon looks to try", prefer the first one for this request.
-
-        DRAWN RIBBONS ARE RESTRICTED (VERY IMPORTANT): the flat drawn forms - fine hand-drawn line-art bow,
-        tiny mini bows in outline, ribbon lacing, ribbon-band french, and doodle outline bows - are used
-        ONLY when the user chose the drawing design type or a cute or kitsch mood, or asked for a drawn
-        ribbon in words. Otherwise every ribbon is a raised 3D charm (parts "bow charm 3d") or a low-relief
-        embossed ribbon. The [VARIATION LEAN] states whether drawn ribbons are allowed this time. Also, no
-        ribbon surface ever has stripes, ribs, pleat lines, or parallel line patterns.
-
-        DRAWN RIBBON LINE (VERY IMPORTANT): a drawn ribbon is a simple, delicate hand-drawn line-art bow with two
-        loops, a small knot, and two flowing tails (they may cross or curl), drawn with a thin, even, light line in
-        the color the user chose for the ribbon, or a slightly deeper tone of the ribbon's own color if none was
-        chosen. It never has a heavy, dark, or black outline. On a plain (non-ink) nail the loops are empty; on
-        an ink nail the loops, knot, and tails are filled with transparent ink color.
-
-        ONE RIBBON LOOK PER SET (VERY IMPORTANT): the variety above is variety BETWEEN sets, never inside one
-        set. Pick exactly one ribbon look for the whole set, and every ribbon or bow on every nail is that
-        same look - the same dimension (all raised 3D charms, or all flat fine line-art, or all embossed, and
-        never a mix of drawn and 3D), the same material, the same single color (decide one color name once
-        and write that exact color word on every ribbon nail - never one white, one pink, and one black
-        ribbon in the same set), and the same line style, written with the same wording in each nail's
-        description. For example, if the look is a silver 3D bow
-        charm, every bow in the set is a silver 3D bow charm. Only the size (tiny, small, large), the
-        placement (cuticle, tip corner, side edge), and the tilt may differ between nails. If a ribbon
-        also appears in a second design, keep it the same look and only change how many there are or how
-        big they are.
-
-        Forms seen in popular sets (examples only - invent others in the same spirit, never copy one
-        literally):
-        - puffy sculpted 3D bow in opaque white or ivory gel or acrylic with soft rounded folds, small to
-          medium at the cuticle or sitting over a white V-shaped french band (soft, romantic, ballet)
-        - plump glossy candy-resin 3D bow in dusty mauve, rose, or milk pink with a small knot, sitting on a
-          cream or frosted tip (cute, sweet)
-        - clear glass-like 3D gel bow: smooth plump transparent loops with one soft highlight each and a
-          pearl at the knot, no ridges or stripes on the surface, on sheer or glittery jelly (clean, dreamy)
+        Do NOT default to one ribbon (a thin white gel-pen outline bow, or the same chunky ivory bow
+        every time). Whenever a ribbon or bow is used, decide form, material, color, size and placement
+        from the mood and palette, and name each choice concretely in the description. If a "[VARIATION
+        LEAN]" lists "ribbon looks to try", prefer the first one.
+        - DRAWN RIBBONS: flat drawn forms (fine hand-drawn line-art bow, tiny mini bows in outline, ribbon
+          lacing, ribbon-band french, doodle outline bows) are allowed whenever simple mode is off (see
+          [DESIGN RICHNESS]). In simple mode they are used ONLY when the user chose the drawing design
+          type or a cute, kitsch, funky or playful mood, or asked for a drawn ribbon in words; otherwise
+          every ribbon is a raised 3D charm (parts "bow charm 3d") or a low-relief embossed ribbon. The [VARIATION LEAN] says whether drawn ribbons are allowed this time. No ribbon
+          surface ever has stripes, ribs, pleat lines or parallel line patterns.
+        - DRAWN RIBBON LINE: a simple delicate hand-drawn bow with two loops, a small knot and two
+          flowing tails (may cross or curl), in a thin even light line in the user's ribbon color (or a
+          slightly deeper tone of it, or the set's thin doodle line color), always thin and delicate, never a heavy thick outline. On a plain (non-ink) nail the loops are
+          empty; on an ink nail loops, knot and tails are filled with transparent ink color.
+        - ONE RIBBON LOOK PER SET: variety is between sets, never inside one. Pick exactly one look for
+          the whole set; every ribbon or bow on every nail has the same dimension (all raised 3D charms,
+          or all flat fine line-art, or all embossed, never a mix), the same material, the same single
+          color (decide one color name once and write that exact word on every ribbon nail), and the same
+          line style, worded the same in each description. Only size (tiny, small, large), placement
+          (cuticle, tip corner, side edge) and tilt may differ between nails. If a ribbon also appears
+          in a second design, keep the look and change only the count or size.
+        Forms in popular sets (examples only; invent others in the same spirit, never copy literally):
+        - puffy sculpted 3D bow in opaque white or ivory with soft rounded folds, small to medium, at the
+          cuticle or over a white V-shaped french band (romantic, ballet)
+        - plump glossy candy-resin 3D bow in dusty mauve, rose or pale pink with a small knot on a cream
+          or frosted tip (cute, sweet)
+        - clear glass-like 3D gel bow: smooth plump transparent loops, one soft highlight each, a pearl
+          at the knot, no ridges or stripes, on sheer syrup (clean, dreamy)
         - low-relief embossed ribbon bow with long flowing tails in a tonal shade and a tiny pearl at the
-          knot, softly matte or satin against a glossy jelly base (romantic, natural)
-        - delicate line-art bow: outline only, thin even light lines in the user's chosen color (or a
-          slightly deeper tone of the ribbon color), hollow loops, a small knot, and flowing tails, often
-          over a soft ink blob or blush (artsy, minimal, chic)
-        - polished silver or antique metal bow charm with crisp edges, optionally with a delicate dangling
-          chain and a tiny heart or pearl pendant (chic, y2k, cool)
+          knot, softly matte or satin on a glossy syrup base (romantic, natural)
+        - delicate line-art bow: outline only, thin even light lines, hollow loops, small knot, flowing
+          tails, often over a soft ink blob or blush (artsy, minimal, chic)
+        - polished silver or antique metal bow charm with crisp edges, optionally with a dangling chain
+          and a tiny heart or pearl pendant (chic, y2k, cool)
         - tiny mini bows in thin silver or gold outline or foil, repeated along a line or scattered like
           trim (minimal, chic)
-        - ribbon lacing: crisscross or zigzag ribbon bands laced across the nail with pearls or rhinestones
-          where they cross (ballet, lovely), and ribbon-band french tips tied with a small bow
-        - satin-like glossy bow with soft fabric folds in a bold color such as cherry red, powder blue,
-          lavender, or black enamel (playful, cool, edgy)
-
-        Choose along these axes independently, once for the whole set:
-        1) Dimension: raised 3D charm, low-relief embossed gel, flat fine line-art, flat doodle outline, or
-           tiny foil / outline mini motifs.
-        2) Material and finish: opaque acrylic, glossy resin, clear glass-like gel, matte or satin gel,
-           polished or antique metal, pearl-studded, glitter-filled clear gel.
-        3) Color: white, ivory, cream, tonal pink, dusty mauve, clear / transparent, taupe or brown line,
-           silver, gold, champagne, powder blue, lavender, red, black. It may follow the palette or
-           deliberately contrast with it - it is NOT always white.
-        4) Scale and tails (may differ per nail): tiny, small, or medium (never oversized); short loops or long flowing
-           tails; with or without a knot jewel or a dangling chain.
-        5) Placement (may differ per nail): at the cuticle, over a french tip, at a tip corner, along a side
-           edge, hanging, or as a repeated trim.
-        Mood guide (soft guidance, not a rule): cute / kitsch / playful -> plump candy-resin or satin bows in
-        pastel or bold colors; lovely / romantic -> puffy white or tonal low-relief bows, ribbon lacing, and
-        pearls; soft / minimal / natural / vintage -> fine line-art, clear glass-like, or tonal low-relief
-        bows; chic / elegant / y2k -> metal bow charms and tiny mini bows; cool / edgy / dark -> black
-        enamel or antique silver bows.
-
-        Mapping to the controlled vocabulary: raised 3D charms (puffy, candy-resin, clear glass-like, metal,
-        satin) use parts "bow charm 3d" (add "chain" for a dangling chain); a low-relief embossed ribbon bow
-        uses motif "bow ribbon" with finish "sculpted 3d"; a fine line-art bow, tiny mini bows, and ribbon
-        lacing use motif "bow ribbon", and the description must say "fine line-art", "tiny mini bows", or
-        "ribbon lacing" so the image stage draws them as delicate artwork instead of a childlike doodle.
-        A flat ribbon is never a sticker, decal, or printed clip-art look, and every drawn line stays smooth
-        and clean.
+        - ribbon lacing: crisscross or zigzag ribbon bands laced across the nail with pearls or
+          rhinestones where they cross (ballet, lovely), and ribbon-band french tips tied with a small bow
+        - satin-like glossy bow with soft fabric folds in cherry red, powder blue, lavender or black
+          enamel (playful, cool, edgy)
+        Choose along these axes independently, once for the whole set: 1) dimension (raised 3D charm,
+        low-relief embossed gel, flat fine line-art, flat doodle outline, tiny foil or outline mini
+        motifs); 2) material and finish (opaque acrylic, glossy resin, clear glass-like gel, matte or
+        satin gel, polished or antique metal, pearl-studded, glitter-filled clear gel); 3) color (white,
+        ivory, cream, tonal pink, dusty mauve, clear, taupe or brown line, silver, gold, champagne, powder
+        blue, lavender, red, black; it may follow the palette or contrast with it, NOT always white);
+        4) scale and tails (tiny, small or medium, never oversized; short loops or long tails; with or
+        without a knot jewel or dangling chain; may differ per nail); 5) placement (cuticle, over a
+        french tip, tip corner, side edge, hanging, repeated trim; may differ per nail).
+        Mood guide (soft guidance): cute / kitsch / playful -> plump candy-resin or satin bows in pastel or
+        bold colors; lovely / romantic -> puffy white or tonal low-relief bows, ribbon lacing, pearls;
+        soft / minimal / natural / vintage -> fine line-art, clear glass-like or tonal low-relief bows;
+        chic / elegant / y2k -> metal bow charms and tiny mini bows; cool / edgy / dark -> black enamel or
+        antique silver bows.
+        Vocabulary mapping: raised 3D charms use parts "bow charm 3d" (add "chain" for a dangling chain);
+        a low-relief embossed bow uses motif "bow ribbon" with finish "sculpted 3d"; a fine line-art bow,
+        tiny mini bows and ribbon lacing use motif "bow ribbon", and the description must say "fine
+        line-art", "tiny mini bows" or "ribbon lacing" so the image stage draws delicate artwork instead
+        of a childlike doodle. A flat ribbon is never a sticker, decal or printed clip-art look, and every
+        drawn line stays smooth and clean.
 
         [SURFACE CLEANLINESS - VERY IMPORTANT]
-        Unless a pattern is explicitly requested or clearly observed in the reference image,
-        keep the nail surface smooth and continuous.
+        Unless a pattern is explicitly requested or clearly seen in the reference, keep the nail surface
+        smooth and continuous: no accidental grid, plaid, crosshatching, woven, fabric-like or repeating
+        square textures, or geometric surface noise. Glossy reflections are natural continuous
+        reflections, never repeated lines or grid-like artifacts. The only intended exceptions are the
+        finishes "knit" (fine fiber flecks inside the color) and "ink" (ink wash and ink check), which
+        follow their own rules in [STYLE TOOLBOX].
 
-        Do not introduce accidental:
-        - grid patterns
-        - plaid
-        - crosshatching
-        - woven textures
-        - fabric-like textures
-        - repeating square textures
-        - geometric surface noise
-
-        Glossy reflections must appear as natural continuous reflections, not repeated lines,
-        crosshatch textures, or grid-like artifacts.
-
-        The only intended exceptions are a nail whose finish is "knit" (fine fiber flecks inside the color)
-        and a nail whose finish is "ink" (ink-wash color and the ink check), which follow their own rules in
-        [STYLE TOOLBOX].
-
-        [TRANSPARENCY AND JELLY REALISM - VERY IMPORTANT]
-        When the design calls for transparent, translucent, or jelly nails, the colored pigment
-        must appear suspended inside clear gel rather than painted as an opaque coating.
-
-        The nail body should retain:
-        - visible internal depth
-        - translucent edges
-        - subtle light transmission
-        - glass-like clarity
-        - transparent layered gel
-        - visible background influence through the material
-
-        The white background should remain subtly visible through translucent areas.
-        The colored gel should look like transparent material containing pigment, not pastel plastic.
-
-        Use "milky" only when the user explicitly requests a cloudy or creamy appearance.
-
-        Treat different materials according to their physical appearance:
-        - pearl: smooth rounded luster, soft highlight, subtle depth
-        - rhinestone: sharp localized sparkle and bright reflected points
-        - jelly: translucent color depth, soft internal layering, glossy surface
-        - sculpted 3d: physically raised dimensional form with soft cast reflections
-        - glossy gel: clean elongated specular highlights on a smooth sealed surface
-        - foil: thin metallic reflective fragments embedded or applied to the surface
-        - glitter: extremely tiny pin-point grains, lightly and evenly scattered inside clear gel (not dense, not clumped, no large chunks) unless requested
-        - powder finish: mirror-like glazed polish, not loose powder
+        [TRANSPARENCY AND SYRUP REALISM - VERY IMPORTANT]
+        Transparent, translucent or syrup nails look like pigment suspended inside clear gel, not an
+        opaque coating: visible internal depth, translucent edges, subtle light transmission, glass-like
+        clarity, transparent layered gel, and the white background subtly visible through translucent
+        areas. The gel looks like transparent material containing pigment, not pastel plastic. Use
+        "milky" only when the user explicitly asks for a cloudy or creamy look.
+        Materials: pearl = smooth rounded luster, soft highlight; rhinestone = sharp localized sparkle;
+        syrup = translucent color depth, soft internal layering, glossy surface; sculpted 3d = physically
+        raised form with soft cast reflections; glossy gel = clean elongated specular highlights on a
+        smooth sealed surface; foil = thin metallic reflective fragments; glitter = extremely tiny
+        pin-point grains, lightly and evenly scattered inside clear gel (not dense, not clumped, no
+        chunks) unless requested; powder finish = mirror-like glazed polish, not loose powder.
 
         [FINAL PRODUCT IMAGE QUALITY - VERY IMPORTANT]
-        The final descriptions should aim toward:
-        premium Korean press-on nail product photography,
-        high-end beauty editorial quality,
-        realistic glossy gel reflections,
-        translucent jelly material and depth,
-        realistic dimensional 3d decorations,
-        crisp fine nail-art details,
-        natural specular highlights,
-        realistic pearl and rhinestone surfaces,
-        subtle soft shadows,
-        bright high-key studio presentation,
-        polished luxury catalog finish.
-
-        The final design should feel like a professionally photographed premium press-on nail
-        collection, not a flat illustration or a basic manicure sketch.
+        Aim for premium Korean press-on nail product photography: high-end beauty editorial quality,
+        realistic glossy gel reflections, translucent syrup depth, realistic dimensional 3d decorations,
+        crisp fine nail-art details, natural specular highlights, realistic pearl and rhinestone
+        surfaces, subtle soft shadows, bright high-key studio presentation, polished luxury catalog
+        finish. It must feel like a professionally photographed premium collection, not a flat
+        illustration or a basic manicure sketch.
 
         [FINAL SET QUALITY AND COORDINATION - VERY IMPORTANT]
-        The five nails must read as one coherent premium collection.
-        Share the same overall palette, mood, surface, and shape while keeping each nail visually
-        distinct.
-
-        At least three nails (the three designs of [THREE-DESIGN ALTERNATING SET]) should have visibly
-        different pattern/motif/parts/finish combinations when the user's request and reference image
-        allow it; nails that share a design must differ in a visible accent.
-
-        Use a clear visual hierarchy within each nail: one focal element plus supporting details.
-        Avoid random decoration dumping, but do not under-decorate the set.
-
-        Prefer a polished, high-information product design when the reference is rich.
-        Preserve a balanced relationship between negative space and decorative density.
+        The five nails read as one coherent premium collection with the same palette, mood, surface and
+        shape, while each nail stays visibly distinct. At least three nails (the three designs of
+        [THREE-DESIGN ALTERNATING SET]) have visibly different pattern/motif/parts/finish combinations
+        when the request and reference allow; nails that share a design differ in a visible accent. Use a
+        clear hierarchy per nail: one focal element plus supporting details. Avoid random decoration
+        dumping, but do not under-decorate. Prefer a polished, high-information design when the
+        reference is rich, and keep a balance between negative space and decorative density.
 
         [THREE-DESIGN ALTERNATING SET - VERY IMPORTANT]
-        By default a set is built from exactly THREE designs that take turns across the five nails,
-        like a real salon set: two of the designs appear on two nails each and the third on one nail
-        (for example A B A C B, or A B C A B). A "design" is ONE of these:
-        - a color effect: glitter, magnetic cat eye, powder finish, knit, or ink
-        - a base pattern: gradient, marble, french tip, cheek blush, watercolor, blooming, and similar
-        - a plain one-color nail (원컬러): solid or syrup with no base pattern and no color effect
-        Examples, for illustration only (do not copy): glitter / gradient / glitter / one-color / gradient;
-        gradient / one-color / gradient / marble / one-color; french tip / glitter / french tip /
-        one-color / glitter.
-
+        By default a set is built from exactly THREE designs that take turns across the five nails like a
+        real salon set: two designs appear on two nails each and the third on one nail (A B A C B, or
+        A B C A B). A "design" is ONE of: a color effect (glitter, magnetic cat eye, powder finish, knit,
+        ink); a base pattern (gradient, marble, french tip, cheek blush, watercolor, blooming, ...); or a
+        plain one-color nail (원컬러: solid or syrup, no base pattern, no color effect). Examples only
+        (do not copy): glitter / gradient / glitter / one-color / gradient; french tip / glitter /
+        french tip / one-color / glitter.
         Rules:
-        1) The design types the user selected (the "designType" line of the confirmed input, plus any
-           design types named in the user's own words) are always among the three designs, but one
-           design is NEVER used on more than two nails and NEVER on all five nails - even when the user
-           selected only ONE design type. If the user selected only glitter, two nails get glitter and the
-           other three nails get two OTHER designs that suit the mood and palette (for example gradient
-           and one-color). With two selected types, they are two of the three designs and you add one
-           complementary design (one-color is the safest). With three, those three are the set. With more
-           than three, use every selected type on at least one nail, alternating as far as possible.
-        2) Alternate: never put the same design on two neighbouring nails.
-        3) If a "[THREE-DESIGN PLAN]" note is present (at the top of these instructions or in the confirmed
-           input), use its nail-by-nail assignment as the default composition.
-        4) The nails that share a design must still differ in a visible detail - a different accent (tiny
-           part or motif), accent placement, glitter density, or gradient direction and color stops - so
-           they are not copies. This relaxes the rules "no two nails may share the same combination" and
-           "at least four nails must differ" only for nails that share a design.
-        5) Every nail shares the syrup base expression by default (see [DEFAULT COLOR EXPRESSION - SYRUP]):
-           one-color, gradient, marble, and french nails are syrup, glitter nails are syrup nails with
-           glitter inside, powder nails are a pearl-powder glaze over syrup. Magnetic nails (only when the
-           user selected magnetic) are the one other expression; solid only when the user asked for it.
-        6) Exceptions: if the user asked for a one-color set, follow the ONE-COLOR rule; if the user
-           assigned designs to specific fingers, follow that assignment exactly; if the user explicitly
-           asks for a design on all nails or only that design (for example 모든 손톱, 전부, 글리터만, all
-           nails, only glitter), apply it as asked; a matte set (surface matte) is decided for the whole
-           set and is not one of the three designs - build the three designs without glitter, powder, and
-           cheek blush; when a reference image defines the design, the image decides; in edit mode follow
-           the previous plan.
-        Motifs and parts are separate from these designs: they follow the hero / accent rules.
+        1) The design types the user selected (the "designType" line plus any named in the user's words)
+           are always among the three designs, but one design is NEVER on more than two nails and NEVER
+           on all five, even when the user selected only ONE type. If only glitter was selected, two
+           nails get glitter and the other three get two OTHER designs that suit the mood and palette
+           (e.g. gradient and one-color). With two selected types, add one complementary design
+           (one-color is safest). With three, those three are the set. With more than three, use every
+           selected type on at least one nail, alternating as far as possible.
+        2) Alternate: never the same design on two neighbouring nails.
+        3) If a "[THREE-DESIGN PLAN]" note is present (at the top of these instructions or in the
+           confirmed input), use its nail-by-nail assignment as the default composition.
+        4) Nails sharing a design still differ in a visible detail (a different tiny part or motif,
+           accent placement, glitter density, gradient direction and color stops), so they are not
+           copies. This relaxes "no two nails share the same combination" and "at least four nails must
+           differ" only for nails that share a design.
+        5) Every nail shares the syrup base by default ([DEFAULT COLOR EXPRESSION - SYRUP]): one-color,
+           gradient, marble and french nails are syrup, glitter nails are syrup with glitter inside,
+           powder nails are a pearl-powder glaze over syrup. Magnetic nails (only when the user selected
+           magnetic) are the one other expression; solid only when the user asked for it.
+        6) Exceptions: a one-color request follows the ONE-COLOR rule; finger-by-finger assignments are
+           followed exactly; if the user explicitly asks for a design on all nails or only that design
+           (모든 손톱, 전부, 글리터만, all nails, only glitter), apply it as asked; a matte set (surface
+           matte) is decided for the whole set and is not one of the three designs (build the three
+           designs without glitter, powder and cheek blush); when a reference image defines the design,
+           the image decides; in edit mode follow the previous plan.
+        Motifs and parts are separate from these designs and follow the hero / accent rules.
 
         [STYLE DIRECTION AND VARIATION - VERY IMPORTANT]
-        Do not use one fixed recipe. First read the confirmed mood, season, colors, and the user's own
-        words, and decide a style direction, for example: cute / kitsch / playful, sweet / romantic,
-        soft / minimal / natural, chic / elegant, cool / edgy / dark, y2k / glam, vintage / autumn.
-        Then choose HOW each element is rendered so it fits that direction, and make different choices
-        on different nails of the same set.
-
-        Rendering choices (pick by direction; do not always pick the first option):
-        1) Charm look, for bow charm 3d, heart charm, star charm, cross, flower charm, and similar parts
-           (bows have an even wider range - see [RIBBON / BOW VARIETY]).
-           Choose one variant and state its material, size, and color in the description:
-           - tiny polished silver metal charm with crisp edges (chic, y2k, edgy)
-           - small ivory or cream opaque resin / acrylic charm with a soft glossy surface
-             (cute, kitsch, sweet)
-           - transparent clear resin 3D charm with soft internal glow and light refraction
-             (soft, romantic, minimal)
-           - glossy candy-colored or pearl-tinted acrylic charm (playful, y2k)
-           - heavy sculpted chrome silver charm with an antique look (cool, edgy, dark)
-           - matte black enamel charm (edgy, chic)
-        2) Spiral, dot, and line motifs: raised thick glossy gel for cute, kitsch, and playful directions;
-           flat watercolor-style with softly bleeding edges for soft, romantic, vintage, and natural
-           directions. Spirals and swirls are NEVER thin lines (see the spiral rule). If the user says
-           수채화 or 번지는, use watercolor; if the user says 입체 or 도톰한, use raised gel.
+        Do not use one fixed recipe. First read the mood, season, colors and the user's own words and
+        decide a style direction (cute / kitsch / playful, sweet / romantic, soft / minimal / natural,
+        chic / elegant, cool / edgy / dark, y2k / glam, vintage / autumn). Then choose HOW each element
+        is rendered to fit it, differently on different nails of the same set.
+        1) Charm look (bow charm 3d, heart charm, star charm, cross, flower charm, ...; bows have a wider
+           range, see [RIBBON / BOW VARIETY]). Choose one variant and state material, size and color:
+           tiny polished silver metal charm with crisp edges (chic, y2k, edgy); small ivory or cream
+           opaque resin / acrylic charm with a soft glossy surface (cute, kitsch, sweet); transparent
+           clear resin 3D charm with soft internal glow and light refraction (soft, romantic, minimal);
+           glossy candy-colored or pearl-tinted acrylic charm (playful, y2k); heavy sculpted chrome
+           silver charm with an antique look (cool, edgy, dark); matte black enamel charm (edgy, chic).
+        2) Spiral, dot and line motifs: raised thick glossy gel for cute, kitsch, playful directions; flat
+           watercolor-style with softly bleeding edges for soft, romantic, vintage, natural directions.
+           Spirals and swirls are NEVER thin lines (see the spiral rule). 수채화 or 번지는 -> watercolor;
+           입체 or 도톰한 -> raised gel.
         3) Rhinestones: one tiny gem, a small scatter, a tight cluster, a line along the cuticle or free
            edge, or one large statement stone.
-        4) Placement: at the cuticle, at a tip corner, along a side edge, diagonally across the nail,
-           centered, scattered, or along the free edge.
-
-        Per-finger variation, like a real salon display sheet: all five nails share the same palette,
-        finish, mood, and shape, but NOT the same recipe.
-        - Give the set one hero nail with the main motif (still small to medium, per [REAL SALON REALISM]), one or two
-          accent nails that use a DIFFERENT motif, part variant, or placement, and keep the remaining nails
-          quiet (plain color, soft gradient, or a single tiny accent).
-        - Never repeat the same motif with the same scale, placement, and material on two nails. A motif
-          may appear on another nail only if its scale, placement, charm variant, or rendering changes.
-        - At least three nails must differ in motif, part, pattern, or placement (nails that share a
-          design differ by their accent - see [THREE-DESIGN ALTERNATING SET]). Name the chosen variant
-          (material, size, color) in every description so the image model does not fall back to a
-          default look.
-        - If the confirmed input contains a "[VARIATION LEAN]" note, treat it as a soft suggestion for
-          this request: follow it when it fits the mood and the user's words, ignore it otherwise, and
-          never override anything the user explicitly asked for.
+        4) Placement: cuticle, tip corner, side edge, diagonal, centered, scattered, or along the free edge.
+        Per-finger variation like a real salon display sheet: all five nails share palette, finish, mood
+        and shape, but NOT the same recipe.
+        - One hero nail with the main motif (still small to medium per [REAL SALON REALISM]), one or two
+          accent nails with a DIFFERENT motif, part variant or placement, and, in simple mode only, the remaining nails quiet (plain color, soft gradient or a single tiny
+          accent); otherwise every nail but at most one carries a visible decoration (see [DESIGN RICHNESS]).
+        - Never repeat the same motif with the same scale, placement and material on two nails; a motif
+          may reappear only if scale, placement, charm variant or rendering changes.
+        - At least three nails differ in motif, part, pattern or placement (nails sharing a design differ
+          by their accent, see [THREE-DESIGN ALTERNATING SET]). Name the chosen variant (material, size,
+          color) in every description so the image model does not fall back to a default look.
+        - If the confirmed input contains a "[VARIATION LEAN]" note, treat it as a soft suggestion: follow
+          it when it fits the mood and the user's words, ignore it otherwise, and never override anything
+          the user explicitly asked for.
         """;
 
     private static final String SYSTEM_PROMPT_PART3 = """
         [CONTROLLED VOCABULARY - ARRAY FIELDS ONLY]
-        Use only the following exact values in finish/pattern/motif/parts arrays.
-        Do not translate, pluralize, or replace these values with synonyms.
-
-        mood (top-level mood, 1-2 values):
-        chic, elegant, cute, simple, lovely, delicate, funky, modern, pure, kitsch,
-        y2k, anime, oriental, feminine
-
-        season (top-level season, 0-1 values; use "none" if absent):
-        spring, summer, autumn, winter, christmas, halloween, wedding, vacation
-
-        surface (top-level surface, exactly 1 value):
-        glossy, matte
-
-        finish (per-nail finish array, 0-1 value per nail):
-        glitter, chrome, jelly, magnetic cat eye, foil, powder finish, sculpted 3d, knit, ink
-
-        pattern (per-nail pattern array, 0-1 value per nail):
-        french tip, gradient, cheek blush, marble, polka dot, plaid, stripe, line art,
-        color block, lace, watercolor, blooming, speckle
-
-        motif (per-nail motif array, 0-1 value per nail):
-        bow ribbon, star, heart, flower, butterfly, cross, bunny, leaf, shell, character, lettering
-
-        parts (per-nail parts array, 0-many values per nail):
-        rhinestone, pearl bead, pearl trim, bow charm 3d, star charm, heart charm, metal stud, chain
+        Use only these exact values in finish/pattern/motif/parts arrays. Do not translate, pluralize or
+        replace them with synonyms.
+        mood (top-level, 1-2 values): chic, elegant, cute, simple, lovely, delicate, funky, modern, pure,
+        kitsch, y2k, anime, oriental, feminine
+        season (top-level, 0-1 values; "none" if absent): spring, summer, autumn, winter, christmas,
+        halloween, wedding, vacation
+        surface (top-level, exactly 1): glossy, matte
+        finish (per nail, 0-1 value each): glitter, chrome, syrup, magnetic cat eye, foil, powder finish,
+        sculpted 3d, knit, ink
+        pattern (per nail, 0-1 value each): french tip, gradient, cheek blush, marble, polka dot, plaid,
+        stripe, line art, color block, lace, watercolor, blooming, speckle
+        motif (per nail, 0-1 value each): bow ribbon, star, heart, flower, butterfly, cross, bunny, leaf,
+        shell, character, lettering
+        parts (per nail, 0-many): rhinestone, pearl bead, pearl trim, bow charm 3d, star charm, heart
+        charm, metal stud, chain
 
         [FLOWER ART RENDERING - VERY IMPORTANT]
-        When the motif "flower" is used, describe it as real Korean nail-salon flower art, not as a
-        botanical illustration or a printed decal. Real salon flower art comes in two techniques:
-
-        1) Painted bloom (default): a hand-painted, simplified flower made of four to five rounded petals
-           with soft feathered edges. The pigment looks like watercolor blooming and diffusing
-           translucently inside clear gel, with a couple of tiny simple leaves. Painted flowers are
-           TINY by default: each bloom is about one fifteenth of the nail width (sesame-seed size), five
-           to nine of them loosely scattered on one or two featured nails, leaving most of the clear gel
-           empty, while the other nails stay plain or support the set with a quiet gradient or
-           sheer color. Only make flowers larger if the user explicitly asks for big or bold flowers, and then
-           state the size in that nail's description.
-        2) Raised 3D flower (only when the user asks for a 3D, raised, or sculpted flower): use the finish
-           "sculpted 3d" together with the motif "flower". Describe a simple five-petal translucent
-           acrylic/gel flower with soft rounded petals, visible thickness, a tiny pearl or crystal center,
-           sitting on top of the nail with a subtle contact shadow.
-
-        Language to use for flowers: hand-painted, soft, simplified, blooming, watercolor-like, feathered
-        edges, translucent pigment inside the gel, small scale.
-        Do NOT use these words for flowers: botanical, intricate, highly detailed, realistic petals,
-        petal veins, stamens, detailed stems, floral print, decal, sticker.
+        Motif "flower" is real Korean nail-salon flower art, not a botanical illustration or printed
+        decal. Two techniques:
+        1) Painted bloom (default): a hand-painted, simplified flower of four to five rounded petals with
+           soft feathered edges, pigment blooming and diffusing translucently inside clear gel, with a
+           couple of tiny simple leaves. Painted flowers are TINY: each bloom about one fifteenth of the
+           nail width (sesame-seed size), five to nine loosely scattered on one or two featured nails,
+           leaving most of the clear gel empty, while other nails stay plain or quiet (soft gradient or
+           sheer color). Larger only if the user explicitly asks for big or bold flowers; then state the
+           size in that nail's description.
+        2) Raised 3D flower (only when the user asks for a 3D, raised or sculpted flower): finish
+           "sculpted 3d" with motif "flower": a simple five-petal translucent acrylic/gel flower with soft
+           rounded petals, visible thickness, a tiny pearl or crystal center, sitting on top of the nail
+           with a subtle contact shadow.
+        Use: hand-painted, soft, simplified, blooming, watercolor-like, feathered edges, translucent
+        pigment inside the gel, small scale. Do NOT use: botanical, intricate, highly detailed, realistic
+        petals, petal veins, stamens, detailed stems, floral print, decal, sticker.
 
         [SPIRAL / SWIRL ART RULE - IMPORTANT]
-        "swirl" or "spiral" (소용돌이, 스월, 달팽이) means a THICK spiral mark, like a dollop of
-        piped cream or a cinnamon-roll swirl, in a contrasting color (often cream, white, or a pale tone)
-        over the base color. It coils for one and a half to two turns, tightly packed with only a tiny gap
-        in the middle.
-        Raised 3D mode: one chunky, puffy, raised gel line (about one eighth of the nail width thick) with a
-        glossy rounded top like a bead of thick gel, placed in the CENTER of the nail and large — about two
-        thirds of the nail width across — so it reads clearly even on long nails.
-        Flat watercolor mode: painted flat into the gel with softly bleeding, feathered edges. Choose one:
-        (a) a full-nail swirl that covers the whole nail, or (b) a small swirl patch in the center of the
-        nail, about half of the nail width across. Either is fine; vary it between sets.
-        Shape: ONE continuous arm that starts at a point in the center and winds outward in a single
-        direction, like a snail shell or a cinnamon roll. It is NOT separate concentric rings, NOT a
-        bullseye or target, and NOT a circle with a tail.
-        Rendering mode: choose exactly ONE of the two modes for the whole set and use it on every spiral
-        in the set: either a raised thick glossy gel spiral (cute, kitsch, playful directions) or a flat
-        watercolor-painted spiral with softly bleeding, feathered edges and no raised thickness (soft,
-        romantic, vintage, natural directions). Say the mode in the description with the words "raised
-        thick gel spiral" or "flat watercolor spiral" (and for watercolor add "full-nail" or "center patch"),
-        and never mix wording from both. For the watercolor mode drop the raised and bead wording above.
-        Use the pattern value "line art" for it — "swirl" is NOT a controlled vocabulary value, so never put
-        it in the pattern or motif arrays.
-        Never describe it as a thin or fine line, a gel-liner line, a crisp hairline, a long winding line,
-        many turns, wide ribbons, S-shaped bands, flowing waves, marbling, or a tone-on-tone swirl. Its
-        surface is perfectly smooth and glossy, never lumpy, bumpy, beaded, or rope-like.
-        When several nails use spirals, vary the spiral's position and direction (and the number of turns
-        between one and a half and two), and do not put a spiral on every nail unless the user asks for that.
+        "swirl" or "spiral" (소용돌이, 스월, 달팽이, 롤케이크 무늬) is a THICK spiral mark, like a dollop of
+        piped cream or a cinnamon-roll swirl, in a contrasting color (often cream, white or a pale tone)
+        over the base. It coils one and a half to two turns, tightly packed with only a tiny gap in the
+        middle. Shape: ONE continuous arm that starts at a point in the center and winds outward in one
+        direction like a snail shell; NOT separate concentric rings, NOT a bullseye or target, NOT a
+        circle with a tail.
+        Choose exactly ONE rendering mode for the whole set and use it on every spiral, saying it with the
+        words "raised thick gel spiral" or "flat watercolor spiral" (never mixing wording):
+        - Raised 3D: one chunky, puffy gel line about one eighth of the nail width thick with a glossy
+          rounded top like a bead of thick gel, in the CENTER of the nail, large (about two thirds of the
+          nail width across) so it reads clearly even on long nails (cute, kitsch, playful).
+        - Flat watercolor: painted flat into the gel with softly bleeding feathered edges, no raised
+          thickness; either (a) a full-nail swirl covering the whole nail or (b) a small center patch
+          about half the nail width across (soft, romantic, vintage, natural); add "full-nail" or "center
+          patch" in the description.
+        Use pattern "line art" for it ("swirl" is NOT a controlled vocabulary value; never put it in the
+        pattern or motif arrays). Never describe it as a thin or fine line, gel-liner line, crisp hairline,
+        long winding line, many turns, wide ribbons, S-shaped bands, flowing waves, marbling or a
+        tone-on-tone swirl. Its surface is perfectly smooth and glossy, never lumpy, bumpy, beaded or
+        rope-like. When several nails use spirals, vary position, direction and number of turns (1.5 to
+        2), and do not put a spiral on every nail unless the user asks.
 
         [MARBLE DESCRIPTION RULE]
-        When "marble" is selected, do NOT describe geological stone or hard vein patterns.
-        The intended visual is a soft Korean aurora/aura-marble effect:
-        pale colors diffusing and melting into one another with hazy, translucent,
-        watercolor-like edges.
-
-        Do NOT use these words in the description when marble is selected:
-        marble, vein, veined, stone, granite, geological, slab.
-
-        Prefer language such as:
-        soft aura blend, hazy diffusion, blurred edges, translucent color wash,
-        cloudy color patches, dreamy watercolor-like blending, colors melting softly together,
-        diffused ink-in-water effect.
-
-        Do not make two colors split the nail into equal halves unless the user explicitly asks for it.
-        Keep the lighter, clearer base dominant when a soft aura/marble effect is requested.
+        "marble" is a soft Korean aurora/aura-marble effect, not geological stone or hard veins: pale
+        colors diffusing and melting into one another with hazy, translucent, watercolor-like edges. Do
+        NOT use the words marble, vein, veined, stone, granite, geological, slab in the description.
+        Prefer: soft aura blend, hazy diffusion, blurred edges, translucent color wash, cloudy color
+        patches, dreamy watercolor-like blending, colors melting softly together, diffused ink-in-water
+        effect. Do not split the nail into equal halves unless asked; keep the lighter, clearer base
+        dominant.
 
         [COLOR RULES]
         top-level color must preserve the exact HEX values supplied in the confirmed input.
@@ -715,145 +519,140 @@ public class FingerDesignPlanService {
         Preserve the user's intended tonal relationships.
 
         [COLOR NAMING FORMAT - IMPORTANT]
-        Describe each nail's base color with one consistent phrase in the form "<modifier> <color name> base",
-        for example "dusty mauve base" or "milky peach base". Choose the closest words to the supplied HEX values.
-        Modifiers: pale, light, milky, muted, dusty, deep, vivid, soft, warm, cool, creamy, sheer, smoky,
+        Describe each nail's base color with one consistent phrase "<modifier> <color name> base" (e.g.
+        "dusty mauve base", "soft peach base"), choosing the closest words to the supplied HEX values.
+        Modifiers: pale, light, muted, dusty, deep, vivid, soft, warm, cool, sheer, smoky,
         rich, bright, pastel, burnt
         Color names: off white, ivory, cream, beige, nude, pink, rose, coral, red, burgundy, peach, yellow,
-        mustard, mint, sage green, olive, sky blue, powder blue, navy, lavender, mauve, purple, taupe, brown,
-        chocolate, gray, charcoal, black, silver, gold, clear, blush, lilac, cocoa, caramel, champagne,
-        terracotta, rust, apricot, lemon, khaki, forest green, teal, baby blue, cobalt, fuchsia, magenta,
-        wine, plum, pearl, rose gold
-        Write multi-word names with spaces (for example "sage green"). Accent or pattern colors may be named in
-        the same sentence with the same vocabulary.
-        These words describe COLOR only. Color words such as rose, peach, lemon, apricot, and lilac never mean
-        a flower or fruit motif; draw a motif only when the motif array contains it.
+        mustard, mint, sage green, olive, sky blue, powder blue, navy, lavender, mauve, purple, taupe,
+        brown, chocolate, gray, charcoal, black, silver, gold, clear, blush, lilac, cocoa, caramel,
+        champagne, terracotta, rust, apricot, lemon, khaki, forest green, teal, baby blue, cobalt,
+        fuchsia, magenta, wine, plum, pearl, rose gold
+        Write multi-word names with spaces. Accent or pattern colors use the same vocabulary. These words
+        describe COLOR only: rose, peach, lemon, apricot and lilac never mean a flower or fruit motif;
+        draw a motif only when the motif array contains it.
 
         [DESCRIPTION STRUCTURE]
-        For each nail, use a compact but richly informative 2-3 sentence structure when needed.
+        Per nail, 2-3 sentences when needed. Sentence 1: base color, surface, finish, major pattern.
+        Sentence 2: the primary motif or parts with physical material and visual effect. Optional sentence
+        3: supporting details, layering, reflective behavior, or how the focal decoration interacts with
+        the nail surface. When a motif or part is selected, name it in the description with the exact
+        controlled term or a direct natural equivalent, and keep it visually important, not a background
+        detail.
 
-        Sentence 1:
-        Establish the base color, surface, finish, and major pattern.
-
-        Sentence 2:
-        Introduce the primary motif or parts and describe their physical material and visual effect.
-
-        Optional Sentence 3:
-        Describe supporting details, layering, reflective behavior, or how the focal decoration
-        interacts with the nail surface.
-
-        When a specific motif or part is selected, explicitly name it in the description using the
-        exact controlled vocabulary term or a direct natural-language equivalent that preserves its meaning.
-        The selected motif or part should remain visually important rather than being reduced to a
-        background detail.
-
-        [DESIGN RICHNESS]
-        Unless the user explicitly requests a simple design with no rich reference, prefer a visually
-        complete set rather than a sparse set.
-
-        Keep the set calm and cohesive, like a real salon set. Across the whole set use roughly 3 to 5
-        distinct decorative elements in total (motifs and parts together), including the ones the user
-        named, and at most TWO decoration elements on any single nail (for example one motif plus one
-        part; a funky mood overrides these limits, see [FUNKY MOOD]). Leave one or two nails quiet (plain color, soft gradient, or a single tiny accent). Add one
-        or two mood-fitting supporting elements the user did NOT name (see
-        [MOOD-BASED SUPPORTING ELEMENTS]) only if the set still feels simple. Base designs / patterns do
-        not count toward this number; they are limited to three in total.
-        These may come from finish, pattern, motif, parts, or clearly described material effects.
-
-        Do not add an element that clashes with the mood merely to satisfy a count.
-        When the user explicitly selected a pattern, motif, or part category, keep the user's choice
-        as the priority, and create richness by adding compatible supporting elements, materials, and
-        finish variation around it instead of overriding the request.
+        [DESIGN RICHNESS - VERY IMPORTANT]
+        SIMPLE MODE is on only when the mood contains "simple" or the user's own words ask for it (심플,
+        미니멀, 깔끔, simple, minimal, clean). Without it, the set must look like a real market nail-art
+        display sheet: art-driven and varied, never a plain set with a few sprinkled gems. When the user asks
+        for "화려하게", "아트적으로" or "포인트" this means MORE NAIL ART (drawn motifs, patterns, french
+        variants, washes, 3D pieces), never just more rhinestones, stars or glitter.
+        Default (simple mode off):
+        - One concept per set, taken from the mood, season, colors, the user's words or the reference image
+          (for example ribbon and heart, cherry and strawberry, leopard and check street style, halloween,
+          music, cross and chrome, star and butterfly y2k). The five nails are DIFFERENT designs under that
+          concept, on soft sheer base colors of one coordinated palette.
+        - Art mix: use at least FOUR different art types across the five nails:
+          a) hand-drawn doodle motifs in thin smooth lines (bow outline, heart, star, cross, butterfly, cherry,
+             strawberry, music notes, small ghost or bat silhouettes for halloween, tiny spiral, small dots or a
+             short word), in black, dark brown or a deeper tone of the palette;
+          b) pattern nails: leopard print, plaid / gingham check, polka dot, stripe, speckle (leopard and other
+             drawn prints use the pattern "line art" or "speckle" and are named plainly in the description);
+          c) french variants: thin black french, leopard french, glitter french, double french, V-shaped or
+             reversed french, color-tip french;
+          d) soft washes: gradient, aura / smoky ink-blot wash, cat-eye glow, marble, blooming dots;
+          e) 3D pieces: a polished silver or resin bow charm, a chrome cross, heart or star charm;
+          f) one quiet one-color syrup nail (at most one).
+        - Each nail has one focal art plus at most TWO supporting accents. At least three nails carry a drawn
+          motif or a pattern, at least one nail carries a 3D piece, and at most one nail stays quiet.
+        - Rhinestones, pearls, studs and glitter are accents only: at most TWO nails carry a gem cluster and
+          never every nail.
+        - Drawn motifs and patterns may be medium (up to about half of the nail) and a pattern may cover the
+          whole nail; 3D charms and gems stay small (see [REAL SALON REALISM]).
+        - Nails that share a design of [THREE-DESIGN ALTERNATING SET] differ in their art.
+        Simple mode: roughly 3 to 5 decorative elements in total, at most TWO on any nail, one or two quiet
+        nails, and no extra supporting elements.
+        In every mode: the user's own selection has priority (create richness with compatible supporting
+        elements, materials and finish variation around it, never override it); base designs / patterns are
+        limited to three distinct ones in total and do not count toward the element numbers; a funky mood
+        overrides the per-nail limit (see [FUNKY MOOD]); do not add an element that clashes with the mood
+        merely to reach a count; if the user declined motifs or parts ("none" / "없음") do not add any.
 
         [MOOD-BASED SUPPORTING ELEMENTS - VERY IMPORTANT]
-        The user usually names only one or two elements (for example a ribbon and a flower). That is a
-        starting point, not the whole design. Keep every element the user named, but do NOT cover all
-        five nails with only those elements. Read the mood and add supporting elements that a real nail
-        artist would pair with it, using ONLY controlled vocabulary values:
-        - lovely / feminine / sweet / romantic: lace (pattern), heart charm / pearl bead / pearl trim /
-          rhinestone / bow charm 3d (parts), heart (motif), cheek blush or a soft french tip (pattern)
-        - cute / kitsch / playful: heart, star, bunny (motif), polka dot, plaid, stripe (pattern),
-          heart charm, star charm, bow charm 3d, rhinestone (parts)
-        - chic / elegant / modern: french tip, line art, color block, blooming (pattern), pearl trim,
+        The user usually names only one or two elements. Keep them, but do NOT cover all five nails with
+        only those. Add supporting elements a real nail artist would pair with the mood, using ONLY
+        controlled vocabulary:
+        - lovely / feminine / sweet / romantic: lace (pattern); heart charm, pearl bead, pearl trim,
+          rhinestone, bow charm 3d (parts); heart (motif); cheek blush or soft french tip (pattern)
+        - cute / kitsch / playful: heart, star, bunny (motif); polka dot, plaid, stripe (pattern); heart
+          charm, star charm, bow charm 3d, rhinestone (parts)
+        - chic / elegant / modern: french tip, line art, color block, blooming (pattern); pearl trim,
           chain, metal stud, rhinestone (parts)
-        - cool / edgy / dark / funky: cross, star, butterfly (motif), speckle, marble, blooming (pattern),
+        - cool / edgy / dark / funky: cross, star, butterfly (motif); speckle, marble, blooming (pattern);
           chain, metal stud, star charm (parts)
-        - y2k / glam: star, butterfly (motif), rhinestone, star charm, chain (parts), chrome or glitter
+        - y2k / glam: star, butterfly (motif); rhinestone, star charm, chain (parts); chrome or glitter
           (finish)
-        - natural / minimal / vintage: watercolor, gradient, line art (pattern), tiny pearl bead,
-          leaf (motif)
-        Distribute them like this: the nail with the user's main element is the hero; a second nail
-        carries the user's other named element; one or two of the remaining nails carry a DIFFERENT
-        supporting element or part from the mood list above (for example one nail with a heart charm or
-        a rhinestone cluster), and the rest stay quiet. At least one supporting element should be
-        a motif (such as heart, star, butterfly), not only a part. Prefer motifs and parts as supporting
-        elements; add a new base design / pattern (lace, french tip, polka dot, ...) only if the set
-        stays within three distinct base designs in total. If the
-        confirmed input has a "[VARIATION LEAN]" with "supporting elements to try", use those that fit
-        the mood. A user-named motif may appear on at most three nails, and no two nails may have the
-        same combination of motif, part, and pattern (nails that share a design differ at least by
-        their accent - see [THREE-DESIGN ALTERNATING SET]).
-        Every description must name its element and, for parts, its material, size, and color.
-        If the user declined motifs or parts ("none" / "없음") or asked for a minimal design, skip this
-        rule.
+        - natural / minimal / vintage: watercolor, gradient, line art (pattern); tiny pearl bead, leaf
+          (motif)
+        Distribute: the nail with the user's main element is the hero; a second nail carries the user's
+        other named element; the remaining nails (all but at most one; in simple mode all but one or two) carry a DIFFERENT
+        supporting element or part from the mood list (e.g. a heart charm or a rhinestone cluster). At least one
+        supporting element is a motif (heart, star, butterfly), not only a part. Prefer motifs and parts;
+        add a new base design / pattern only if the set stays within three distinct base designs. If the
+        confirmed input has a "[VARIATION LEAN]" with "supporting elements to try", use those that fit the
+        mood. A user-named motif appears on at most three nails, and no two nails have the same
+        combination of motif, part and pattern (nails sharing a design differ at least by their accent).
+        Every description names its element and, for parts, material, size and color. If the user declined
+        motifs or parts ("none" / "없음") or asked for a minimal design, skip this rule.
 
         [CREATIVE LATITUDE - VERY IMPORTANT]
-        Honor every choice the user made (selected options and their own words), the controlled vocabulary, and the
-        hard rules, but treat everything the user did NOT specify as yours to design inventively. Do not default to
-        the most obvious combination or repeat the same recipe from set to set: vary which nail is the hero, the
-        asymmetry and placement of accents, the scale within the allowed limits, accent colors, finish mixes,
-        edge-hugging or corner-cropped art, negative space, partial or reversed french tips, color-blocked
-        halves, and gradient direction. The [THREE-DESIGN PLAN] and the [VARIATION LEAN] (including its creative
-        twists) are starting points, not orders: you may re-assign designs among nails and add unexpected but
-        harmonious ideas. If the same selection would produce a set that looks like a previous one, change
-        something visible.
+        Honor every user choice (selected options and own words), the controlled vocabulary and the hard
+        rules, but design everything not specified inventively. Do not default to the most obvious
+        combination or repeat the same recipe from set to set: vary the hero nail, asymmetry and accent
+        placement, scale within limits, accent colors, finish mixes, edge-hugging or corner-cropped art,
+        negative space, partial or reversed french tips, color-blocked halves and gradient direction. The
+        [THREE-DESIGN PLAN] and [VARIATION LEAN] (including creative twists) are starting points, not
+        orders: you may re-assign designs among nails and add unexpected but harmonious ideas. If the same
+        selection would produce a set like a previous one, change something visible.
 
         [DEFAULT COLOR EXPRESSION - SYRUP - VERY IMPORTANT]
-        The default color expression of EVERY nail is a syrup color (finish "jelly"): a translucent, juicy,
-        glass-like jelly gel in which the pigment looks suspended in clear gel, the nail bed color glows
-        softly through it, and a large soft mirror-like highlight sits on a thick, wet-looking surface - the
-        trending Korean syrup-gel look. An opaque creamy pastel looks flat and cheap, so never use it by
-        default.
-        - It applies to every design of the set: gradient nails (a syrup gradient), marble, french tip, and
-          one-color nails, and also glitter nails (ultra-fine glitter floating inside a syrup base: finish
-          ["jelly", "glitter"]) and powder nails (a pearl-powder glaze over a syrup base: finish
-          ["jelly", "powder finish"]).
-        - Write "syrup" or "translucent syrup gel" in every description and describe its light transmission
-          and glassy depth, as in [TRANSPARENCY AND JELLY REALISM].
-        - Use a solid (opaque, no "jelly" finish) color only when the user asked for solid / opaque colors
-          or a matte set. Magnetic cat eye, knit, and ink nails keep their own expression.
+        The default color expression of EVERY nail is a syrup color (finish "syrup"): translucent, juicy,
+        glass-like syrup gel with pigment suspended in clear gel, the nail bed glowing softly through, and
+        a large soft mirror-like highlight on a thick wet-looking surface (the trending Korean syrup-gel
+        look). Opaque creamy pastel looks flat and cheap, so never use it by default.
+        - It applies to every design: gradient (syrup gradient), marble, french tip, one-color, glitter
+          (ultra-fine glitter floating in a syrup base: finish ["syrup", "glitter"]) and powder (a
+          pearl-powder glaze over syrup: finish ["syrup", "powder finish"]).
+        - Write "syrup" or "translucent syrup gel" in every description with its light transmission and
+          glassy depth, as in [TRANSPARENCY AND SYRUP REALISM].
+        - Use solid (opaque, no "syrup") only when the user asked for solid / opaque colors or a matte set.
+          Magnetic cat eye, knit and ink nails keep their own expression.
         - This default overrides any example below that shows a "solid" nail.
 
         [STYLE TOOLBOX - MIX PER FINGER - VERY IMPORTANT]
-        Build each nail by choosing options from these four axes (an axis may be skipped when it does not
-        suit the nail). All five nails keep the same mood, palette, and shape, but each nail combines the
-        options differently, like a real salon display sheet.
+        Build each nail from these four axes (skip an axis when it does not suit the nail). All five nails
+        keep the same mood, palette and shape but combine options differently, like a salon display sheet.
 
         1) Color expression (how the base color looks):
-           - syrup: translucent jelly syrup-gel color (finish "jelly") - the DEFAULT for every nail
-           - solid: opaque, even solid color (no color finish) - only when the user asks for solid / opaque
-             colors or a matte set
+           - syrup: translucent syrup-gel color (finish "syrup"), the DEFAULT for every nail.
+           - solid: opaque, even solid color (no color finish), only when the user asks for solid / opaque
+             colors or a matte set.
            - magnetic: magnetic gel (finish "magnetic cat eye") rendered by default as a ROUND GLASS-BEAD
-             glow — a soft, domed, pearly gleam gathered into a rounded blob in the center of the nail, like
-             a glossy glass bead or pearl sitting in clear gel, with a bright clean highlight on top. It is
-             NOT a stripe, band, diagonal line, spiral, or swirl. The magnetic gleam is SILVER or GOLD
-             (champagne) only, never holographic, rainbow, or iridescent multi-color, unless the user
-             explicitly asks for a special combination (for example a guava nail: green base with a pink
-             magnetic gleam). It has NO visible particles, specks, or sparkle, so it never looks like glitter.
+             glow: a soft, domed, pearly gleam gathered into a rounded blob in the center of the nail,
+             like a glossy glass bead or pearl in clear gel, with a bright clean highlight on top. NOT a
+             stripe, band, diagonal line, spiral or swirl. The gleam is SILVER or GOLD (champagne) only,
+             never holographic, rainbow or multi-color iridescent, unless the user explicitly asks for a
+             combination (e.g. a guava nail: green base with a pink gleam). No visible particles, specks
+             or sparkle, so it never looks like glitter.
            - glitter: (finish "glitter") ONLY a sparkle effect: a scattering of tiny bright points of light
-             that twinkle inside a perfectly smooth, clear, even-colored syrup surface. Glitter adds no
-             texture, no pattern, no grid, no net, no crackle, and no background marks of any kind - the
-             color underneath stays one smooth clean tone, and only small glints of light are added. The
-             glints are small, few to moderate in number, spread loosely, in the nail's own hue family
-             (soft pink, rose, silver, or champagne). Never large flakes, chunky pieces, or hexagon
-             confetti. Glitter and magnetic must never be described with the same wording. In the
-             description write only the color and "fine sparkle" (for example "soft pink syrup with fine
-             sparkle") - do not describe grains, dust, or texture.
-             Glitter is not a separate base: a glitter nail is a syrup nail with the glitter floating inside
-             (finish ["jelly", "glitter"]).
-             Use glitter on at most TWO nails of the set (unless the user explicitly asks for it on more
-             nails, for example all nails), and never describe glitter on a nail whose finish array does
-             not contain "glitter".
+             twinkling inside a perfectly smooth, clear, even-colored syrup surface. No texture, pattern,
+             grid, net, crackle or background marks; the color underneath stays one smooth clean tone.
+             Glints are small, few to moderate, loosely spread, in the nail's own hue family (soft pink,
+             rose, silver or champagne); never large flakes, chunks or hexagon confetti. Glitter and
+             magnetic are never described with the same wording. Write only the color and "fine sparkle"
+             (e.g. "soft pink syrup with fine sparkle"), no grains, dust or texture. A glitter nail is a
+             syrup nail with glitter floating inside (finish ["syrup", "glitter"]). Use glitter on at most
+             TWO nails (unless the user explicitly asks for more, e.g. all nails), and never describe
+             glitter on a nail whose finish array lacks "glitter".
            - knit: knit gel, also called velvet or "ppoguri" gel (finish "knit"): a soft, glossy, slightly
              milky-translucent gel color filled with a DENSE scatter of countless TINY short fiber fragments,
              like chopped wool or velvet flock, spread evenly over the whole nail and floating inside the clear gel.
@@ -870,166 +669,153 @@ public class FingerDesignPlanService {
              CLEANLINESS]. A knit nail is a knit one-color nail: never combined with glitter, magnetic, powder
              or cheek blush, and never gets glitter wording. Write the color, "translucent knit gel", and
              "dense tiny fiber flecks floating inside the gel".
-           - ink: ink gel (finish "ink"), a DRAWING ELEMENT used on top of a base color, not a replacement for
-             the base: every ink nail has a base color laid first (by default the syrup base, so finish
-             ["jelly", "ink"]; a clear or sheer natural base is allowed but is not the default). Ink itself is a
-             vivid but fully transparent colored gel, like colored glass or marker ink: saturated, see-through,
-             soft-edged color. It is used in three ways:
-             a) Ink drawing art (the drawing design type): an ink illustration, like a cute hand-inked
-                sticker. The motif's shapes are FILLED with transparent ink gel colors - sheer, saturated,
-                slightly uneven watercolor-like color areas - on top of the base color, with at most a thin,
-                light line in a slightly deeper tone of the same hue (no black or heavy dark outline). Small
-                details (a knot, folds, a face, stripes) use the same light line. Use one to three harmonious
-                fill colors from the palette. The ink fills must be clearly visible, and the motif must be
-                clearly recognizable and fairly large (about half of the nail). Never abstract lines,
-                lacing, spirals, raised gel lines, or pearls instead of a motif. Ink alone (a wash with no
-                motif) is not a drawing, so every ink drawing nail carries a motif (ribbon, flower, clover,
-                heart, star, lettering, a small cute character). When the user chose the drawing design type,
-                use ink on the nails that carry the drawn art and give the other nails syrup or another base.
-             b) An ink wash: soft ribbon-like or wave-like swaths of one vivid hue painted over part of the
-                base color with soft, slightly pooled watercolor-like edges (not an airbrush gradient over the
-                whole nail, not a milky blush).
-             c) An ink check (gingham): pattern "plaid" with finish "ink" - wide see-through stripes of one
-                vivid hue running in two directions, deeper where they cross, with soft hand-painted edges and no dark lines.
-             Colors are bright and clear: raspberry, rose, coral, orange, yellow, lime, mint, aqua, sky blue,
-             cobalt, violet. Ink is glossy only (never in a matte set). In the description write the base
-             color (for example "soft pink syrup base") and the ink drawing, wash, or check on it.
+           - ink: ink gel (finish "ink"), a DRAWING ELEMENT on top of a base color, not a replacement: every
+             ink nail has a base color laid first (by default syrup, so finish ["syrup", "ink"]; a clear or
+             sheer natural base is allowed but not the default). Ink is a vivid but fully transparent
+             colored gel, like colored glass or marker ink: saturated, see-through, soft-edged. Three uses:
+             a) Ink drawing art (the drawing design type): an ink illustration like a cute hand-inked
+                sticker. The motif's shapes are FILLED with transparent ink colors (sheer, saturated,
+                slightly uneven, watercolor-like) on top of the base, with at most a thin light line in a
+                slightly deeper tone of the same hue (no black or heavy dark outline). Small details (a
+                knot, folds, a face, stripes) use the same light line. Use one to three harmonious fill
+                colors from the palette. The fills are clearly visible and the motif is clearly
+                recognizable and fairly large (about half the nail). Never abstract lines, lacing,
+                spirals, raised gel lines or pearls instead of a motif. Ink alone (a wash with no motif)
+                is not a drawing, so every ink drawing nail carries a motif (ribbon, flower, clover,
+                heart, star, lettering, a small cute character). When the user chose the drawing design
+                type, use ink on the nails carrying the drawn art and give the other nails syrup or
+                another base.
+             b) Ink wash: soft ribbon-like or wave-like swaths of one vivid hue painted over part of the
+                base with soft, slightly pooled watercolor-like edges (not an airbrush gradient over the
+                whole nail, not a blush).
+             c) Ink check (gingham): pattern "plaid" with finish "ink": wide see-through stripes of one
+                vivid hue in two directions, deeper where they cross, soft hand-painted edges, no dark
+                lines.
+             Colors are bright and clear: raspberry, rose, coral, orange, yellow, lime, mint, aqua, sky
+             blue, cobalt, violet. Ink is glossy only (never in a matte set). Write the base color (e.g.
+             "soft pink syrup base") and the ink drawing, wash or check on it.
         2) Parts / motif rendering (how decorations are made):
-           - 3D: raised physical decoration made of plastic, embossed gel, silver metal, pearl, or resin
-             (parts such as "bow charm 3d", "heart charm", "star charm", "pearl bead", "rhinestone", or the
-             finish "sculpted 3d" for embossed gel)
+           - 3D: raised physical decoration of plastic, embossed gel, silver metal, pearl or resin (parts
+             "bow charm 3d", "heart charm", "star charm", "pearl bead", "rhinestone", or the finish
+             "sculpted 3d" for embossed gel).
            - drawing: a flat hand-drawn motif (motif values such as "bow ribbon", "heart", "flower"; checks
-             and lines use the pattern "plaid" or "line art"). There are two drawing styles, pick one per
-             nail and name it in the description:
-             a) doodle drawing: a naive, childlike outline drawing — simple shapes with slightly imperfect
-                proportions, as if a kid drew it, traced by outline only or lightly filled in (good for
-                cute, kitsch, playful moods). The shape may be naive, but the LINE ITSELF must be smooth:
-                a solid, evenly colored, evenly glossy stroke like a smooth gel pen, with no grain, no
-                bumps, no lumps, no fuzzy or rope-like texture.
-             b) painted flowers only: soft smudged painted blooms follow the [FLOWER ART RENDERING] rule.
-             Every other flat motif (stars, hearts, butterflies, bunnies, crosses, leaves, shells) is
-             EITHER a doodle outline (a) OR a raised 3D piece (a part, or the finish "sculpted 3d" for
-             embossed gel). Ribbons and bows have more options (fine line-art, low-relief embossed, tiny
-             mini bows, ribbon lacing - see [RIBBON / BOW VARIETY]). Otherwise there is no third option:
-             never a shaded, refined, illustrated, or semi-realistic drawing, and never a sticker / decal /
-             printed clip-art look (a flat glossy printed shape pasted on the nail). Thin hairline
-             illustrations do not exist in real nail art, except the delicate fine line-art ribbons of
-             [RIBBON / BOW VARIETY], which are drawn with real gel-pen lines.
+             and lines use pattern "plaid" or "line art"). Two styles, pick one per nail and name it:
+              a) doodle drawing: the main hand-drawn art style of market nail sets: a naive, childlike thin-line
+                 outline drawing with simple shapes and slightly imperfect proportions, outline only or
+                 lightly filled in, in black, dark brown or a deeper tone of the palette, up to about half of
+                 the nail (hearts, bows, stars, crosses, butterflies, cherries, strawberries, music notes,
+                 tiny spirals, small dots, short words). The shape may be naive but the LINE must be smooth:
+                 a solid, evenly colored, evenly glossy stroke like a smooth gel pen, with no grain, bumps,
+                 lumps, fuzzy or rope-like texture.
+              b) painted flowers only: soft smudged painted blooms per [FLOWER ART RENDERING].
+              Every other flat motif (stars, hearts, butterflies, bunnies, crosses, leaves, shells) is EITHER
+              a doodle outline (a) OR a raised 3D piece (a part, or finish "sculpted 3d" for embossed gel).
+              Ribbons and bows have more options (see [RIBBON / BOW VARIETY]). There is no third option:
+              never a shaded, refined, illustrated or semi-realistic drawing, and never a sticker / decal /
+              printed clip-art look (a flat glossy printed shape pasted on the nail). Thin gel-pen line
+              doodles are the intended style.
         3) Design (the base design of the nail):
            - gradient (pattern "gradient"), cheek (pattern "cheek blush"), ink-blot (pattern "watercolor",
              spreading ink-blot bleed), marble (pattern "marble"), french (pattern "french tip")
-           - blooming (pattern "blooming"): a sheer, glossy, translucent base (milky pink, nude, lilac, or clear) with
-             large soft dots of ink pigment, each a FILLED blob like a drop of ink spreading in wet gel: the center
-             of each dot is its darkest, most saturated part and the color fades smoothly outward into a blurred,
-             feathered edge. By default the dots are BIG (each about one fifth to one quarter of the nail width) and
-             FOLLOW THE OUTLINE of the nail: a row of dots along the curved free edge like a scalloped border, or
-             along one side wall, with the dots touching or overlapping so they melt into a soft scalloped edge;
-             or a small cluster of four dots forming a blossom near a corner or the tip. Not an S-curve and not a
-             chain wandering across the middle of the nail. Never a ring, donut, hollow or outlined circle, white
-             fluffy puff, or halo-only dot. The dots are one hue and always a deeper, more saturated tone than the
-             base (for example wine, plum, or lilac on a nude base, smoke gray on a gray base), never white, with
-             most of the nail left clean. It is often used in funky and chic moods. It is NOT a flower drawing and
-             NOT outlined or polka dots; the spreading dots are the whole design of that nail.
+           - blooming (pattern "blooming"): a sheer, glossy, translucent base (soft pink, nude, lilac or
+             clear) with large soft dots of ink pigment, each a FILLED blob like a drop of ink spreading in
+             wet gel: the center is the darkest, most saturated part and the color fades smoothly outward
+             into a blurred feathered edge. By default the dots are BIG (each about one fifth to one
+             quarter of the nail width) and FOLLOW THE OUTLINE of the nail: a row of dots along the curved
+             free edge like a scalloped border, or along one side wall, touching or overlapping so they
+             melt into a soft scalloped edge; or a small cluster of four dots forming a blossom near a
+             corner or the tip. Not an S-curve and not a chain wandering across the middle. Never a ring,
+             donut, hollow or outlined circle, white fluffy puff or halo-only dot. The dots are one hue,
+             always a deeper, more saturated tone than the base (e.g. wine, plum or lilac on nude, smoke
+             gray on gray), never white, with most of the nail left clean. Often used in funky and chic
+             moods. NOT a flower drawing and NOT outlined or polka dots; the spreading dots are the whole
+             design of that nail.
         4) Finish (the top surface of the whole set):
-           - The whole set is EITHER matte OR glossy, decided once with the top-level "surface" value.
-             A matte set is matte on all five nails (no mixing of matte and glossy nails).
+           - The whole set is EITHER matte OR glossy, decided once with the top-level "surface". A matte
+             set is matte on all five nails (no mixing).
            - Inside a glossy set, individual nails may be plain glossy or powder (finish "powder finish").
-           - A matte set uses only solid colors and knit (matte velvet) - no syrup, ink, magnetic, glitter,
-             or powder; create variety through the base design (gradient, cheek, ink-blot, marble, blooming,
-             french) and the parts / motif rendering instead.
+           - A matte set uses only solid colors and knit (matte velvet): no syrup, ink, magnetic, glitter
+             or powder; variety comes from base design (gradient, cheek, ink-blot, marble, blooming,
+             french) and parts / motif rendering.
            - If the user's words say matte or glossy, follow them for the whole set.
 
         Mixing rules:
-        - Example for a lovely cute glossy set, for illustration only (do not copy it): thumb = syrup +
-          gradient + glossy (design A); index = syrup + glitter + glossy (design B); middle = syrup +
-          gradient + silver 3D bow + glossy (design A, different accent); ring = syrup one-color + one 3D
-          pearl + glossy (design C); pinky = syrup + glitter + glossy with one tiny rhinestone near the
-          cuticle (design B). It uses one color expression (syrup); the glitter nails are syrup nails with
-          glitter inside.
-        - LIMIT ON COLOR EXPRESSIONS: syrup is the base of every nail (see [DEFAULT COLOR EXPRESSION -
-          SYRUP]). Besides syrup use at most ONE other expression across the whole set: solid (only when the
-          user asked for it), magnetic, knit, or ink (when the user chose the drawing design type, that
-          expression is ink). Do not use more. The other axes provide the variety.
-        - At least three nails must differ from each other in at least one axis (the three designs of
-          [THREE-DESIGN ALTERNATING SET]); the nails that share a design share its axes but differ by their
-          accent. Some nails may use only one or two axes so the set has quiet nails and busy nails; do not
-          stack many effects on one nail.
-        - LIMIT ON DESIGNS: across the whole set, use at most THREE distinct base designs / patterns
-          (gradient, cheek blush, marble, french tip, watercolor / ink-blot, blooming, polka dot, plaid, stripe,
-          line art, lace, color block, speckle), counting the ones the user named. Keep it calm: variety
-          should mostly come from motifs, parts, and color expression, which may be as varied as you like.
-          Do not pile several designs on one nail (at most one base design per nail).
-        - DOTS (polka dot): dots are EITHER the whole design of a nail - evenly spaced dots of one size
-          covering the entire nail from cuticle to tip, with no other motif, part, wave, or ink swath on it -
-          OR they sit only inside the french tip area of a french tip nail. Never scatter dots around or
-          between other elements: a nail with a motif (cherry, flower, ribbon, heart, ...), a charm, a wave,
-          or an ink swath has no dots, and a dot nail has no other motif. Dots are simple solid round dots
-          with no outline (never outlined cartoon circles), and they are written as the pattern "polka dot",
-          not as a motif.
-        - CHECK (plaid): when the set combines check with the drawing design type or a cute mood, every check
-          nail is a HAND-DRAWN check: soft translucent color bands running in two directions PLUS thin, slightly
-          wobbly hand-drawn lines along and across the bands in an accent color of the palette (a deeper or
-          contrasting tone), not perfectly straight, with uneven spacing and a few lines slightly overlapping or
-          doubled, like a pen sketched over the bands. Write "hand-drawn wobbly check lines" in the description.
-        - CHEEK BLUSH is only allowed on syrup (jelly) nails. A nail with cheek blush must have finish
-          "jelly", and must never combine with glitter, magnetic, or a solid opaque base.
+        - Example for a lovely cute glossy set (illustration only, do not copy): thumb = syrup + gradient
+          + glossy (design A); index = syrup + glitter + glossy (design B); middle = syrup + gradient +
+          silver 3D bow + glossy (design A, different accent); ring = syrup one-color + one 3D pearl +
+          glossy (design C); pinky = syrup + glitter + glossy with one tiny rhinestone near the cuticle
+          (design B). One color expression (syrup); the glitter nails are syrup with glitter inside.
+        - LIMIT ON COLOR EXPRESSIONS: syrup is the base of every nail. Besides syrup use at most ONE other
+          expression across the set: solid (only when asked), magnetic, knit or ink (when the user chose
+          the drawing design type, that expression is ink). The other axes provide the variety.
+        - At least three nails differ in at least one axis (the three designs of [THREE-DESIGN ALTERNATING
+          SET]); nails sharing a design share its axes but differ by accent. Some nails use only one or two
+          axes so the set has quiet and busy nails; do not stack many effects on one nail.
+        - LIMIT ON DESIGNS: across the set use at most THREE distinct base designs / patterns (gradient,
+          cheek blush, marble, french tip, watercolor / ink-blot, blooming, polka dot, plaid, stripe, line
+          art, lace, color block, speckle), counting the user's. Keep it calm: variety comes mostly from
+          motifs, parts and color expression. At most one base design per nail.
+        - DOTS (polka dot): dots are EITHER the whole design of a nail (evenly spaced dots of one size
+          covering the entire nail from cuticle to tip, no other motif, part, wave or ink swath) OR sit only
+          inside the french tip area of a french tip nail. Never scatter dots around or between other
+          elements: a nail with a motif (cherry, flower, ribbon, heart, ...), a charm, a wave or an ink
+          swath has no dots, and a dot nail has no other motif. Dots are simple solid round dots without
+          outline (never outlined cartoon circles), written as pattern "polka dot", not as a motif.
+        - CHECK (plaid): when check is combined with the drawing design type or a cute mood, every check
+          nail is a HAND-DRAWN check: soft translucent color bands in two directions PLUS thin, slightly
+          wobbly hand-drawn lines along and across the bands in an accent color of the palette (a deeper
+          or contrasting tone), not perfectly straight, with uneven spacing and a few lines slightly
+          overlapping or doubled, like a pen sketched over the bands. Write "hand-drawn wobbly check
+          lines" in the description.
+        - CHEEK BLUSH is only allowed on syrup nails: finish "syrup", never combined with glitter,
+          magnetic or a solid opaque base.
         - A nail never combines glitter with another strong effect (cheek blush, magnetic, powder, french
           tip): glitter nails stay simple.
         - SMOOTH LINES: every drawn motif (stars, hearts, ribbons, spirals, dots) is a smooth, even, solid
-          stroke with clean edges. Never describe lumpy, bumpy, grainy, rough, beaded, fuzzy, or rope-like
-          lines.
-        - COLOR SPREAD: a motif's own color must stay close to its outline. If a motif is soft or
-          watercolor-like, its edges may blur only slightly (within a small margin around the motif); its
-          color must never wash widely across the nail or tint the surrounding gel. Aura / watercolor /
-          marble background colors must come from a different, subtle color family than the motif colors.
-        - Keep the user's named elements. Fill the other nails by mixing the axes above in ways that fit
-          the mood.
+          stroke with clean edges; never lumpy, bumpy, grainy, rough, beaded, fuzzy or rope-like.
+        - COLOR SPREAD: a motif's color stays close to its outline. A soft or watercolor-like motif may
+          blur only slightly within a small margin; its color never washes widely across the nail or tints
+          the surrounding gel. Aura / watercolor / marble background colors come from a different, subtle
+          color family than the motif colors.
+        - Keep the user's named elements and fill the other nails by mixing the axes in ways that fit the
+          mood.
         - If a "[THREE-DESIGN PLAN]" is present (at the top of these instructions or in the confirmed
-          input), use it as the starting point for each nail's color expression, base design, and finish
-          (matte or glossy or powder), then add the user's named elements and the parts / motif rendering on
-          top. Change it only when it clashes with the mood or the user's words.
-        - Name the chosen options in each description (for example "syrup base", "doodle bow ribbon", "silver
-          3D heart", "chunky ivory 3D bow"), so the image model does not fall back to a default look.
+          input), use it as the starting point for each nail's color expression, base design and finish
+          (matte, glossy or powder), then add the user's named elements and the parts / motif rendering.
+          Change it only when it clashes with the mood or the user's words.
+        - Name the chosen options in each description (e.g. "syrup base", "doodle bow ribbon", "silver 3D
+          heart", "chunky ivory 3D bow") so the image model does not fall back to a default look.
 
         [SURFACE / FINISH COMPATIBILITY]
-        If the top-level surface is matte, do not use glitter, chrome, jelly, ink, magnetic cat eye, or powder
-        finish on any nail (knit is fine: matte velvet).
-        If the top-level surface is glossy, all finish values are permitted unless another user rule
-        conflicts.
+        If the top-level surface is matte, do not use glitter, chrome, syrup, ink, magnetic cat eye or
+        powder finish on any nail (knit is fine: matte velvet). If it is glossy, all finish values are
+        permitted unless another user rule conflicts.
 
         [USER'S OWN WORDS - HIGHEST PRIORITY]
-        If the confirmed input contains a section with the user's own chat messages, every concrete
-        request in it (decorations, parts, materials, colors, placement) MUST appear in the output.
-        Never drop, soften, or replace such a request, even if it conflicts with "simple", with a
-        finish rule, or with an earlier "none" selection (a later explicit request cancels "none").
-        Map Korean terms to the controlled vocabulary and ALSO name the element in the nail
-        descriptions:
-        - 큐빅, 스톤, 보석, 크리스탈, 쥬얼 -> parts: "rhinestone" (sharp, faceted, sparkling gems)
-        - 진주, 펄 비즈 -> parts: "pearl bead"
-        - 블루밍, 번지는 점 -> pattern: "blooming" (spreading ink-like dots, see the blooming design)
-        - 리본 입체, 리본 참 -> parts: "bow charm 3d"
-        - 체인 -> parts: "chain"; 메탈 스터드, 징 -> parts: "metal stud"
-        - 소용돌이, 스월, 스파이럴 -> pattern: "line art" (a thin spiral line, see the spiral rule)
-        If the user did not say which fingers, place the element on at least two or three nails as a
-        clear focal accent (not on every nail), clustered near the cuticle or tip.
+        If the confirmed input contains the user's own chat messages, every concrete request in it
+        (decorations, parts, materials, colors, placement) MUST appear in the output. Never drop, soften
+        or replace one, even if it conflicts with "simple", a finish rule or an earlier "none" selection
+        (a later explicit request cancels "none"). Map Korean terms to the controlled vocabulary and ALSO
+        name the element in the nail descriptions:
+        - 큐빅, 스톤, 보석, 크리스탈, 쥬얼 -> parts "rhinestone" (sharp, faceted, sparkling gems)
+        - 진주, 펄 비즈 -> parts "pearl bead"
+        - 블루밍, 번지는 점 -> pattern "blooming" (spreading ink-like dots, see the blooming design)
+        - 리본 입체, 리본 참 -> parts "bow charm 3d"
+        - 체인 -> parts "chain"; 메탈 스터드, 징 -> parts "metal stud"
+        - 소용돌이, 스월, 스파이럴 -> pattern "line art" (see the spiral rule)
+        If the user did not say which fingers, place the element on at least two or three nails as a clear
+        focal accent (not on every nail), clustered near the cuticle or tip.
 
         [USER-SPECIFIED PRIORITY]
-        The confirmed input is authoritative.
-        If the user specified a finger-by-finger design, follow that assignment exactly.
-        If the user specified a finger-by-finger exclusion, do not use that excluded element on that finger.
-
-        If only some fingers are specified and no style is given for the others:
-        - keep the specified fingers exactly as requested
-        - design the remaining fingers using the shared set palette and mood
-        - do not leave the remaining fingers empty unless the user explicitly requested that
-
-        If the user asks to combine multiple styles without assigning them to specific fingers,
-        distribute the styles naturally across the five nails.
+        The confirmed input is authoritative. A finger-by-finger design is followed exactly; a
+        finger-by-finger exclusion means that element is not used on that finger. If only some fingers are
+        specified, keep them exactly as requested and design the rest with the shared palette and mood
+        (never leave them empty unless the user asked). If the user combines several styles without
+        assigning fingers, distribute them naturally across the five nails.
 
         [TEXT / LETTERING]
-        If the user explicitly requests a letter, initial, or word to appear on a nail,
-        preserve the exact requested characters and include the corresponding lettering element.
-        Do not invent or modify the requested text.
+        If the user explicitly asks for a letter, initial or word on a nail, keep the exact characters and
+        include the lettering element. Do not invent or modify the text.
 
         [EDIT MODE - PREVIOUS PLAN]
         %s
@@ -1107,7 +893,7 @@ public class FingerDesignPlanService {
             "glitter-filled clear gel bow with a pearl knot");
 
     private static final List<String> LEAN_RIBBON_COLORS = List.of(
-            "tonal pink", "dusty mauve", "milk white", "ivory cream", "clear transparent", "silver", "champagne gold",
+            "tonal pink", "dusty mauve", "soft white", "ivory cream", "clear transparent", "silver", "champagne gold",
             "powder blue", "soft lavender", "cherry red", "chocolate brown", "black", "sage green", "butter yellow");
 
     // 보조 요소는 모티프/파츠만 — 베이스 디자인(패턴)은 세트당 3개 이내로 제한하기 때문에 여기서 부추기지 않는다.
@@ -1150,7 +936,7 @@ public class FingerDesignPlanService {
             "(?i)\\b(?:fine\\s+)?(?:hand-drawn|line[- ]?art|doodle|gel-pen|sketchy|sketch|drawn|outline|ribbon lacing|ribbon[- ]band)\\b");
 
     private static boolean drawnRibbonAllowed(String confirmedInput) {
-        return DRAWN_RIBBON_OK.matcher(wantedPart(confirmedInput)).find();
+        return !wantsSimple(confirmedInput) || DRAWN_RIBBON_OK.matcher(wantedPart(confirmedInput)).find();
     }
 
     /**
@@ -1170,7 +956,7 @@ public class FingerDesignPlanService {
             String description = DRAWN_TERMS.matcher(f.path("description").asText("")).replaceAll("")
                     .replaceAll("(?i)\\bin (?:thin|fine|delicate) [a-z ]{0,20}lines?\\b", "")
                     .replaceAll("\\s{2,}", " ").trim();
-            f.put("description", description + " The bow is a small raised 3D bow charm made of smooth glossy milky resin"
+            f.put("description", description + " The bow is a small raised 3D bow charm made of smooth glossy pearly resin"
                     + " with visible thickness and plump smooth loops (a real molded charm, not a drawing or line-art).");
             System.out.println("[FingerDesignPlan] 드로잉 리본 불허 → " + finger + " 손톱의 리본을 3D 리본 참으로 변환");
         }
@@ -1331,6 +1117,46 @@ public class FingerDesignPlanService {
         if (n > 0) System.out.println("[FingerDesignPlan] 드로잉/큐트 + 체크 → 체크 손톱 " + n + "개에 손으로 그은 삐뚤빼뚤한 선을 추가");
     }
 
+    /**
+     * 이미지 모델은 참고 이미지를 볼 수 없는데 플래너가 "...of the reference", "from the reference" 같은 문구를 설명에 남기는 경우가 있다.
+     * "reference"가 들어간 문장은 쉼표 뒤 꼬리절만 잘라내고(앞 내용이 있으면), 앞 내용이 없으면 문장째 지운다. 다른 문장이 없으면 단어만 바꾼다.
+     */
+    private static String dropReferenceWording(String description) {
+        if (description == null || !description.toLowerCase().contains("reference")) return description;
+        StringBuilder out = new StringBuilder();
+        for (String sentence : description.split("(?<=[.!?])\\s+")) {
+            String low = sentence.toLowerCase();
+            if (!low.contains("reference")) {
+                if (out.length() > 0) out.append(" ");
+                out.append(sentence);
+                continue;
+            }
+            int ref = low.indexOf("reference");
+            int comma = sentence.lastIndexOf(',', ref);
+            if (comma > 8) {
+                if (out.length() > 0) out.append(" ");
+                out.append(sentence, 0, comma).append(sentence.endsWith(".") ? "." : "");
+            }
+            // 쉼표가 없거나 앞 내용이 거의 없으면 문장째 건너뛴다
+        }
+        String cleaned = out.toString().trim();
+        if (cleaned.isEmpty()) {
+            return description.replaceAll("(?i)\\b(?:of |from |in )?the reference(?:'s|\u2019s)?(?: image)?", "the mood")
+                    .replaceAll("(?i)\\breference image\\b", "mood").trim();
+        }
+        return cleaned;
+    }
+
+    private void stripReferenceWording(JsonNode plan) {
+        if (!(plan instanceof ObjectNode root)) return;
+        for (String finger : FINGERS) {
+            if (!(root.path(finger) instanceof ObjectNode f)) continue;
+            String d = f.path("description").asText("");
+            String cleaned = dropReferenceWording(d);
+            if (!cleaned.equals(d)) f.put("description", cleaned);
+        }
+    }
+
     private static boolean isDotValue(String raw) {
         String v = raw == null ? "" : raw.trim().toLowerCase();
         return v.equals("dot") || v.equals("dots") || v.startsWith("polka") || v.equals("도트");
@@ -1430,11 +1256,11 @@ public class FingerDesignPlanService {
         boolean syrup = "syrup".equals(base);
         return switch (design) {
             case "glitter" -> syrup
-                    ? "glitter nail: finish jelly + glitter - ultra-fine glitter floating inside a syrup base, no base pattern"
+                    ? "glitter nail: finish syrup + glitter - ultra-fine glitter floating inside a syrup base, no base pattern"
                     : "glitter nail: finish glitter on a solid base, no base pattern";
             case "magnetic" -> "magnetic nail: finish magnetic cat eye, no base pattern";
             case "powder" -> syrup
-                    ? "powder nail: finish jelly + powder finish - pearl-powder glaze over a syrup base, no base pattern"
+                    ? "powder nail: finish syrup + powder finish - pearl-powder glaze over a syrup base, no base pattern"
                     : "powder nail: finish powder finish on a solid base, no base pattern";
             case "gradient" -> "gradient nail: pattern gradient on a " + base + " base";
             case "marble" -> "marble nail: pattern marble on a " + base + " base";
@@ -1444,8 +1270,8 @@ public class FingerDesignPlanService {
                     + " floating inside the gel (not a woven fabric look), no glitter, no base pattern";
             case "blooming" -> "blooming nail: pattern blooming - soft filled ink-drop dots (dark center fading outward, deeper tone of the base) in a scalloped row along the nail's free edge on a " + base + " base";
             case "check" -> "check nail: pattern plaid - a gingham check on a " + base + " base (when ink is part of the set it is an"
-                    + " ink check: finish jelly + ink)";
-            case "ink" -> "ink nail: finish jelly + ink - a syrup base color with ink on top: a hand-drawn motif filled with"
+                    + " ink check: finish syrup + ink)";
+            case "ink" -> "ink nail: finish syrup + ink - a syrup base color with ink on top: a hand-drawn motif filled with"
                     + " sheer saturated transparent ink colors, or ink dots (whole-nail solid dots), or an ink check";
             default -> "one-color nail: plain " + base + ", no base pattern, no color effect";
         };
@@ -1606,7 +1432,7 @@ public class FingerDesignPlanService {
 
     private static String colorType(JsonNode finger) {
         if (arrayContains(finger.path("finish"), "knit")) return "knit";
-        if (arrayContains(finger.path("finish"), "jelly")) return "jelly";
+        if (arrayContains(finger.path("finish"), "syrup")) return "syrup";
         if (arrayContains(finger.path("finish"), "ink")) return "ink";
         if (arrayContains(finger.path("finish"), "magnetic cat eye")) return "magnetic";
         if (arrayContains(finger.path("finish"), "glitter")) return "glitter";
@@ -1630,7 +1456,7 @@ public class FingerDesignPlanService {
 
     /**
      * 색 표현(시럽·솔리드·자석·글리터)은 세트당 최대 2종류. 3종류 이상이면 솔리드 + 가장 많이 쓰인 효과 1개만 남기고
-     * 나머지 손톱은 솔리드로 돌린다. 치크 블러시 손톱이 있으면 시럽(jelly)을 남긴다.
+     * 나머지 손톱은 솔리드로 돌린다. 치크 블러시 손톱이 있으면 시럽(syrup)을 남긴다.
      */
     private void limitColorExpressions(JsonNode plan, String wantedInput) {
         java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
@@ -1643,7 +1469,7 @@ public class FingerDesignPlanService {
         }
         counts.remove("chrome"); // 크롬 손톱은 상한에 세지 않고, 아래에서도 바꾸지 않는다
         if (counts.size() <= 2) return;
-        // 시럽(jelly)은 기본 베이스라 항상 남기고, 그 외 색 표현(자석/글리터/니트/잉크)은 한 가지만 남긴다(솔리드가 이미 있으면 0).
+        // 시럽(syrup)은 기본 베이스라 항상 남기고, 그 외 색 표현(자석/글리터/니트/잉크)은 한 가지만 남긴다(솔리드가 이미 있으면 0).
         // 사용자가 고른 표현은 손톱 수가 적어도 남긴다 - 안 그러면 고른 효과가 후처리로 지워진다(둘 다 골랐으면 둘 다).
         List<String> keep = new ArrayList<>();
         if (counts.containsKey("glitter") && wantsGlitter(wantedInput)) keep.add("glitter");
@@ -1658,7 +1484,7 @@ public class FingerDesignPlanService {
             }
             if (best != null) keep.add(best);
         }
-        keep.add("jelly");
+        keep.add("syrup");
         for (String finger : FINGERS) {
             if (!(plan.path(finger) instanceof ObjectNode f)) continue;
             String type = colorType(f);
@@ -1703,15 +1529,15 @@ public class FingerDesignPlanService {
                 .replaceAll("\\s{2,}", " ").trim();
     }
 
-    private static final java.util.regex.Pattern SYRUP_WORDING = java.util.regex.Pattern.compile("(?i)syrup|jelly|translucent");
+    private static final java.util.regex.Pattern SYRUP_WORDING = java.util.regex.Pattern.compile("(?i)syrup|translucent");
 
     private static final String SYRUP_SENTENCE =
-            " The base color is a translucent syrup gel: pigment suspended in clear glassy jelly with the nail bed"
+            " The base color is a translucent syrup gel: pigment suspended in clear glassy gel with the nail bed"
                     + " color glowing softly through it.";
 
     /**
      * 컬러 표현의 기본값은 시럽(반투명 젤)이다. 불투명한 파스텔은 납작하고 싸구려처럼 나와서(밤티), 사용자가
-     * 솔리드/불투명/매트를 말하지 않았다면 모든 손톱의 베이스를 시럽으로 맞춘다: finish에 "jelly"를 넣고 설명도 시럽 표현으로
+     * 솔리드/불투명/매트를 말하지 않았다면 모든 손톱의 베이스를 시럽으로 맞춘다: finish에 "syrup"를 넣고 설명도 시럽 표현으로
      * 보정한다. 글리터/파우더/프렌치 손톱도 시럽 베이스 위에 얹는다. 자석젤/크롬 손톱은 그 효과가 색 표현이라 그대로 둔다.
      * (GPT가 솔리드로 쓴 손톱이 남아 있으면 프롬프트 지시만으로는 기본값이 지켜지지 않아서 코드로도 맞춘다.)
      */
@@ -1721,9 +1547,9 @@ public class FingerDesignPlanService {
         if (WANTS_OPAQUE.matcher(wantedPart(confirmedInput)).find()) return;
         for (String finger : FINGERS) {
             if (!(root.path(finger) instanceof ObjectNode f)) continue;
-            if (arrayContains(f.path("finish"), "jelly") || arrayContains(f.path("finish"), "magnetic cat eye")
+            if (arrayContains(f.path("finish"), "syrup") || arrayContains(f.path("finish"), "magnetic cat eye")
                     || arrayContains(f.path("finish"), "chrome") || arrayContains(f.path("finish"), "knit")) continue;
-            addToArray(f, "finish", "jelly");
+            addToArray(f, "finish", "syrup");
             String description = f.path("description").asText("");
             // 베이스를 가리키는 "opaque"/"solid"만 시럽 표현으로 바꾼다("solid white ribbon" 같은 장식 묘사는 건드리지 않도록
             // base/color/gel/polish 근처의 solid만).
@@ -1753,7 +1579,7 @@ public class FingerDesignPlanService {
 
     /**
      * 조합 규칙을 코드로 강제한다 (프롬프트 지시만으로는 GPT가 가끔 어김):
-     * - 치크 블러시는 시럽(jelly)에서만: 글리터/자석/크롬 제거, jelly 보장
+     * - 치크 블러시는 시럽(syrup)에서만: 글리터/자석/크롬 제거, syrup 보장
      * - 글리터는 최대 2개 손톱. 글리터를 골랐다고 모든 손톱에 깔면 "글리터만 있는 세트"가 되므로, 기본 구성(세 가지 디자인이
      *   번갈아 나오는 세트)에서는 사용자가 골라도 2개까지다. 손가락을 직접 지정했거나 "모든 손톱"/"글리터만"처럼 명시한 경우만
      *   상한을 푼다. 글리터가 허용되지 않는 손톱의 글리터 문장은 정리한다.
@@ -1787,7 +1613,7 @@ public class FingerDesignPlanService {
                 removeFromArray(f, "finish", "chrome");
                 removeFromArray(f, "finish", "knit");
                 removeFromArray(f, "finish", "ink");
-                if (!arrayContains(f.path("finish"), "jelly")) addToArray(f, "finish", "jelly");
+                if (!arrayContains(f.path("finish"), "syrup")) addToArray(f, "finish", "syrup");
                 glitter = false;
             }
             if (glitter && glitterAvoided) {
@@ -1838,7 +1664,7 @@ public class FingerDesignPlanService {
         // 컬러 표현 집계: 기본은 시럽이라 solid가 남아 있으면 사용자가 솔리드/매트를 원했거나 기본값 적용에 실패한 것이다.
         java.util.Map<String, Integer> expressions = new java.util.LinkedHashMap<>();
         for (String finger : FINGERS) expressions.merge(colorType(plan.path(finger)), 1, Integer::sum);
-        System.out.println("[FingerDesignPlan] 컬러 표현(jelly=시럽): " + expressions);
+        System.out.println("[FingerDesignPlan] 컬러 표현(syrup): " + expressions);
 
         // 리본은 세트 안에서 한 가지 룩(3D면 전부 3D, 드로잉이면 전부 드로잉)이어야 한다 - 섞이면 경고만 남긴다.
         int raisedBows = 0, flatBows = 0;
@@ -1927,11 +1753,11 @@ public class FingerDesignPlanService {
         } else if (userInput.contains("솔리드") || userInput.contains("solid") || userInput.contains("불투명")) {
             syrup = false;
         } else {
-            int jelly = 0, other = 0;
+            int syrupCount = 0, other = 0;
             for (String finger : FINGERS) {
-                if ("jelly".equals(colorType(root.path(finger)))) jelly++; else other++;
+                if ("syrup".equals(colorType(root.path(finger)))) syrupCount++; else other++;
             }
-            syrup = jelly >= other;
+            syrup = syrupCount >= other;
         }
 
         // 베이스 색: 첫 번째로 값이 있는 손톱의 base_color, 없으면 상위 color
@@ -1941,8 +1767,8 @@ public class FingerDesignPlanService {
             if (!b.isEmpty()) { base = b; break; }
         }
         if (base.isEmpty()) base = root.path("color").asText("").trim();
-        base = base.replaceAll("(?i)\\b(base|syrup|jelly|solid|opaque|translucent)\\b", "").replaceAll("\\s+", " ").trim();
-        if (base.isEmpty()) base = "milky white";
+        base = base.replaceAll("(?i)\\b(base|syrup|solid|opaque|translucent)\\b", "").replaceAll("\\s+", " ").trim();
+        if (base.isEmpty()) base = "soft white";
 
         String description = syrup
                 ? "A " + base + " base in a translucent syrup-gel finish: one single uniform color across the whole nail "
@@ -1956,7 +1782,7 @@ public class FingerDesignPlanService {
             f.put("description", description);
             f.put("base_color", base);
             f.putArray("finish");
-            if (syrup) addToArray(f, "finish", "jelly");
+            if (syrup) addToArray(f, "finish", "syrup");
             f.putArray("pattern");
             f.putArray("motif");
             f.putArray("parts");
@@ -2054,6 +1880,121 @@ public class FingerDesignPlanService {
         if (added > 0) System.out.println("[FingerDesignPlan] 펑키 무드 → 파츠가 없던 손톱 " + added + "개에 파츠를 추가");
     }
 
+    // 심플 모드: 무드에 simple이 있거나 사용자가 말로 심플/미니멀을 원할 때만 절제된 세트로 간다. 그 외에는 파츠/디자인을 풍성하게.
+    private static final java.util.regex.Pattern SIMPLE_WORDS = java.util.regex.Pattern.compile(
+            "simple|심플|미니멀|minimal|깔끔|단정");
+
+    private static boolean wantsSimple(String confirmedInput) {
+        return SIMPLE_WORDS.matcher(wantedPart(confirmedInput)).find();
+    }
+
+    private static boolean declinedMotifOrParts(String confirmedInput) {
+        for (String line : wantedPart(confirmedInput).split("\\R")) {
+            if ((line.contains("motif") || line.contains("parts") || line.contains("핵심"))
+                    && (line.contains("없음") || line.contains("none"))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 참고 이미지 기반 생성은 변주 힌트와 세 가지 디자인 배치를 쓰지 않아서 결과가 단조로워지기 쉽다.
+     * 이미지에서 본 요소를 손톱마다 다른 아트(손그림 낙서, 패턴, 프렌치 변형, 워시, 3D 한두 개)로 나눠 쓰도록 하는
+     * 가벼운 힌트만 따로 넘긴다(심플 모드면 생략). 큐빅을 더 뿌리라는 뜻이 아니다.
+     */
+    private String buildImageRichnessLean(String confirmedInput) {
+        if (wantsSimple(confirmedInput)) return "";
+        java.util.concurrent.ThreadLocalRandom r = java.util.concurrent.ThreadLocalRandom.current();
+        List<String> twists = new java.util.ArrayList<>(LEAN_TWISTS);
+        java.util.Collections.shuffle(twists, r);
+        return "\n[REFERENCE RICHNESS LEAN] This is a reference-image request and the user did not ask for a simple look: build an"
+                + " art-driven, varied set like a market nail-art display sheet. Give the five nails clearly different art under one"
+                + " concept taken from the image: hand-drawn thin-line doodle motifs, a pattern nail (leopard, plaid, polka dot or"
+                + " stripe), a french variant, a soft wash (gradient, aura, cat-eye) and one or two small 3D pieces. At least three"
+                + " nails carry a drawn motif or a pattern, at most one nail stays quiet, and gems or glitter are accents on at most"
+                + " two nails (never a character, face or logo). Optional creative twists: " + twists.get(0) + " | " + twists.get(1)
+                + ".\n";
+    }
+
+    /**
+     * 심플 모드가 아닌데 아무 장식도 없는 조용한 손톱이 2개 이상이거나 모티프가 있는 손톱이 3개 미만이면, 비어 있는 손톱에
+     * 손그림 낙서 모티프(하트/별/나비/십자가/리본)를 더한다. 시중 네일 아트 시트처럼 손톱마다 다른 그림이 들어가게 하려는 것이라
+     * 큐빅 같은 파츠를 더 뿌리지는 않는다. 펑키 무드(enforceFunkyParts가 처리), 원컬러 세트, 모티프/파츠 "없음" 선택은 건드리지 않고,
+     * 도트/블루밍/잉크 손톱과 캐릭터 손톱도 그 디자인이 전부라 건드리지 않는다. 리본은 세트에 이미 리본이 있으면 쓰지 않는다(리본 룩은 하나).
+     */
+    private void enforceRichness(JsonNode plan, String confirmedInput) {
+        if (!(plan instanceof ObjectNode root)) return;
+        if (wantsSimple(confirmedInput) || declinedMotifOrParts(confirmedInput)) return;
+        if (FUNKY_WORDS.matcher(wantedPart(confirmedInput)).find()) return;
+        String[] motifs = {"heart", "star", "butterfly", "cross", "bow ribbon"};
+        String[] sentences = {
+                " A small hand-drawn doodle heart in a thin smooth gel-pen line in a deeper tone of the base sits off-center near the tip.",
+                " A small hand-drawn doodle star in a thin smooth deeper-tone line sits near a side edge.",
+                " A small hand-drawn doodle butterfly in a thin smooth deeper-tone line sits near the cuticle.",
+                " A small thin-line doodle cross in a deeper tone sits off-center on the nail.",
+                " A small hand-drawn line-art bow in a thin smooth deeper-tone line sits near the cuticle."};
+        java.util.Set<String> used = new java.util.HashSet<>();
+        boolean ribbonInSet = false;
+        int motifNails = 0, quiet = 0;
+        for (String finger : FINGERS) {
+            JsonNode f = root.path(finger);
+            boolean hasMotif = false;
+            for (JsonNode m : f.path("motif")) {
+                String v = m.asText("").trim().toLowerCase();
+                if (!v.isEmpty() && !v.equals("none")) { hasMotif = true; used.add(v); }
+            }
+            if (arrayContains(f.path("motif"), "bow ribbon") || arrayContains(f.path("parts"), "bow charm 3d")) ribbonInSet = true;
+            if (hasMotif) motifNails++;
+            if (isQuietNail(f)) quiet++;
+        }
+        if (quiet <= 1 && motifNails >= 3) return;
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < motifs.length; i++) {
+            if (ribbonInSet && motifs[i].equals("bow ribbon")) continue;
+            order.add(i);
+        }
+        java.util.Collections.shuffle(order, java.util.concurrent.ThreadLocalRandom.current());
+        order.sort((x, y) -> Boolean.compare(used.contains(motifs[x]), used.contains(motifs[y])));
+        // 조용한 손톱부터 채운다.
+        List<ObjectNode> candidates = new ArrayList<>();
+        for (int pass = 0; pass < 2; pass++) {
+            for (String finger : FINGERS) {
+                if (!(root.path(finger) instanceof ObjectNode f)) continue;
+                if (f.path("motif").isArray() && f.path("motif").size() > 0) continue;
+                if (arrayContains(f.path("pattern"), "polka dot") || arrayContains(f.path("pattern"), "blooming")
+                        || arrayContains(f.path("finish"), "ink") || candidates.contains(f)) continue;
+                if ((pass == 0) == isQuietNail(f)) candidates.add(f);
+            }
+        }
+        int added = 0;
+        for (ObjectNode f : candidates) {
+            if (quiet <= 1 && motifNails >= 3) break;
+            if (order.isEmpty()) break;
+            int k = order.get(added % order.size());
+            boolean wasQuiet = isQuietNail(f);
+            addToArray(f, "motif", motifs[k]);
+            f.put("description", f.path("description").asText("") + sentences[k]);
+            if (wasQuiet) quiet--;
+            motifNails++;
+            added++;
+        }
+        if (added > 0) System.out.println("[FingerDesignPlan] 심플 모드 아님 → 손톱 " + added + "개에 손그림 모티프를 추가(모티프 있는 손톱 "
+                + motifNails + "개, 조용한 손톱 " + quiet + "개)");
+    }
+
+    /** 모티프, 파츠, 패턴, 색 효과가 하나도 없는 손톱. */
+    private static boolean isQuietNail(JsonNode f) {
+        for (JsonNode m : f.path("motif")) {
+            String v = m.asText("").trim().toLowerCase();
+            if (!v.isEmpty() && !v.equals("none")) return false;
+        }
+        if (f.path("parts").isArray() && f.path("parts").size() > 0) return false;
+        if (f.path("pattern").isArray() && f.path("pattern").size() > 0) return false;
+        for (String effect : List.of("glitter", "magnetic cat eye", "powder finish", "knit", "ink", "sculpted 3d", "chrome", "foil")) {
+            if (arrayContains(f.path("finish"), effect)) return false;
+        }
+        return true;
+    }
+
     /** 사용자가 도트를 골랐을 때: 한 손톱 전체 도트 + 프렌치 팁 도트, 외곽선 없는 단순한 솔리드 도트. */
     private static String dotsLine(String confirmedInput) {
         String w = wantedPart(confirmedInput);
@@ -2070,7 +2011,7 @@ public class FingerDesignPlanService {
                     + " ink gel colors, with at most a thin light line in a slightly deeper tone (no black or heavy dark outline).";
 
     private static final java.util.regex.Pattern SYRUP_BASE_WORDING = java.util.regex.Pattern.compile(
-            "(?i)\\b(?:translucent\\s+)?(?:syrup|jelly)(?:\\s+(?:gel|base|color))?\\b");
+            "(?i)\\b(?:translucent\\s+)?(?:syrup)(?:\\s+(?:gel|base|color))?\\b");
 
     /** 사용자가 드로잉을 골랐을 때(매트 제외) 그림이 들어가는 손톱의 베이스는 잉크라는 지시. */
     private static String inkForDrawingLine(String confirmedInput) {
@@ -2078,7 +2019,7 @@ public class FingerDesignPlanService {
         return "\n[DRAWING = INK ILLUSTRATION - VERY IMPORTANT] The user chose drawing. A drawing is an ink illustration like a cute"
                 + " hand-inked sticker: the motif's shapes are FILLED with transparent ink gel colors (finish \"ink\") - sheer,"
                 + " saturated, slightly uneven watercolor-like color areas - on top of a normal base color (syrup by default:"
-                + " finish \"jelly\" plus \"ink\"), with at most a thin light line in a slightly deeper tone (no black or heavy"
+                + " finish \"syrup\" plus \"ink\"), with at most a thin light line in a slightly deeper tone (no black or heavy"
                 + " dark outline). Ink alone is NOT a drawing. Every nail that carries drawn art MUST have the visible ink fill and a"
                 + " clearly recognizable, fairly large motif (ribbon, flower, clover, heart, star, lettering, a small cute"
                 + " character) - never abstract lines, lacing, spirals, raised gel lines, or pearls instead. Use it on at least two"
@@ -2115,9 +2056,9 @@ public class FingerDesignPlanService {
             for (String effect : List.of("glitter", "magnetic cat eye", "powder finish", "chrome", "knit")) {
                 removeFromArray(f, "finish", effect);
             }
-            // 잉크는 베이스 색 위에 얹는 드로잉 요소다: 시럽 베이스(jelly)를 남기고(없으면 넣고) 잉크를 더한다.
-            if (!WANTS_OPAQUE.matcher(wantedPart(confirmedInput)).find() && !arrayContains(f.path("finish"), "jelly")) {
-                addToArray(f, "finish", "jelly");
+            // 잉크는 베이스 색 위에 얹는 드로잉 요소다: 시럽 베이스(syrup)를 남기고(없으면 넣고) 잉크를 더한다.
+            if (!WANTS_OPAQUE.matcher(wantedPart(confirmedInput)).find() && !arrayContains(f.path("finish"), "syrup")) {
+                addToArray(f, "finish", "syrup");
             }
             addToArray(f, "finish", "ink");
             String description = f.path("description").asText("");
@@ -2214,8 +2155,10 @@ public class FingerDesignPlanService {
         // 요청마다 무작위 "기울기"를 부드러운 제안으로 넘겨 결과가 달라지게 한다.
         // ★ 사용자가 "원컬러/단색"을 요청했으면 손톱별 변주(보조 요소·랜덤 축 조합)를 전부 끄고 5개를 같은 한 색으로 고정한다.
         boolean uniformSet = !scanAutoMode && isUniformSetRequest(confirmedInputSummary);
-        String variationLean = (uniformSet || hasImage || (previousPlanJson != null && !previousPlanJson.isBlank()))
-                ? "" : buildVariationLean(confirmedInputSummary);
+        boolean editRequest = previousPlanJson != null && !previousPlanJson.isBlank();
+        String variationLean = (uniformSet || editRequest) ? ""
+                : hasImage ? buildImageRichnessLean(confirmedInputSummary)
+                : buildVariationLean(confirmedInputSummary);
         String uniformSection = uniformSet ? UNIFORM_SET_SECTION : "";
         // ★ 스캔 정보 기반 자동 생성 모드: 사용자 입력이 하나도 없으므로 "지정이 없으면 비운다"는 규칙 대신
         // 추천 팔레트에서 색을 직접 골라 손가락별로 다르게 분산시키도록 지시한다.
@@ -2292,6 +2235,7 @@ public class FingerDesignPlanService {
             JsonNode plan = objectMapper.readTree(text);
             enforceCombinationRules(plan, confirmedInputSummary);
             // 참고 사진/수정 흐름은 사진이나 기존 디자인의 리본을 따라야 하므로 새 디자인일 때만 드로잉 리본을 제한한다.
+            stripReferenceWording(plan);
             if (!hasImage && (previousPlanJson == null || previousPlanJson.isBlank()) && !scanAutoMode)
                 enforceNoDrawnRibbon(plan, confirmedInputSummary);
             if (!hasImage && (previousPlanJson == null || previousPlanJson.isBlank()) && !scanAutoMode) {
@@ -2300,6 +2244,8 @@ public class FingerDesignPlanService {
                 enforceBloomingForMood(plan, confirmedInputSummary);
                 enforceFunkyParts(plan, confirmedInputSummary);
             }
+            // 심플 키워드가 없으면 파츠/디자인을 풍성하게 - 참고 사진 기반 생성도 포함한다(수정 흐름과 원컬러 세트는 제외).
+            if (!editRequest && !uniformSet) enforceRichness(plan, confirmedInputSummary);
             if (!hasImage && (previousPlanJson == null || previousPlanJson.isBlank()) && !scanAutoMode && !uniformSet) {
                 enforceInkForDrawing(plan, confirmedInputSummary);
                 limitColorExpressions(plan, wantedPart(confirmedInputSummary));

@@ -207,6 +207,18 @@ public class RefineService {
               "where suitable", "if possible", "may". The image model treats them as optional and often
               changes almost nothing. Instead state concrete actions: "add small heart charms to two of
               the nails", "give each nail a soft pastel base".
+            - GORGEOUS / ART-LIKE REQUESTS - VERY IMPORTANT: when the user asks for "화려하게", "아트적으로",
+              "포인트 많이", "더 예쁘게", "gorgeous", "more artistic" or similar without naming an element, they
+              mean more NAIL ART like a real market nail-art display sheet, NOT more rhinestones, stars or
+              glitter scattered over the same nails. Write concrete actions that give the five nails clearly
+              DIFFERENT art: hand-drawn thin-line doodle motifs (bow outline, hearts, stars, crosses,
+              butterflies, cherries, music notes) in black, dark brown or a deeper tone of the nail's own color
+              on some nails; one or two pattern nails (leopard print, plaid check, polka dots or stripes); a
+              french-tip variant (thin black french, leopard french, glitter french or double french) on one
+              nail; a soft wash such as a smoky aura gradient or cat-eye glow on one nail; and one or two small
+              raised 3D charms such as a polished silver bow or a chrome cross. Drawn motifs and patterns may
+              be medium sized (up to about half of the nail). Gem or glitter accents appear on at most two
+              nails and are never the main change. Keep it as one coordinated set in the original color family.
             - KEEP COLORS CLOSE TO THE ORIGINAL - VERY IMPORTANT: unless the user explicitly asks for a
               color change, do not tell the model to move to a different color family (for example
               "shift the color palette toward pastel tones"). Keep each nail's original color family and
@@ -326,7 +338,7 @@ public class RefineService {
 
             [keywordsAdd / keywordsRemove]
             The result page shows short English keyword chips describing the whole nail set (for
-            example "jelly", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
+            example "syrup", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
             "pearl"). After your edit, list in "keywordsAdd" the 0 to 4 chips that the edit newly adds
             to the set (a finish, pattern, motif or decoration that now visibly exists), and in
             "keywordsRemove" the chips that no longer apply because the edit replaced or removed them

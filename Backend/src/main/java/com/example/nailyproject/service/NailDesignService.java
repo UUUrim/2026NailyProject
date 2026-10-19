@@ -890,8 +890,11 @@ public class NailDesignService {
             }
         }
 
+        // ★ 참고 사진 기반 생성은 사용자의 손 스캔 정보(추천 쉐입/컬러/피부톤 등)를 전혀 쓰지 않는다.
+        // 프론트가 scanId를 매 요청마다 자동으로 보내도 여기서 무시해서, 사진이 색감/분위기/디자인을 정한다.
+        boolean photoFlow = imageBase64 != null && !imageBase64.isBlank();
         HandScan handScan = null;
-        if (request.getScanId() != null) {
+        if (!photoFlow && request.getScanId() != null) {
             handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId()).orElse(null);
         }
 
@@ -908,8 +911,11 @@ public class NailDesignService {
         // scan-auto가 아니면 기존대로 빈 슬롯을 스캔 값으로 메운다.
         // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
         //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
-        if (!scanAuto) {
-            fillMissingFromScan(slots, handScan, !hasImage);
+        // ★ 참고 사진 기반 생성에서는 비어 있는 무드/색/쉐입을 스캔 기본값(랜덤 색 1~3개, 랜덤 무드, 추천 쉐입)으로 채우지 않는다.
+        // 그 값이 사진의 색감/분위기를 덮어써서(사진은 짙은 파랑 밤하늘인데 결과가 라벤더/핑크 파스텔) 사진이 반영되지 않았다.
+        // 사진이 비어 있는 부분을 정하고, 쉐입은 아래 enforceAppShape가 (사용자 말 > 슬롯 > 플랜 > 스캔) 순서로 정리한다.
+        if (!scanAuto && !photoFlow) {
+            fillMissingFromScan(slots, handScan);
         }
 
         if (session != null && !scanAuto) {
@@ -955,7 +961,17 @@ public class NailDesignService {
 
         // 앱이 제공하는 쉐입은 6가지(round/oval/almond/stiletto/ballerina/square)뿐이다. 플랜 LLM이 사진을 보고
         // "rounded square" 같은 새 이름을 적으면 프롬프트와 AR 3D 템플릿(파일명 매칭)이 어긋나므로, 항상 6가지 중 하나로 정리한다.
-        enforceAppShape(plan, getLiked(slots, "shape"), handScan != null ? scanRecommendedShape(handScan) : null);
+        // ★ 사진 기반 생성에서 사용자가 "쉐입은 스틸레토로" 처럼 직접 말한 쉐입은 가장 우선한다(참고 사진의 손톱 모양, 플래너 값보다 위).
+        List<String> shapePriority = new ArrayList<>();
+        if (hasImage) {
+            String wordsShape = shapeFromUserWords(session, request.getUserNote());
+            if (wordsShape != null) {
+                shapePriority.add(wordsShape);
+                System.out.println("[NailDesignService] 사용자 문장에서 쉐입 지정 감지 → '" + wordsShape + "' 우선 적용");
+            }
+        }
+        shapePriority.addAll(getLiked(slots, "shape"));
+        enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
 
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
@@ -1073,6 +1089,7 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
+                .shape(plan.path("shape").asText(null))
                 .keywords(localizeKeywords(mergeKeywords(referenceSubjectKeyword(plan), mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
                 .build();
@@ -1349,6 +1366,41 @@ public class NailDesignService {
                 .role(ChatMessage.MessageRole.user)
                 .content(PHOTO_REQUEST_TEXT + "\n" + trimmed)
                 .build());
+    }
+
+    // 사용자 문장에서 쉐입 이름을 찾는다(한글/영어). "아몬드 말고" 같은 부정은 건너뛰고, 여러 번 나오면 마지막 것을 쓴다.
+    private static final java.util.regex.Pattern SHAPE_WORD = java.util.regex.Pattern.compile(
+            "(스틸레토|stiletto|아몬드|almond|발레리나|코핀|ballerina|coffin|스퀘어|square|오발|타원|oval|라운드|\\bround\\b)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern SHAPE_NEGATION = java.util.regex.Pattern.compile(
+            "^\\s*(?:쉐입|모양|형)?\\s*(?:말고|빼고|제외|싫|아니|아닌|말아)");
+
+    private String shapeFromUserWords(DesignSession session, String note) {
+        StringBuilder text = new StringBuilder();
+        if (session != null) {
+            chatMessageRepository.findBySessionOrderBySentAtAsc(session).stream()
+                    .filter(m -> m.getRole() == ChatMessage.MessageRole.user)
+                    .map(m -> m.getContent() == null ? "" : m.getContent())
+                    .forEach(c -> text.append(c).append('\n'));
+        }
+        if (note != null) text.append(note);
+        String found = null;
+        java.util.regex.Matcher m = SHAPE_WORD.matcher(text);
+        while (m.find()) {
+            String after = text.substring(m.end(), Math.min(text.length(), m.end() + 8));
+            if (SHAPE_NEGATION.matcher(after).find()) continue;
+            String w = m.group(1).toLowerCase();
+            String mapped;
+            if (w.contains("스틸레토")) mapped = "stiletto";
+            else if (w.contains("아몬드")) mapped = "almond";
+            else if (w.contains("발레리나") || w.contains("코핀")) mapped = "ballerina";
+            else if (w.contains("스퀘어")) mapped = "square";
+            else if (w.contains("오발") || w.contains("타원")) mapped = "oval";
+            else if (w.contains("라운드")) mapped = "round";
+            else mapped = mapToAppShape(w);
+            if (mapped != null) found = mapped;
+        }
+        return found;
     }
 
     private String buildPhotoNoteText(String note) {
@@ -2128,7 +2180,8 @@ public class NailDesignService {
                 .append("set from a Korean nail salon's portfolio, not an AI render. Real sets are restrained and ")
                 .append("delicate: charms, pearls, and motifs are SMALL (one charm covers at most about a quarter of ")
                 .append("the nail) and sit off-center, leaving most of the nail as a bare sheer milky base. Colors are ")
-                .append("soft, translucent, and slightly desaturated, never flat saturated candy pigment, and a ")
+                .append("translucent and glossy, soft and slightly desaturated by default but deep or saturated when the ")
+                .append("palette or the nail descriptions call for it (for example a deep midnight blue), never flat opaque candy pigment, and a ")
                 .append("gradient is a soft translucent blend of gel rather than a digital two-color fade. Resin or ")
                 .append("acrylic charms are small, milky or pearly with slightly irregular hand-molded edges, set into ")
                 .append("a small bead of clear gel that blends them into the nail; metal charms are tiny and polished; ")
@@ -2144,12 +2197,12 @@ public class NailDesignService {
                 .append("art, not a cartoon or plastic-toy look, not a smooth game-asset render.\n\n")
                 .append("Lighting: a soft studio softbox at a low angle wraps gently around the curved ")
                 .append("surface of each nail with soft bounce fill in the shadows — the exact highlight ")
-                .append("shape (a long, bright, window-shaped glassy highlight along the gel dome for glossy/chrome/jelly finishes, or a luminous, wet-looking ")
+                .append("shape (a long, bright, window-shaped glassy highlight along the gel dome for glossy/chrome/syrup finishes, or a luminous, wet-looking ")
                 .append("pearly sheen over the whole nail with bright soft reflections gliding along the curve for ")
                 .append("powder finishes, ")
                 .append("without changing the nail's color) ")
                 .append("should follow whatever each nail's own material description above specifies, ")
-                .append("rendered with real-photo specular realism. Where the nail is jelly, milky, or ")
+                .append("rendered with real-photo specular realism. Where the nail is syrup, milky, or ")
                 .append("translucent, render real light transmission — light glows softly from within ")
                 .append(useTransparentGptImage()
                         // 투명 PNG로 받을 때 "배경이 비친다"고 쓰면 모델이 손톱의 흰/맑은 부분을 알파 0으로 뚫어버려
@@ -2171,10 +2224,9 @@ public class NailDesignService {
                 .append("true-to-life color rendering. Only tiny natural imperfections of real handmade ")
                 .append("gel nails (a slightly uneven edge or cuticle line); the color layer itself is smooth and ")
                 .append("even with no texture, grain, crackle, grid, or surface pattern of its own (except the knit fibers or ink check that a nail's own description specifies), and the clear top gel stays smooth, thick, and glossy. ")
-                .append("The five nails are one matched set cured from the same bottle: the base color, ")
-                .append("tone, translucency, and gloss level are exactly the same on every nail, with no ")
-                .append("nail looking pinker, grayer, bluer, lighter, or more transparent than the others — ")
-                .append("only designs that a nail's own description assigns to it may differ. Unless the design explicitly ")
+                .append("The five nails are one coordinated set cured the same way: the translucency and ")
+                .append("gloss level are the same on every nail, while each nail's base color and design follow ")
+                .append("that nail's own description above. Unless the design explicitly ")
                 .append("calls for glitter, render every reflective or shimmery surface as a smooth, ")
                 .append("continuous, mirror-like gloss — never as scattered glitter specks or sparkle ")
                 .append("dust. This must read as an unedited raw photograph from a real Korean nail ")
@@ -2270,16 +2322,16 @@ public class NailDesignService {
         boolean isMatte = surface.toLowerCase().contains("matte");
         items.add(isMatte ? "matte finish"
                 : "glossy gel polish under a thick clear top-gel overlay that forms a plump convex glass-like dome");
-        // ★ 항상 "시럽젤" 스타일 투명감을 언급 — jelly가 선택 안 돼도 요즘 트렌드인 시럽젤
+        // ★ 항상 "시럽젤" 스타일 투명감을 언급 — syrup이 선택 안 돼도 요즘 트렌드인 시럽젤
         // (두껍고 촉촉해 보이는 유리질 투명 젤, 손톱 색이 은은히 비치는) 느낌이 없으면
         // 이미지가 납작한 스티커/오페이크 페인트처럼 나옴.
         String finishLower = finishes.stream().map(String::toLowerCase).collect(Collectors.joining(" "));
         String partsLower  = parts.stream().map(String::toLowerCase).collect(Collectors.joining(" "));
 
-        // ★ 시럽(jelly)은 이제 손톱별로 고르는 색 표현 중 하나라서, 시럽 손톱이 있을 때만 투명 시럽젤 문구를 넣고
+        // ★ 시럽(syrup)은 이제 손톱별로 고르는 색 표현 중 하나라서, 시럽 손톱이 있을 때만 투명 시럽젤 문구를 넣고
         // 솔리드 손톱은 불투명하게 둔다. 시럽이 없으면 광택 있는 젤 깊이감만 가볍게 언급한다.
         if (!isMatte) {
-            if (finishLower.contains("jelly")) {
+            if (finishLower.contains("syrup")) {
                 items.add("thick glossy syrup-gel texture on the nails described as syrup — a wet-looking, " +
                         "glass-clear translucent gel layer with a large soft mirror-like highlight, the nail bed " +
                         "color subtly glowing through the translucent gel, like a trending Korean syrup-gel " +
@@ -2289,7 +2341,7 @@ public class NailDesignService {
             }
         }
 
-        if (finishLower.contains("jelly"))          items.add("translucent jelly layers");
+        if (finishLower.contains("syrup"))          items.add("translucent syrup layers");
         if (finishLower.contains("glitter"))        items.add("fine sparkle on the nails described with glitter — only small bright twinkling points of " +
                 "light scattered loosely over a perfectly smooth, clean, evenly colored glossy surface, in the nail's own " +
                 "hue family (soft pink, rose, silver, or champagne). The sparkle adds no texture and no pattern: the color " +
@@ -2513,7 +2565,7 @@ public class NailDesignService {
             Map.entry("glitter", "글리터"), Map.entry("gradient", "그라데이션"), Map.entry("cheek", "치크"),
             Map.entry("marble", "마블"), Map.entry("french", "프렌치"), Map.entry("magnetic", "마그네틱"),
             Map.entry("powder", "파우더"), Map.entry("matte", "매트"), Map.entry("glossy", "글로시"),
-            Map.entry("art", "아트"), Map.entry("chrome", "크롬"), Map.entry("jelly", "젤리"),
+            Map.entry("art", "아트"), Map.entry("chrome", "크롬"),
             Map.entry("foil", "호일"), Map.entry("syrup", "시럽"), Map.entry("plaid", "체크"),
             Map.entry("check", "체크"), Map.entry("stripe", "스트라이프"), Map.entry("lace", "레이스"),
             Map.entry("watercolor", "수채화"), Map.entry("blooming", "블루밍"), Map.entry("speckle", "스펙클"), Map.entry("line", "라인"),
