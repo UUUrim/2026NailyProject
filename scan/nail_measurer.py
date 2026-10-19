@@ -1781,6 +1781,7 @@ def _fallback_measurement(finger: str) -> dict:
         "arc_radius_mm":   arc_radius_mm,
         "thickness_mm":    0.6,  # STL 기본 두께(다른 곳 주석과 동일)
         "_ccurve_method":  "fallback average (measurement failed)",
+        "c_curve_source":  "fallback_average",
         "_is_fallback":    True,
     }
 
@@ -1892,6 +1893,14 @@ def measure_finger(top_path: str, finger: str,
         # ── Override C-curve with end-on measurement if photo is provided ──
         use_endon = ccurve_path and os.path.isfile(ccurve_path) and _ENDON_AVAILABLE
         if use_endon:
+            # A low-resolution side photo (the phone's 640px preview, saved when the full-resolution shot
+            # failed) has a different field of view, so the fixed crop below would miss the finger and the
+            # arc fit would return an arbitrary number. Treat it as "no side photo".
+            _hdr = cv2.imread(ccurve_path, cv2.IMREAD_REDUCED_COLOR_8)
+            if _hdr is None or _hdr.shape[1] * 8 < 2000:
+                print(f"  [C-curve] WARN side photo is low-resolution ({ccurve_path}) - not used")
+                use_endon = False
+        if use_endon:
             print(f"\n  [C-curve] end-on photo: {ccurve_path}")
             debug_path = os.path.join(output_dir, f"{finger}_ccurve_debug.jpg")
             try:
@@ -1906,6 +1915,7 @@ def measure_finger(top_path: str, finger: str,
                 data["c_curve_mm"]    = cc["c_curve_mm"]
                 data["arc_radius_mm"] = cc["arc_radius_mm"]
                 data["_ccurve_method"] = "end-on photo"
+                data["c_curve_source"] = "end_on"
                 print(f"  [C-curve] OK end-on  "
                       f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
                       f"(debug -> {debug_path})")
@@ -1919,8 +1929,10 @@ def measure_finger(top_path: str, finger: str,
                 )
                 data["_ccurve_method"] = (f"fallback {finger} average {fallback_cc}mm "
                                           f"(end-on/phone measurement failed)")
+                data["c_curve_source"] = "fallback_average"
         else:
             data["_ccurve_method"] = "brightness fallback"
+            data["c_curve_source"] = "brightness"
             if ccurve_path and not os.path.isfile(ccurve_path):
                 print(f"  [C-curve] WARN ccurve photo not found: {ccurve_path}")
 
@@ -1985,7 +1997,7 @@ def build_payload(results: list, aruco_size_mm: float) -> dict:
     votes = []
     for r in results:
         std = STANDARD_LENGTH.get(r["finger"])
-        cl  = r.get("corrected_length_mm")
+        cl  = r.get("length_mm")
         if std and cl:
             votes.append("long" if cl >= std else "short")
     nail_length = "long" if votes.count("long") > votes.count("short") else "short"
@@ -2085,7 +2097,9 @@ def build_profile(results: list) -> dict:
             continue
         w   = r["width_mm"]
         l   = r["length_mm"]
-        l_c = r.get("corrected_length_mm") or l
+        # Live-view measurement is accurate enough to judge on directly -
+        # no W/L-ratio corrected length.
+        l_c = l
         w_z = (w - std["width_mm"]) / std["width_sd"]
         l_z = (l_c - std["length_mm"]) / std["length_sd"]
         fingers.append({
@@ -2186,7 +2200,7 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     votes = []
     for n in nails:
         std = STANDARD_LENGTH.get(n["finger"])
-        cl  = n.get("corrected_length_mm")
+        cl  = n.get("length_mm")
         if std and cl:
             votes.append("long" if cl >= std else "short")
     nail_length = "long" if votes.count("long") > votes.count("short") else "short"
@@ -2247,54 +2261,86 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
     }
 
 
+_C_CURVE_DESC = {
+    "much_smaller": "평균보다 많이 평평한 편",
+    "smaller": "평균보다 평평한 편",
+    "average": "평균과 비슷한 편",
+    "larger": "평균보다 둥글게 휜 편",
+    "much_larger": "평균보다 많이 둥글게 휜 편",
+}
+
+
+def _c_curve_z(n: dict):
+    """한 손가락의 C-curve z-score = (측정값 - 그 손가락 평균) / SD (STANDARD_NAILS).
+    쓸 수 없는 값이면 None.  측정 실패로 손가락 평균이 대신 들어간 값은 뺀다
+    (z가 0 쪽으로 쏠리므로).  c_curve_source가 없는 예전 결과 파일은 측정값으로 간주한다."""
+    std = STANDARD_NAILS.get(n.get("finger"))
+    if std is None or n.get("c_curve_source") == "fallback_average":
+        return None
+    try:
+        v = float(n.get("c_curve_mm"))
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(v) or math.isinf(v):
+        return None
+    return (v - std["c_curve_mm"]) / std["c_curve_sd"]
+
+
+def _classify_c_curve_total(all_nails: list) -> dict:
+    """
+    C-curve를 손가락별로 여성 평균/SD(STANDARD_NAILS)와 비교해 5단계로 판정하고,
+    손 전체 판정은 손가락별 판정의 다수결로 정한다 (폭/길이와 같은 방식).
+    c_curve_size: much_smaller / smaller / average / larger / much_larger
+    (smaller = 평균보다 평평, larger = 평균보다 더 휘어 있음)
+    """
+    labels = [_size_category(z) for z in map(_c_curve_z, all_nails) if z is not None]
+    if not labels:
+        return {"c_curve_size": None, "c_curve_finger_count": 0, "c_curve_text": None}
+    size = _majority(labels)
+    return {
+        "c_curve_size":         size,
+        "c_curve_finger_count": len(labels),
+        "c_curve_text": f"C-curve(손톱의 휘어진 정도)는 {_C_CURVE_DESC[size]}이에요.",
+    }
+
+
 def classify_size_totals(all_nails: list) -> dict:
     """
-    Aggregate-vs-aggregate size verdict across BOTH hands (10 fingers).
-
-    Per 팀장's request: instead of classifying each finger against its own
-    per-finger Asian-women reference and majority-voting the resulting 5/10
-    labels (what build_profile()/merge_hand_measurements() do per hand),
-    sum this person's measured width/length across all 10 fingers and
-    compare that ONE total against the combined 10-finger reference total
-    (each of the 5 STANDARD_NAILS entries counted once per hand) - one
-    z-score, one verdict, for "양손 vs 아시아 여성 평균 양손".
-
-    Combining the reference: assuming each finger's measurement is
-    independent, the sum of 10 means is the reference mean, and the SD of
-    that sum is sqrt(sum of the 10 variances) (SDs don't just add).
+    Hand-level size verdict across BOTH hands (10 fingers): each finger is
+    classified against its own STANDARD_NAILS reference (width / length /
+    C-curve, 5 levels each, z-score = (measured - mean) / SD), and the
+    overall verdict for each axis is the majority vote of those labels
+    (ties broken toward 'average', see _majority).
 
     all_nails: the 10 "nails" entries from a left hand's measurements.json
                + a right hand's measurements.json (5 each).
     """
-    std_width_mean  = 2 * sum(STANDARD_NAILS[f]["width_mm"]         for f in FINGER_NAMES)
-    std_width_sd    = math.sqrt(2 * sum(STANDARD_NAILS[f]["width_sd"]  ** 2 for f in FINGER_NAMES))
-    std_length_mean = 2 * sum(STANDARD_NAILS[f]["length_mm"]        for f in FINGER_NAMES)
-    std_length_sd   = math.sqrt(2 * sum(STANDARD_NAILS[f]["length_sd"] ** 2 for f in FINGER_NAMES))
+    width_labels, length_labels, nail_labels = [], [], []
+    for n in all_nails:
+        std = STANDARD_NAILS.get(n.get("finger"))
+        if std is None:
+            continue
+        # Measured length as-is (no W/L-ratio corrected length) - live-view
+        # measurement is accurate, and avg_length_mm uses the same value.
+        w_z = (n["width_mm"]  - std["width_mm"])  / std["width_sd"]
+        l_z = (n["length_mm"] - std["length_mm"]) / std["length_sd"]
+        width_labels.append(_size_category(w_z))
+        length_labels.append(_size_category(l_z))
+        nail_labels.append(_size_category((w_z + l_z) / 2.0))
 
-    total_width  = sum(n["width_mm"] for n in all_nails)
-    total_length = sum((n.get("corrected_length_mm") or n["length_mm"]) for n in all_nails)
-
-    width_z  = (total_width  - std_width_mean)  / std_width_sd
-    length_z = (total_length - std_length_mean) / std_length_sd
-
-    width_size  = _size_category(width_z)
-    length_size = _size_category(length_z)
-    nail_size   = _size_category((width_z + length_z) / 2.0)
+    width_size  = _majority(width_labels)
+    length_size = _majority(length_labels)
+    nail_size   = _majority(nail_labels)
 
     length_phrase = _LENGTH_DESC.get(length_size, "평균과 비슷한 편")
     width_phrase  = _WIDTH_DESC.get(width_size, "평균과 비슷한 편")
     summary_text = f"양손 손톱을 전체로 봤을 때 길이는 {length_phrase}이고, 너비는 {width_phrase}이에요."
 
     return {
-        "total_width_mm":       round(total_width, 2),
-        "total_length_mm":      round(total_length, 2),
-        "reference_width_mm":   round(std_width_mean, 2),
-        "reference_length_mm":  round(std_length_mean, 2),
-        "width_z":              round(width_z, 3),
-        "length_z":             round(length_z, 3),
-        "width_size":           width_size,
-        "length_size":          length_size,
-        "nail_size":            nail_size,
+        **_classify_c_curve_total(all_nails),
+        "width_size":           width_size or "average",
+        "length_size":          length_size or "average",
+        "nail_size":            nail_size or "average",
         "summary_text":         summary_text,
     }
 

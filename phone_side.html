@@ -62,11 +62,52 @@
     border: none; border-radius: 999px;
     background: #4ADE80; color: #06240f;
   }
+  /* 초점/노출 지점 표시 + 설정 패널 */
+  #focusRing {
+    position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px;
+    border: 2px solid #FFD54A; border-radius: 50%;
+    pointer-events: none; display: none; box-shadow: 0 0 0 1px rgba(0,0,0,0.6);
+  }
+  #gearBtn {
+    position: absolute; top: 12px; right: 12px; z-index: 5;
+    width: 44px; height: 44px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,0.55); color: #fff; font-size: 22px;
+  }
+  #panel {
+    position: absolute; top: 64px; right: 12px; z-index: 5; width: 270px;
+    background: rgba(0,0,0,0.78); border-radius: 12px; padding: 12px 14px;
+    font-size: 14px; line-height: 1.5; display: none;
+  }
+  #panel label { display: block; margin-top: 8px; }
+  #panel input[type=range] { width: 100%; }
+  #panel small { color: #aaa; display: block; margin-top: 6px; }
+  #panel button { margin-top: 8px; padding: 6px 10px; border-radius: 8px; border: none; background: #3a4150; color: #fff; }
 </style>
 </head>
 <body>
   <video id="video" playsinline autoplay muted></video>
   <div id="flash"></div>
+  <div id="focusRing"></div>
+  <button id="gearBtn" type="button" aria-label="카메라 설정">⚙</button>
+  <div id="panel">
+    <b>카메라 설정</b>
+    <label>초점
+      <select id="afMode" style="width:100%">
+        <option value="poi">손가락 지점에 맞춤 (권장)</option>
+        <option value="auto">자동</option>
+        <option value="manual">수동 거리</option>
+      </select>
+    </label>
+    <label id="fdRow" style="display:none">초점 거리 <span id="fdVal"></span>
+      <input id="fd" type="range" min="0" max="1" step="0.01" value="0.5" />
+    </label>
+    <label id="evRow">노출 보정 <span id="evVal"></span>
+      <input id="ev" type="range" min="-3" max="3" step="0.1" value="-1" />
+    </label>
+    <small id="capInfo"></small>
+    <small>촬영할 때마다 서버가 손가락 위치를 자동으로 찾아 그 지점에 초점·노출을 맞춥니다. 자동 검출이 안 될 때만 화면에서 손톱 부근을 탭해 둔 지점을 씁니다.</small>
+    <button id="applyBtn" type="button">지금 적용</button>
+  </div>
   <div id="overlay">
     <div id="status">연결 대기 중...</div>
     <div id="bottom">
@@ -88,17 +129,58 @@
   const manualBtn   = document.getElementById("manualBtn");
   const startScreen = document.getElementById("startScreen");
   const startBtn    = document.getElementById("startBtn");
+  const ringEl      = document.getElementById("focusRing");
+  const gearBtn     = document.getElementById("gearBtn");
+  const panel       = document.getElementById("panel");
+  const afModeEl    = document.getElementById("afMode");
+  const fdRow       = document.getElementById("fdRow");
+  const fdEl        = document.getElementById("fd");
+  const fdVal       = document.getElementById("fdVal");
+  const evEl        = document.getElementById("ev");
+  const evVal       = document.getElementById("evVal");
+  const capInfo     = document.getElementById("capInfo");
+  const applyBtn    = document.getElementById("applyBtn");
 
-  const PREVIEW_MS      = 1000;   // preview upload interval
+  const PAGE_VERSION    = "cal3";   // shown in /phone/side/debug so the desktop can tell which page the phone is running
+  const PREVIEW_MS      = 250;    // minimum gap between preview uploads (next one waits for the previous to finish)
   const POLL_MS         = 400;    // capture-request poll interval
-  const PREVIEW_MAX_W   = 960;    // preview width sent to desktop (~1fps, so this is cheap)
+  const PREVIEW_MAX_W   = 640;    // preview width sent to desktop (small, so it keeps up through ngrok)
+  const FOCUS_SETTLE_MS = 1000;   // time given to a one-shot autofocus before it is locked / the photo is taken
+
+  // The fingertip sits at almost the same place in this fixed rig, so the focus + exposure point is
+  // stored on the phone. Default = roughly where the nail ends up in the phone's own (unrotated) frame;
+  // tap the fingertip once on the live view to set it exactly.
+  const DEFAULTS = { af: "poi", ev: -1.0, fd: null, point: { x: 0.47, y: 0.50 } };
+  let cfg = loadCfg();
 
   let stream        = null;
   let track         = null;
   let imageCapture   = null;
+  let caps          = {};
   let previewTimer   = null;
+  let sending        = false;     // true while a preview upload is in flight (no pile-up)
   let pollTimer      = null;
   let busy           = false;     // true while a full-res capture is in flight
+  let serverFd       = null;      // manual focus distance found by the desktop's focus calibration
+  let calibrating    = false;
+  let autoPoint      = null;      // finger position the desktop server found in the latest preview (no tapping needed)
+
+  function loadCfg() {
+    try {
+      const j = JSON.parse(localStorage.getItem("nailySide") || "null");
+      if (j) {
+        const c = Object.assign({}, DEFAULTS, j, { point: Object.assign({}, DEFAULTS.point, j.point || {}) });
+        const ok = (v) => typeof v === "number" && isFinite(v) && v >= 0 && v <= 1;
+        if (!ok(c.point.x) || !ok(c.point.y)) c.point = Object.assign({}, DEFAULTS.point);
+        if (typeof c.ev !== "number" || !isFinite(c.ev)) c.ev = DEFAULTS.ev;
+        return c;
+      }
+    } catch (e) { /* storage blocked: use defaults */ }
+    return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+  function saveCfg() {
+    try { localStorage.setItem("nailySide", JSON.stringify(cfg)); } catch (e) { /* ignore */ }
+  }
 
   function setStatus(text, cls) {
     statusEl.textContent = text;
@@ -110,6 +192,205 @@
     setTimeout(() => flashEl.classList.remove("on"), 150);
   }
 
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ── camera control ─────────────────────────────────────────────────────────
+  // Unsupported "advanced" constraints are silently ignored by the browser (no error), so what was
+  // actually applied is read back from track.getSettings() and reported to the desktop server.
+
+  async function applyAdv(obj) {
+    if (!track || !track.applyConstraints) return false;
+    try { await track.applyConstraints({ advanced: [obj] }); return true; }
+    catch (e) { return false; }
+  }
+
+  function has(list, v) { return Array.isArray(list) && list.indexOf(v) >= 0; }
+  // focus/metering point: the server's live finger detection if it sent one, else the stored/tapped point
+  function curPoint() { return autoPoint || cfg.point; }
+
+  async function applyExposure() {
+    // Metering on the (bright) finger instead of the dark box keeps the nail from being blown out,
+    // and a negative compensation pulls the highlights further down so the nail edge keeps its contrast.
+    const adv = {};
+    if (caps.exposureMode && has(caps.exposureMode, "continuous")) {
+      adv.exposureMode = "continuous";
+      adv.pointsOfInterest = [curPoint()];
+    }
+    await applyAdv(adv);
+    const c = caps.exposureCompensation;
+    if (c && typeof c.min === "number") {
+      const v = Math.max(c.min, Math.min(c.max, cfg.ev));
+      await applyAdv({ exposureCompensation: v });
+    }
+  }
+
+  function clampFd(v) {
+    const fd = caps.focusDistance;
+    return fd && typeof fd.min === "number" ? Math.max(fd.min, Math.min(fd.max, v)) : v;
+  }
+
+  async function applyFocus() {
+    const fd = caps.focusDistance;
+    const canManual = fd && typeof fd.min === "number" && has(caps.focusMode, "manual");
+    // 1) a focus distance measured by the desktop's calibration (sharpest distance for the fingertip) wins
+    if (serverFd != null && canManual) {
+      await applyAdv({ focusMode: "manual", focusDistance: clampFd(serverFd) });
+      return;
+    }
+    // 2) a distance chosen by hand with the slider
+    if (cfg.af === "manual") {
+      if (canManual) {
+        const t = cfg.fd == null ? 0.5 : cfg.fd;
+        await applyAdv({ focusMode: "manual", focusDistance: fd.min + (fd.max - fd.min) * t });
+      }
+      return;
+    }
+    if (cfg.af === "auto") {
+      if (has(caps.focusMode, "continuous")) await applyAdv({ focusMode: "continuous" });
+      return;
+    }
+    // 3) "poi": one-shot autofocus on the finger. Only possible when the phone exposes autofocus
+    // (many Samsung browsers list "manual" as the ONLY mode - then the phone's own autofocus is left
+    // alone, and the focus calibration is what fixes the distance). Never lock to a distance read back
+    // from getSettings(): on such phones it is out of the allowed range (e.g. 10 vs max 0.61) and
+    // pins the lens to infinity, which blurs the fingertip.
+    if (has(caps.focusMode, "single-shot")) {
+      await applyAdv({ focusMode: "single-shot", pointsOfInterest: [curPoint()] });
+    } else if (has(caps.focusMode, "continuous")) {
+      await applyAdv({ focusMode: "continuous", pointsOfInterest: [curPoint()] });
+    } else {
+      return;
+    }
+    await sleep(FOCUS_SETTLE_MS);
+    const st = track.getSettings ? track.getSettings() : {};
+    if (canManual && typeof st.focusDistance === "number" && st.focusDistance >= fd.min && st.focusDistance <= fd.max) {
+      await applyAdv({ focusMode: "manual", focusDistance: st.focusDistance });
+    }
+  }
+
+  // Focus calibration (started from the PC: open /phone/side/calibrate with a finger in the rig).
+  // Sweeps the manual focus distance across the phone's range, uploads one frame per step, and the
+  // server picks the sharpest fingertip. The result is kept on the server and sent back in /status.
+  async function runCalibration(runId) {
+    calibrating = true; busy = true;
+    try {
+      const fd = caps.focusDistance;
+      if (!(fd && typeof fd.min === "number" && has(caps.focusMode, "manual"))) {
+        setStatus("이 폰은 수동 초점을 지원하지 않아 보정할 수 없습니다", "err");
+        await fetch("/phone/side/calib/done?run=" + runId, { method: "POST" });
+        return;
+      }
+      const N = 14;
+      const sweepStep = async (v, label) => {
+        setStatus("초점 보정 " + label + " (움직이지 마세요)", "warn");
+        await applyAdv({ focusMode: "manual", focusDistance: clampFd(v) });
+        await sleep(900);
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (!vw || !vh) return;
+        const c = document.createElement("canvas");
+        c.width = vw; c.height = vh;
+        c.getContext("2d").drawImage(video, 0, 0, vw, vh);
+        const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.9));
+        if (blob) {
+          try { await fetch("/phone/side/calib?run=" + runId + "&fd=" + clampFd(v), { method: "POST", body: blob }); }
+          catch (e) { /* skip this step */ }
+        }
+      };
+      // pass 1: coarse sweep over the phone's whole focus range
+      for (let i = 0; i < N; i++) await sweepStep(fd.min + (fd.max - fd.min) * (i / (N - 1)), "1/2 " + (i + 1) + "/" + N);
+      // pass 2: fine sweep around the coarse peak (the in-focus zone of a close-up lens is narrow)
+      try {
+        const pk = await (await fetch("/phone/side/calib/peek?run=" + runId, { method: "POST" })).json();
+        if (pk && pk.best != null) {
+          const step = (fd.max - fd.min) / (N - 1), M = 9;
+          for (let j = 0; j < M; j++) await sweepStep(pk.best - step + 2 * step * (j / (M - 1)), "2/2 " + (j + 1) + "/" + M);
+        }
+      } catch (e) { /* the coarse result is still used */ }
+      const r = await fetch("/phone/side/calib/done?run=" + runId, { method: "POST" });
+      const j = await r.json();
+      if (j && j.best != null) {
+        serverFd = j.best;
+        await applyAdv({ focusMode: "manual", focusDistance: clampFd(serverFd) });
+        setStatus("초점 보정 완료: " + Number(j.best).toFixed(3), "connected");
+      } else {
+        setStatus("초점 보정 실패: " + ((j && j.message) || "선명한 지점을 못 찾음"), "err");
+      }
+    } catch (e) {
+      setStatus("초점 보정 오류: " + e.message, "err");
+    } finally {
+      calibrating = false; busy = false;
+    }
+  }
+
+  async function prepareCamera() {
+    if (!track) return;
+    await applyExposure();
+    await applyFocus();
+    reportCaps("prepare");
+  }
+
+  function reportCaps(why) {
+    let settings = {};
+    try { settings = track.getSettings ? track.getSettings() : {}; } catch (e) { /* ignore */ }
+    const body = { why: why, ua: navigator.userAgent, caps: caps, settings: settings, cfg: cfg,
+                   video: { w: video.videoWidth, h: video.videoHeight } };
+    fetch("/phone/side/caps", { method: "POST", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(body) }).catch(() => {});
+  }
+
+  function describeCaps() {
+    const bits = [];
+    bits.push("초점 모드: " + (caps.focusMode ? caps.focusMode.join("/") : "지원 안 함"));
+    bits.push("초점 거리: " + (caps.focusDistance ? "조절 가능" : "지원 안 함"));
+    bits.push("노출 보정: " + (caps.exposureCompensation ? "조절 가능" : "지원 안 함"));
+    capInfo.textContent = bits.join(" · ");
+  }
+
+  function syncPanel() {
+    afModeEl.value = cfg.af;
+    evEl.value = cfg.ev; evVal.textContent = Number(cfg.ev).toFixed(1);
+    const fd = caps.focusDistance;
+    fdRow.style.display = (cfg.af === "manual" && fd) ? "block" : "none";
+    const t = cfg.fd == null ? 0.5 : cfg.fd;
+    fdEl.value = t; fdVal.textContent = fd ? (fd.min + (fd.max - fd.min) * t).toFixed(2) : "";
+    document.getElementById("evRow").style.display = caps.exposureCompensation ? "block" : "none";
+    describeCaps();
+  }
+
+  gearBtn.addEventListener("click", () => {
+    panel.style.display = panel.style.display === "block" ? "none" : "block";
+    syncPanel();
+  });
+  afModeEl.addEventListener("change", () => { cfg.af = afModeEl.value; saveCfg(); syncPanel(); });
+  fdEl.addEventListener("input", () => { cfg.fd = Number(fdEl.value); saveCfg(); syncPanel(); });
+  evEl.addEventListener("input", () => { cfg.ev = Number(evEl.value); saveCfg(); syncPanel(); });
+  applyBtn.addEventListener("click", async () => {
+    setStatus("초점·노출 적용 중...", "warn");
+    await prepareCamera();
+    setStatus("적용 완료", "connected");
+  });
+
+  // tap on the live view -> focus/exposure point (undo object-fit:cover cropping to get frame coords)
+  video.addEventListener("click", async (e) => {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return;
+    const r = video.getBoundingClientRect();
+    if (!r.width || !r.height) return;   // not laid out (e.g. hidden tab) - nothing sensible to compute
+    const s = Math.max(r.width / vw, r.height / vh);
+    const dw = vw * s, dh = vh * s;
+    const offX = (dw - r.width) / 2, offY = (dh - r.height) / 2;
+    const fx = (e.clientX - r.left + offX) / dw, fy = (e.clientY - r.top + offY) / dh;
+    cfg.point = { x: Math.max(0, Math.min(1, fx)), y: Math.max(0, Math.min(1, fy)) };
+    saveCfg();
+    ringEl.style.left = (e.clientX - r.left) + "px"; ringEl.style.top = (e.clientY - r.top) + "px";
+    ringEl.style.display = "block";
+    setStatus("초점 지점 설정 중...", "warn");
+    await prepareCamera();
+    setStatus("초점 지점 설정됨", "connected");
+    setTimeout(() => { ringEl.style.display = "none"; }, 1500);
+  });
+
+  // ── capture ───────────────────────────────────────────────────────────────
   async function startCamera() {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -127,6 +408,7 @@
 
     video.srcObject = stream;
     track = stream.getVideoTracks()[0];
+    try { caps = track.getCapabilities ? track.getCapabilities() : {}; } catch (e) { caps = {}; }
 
     if (window.ImageCapture) {
       try { imageCapture = new ImageCapture(track); }
@@ -137,6 +419,8 @@
     setStatus("프리뷰 전송 중...", "connected");
     previewTimer = setInterval(sendPreview, PREVIEW_MS);
     pollTimer    = setInterval(pollCapture, POLL_MS);
+    reportCaps("start");
+    prepareCamera();
   }
 
   function previewCanvas() {
@@ -152,14 +436,18 @@
   }
 
   function sendPreview() {
+    if (sending) return;
     if (busy) return;
     const c = previewCanvas();
     if (!c) return;
     c.toBlob((blob) => {
       if (!blob) return;
-      fetch("/phone/side/frame", { method: "POST", body: blob })
+      sending = true;
+      fetch("/phone/side/frame", { method: "POST", body: blob,
+            signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined })
         .then(() => setStatus("연결됨 - 라이브 프리뷰 전송 중", "connected"))
-        .catch(() => setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err"));
+        .catch(() => setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err"))
+        .finally(() => { sending = false; });
     }, "image/jpeg", 0.85);
   }
 
@@ -167,9 +455,13 @@
     if (busy) return;
     let wanted = false;
     try {
-      const r = await fetch("/phone/side/status", { cache: "no-store" });
+      const r = await fetch("/phone/side/status?v=" + PAGE_VERSION + "&b=" + (busy ? 1 : 0) + "&c=" + (calibrating ? 1 : 0) +
+                            "&txt=" + encodeURIComponent(statusEl.textContent.slice(0, 60)), { cache: "no-store" });
       const j = await r.json();
       wanted = !!j.capture;
+      if (typeof j.fd === "number") serverFd = j.fd;
+      if (j.calibrate && !calibrating) { runCalibration(j.calibrate); return; }
+      if (wanted && j.point && typeof j.point.x === "number" && typeof j.point.y === "number") autoPoint = j.point;
     } catch (e) {
       setStatus("서버 연결 실패 - 같은 Wi-Fi인지 확인하세요", "err");
       return;
@@ -179,13 +471,18 @@
 
   async function takeAndUploadPhoto() {
     busy = true;
-    setStatus("고화질 촬영 중...", "warn");
-    flash();
+    setStatus("초점 맞추는 중...", "warn");
     try {
+      // refocus on the finger right before the shot (the previous finger may have sat at another distance)
+      try { await prepareCamera(); } catch (e) { /* shoot anyway */ }
+      setStatus("고화질 촬영 중...", "warn");
+      flash();
       let blob = null;
       if (imageCapture) {
-        try { blob = await imageCapture.takePhoto(); }
-        catch (e) { blob = null; }
+        try { blob = await imageCapture.takePhoto({ fillLightMode: "off" }); }
+        catch (e) {
+          try { blob = await imageCapture.takePhoto(); } catch (e2) { blob = null; }
+        }
       }
       if (!blob) {
         // Fallback for browsers without ImageCapture (e.g. iOS Safari):

@@ -82,7 +82,7 @@ CAM_HEIGHT = 1080
 # perfectly consistent — re-measuring the PNG reproduces the stored width
 # exactly — instead of pairing a synthetic average with an arbitrary frame.
 MEDIAN_N       = 3      # consecutive readings the median is taken over
-STABLE_TOL_MM  = 0.5    # max width/length spread across the window to auto-fire
+STABLE_TOL_MM  = 0.7    # max width/length spread across the window to auto-fire
 
 # Kept as an alias: the display's stability line predates the median window.
 STABLE_N       = MEDIAN_N

@@ -126,7 +126,7 @@ SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5}
 # 감싸는 현(chord) 폭이 측정값보다 작아져서, 프린트한 손톱이 실제보다 작게
 # 나옴.  이를 보정하기 위해 STL 생성 전에 측정 폭에 이 값을 더한다.
 # (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
-WIDTH_FIT_MARGIN_MM = 1.5
+WIDTH_FIT_MARGIN_MM = 0.5
 
 # 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
 # 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → 팁 끝(C*TIP_DOME_FRAC)
@@ -141,6 +141,9 @@ CUTICLE_DOME_FRAC = 0.7
 # 뾰족하게 튀어나와 보이는 것을 완화한다.  0이면 평활화 없음.
 CREST_SMOOTH_MM = 3.0
 TIP_DOME_FRAC    = 0.35
+# 폭 방향 돔 단면의 지수.  2.0이면 포물선(가운데만 볼록), 클수록 윗면이 넓게
+# 퍼지고 가장자리 쪽에서 더 급히 내려간다(테두리는 항상 z=0).
+DOME_SHAPE_POWER = 3.0
 
 # 양 끝(큐티클/팁 끝)에서 껍질 두께가 줄어드는 최소값(mm).  몸통은 --thickness 그대로,
 # 양 끝으로 갈수록 이 값까지 부드럽게 얇아져 바닥 평면으로 스무스하게 떨어진다.
@@ -467,7 +470,8 @@ def generate_stl(params, output_path):
     else:
         # 폭 보정: C-curve로 구부리면 현(chord) 폭이 줄어 실제보다 작게
         # 프린트되므로, 측정 폭에 fit margin(+WIDTH_FIT_MARGIN_MM)을 더한다.
-        W     = float(params["width_mm"]) + WIDTH_FIT_MARGIN_MM
+        _fit = params.get("fit_margin_mm")
+        W     = float(params["width_mm"]) + (WIDTH_FIT_MARGIN_MM if _fit is None else float(_fit))
         # Length: use the MEASURED length (Sobel tip→cuticle).  The old code
         # preferred corrected_length_mm = width / 0.91 (Jung et al. W/L prior),
         # but ruler ground truth showed 0.91 is wrong (true ~0.64–0.86), which
@@ -621,6 +625,15 @@ def generate_stl(params, output_path):
         # to z=0 row by row.
         hw     = np.full(ny, W / 2.0)
         xc_row = np.full(ny, x_cen)
+        # Tip side: as the footprint narrows toward the tip, a full-width
+        # reference would leave the side edges riding up the dome (z > 0).
+        # Blend to each row's own half-width over the first half of the nail
+        # (footprint is full width there, so the blend is a no-op) so the two
+        # tip sides stay down on the rim plane (z=0), like the body.
+        hw_act = (grid_x[:, -1] - grid_x[:, 0]) / 2.0
+        wt     = np.clip(ys / max(0.5 * L, 1e-6), 0.0, 1.0)
+        wt     = wt * wt * (3.0 - 2.0 * wt)
+        hw     = (1.0 - wt) * hw + wt * np.minimum(hw_act, hw)
         # Lens-shaped height profile along the length: the rim stays on one
         # flat plane (z=0) while the dome's crest rises from the cuticle end,
         # peaks once at the crest, then falls in a single gentle quarter-cosine
@@ -659,12 +672,16 @@ def generate_stl(params, output_path):
             yc = yy
         fade      = np.interp(ys, yc, f_fine)
         thick_row = np.interp(ys, yc, t_fine)
-        C_row  = C * DOME_HEIGHT_SCALE * fade
+        # The dome height also shrinks with the row's width toward the tip.
+        # Otherwise the last, nearly zero-width rows keep ~1 mm of height while
+        # their sides sit at z=0, which makes a thin upright blade/notch at
+        # the tip instead of a rounded hood.
+        C_row  = C * DOME_HEIGHT_SCALE * fade * (hw / (W / 2.0))
         # Parabolic cross-section per row (edges at z=0).  Unlike a circular
         # arc it stays valid for any height/width ratio, so the narrow cuticle
         # arch rows can rise smoothly instead of being clamped flat.
         u      = (grid_x - xc_row[:, None]) / np.maximum(hw, 1e-6)[:, None]
-        z_bot  = C_row[:, None] * np.maximum(1.0 - u ** 2, 0.0)
+        z_bot  = C_row[:, None] * np.maximum(1.0 - np.abs(u) ** DOME_SHAPE_POWER, 0.0)
     if EXACT or C < 0.05 or CUT_CURVE > 1e-6:
         thick_row = np.full(ny, THICK)
     z_top = z_bot + thick_row[:, None]             # (ny, nx)  shell
@@ -916,6 +933,10 @@ def main():
                         "tip corners — real square nails aren't perfectly "
                         "parallel-sided (default: 1.0 for square, ignored "
                         "by other shapes; 0 = parallel sides)")
+    p.add_argument("--fit-margin",     type=float, default=None,
+                   help="Width fit margin in mm added to the measured width "
+                        f"(default: {WIDTH_FIT_MARGIN_MM}; 0 = none). "
+                        "Ignored in --exact mode")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -979,6 +1000,7 @@ def main():
             "shoulder_round_mm":   shoulder_round,
             "taper_mm":            taper,
             "exact":               args.exact,
+            "fit_margin_mm":       args.fit_margin,
         }
 
         out   = os.path.join(args.output, f"nail_{finger}_{args.shape}.stl")
