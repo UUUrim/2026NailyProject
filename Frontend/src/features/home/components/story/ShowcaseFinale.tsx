@@ -3,7 +3,7 @@ import { CtaButton } from '@/features/home/components/CtaButton'
 import { ScrollReveal } from '@/features/home/components/ScrollReveal'
 import { ShowcaseImage } from '@/features/home/components/story/ShowcaseImage'
 import { SHOWCASE_IMAGES } from '@/features/home/constants/home'
-import { ORBIT_SLOT_COUNT, ORBIT_SLOT_RINGS, useShowcaseOrbit } from '@/features/home/hooks/useShowcaseOrbit'
+import { ORBIT_SLOT_COUNT, useShowcaseOrbit } from '@/features/home/hooks/useShowcaseOrbit'
 
 type ShowcaseFinaleProps = {
   onStartClick?: () => void
@@ -16,7 +16,7 @@ export function ShowcaseFinale({ onStartClick }: ShowcaseFinaleProps) {
     <section ref={sectionRef} className="story-showcase" aria-labelledby="story-showcase-title">
       <div ref={stageRef} className="story-showcase__rings" aria-hidden="true">
         {Array.from({ length: ORBIT_SLOT_COUNT }, (_, index) => (
-          <span key={index} className="story-showcase__card" data-ring={ORBIT_SLOT_RINGS[index]}>
+          <span key={index} className="story-showcase__card">
             <ShowcaseImage
               src={SHOWCASE_IMAGES[index % SHOWCASE_IMAGES.length]}
               placeholder={String(index + 1).padStart(2, '0')}

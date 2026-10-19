@@ -27,6 +27,10 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@mediapipe/tasks-vision'],
+    // 의존성 스캐너는 new Worker(new URL(...))로 띄우는 워커 안의 import를 따라가지 않는다.
+    // 그래서 AR 창을 처음 열어 손톱 분할 워커가 뜰 때에야 onnxruntime-web을 발견하고, 다시
+    // 묶은 뒤 페이지를 통째로 새로고침해 로딩 중이던 AR 창이 닫혀 버렸다 - 미리 묶어 둔다.
+    include: ['onnxruntime-web/webgpu'],
   },
   // 손톱 분할 워커(nailSegmenter.worker.ts)가 onnxruntime-web을 ES 모듈로 불러온다.
   worker: {

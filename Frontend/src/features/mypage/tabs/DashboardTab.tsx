@@ -28,11 +28,10 @@ export function DashboardTab() {
           <div className="mypage-x__hero-copy">
             <p className="mypage-x__hero-subtitle">My Naily</p>
             <h1 className="mypage-x__hero-title">
-              {profile?.nickname ?? '회원'} 님,<br />
-              오늘도 네일리와 함께해요!
+              {profile?.nickname ?? '회원'}님, 오늘도 네일리와 함께해요!
             </h1>
             <p className="mypage-x__hero-desc">
-              손 분석부터 네일팁 출력, 디자인까지 — 나의 네일 여정을 한곳에서 관리하세요.
+              손 분석부터 네일 팁 출력, 디자인까지 — 나의 네일 여정을 한곳에서 관리하세요.
             </p>
           </div>
         </div>
@@ -46,7 +45,7 @@ export function DashboardTab() {
           <button type="button" className="mypage-x__stat-card" onClick={() => navigate('/mypage/prints')}>
             <span className="mypage-x__stat-icon">{Icon.print}</span>
             <span className="mypage-x__stat-value">{totalPrintCount}</span>
-            <span className="mypage-x__stat-label">네일팁 출력</span>
+            <span className="mypage-x__stat-label">네일 팁 출력</span>
           </button>
           <button type="button" className="mypage-x__stat-card" onClick={() => navigate('/mypage/designs')}>
             <span className="mypage-x__stat-icon">{Icon.design}</span>

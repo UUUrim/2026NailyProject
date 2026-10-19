@@ -7,6 +7,9 @@
     /* 세로 스크롤바 폭. position:fixed 요소가 100vw(스크롤바 포함) 대신
        실제 콘텐츠 폭에 맞춰 정렬할 때 뺀다. 스크롤바가 없으면 0. */
     --sbw: calc(100vw - 100%);
+    /* 공통 헤더 높이 (landing.css: 위아래 여백 0.75rem×2 + 로고 6rem − 당긴 여백 0.625rem×2).
+       디자인 채팅처럼 헤더 아래를 화면 높이에 꽉 맞춰 쓰는 화면이 뺀다 */
+    --app-header-height: 6.25rem;
 
     min-height: 100svh;
     display: flex;
@@ -43,4 +46,11 @@
 
 .root-layout__main .login-wireframe {
     min-height: auto;
+}
+
+/* 좁은 화면의 헤더 높이 (로고 3.25rem − 당긴 여백 0.5rem×2 + 위아래 여백 0.75rem×2) */
+@media (max-width: 768px) {
+    .root-layout {
+        --app-header-height: 3.75rem;
+    }
 }

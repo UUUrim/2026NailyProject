@@ -84,6 +84,11 @@ public class NailDesign {
     @Column(name = "reference_image_url")
     private String referenceImageUrl; // 사진 기반 생성일 때, 사용자가 업로드한 원본 참고 이미지 S3 URL (채팅 이력 재연용)
 
+    // 확정하는 순간 채팅 화면에 보이던 대화 그대로 (ChatTranscriptEntryDto 배열 JSON) — "디자인 다시 생성하기"와
+    // 마이페이지 채팅 이력이 이걸 그대로 다시 그린다. 이 기능 이전에 확정됐거나 채팅 없이 만든 디자인은 null.
+    @Column(name = "chat_transcript", columnDefinition = "JSON")
+    private String chatTranscriptJson;
+
     /** 메인 '둘러보기' 갤러리에 공개 공유 여부 */
     @Column(name = "is_shared", nullable = false)
     @Builder.Default
@@ -124,6 +129,10 @@ public class NailDesign {
 
     public void updateReferenceImageUrl(String referenceImageUrl) {
         this.referenceImageUrl = referenceImageUrl;
+    }
+
+    public void updateChatTranscriptJson(String chatTranscriptJson) {
+        this.chatTranscriptJson = chatTranscriptJson;
     }
 
     public void share() {

@@ -21,6 +21,7 @@ export function PrintsTab() {
     openPrintDetail,
     handleActivityHover,
     handleActivitySelect,
+    openDeletePrintModal,
   } = useMyPageContext()
 
   return (
@@ -38,7 +39,7 @@ export function PrintsTab() {
             <EmptyState
                 icon="print"
                 title="출력 신청 내역이 없어요"
-                description="손 분석 후 맞춤 네일팁 3D 출력을 신청할 수 있어요."
+                description="손 분석 후 맞춤 네일 팁 3D 출력을 신청할 수 있어요."
                 actionLabel="출력하러 가기"
                 onAction={() => navigate('/print')}
             />
@@ -57,6 +58,7 @@ export function PrintsTab() {
                                 onOpenDetail={openPrintDetail}
                                 onSelectActivity={handleActivitySelect}
                                 onHoverActivity={handleActivityHover}
+                                onDelete={openDeletePrintModal}
                             />
                         ))}
                       </div>

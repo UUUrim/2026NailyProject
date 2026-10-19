@@ -19,7 +19,7 @@ export const NAIL_SHAPES: NailShapeInfo[] = [
     labelEn: 'ROUND',
     image: '/images/nail-shapes/round.svg',
     description: '끝 부분이 동그랗게 둥근 모양',
-    analysis: 'ㅇㅇ 님의 손톱은 평균보다 **폭이 좁고 길이가 긴 편**이에요.',
+    analysis: 'ㅇㅇ님의 손톱은 평균보다 **폭이 좁고 길이가 긴 편**이에요.',
     reason: '끝을 더 좁히지 않고 둥글게 감싸 손톱을 **부드럽고 안정적으로** 보이게 해주는 라운드를 추천해요.',
   },
   {
@@ -28,7 +28,7 @@ export const NAIL_SHAPES: NailShapeInfo[] = [
     labelEn: 'OVAL',
     image: '/images/nail-shapes/oval.svg',
     description: '끝으로 갈수록 좁아지는 타원형 모양',
-    analysis: 'ㅇㅇ 님의 손톱은 **폭·길이 비율이 평균과 비슷**해요.',
+    analysis: 'ㅇㅇ님의 손톱은 **폭·길이 비율이 평균과 비슷**해요.',
     reason: '**어떤 손톱에도 무난하게 어울리는** 오발을 추천해요.',
   },
   {
@@ -37,7 +37,7 @@ export const NAIL_SHAPES: NailShapeInfo[] = [
     labelEn: 'ALMOND',
     image: '/images/nail-shapes/almond.svg',
     description: '양옆이 좁아져 끝이 살짝 뾰족한 모양',
-    analysis: 'ㅇㅇ 님의 손톱은 평균보다 **폭이 조금 넓고 길이가 짧은 편**이에요.',
+    analysis: 'ㅇㅇ님의 손톱은 평균보다 **폭이 조금 넓고 길이가 짧은 편**이에요.',
     reason: '끝이 부드럽게 좁아지면서 **길이감을 더해주는** 아몬드를 추천해요.',
   },
   {
@@ -46,7 +46,7 @@ export const NAIL_SHAPES: NailShapeInfo[] = [
     labelEn: 'STILETTO',
     image: '/images/nail-shapes/stiletto.svg',
     description: '끝이 길고 날카롭게 뾰족한 모양',
-    analysis: 'ㅇㅇ 님의 손톱은 평균보다 **폭이 꽤 넓고 길이가 짧은 편**이에요.',
+    analysis: 'ㅇㅇ님의 손톱은 평균보다 **폭이 꽤 넓고 길이가 짧은 편**이에요.',
     reason: '손톱이 **가장 길고 날씬해 보이도록** 끝을 길고 뾰족하게 빼는 스틸레토를 추천해요.',
   },
   {
@@ -55,7 +55,7 @@ export const NAIL_SHAPES: NailShapeInfo[] = [
     labelEn: 'BALLERINA',
     image: '/images/nail-shapes/ballerina.svg',
     description: '양옆은 좁고 끝은 일자로 평평한 모양',
-    analysis: 'ㅇㅇ 님의 손톱은 평균보다 **폭이 넓고 길이가 짧은 편**이에요.',
+    analysis: 'ㅇㅇ님의 손톱은 평균보다 **폭이 넓고 길이가 짧은 편**이에요.',
     reason: '양옆을 좁히면서 끝을 길게 빼 **손톱이 길어 보이게** 해주는 발레리나를 추천해요.',
   },
   {
@@ -64,7 +64,7 @@ export const NAIL_SHAPES: NailShapeInfo[] = [
     labelEn: 'SQUARE',
     image: '/images/nail-shapes/square.svg',
     description: '양옆과 끝이 각지고 반듯한 사각형 모양',
-    analysis: 'ㅇㅇ 님의 손톱은 평균보다 **폭이 조금 좁고 길이가 긴 편**이에요.',
+    analysis: 'ㅇㅇ님의 손톱은 평균보다 **폭이 조금 좁고 길이가 긴 편**이에요.',
     reason: '끝이 반듯해서 손톱이 너무 가늘어 보이지 않게 **폭을 살려주는** 스퀘어를 추천해요.',
   },
 ]

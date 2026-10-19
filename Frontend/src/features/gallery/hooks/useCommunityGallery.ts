@@ -23,6 +23,13 @@ export type FavoriteModalTarget = {
     mode: 'like' | 'move'
 }
 
+// 카드에서 바로 여는 AR 미리보기에 넘길 값 (쉐입·손톱팁은 상세 조회 응답)
+export type ArPreviewTarget = {
+    imageUrl: string
+    shape: string | null
+    nailTipCropUrls: string[] | null
+}
+
 export function favKeyOf(designId: number, imageUrl: string) {
     return `${designId}-${imageUrl}`
 }
@@ -52,6 +59,11 @@ export function useCommunityGallery() {
     const [detailNailTipCropUrls, setDetailNailTipCropUrls] = useState<string[] | null>(null)
     // 상세를 연달아 열고 닫을 때, 앞서 연 디자인의 늦은 응답이 지금 모달을 덮어쓰지 않게 한다
     const detailRequestRef = useRef(0)
+
+    const [arTarget, setArTarget] = useState<ArPreviewTarget | null>(null)
+    // 상세 조회를 기다리는 동안 그 카드의 AR 버튼을 잠근다
+    const [arLoadingId, setArLoadingId] = useState<number | null>(null)
+    const arRequestRef = useRef(0)
 
     useEffect(() => {
         let cancelled = false
@@ -133,6 +145,28 @@ export function useCommunityGallery() {
         setDetailShape(null)
         setDetailNailTipCropUrls(null)
         setDetailLoading(false)
+    }, [])
+
+    // ── 카드에서 바로 여는 AR 미리보기 ──────
+    // 상세 모달과 같은 이유로, 쉐입·손톱팁(상세 조회)이 온 뒤에 연다 — 도중에 바뀌면 AR이 다시 시작된다
+    const openAr = (design: CommunityDesignResponse) => {
+        const requestId = ++arRequestRef.current
+        setArLoadingId(design.designId)
+        void getDesignDetail(design.designId)
+            .then((detail) => ({ shape: detail.shape ?? null, nailTipCropUrls: detail.nailTipCropUrls ?? null }))
+            // 상세 조회에 실패하면 2D·로컬 손톱 인식으로 폴백
+            .catch(() => ({ shape: null, nailTipCropUrls: null }))
+            .then(({ shape, nailTipCropUrls }) => {
+                if (requestId !== arRequestRef.current) return
+                setArLoadingId(null)
+                setArTarget({ imageUrl: design.imageUrl, shape, nailTipCropUrls })
+            })
+    }
+
+    const closeAr = useCallback(() => {
+        arRequestRef.current += 1
+        setArLoadingId(null)
+        setArTarget(null)
     }, [])
 
     // ── 로그인이 필요한 동작 공통 처리 ──────
@@ -239,6 +273,10 @@ export function useCommunityGallery() {
         detailNailTipCropUrls,
         openDetail,
         closeDetail,
+        arTarget,
+        arLoadingId,
+        openAr,
+        closeAr,
         isBusy,
         isFavorited,
         folderNameOf,

@@ -106,7 +106,7 @@ export function PrintPagePreviewContent() {
             <div className="print-page__inner">
                 <PageHero
                     eyebrow="Print · Preview"
-                    title="네일팁 출력 (샘플 데이터)"
+                    title="네일 팁 출력 (샘플 데이터)"
                     description={
                         <span style={{ color: '#c96d88', fontWeight: 700 }}>
                             이 화면은 실제 API 없이 가짜 분석 결과 7건으로 스타일만 확인하는 개발용 미리보기입니다.
@@ -163,7 +163,7 @@ export function PrintPagePreviewContent() {
                     </span>
                                     </button>
                                     <button type="button" className="print-session-card__detail-btn" disabled>
-                                        상세보기
+                                        상세 보기
                                     </button>
                                 </div>
                             )
@@ -178,7 +178,7 @@ export function PrintPagePreviewContent() {
 
                 <section className="print-page__section">
                     <div className="print-page__section-head">
-                        <h2>2. 네일팁 쉐입 선택</h2>
+                        <h2>2. 네일 팁 쉐입 선택</h2>
                     </div>
                     <p className="print-page__section-sub">
                         {selectedSession?.recommendedShape ? (
@@ -188,7 +188,7 @@ export function PrintPagePreviewContent() {
                                 원하는 모양을 선택해 주세요.
                             </>
                         ) : (
-                            <>원하는 네일팁 모양을 선택해 주세요.</>
+                            <>원하는 네일 팁 모양을 선택해 주세요.</>
                         )}
                     </p>
                     <div className={`scan-shape-grid ${printConfirmed ? 'is-locked' : ''}`}>
@@ -302,13 +302,13 @@ export function PrintPagePreviewContent() {
                         {printModalStep === 'confirm' ? (
                             <>
                                 <span className="print-modal__icon-badge" aria-hidden="true">{PrinterIcon}</span>
-                                <h2>네일팁 출력 안내</h2>
+                                <h2>네일 팁 출력 안내</h2>
                                 <p>
-                                    미리보기 회원 님의{' '}
+                                    미리보기 회원님의{' '}
                                     {selectedSession ? formatScanDateLabel(selectedSession.scannedAt) : ''} 분석 결과를 기반으로
                                     <br />
                                     <strong> {selectedShape ? getNailShape(selectedShape)?.labelKo ?? selectedShape : ''} </strong>
-                                    네일팁이 연장 길이 <strong>+{tipExtensionMm}mm</strong>로 3D 프린터로 출력됩니다.
+                                    네일 팁이 연장 길이 <strong>+{tipExtensionMm}mm</strong>로 3D 프린터로 출력됩니다.
                                     <br />
                                     출력을 진행하시겠습니까?
                                 </p>
@@ -339,7 +339,7 @@ export function PrintPagePreviewContent() {
                                 </span>
                                 <h2>출력 신청 완료</h2>
                                 <p>
-                                    당신의 네일팁이{' '}
+                                    당신의 네일 팁이{' '}
                                     <br />
                                     <strong>{selectedShape ? getNailShape(selectedShape)?.labelKo ?? selectedShape : ''}</strong>
                                     {' '}(으)로 출력 신청되었습니다.

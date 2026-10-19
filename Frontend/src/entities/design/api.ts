@@ -42,9 +42,17 @@ export interface ScanAutoReflection {
     recommendedColors: string[] // 추천 팔레트 전체 (hex)
     usedColors: string[]        // 그 중 이번 디자인에 반영된 색 (hex)
     shape?: string | null
+    // 아래 넷은 한글 키워드 (여러 개면 ", "로 이음)
     mood?: string | null
     designType?: string | null
     motif?: string | null
+    season?: string | null
+}
+
+/** 결과 화면 컬러 키워드 — 색 스와치 + 한글 색 이름으로 보여준다 */
+export interface KeywordColor {
+    hex: string
+    name: string // keywords에 들어간 표기 그대로 ("페일 핑크")
 }
 
 export interface DesignGenerateResponse {
@@ -56,10 +64,16 @@ export interface DesignGenerateResponse {
     /** 서버가 확정해서 이미지 생성에 쓴 쉐입(round/oval/almond/stiletto/ballerina/square) */
     shape?: string | null
     keywords?: string[]
+    /** keywords 중 컬러 키워드의 원래 hex */
+    keywordColors?: KeywordColor[] | null
+    /** 플랜 키워드 없이 슬롯 값(고른 값 + GPT가 대화·기타 의견에서 뽑은 값)만으로 만든 키워드 — 선택지 기반 결과 화면용 */
+    slotKeywords?: string[] | null
     scanAutoReflection?: ScanAutoReflection | null
     /** 수정 요청이 아니라서 이미지를 바꾸지 않았을 때 서버가 주는 안내 메시지 (있으면 새 이미지가 아님) */
     assistantMessage?: string | null
     assistantOptions?: string[] | null
+    /** 사진 기반 생성일 때 올린 참고 사진의 S3 URL — 채팅 화면의 사진 미리보기를 이 주소로 바꿔 저장한다 */
+    referenceImageUrl?: string | null
 }
 
 export interface DesignImageResponse {
@@ -191,17 +205,52 @@ export async function deleteDesign(designId: number): Promise<void> {
     await apiClient.delete(`/designs/${designId}`)
 }
 
-/** PATCH /designs/{designId}/confirm — "네, 이 디자인으로 할게요" 눌렀을 때 확정. 이때부터 마이페이지 이력에 노출됨 */
-export async function confirmDesign(designId: number): Promise<void> {
-    await apiClient.patch(`/designs/${designId}/confirm`)
+// 디자인 채팅 화면에 보이던 말풍선 하나 — 확정할 때 화면 그대로 보내 두면, "디자인 다시 생성하기"와
+// 마이페이지 채팅 이력이 실제로 나눈 대화 화면과 똑같이 다시 그린다
+export interface ChatTranscriptEntry {
+    role: 'user' | 'assistant'
+    content: string
+    // 참고 사진은 미리보기(data URL) 대신 REFERENCE_PHOTO_PLACEHOLDER를 보내면 서버가 올린 사진 URL로 바꿔 저장한다
+    imageUrls?: string[]
+    colorSwatches?: string[]
+    colorsInline?: boolean
+    textAfterColors?: string
+    designResult?: boolean
+    // 채팅 화면엔 안 보이고 마이페이지 채팅 이력에만 보이는 말풍선 (선택지 기반에서 서버로 보낸 요약 문장)
+    historyOnly?: boolean
+    // 채팅 화면에만 보이고 마이페이지 채팅 이력에서는 빼는 말풍선 (선택지 기반의 단계별 선택)
+    chatOnly?: boolean
+    // 첫 인사·생성 방식 고르기에 속한 말풍선 — 마이페이지 채팅 이력은 마지막 이런 말풍선 다음부터 보여 준다
+    historySection?: 'method'
+    // 이 말풍선에서 해당 생성 방식이 시작됐다 — 마이페이지 채팅 이력의 "생성 방식" 표시에 쓴다
+    generationMethod?: DesignGenerationMethod
+}
+
+export type DesignGenerationMethod = 'preference' | 'freeform' | 'photo' | 'scan-auto'
+
+export const REFERENCE_PHOTO_PLACEHOLDER = 'reference-photo'
+
+/** PATCH /designs/{designId}/confirm — "좋아요! 이 디자인으로 할게요" 눌렀을 때 확정. 이때부터 마이페이지 이력에 노출됨.
+ *  chatTranscript: 그 순간 채팅 화면에 보이던 대화 — 이 디자인의 채팅 이력으로 저장된다 */
+export async function confirmDesign(designId: number, chatTranscript?: ChatTranscriptEntry[]): Promise<void> {
+    await apiClient.patch(`/designs/${designId}/confirm`, chatTranscript ? { chatTranscript } : undefined)
 }
 
 export interface DesignChatMessage {
     role: 'user' | 'assistant'
     content: string
     sentAt: string
-    imageUrls?: string[]
-    designId?: number
+    imageUrls?: string[] | null
+    designId?: number | null
+    // 확정 때 저장한 채팅 화면 대화로 돌려줄 때만 채워진다 (예전 이력은 비어 있다)
+    colorSwatches?: string[] | null
+    colorsInline?: boolean | null
+    textAfterColors?: string | null
+    designResult?: boolean | null
+    historyOnly?: boolean | null
+    chatOnly?: boolean | null
+    historySection?: 'method' | null
+    generationMethod?: DesignGenerationMethod | null
 }
 
 /** GET /designs/{designId}/chat-history — 이 디자인이 만들어진 채팅 세션의 대화 내역 */

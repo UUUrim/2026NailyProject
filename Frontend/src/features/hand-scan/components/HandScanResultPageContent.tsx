@@ -153,7 +153,7 @@ export function HandScanResultPageContent() {
                     <h2>손톱 기본 지표</h2>
                     {!isLoading && apiFingers.length > 0 && (
                         <button type="button" className="scan-result-link" onClick={() => setShowFingerModal(true)}>
-                            상세보기
+                            상세 보기
                         </button>
                     )}
                 </div>
@@ -194,7 +194,7 @@ export function HandScanResultPageContent() {
 
             {isLoading ? (
                 <section className="scan-result-section" aria-hidden="true">
-                    <h2>추천 네일팁 쉐입</h2>
+                    <h2>추천 네일 팁 쉐입</h2>
                     <div className="scan-shape-highlight scan-shape-highlight--skeleton">
                         <div className="scan-shape-highlight__top">
                             <div className="scan-shape-highlight__body">
@@ -207,7 +207,7 @@ export function HandScanResultPageContent() {
                 </section>
             ) : (
                 <section className="scan-result-section">
-                    <h2>추천 네일팁 쉐입</h2>
+                    <h2>추천 네일 팁 쉐입</h2>
                     {recommended ? (
                         <RecommendedShapeCard shape={recommended} userName={userName} />
                     ) : (
@@ -283,6 +283,9 @@ export function HandScanResultPageContent() {
 
                             <article className="skin-tone-palette-card">
                                 <h3>추천 컬러</h3>
+                                <p className="skin-tone-palette-card__desc">
+                                    {userName ? `${userName}님의` : '회원님의'} 손에 어울리는 컬러예요.
+                                </p>
                                 <div className="skin-tone-palette-grid">
                                     {skinTonePalette.map((hex, i) => (
                                         <button
@@ -295,9 +298,6 @@ export function HandScanResultPageContent() {
                                         />
                                     ))}
                                 </div>
-                                <p className="skin-tone-palette-card__desc">
-                                    {userName ? `${userName}님과` : '회원님과'} 어울리는 컬러들이에요.
-                                </p>
                             </article>
                         </div>
                     )
@@ -305,7 +305,7 @@ export function HandScanResultPageContent() {
             </section>
 
             <div className="scan-result-actions">
-                <NextStepButton label="네일팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
+                <NextStepButton label="네일 팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
             </div>
 
             {showFingerModal && apiFingers.length > 0 && (

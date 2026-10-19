@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CommunityDesignResponse } from '@/entities/design/api'
 import { CommunityDesignModal } from '@/features/gallery/components/CommunityDesignModal'
@@ -7,19 +7,21 @@ import {
   collectTextureOptions,
   sortDesigns,
   textureKeysOf,
-  textureLabelOf,
   type GallerySort,
 } from '@/features/gallery/utils/galleryFilters'
+import { NailArTryOnModal } from '@/features/mypage/components/NailArTryOnModal'
 import { FavoriteFolderModal } from '@/shared/components/FavoriteFolderModal'
+import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
 import { Pagination } from '@/shared/components/Pagination'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { isLoggedIn } from '@/shared/utils/auth'
 import '@/styles/gallery.css'
+import '@/styles/ar-preview-button.css'
 
-// 4열 4행 = 한 페이지 16개
-const PAGE_SIZE = 16
-const SKELETON_COUNT = 16
+// 4열 5행 = 한 페이지 20개
+const PAGE_SIZE = 20
+const SKELETON_COUNT = 20
 
 const SORT_OPTIONS: { value: GallerySort; label: string }[] = [
   { value: 'popular', label: '인기순' },
@@ -50,11 +52,12 @@ const HeartIcon = (
 type GalleryCardProps = {
   design: CommunityDesignResponse
   favorited: boolean
+  arLoading: boolean
   onOpen: () => void
+  onOpenAr: () => void
 }
 
-function GalleryCard({ design, favorited, onOpen }: GalleryCardProps) {
-  const textures = textureKeysOf(design).slice(0, 2)
+function GalleryCard({ design, favorited, arLoading, onOpen, onOpenAr }: GalleryCardProps) {
   const likeCount = design.likeCount ?? 0
 
   return (
@@ -67,13 +70,6 @@ function GalleryCard({ design, favorited, onOpen }: GalleryCardProps) {
           loading="lazy"
           decoding="async"
         />
-        {textures.length > 0 && (
-          <span className="gallery-card__tags" aria-hidden="true">
-            {textures.map((key) => (
-              <span key={key}>{textureLabelOf(key)}</span>
-            ))}
-          </span>
-        )}
         {favorited && (
           <span className="gallery-card__saved" aria-label="찜한 디자인">
             {HeartIcon}
@@ -91,7 +87,16 @@ function GalleryCard({ design, favorited, onOpen }: GalleryCardProps) {
           <LikeIcon filled={design.likedByMe} />
           {likeCount}
         </span>
-        <span className="gallery-card__date">{design.createdAt}</span>
+        <button
+          type="button"
+          className="gallery-card__ar ar-preview-btn"
+          onClick={onOpenAr}
+          disabled={arLoading}
+          aria-busy={arLoading}
+        >
+          {ModalActionIcons.ar}
+          AR 미리보기
+        </button>
       </div>
     </li>
   )
@@ -188,7 +193,9 @@ export function GalleryPageContent() {
             key={`${design.designId}-${design.imageUrl}`}
             design={design}
             favorited={gallery.isFavorited(design)}
+            arLoading={gallery.arLoadingId === design.designId}
             onOpen={() => gallery.openDetail(design)}
+            onOpenAr={() => gallery.openAr(design)}
           />
         ))}
       </ul>
@@ -202,7 +209,7 @@ export function GalleryPageContent() {
       <PageHero
         eyebrow="Gallery"
         title="디자인 둘러보기"
-        description="네일리 사용자들이 직접 만들고 공유한 네일 디자인이에요. 마음에 드는 디자인은 찜해 두고, 좋아요로 응원해 보세요."
+        description="네일리 사용자들이 직접 만들고 공유한 네일 디자인이에요. 마음에 드는 디자인은 찜하고, 좋아요로 응원해 보세요."
       />
 
       <div ref={listTopRef} className="gallery-page__toolbar">
@@ -245,13 +252,7 @@ export function GalleryPageContent() {
               aria-pressed={texture === option.key}
               onClick={() => changeTexture(option.key)}
             >
-              {option.swatch && (
-                <span
-                  className="gallery-page__filter-swatch"
-                  style={{ '--swatch': option.swatch } as CSSProperties}
-                  aria-hidden="true"
-                />
-              )}
+              <img className="gallery-page__filter-swatch" src={option.swatchImage} alt="" aria-hidden="true" />
               {option.label}
               <em>{option.count}</em>
             </button>
@@ -270,7 +271,7 @@ export function GalleryPageContent() {
           <p>내 손톱 쉐입과 피부 톤에 맞춘 나만의 디자인을 AI와 함께 만들어 보세요.</p>
         </div>
         <button type="button" className="gallery-page__cta-btn" onClick={handleCreateClick}>
-          디자인 만들기
+          디자인 만들러 가기
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
             <path d="M5 12h12M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -294,6 +295,15 @@ export function GalleryPageContent() {
           onMoveFolder={() => gallery.setFavoriteModalTarget({ design: detailDesign, mode: 'move' })}
           onToggleReaction={() => void gallery.toggleReaction(detailDesign)}
           onDownload={() => void gallery.download(detailDesign)}
+        />
+      )}
+
+      {gallery.arTarget && (
+        <NailArTryOnModal
+          imageUrl={gallery.arTarget.imageUrl}
+          shape={gallery.arTarget.shape}
+          nailTipCropUrls={gallery.arTarget.nailTipCropUrls}
+          onClose={gallery.closeAr}
         />
       )}
 

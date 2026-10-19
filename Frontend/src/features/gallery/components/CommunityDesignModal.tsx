@@ -5,6 +5,7 @@ import { DesignDetailsPanel } from '@/shared/components/DesignDetailsPanel'
 import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
 import '@/styles/mypage.css'
 import '@/styles/nail-design.css'
+import '@/styles/ar-preview-button.css'
 
 const ZOOM_MIN = 1
 const ZOOM_MAX = 4
@@ -202,7 +203,7 @@ export function CommunityDesignModal({
             aria-controls="gallery-design-details"
           >
             {ModalActionIcons.details}
-            <span>{showDetails ? '상세 닫기' : '이미지 상세보기'}</span>
+            <span>{showDetails ? '상세 닫기' : '이미지 상세 보기'}</span>
           </button>
         </div>
         <div className="mypage-x__modal-actions">
@@ -226,12 +227,12 @@ export function CommunityDesignModal({
           {/* 쉐입·손톱팁 정보가 오기 전에 열면 도중에 AR이 다시 시작되므로 상세 조회가 끝난 뒤에 연다 */}
           <button
             type="button"
-            className="mypage-x__modal-action--accent"
+            className="ar-preview-btn"
             onClick={() => setArOpen(true)}
             disabled={detailsLoading}
           >
             {ModalActionIcons.ar}
-            <span>AR로 미리보기</span>
+            <span>AR 미리보기</span>
           </button>
         </div>
       </div>

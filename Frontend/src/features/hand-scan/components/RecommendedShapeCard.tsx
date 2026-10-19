@@ -26,8 +26,10 @@ export function RecommendedShapeCard({ shape, userName }: { shape: NailShapeInfo
         <div className="scan-shape-highlight">
             <div className="scan-shape-highlight__top">
                 <div className="scan-shape-highlight__body">
-                    <p className="scan-shape-highlight__name">{shape.labelKo}</p>
-                    <p className="scan-shape-highlight__label-en">{shape.labelEn}</p>
+                    <p className="scan-shape-highlight__name">
+                        {shape.labelKo}
+                        <span className="scan-shape-highlight__label-en">{shape.labelEn}</span>
+                    </p>
                     <p className="scan-shape-highlight__desc">{shape.description}</p>
                 </div>
                 <div className="scan-shape-highlight__icon" aria-hidden="true">
@@ -36,13 +38,17 @@ export function RecommendedShapeCard({ shape, userName }: { shape: NailShapeInfo
             </div>
 
             <div className="scan-shape-insight">
-                <p className="scan-shape-insight__label">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
-                        <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" />
-                        <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
-                    </svg>
-                    추천 이유
-                </p>
+                <svg
+                    className="scan-shape-insight__icon"
+                    viewBox="0 0 24 24"
+                    width="15"
+                    height="15"
+                    fill="currentColor"
+                    aria-hidden="true"
+                >
+                    <path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z" />
+                    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" />
+                </svg>
                 <p className="scan-shape-insight__text">{renderEmphasis(text)}</p>
             </div>
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/api'
+import { deletePrintOrder, getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/api'
 import {
   getMyDesigns,
   getLikedDesigns,
@@ -18,8 +18,13 @@ import {
   type DesignChatMessage,
 } from '@/entities/design/api'
 import { type DesignImageDetailInput } from '@/features/mypage/components/DesignImageDetailModal'
-import { getScanResult } from '@/entities/scan/api'
-import { useMyScansQuery, useMyScanSessionsQuery } from '@/entities/scan/queries'
+import { deleteScanSession, getScanResult } from '@/entities/scan/api'
+import {
+  MY_SCANS_QUERY_KEY,
+  MY_SCAN_SESSIONS_QUERY_KEY,
+  useMyScansQuery,
+  useMyScanSessionsQuery,
+} from '@/entities/scan/queries'
 import { ApiError } from '@/shared/utils/apiClient'
 import { isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
 import { type LikeModalTarget, buildScanDetail, type ScanDetail } from '@/features/mypage/shared'
@@ -323,6 +328,68 @@ export function useMyPageData() {
     }
   }
 
+  // ── 손 분석 기록 / 출력 내역 삭제 (목록 카드의 삭제 버튼 → 확인 창) ──────
+  const [scanToDelete, setScanToDelete] = useState<ScanSession | null>(null)
+  const [printToDelete, setPrintToDelete] = useState<NailTipPrintOrder | null>(null)
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false)
+  const [recordDeleteError, setRecordDeleteError] = useState<string | null>(null)
+
+  const openDeleteScanModal = (session: ScanSession) => {
+    setRecordDeleteError(null)
+    setScanToDelete(session)
+  }
+
+  const openDeletePrintModal = (order: NailTipPrintOrder) => {
+    setRecordDeleteError(null)
+    setPrintToDelete(order)
+  }
+
+  const closeDeleteRecordModal = () => {
+    if (isDeletingRecord) return
+    setScanToDelete(null)
+    setPrintToDelete(null)
+    setRecordDeleteError(null)
+  }
+
+  const confirmDeleteScan = async () => {
+    if (!scanToDelete || isDeletingRecord) return
+    const { key } = scanToDelete
+    setIsDeletingRecord(true)
+    setRecordDeleteError(null)
+    try {
+      await deleteScanSession(key)
+      // 손 분석 기록 목록은 손 촬영·출력·디자인 채팅과 함께 쓰므로 공용 캐시에서 빼고 다시 받아 온다
+      queryClient.setQueryData<ScanSession[]>(MY_SCAN_SESSIONS_QUERY_KEY, (prev) => prev?.filter((s) => s.key !== key))
+      void queryClient.invalidateQueries({ queryKey: MY_SCAN_SESSIONS_QUERY_KEY })
+      void queryClient.invalidateQueries({ queryKey: MY_SCANS_QUERY_KEY })
+      setScanToDelete(null)
+    } catch (e) {
+      setRecordDeleteError(e instanceof ApiError ? e.message : '손 분석 기록을 삭제하지 못했어요.')
+      // 그새 채팅에 쓰여 지울 수 없게 된 기록이면 목록을 새로 받아 삭제 버튼을 감춘다
+      void queryClient.invalidateQueries({ queryKey: MY_SCAN_SESSIONS_QUERY_KEY })
+    } finally {
+      setIsDeletingRecord(false)
+    }
+  }
+
+  const confirmDeletePrint = async () => {
+    if (!printToDelete || isDeletingRecord) return
+    const { id } = printToDelete
+    setIsDeletingRecord(true)
+    setRecordDeleteError(null)
+    try {
+      await deletePrintOrder(id)
+      queryClient.setQueryData<NailTipPrintOrder[]>(PRINTS_KEY, (prev) => prev?.filter((p) => p.id !== id))
+      setPrintToDelete(null)
+    } catch (e) {
+      setRecordDeleteError(e instanceof ApiError ? e.message : '출력 내역을 삭제하지 못했어요.')
+      // 그새 출력이 시작된 주문이면 목록을 새로 받아 상태를 맞춘다
+      void queryClient.invalidateQueries({ queryKey: PRINTS_KEY })
+    } finally {
+      setIsDeletingRecord(false)
+    }
+  }
+
   return {
     designs,
     favorites,
@@ -377,5 +444,14 @@ export function useMyPageData() {
     openDeleteFolderModal,
     closeDeleteFolderModal,
     confirmDeleteFolder,
+    scanToDelete,
+    printToDelete,
+    isDeletingRecord,
+    recordDeleteError,
+    openDeleteScanModal,
+    openDeletePrintModal,
+    closeDeleteRecordModal,
+    confirmDeleteScan,
+    confirmDeletePrint,
   }
 }
