@@ -963,6 +963,58 @@ def detect_cuticle_by_color(image: np.ndarray, cx: int, fy: int,
     return best
 
 
+CUT_B_SPAN_MM = 5.0     # 가이드선 위아래로 이만큼까지의 후보를 큐티클로 인정 (사용자가 가이드선에서 몇 mm 벗어나게 맞춰도 따라간다)
+CUT_B_WINDOW_MM = 7.0   # 계단 크기를 재려면 후보 주변 여유가 필요해서 창은 인정 범위보다 넓게 본다
+CUT_B_MIN_STEP = 4.0    # 손톱판 → 피부로 내려갈 때 b* 가 이만큼 올라가야 큐티클로 인정 (스캔 30손가락: 6.4~14.5)
+CUT_B_MIN_SLOPE = 0.3   # 행당 b* 상승 최소 기울기 (진짜 경계 0.64~1.55, 창 끝에서 잡히는 잡음 0.04~0.08)
+CUT_B_TOP_FRAC = 0.6    # 최대 상승의 이 비율 이상인 상승 중 가장 위쪽(손톱판 → 피부 첫 전환)을 고른다
+
+
+def detect_cuticle_by_b_rise(image: np.ndarray, cx: int, nail_half: float, mpp: float,
+                             center_y: int, span_mm: float = CUT_B_WINDOW_MM):
+    """손톱 밑 경계(큐티클)의 행을 찾는다. 못 찾으면 None.
+
+    손톱판은 창백한 분홍(b* 낮음), 그 아래 손가락 살은 주황빛(b* 높음)이라, 손톱 가운데 열의 행별 평균 b* 가
+    위에서 아래로 갈 때 가장 뚜렷하게 올라가는 곳이 손톱 밑 경계다. 이 신호는 가이드선이 아니라 이미지를
+    따라간다: 같은 사진에서 탐색 중심을 ±3mm 옮겨도 25개 중 24개에서 위치가 변하지 않았다. 기존 후보
+    (그레이디언트/색/루눌라)는 약한 손톱에서 후보를 못 내서 가이드선 값으로 대신했고, 사용자가 가이드선에서
+    몇 mm 벗어나 있으면 그만큼 틀렸다.
+    """
+    H, W = image.shape[:2]
+    y_a, y_b = max(0, int(center_y - span_mm / mpp)), min(H, int(center_y + span_mm / mpp))
+    x_a, x_b = max(0, int(cx - 0.45 * nail_half)), min(W, int(cx + 0.45 * nail_half))
+    k = max(3, int(0.4 / mpp) | 1)
+    if y_b - y_a < 8 * k or x_b - x_a < 6:
+        return None
+    lab = cv2.cvtColor(cv2.GaussianBlur(image[y_a:y_b, x_a:x_b], (3, 3), 0),
+                       cv2.COLOR_BGR2Lab).astype(np.float32)
+    bs = np.convolve(lab[:, :, 2].mean(1), np.ones(k) / k, mode="same")
+    db = np.gradient(bs)
+    db[:2 * k] = -1e9
+    db[-2 * k:] = -1e9
+    # 인정 범위(가이드선 ±CUT_B_SPAN_MM) 안의 후보만 본다
+    ok = np.zeros(len(db), bool)
+    lo, hi = int(center_y - CUT_B_SPAN_MM / mpp) - y_a, int(center_y + CUT_B_SPAN_MM / mpp) - y_a
+    ok[max(0, lo):max(0, hi)] = True
+    dbm = np.where(ok, db, -1e9)
+    peak = float(dbm.max())
+    if peak < CUT_B_MIN_SLOPE:
+        return None
+    # 최대 상승의 CUT_B_TOP_FRAC 이상인 국소 최대 중 가장 위쪽
+    cands = [i for i in range(1, len(db) - 1)
+             if dbm[i] >= CUT_B_TOP_FRAC * peak and db[i] >= db[i - 1] and db[i] >= db[i + 1]]
+    if not cands:          # 최대 기울기가 창 가장자리(국소 최대가 아님)라서 후보가 없다
+        return None
+    i = min(cands)
+    below, above = bs[i + k:i + 3 * k], bs[max(0, i - 3 * k):i - k]
+    if len(below) == 0 or len(above) == 0:
+        return None
+    step = float(below.mean() - above.mean())
+    if step < CUT_B_MIN_STEP:
+        return None
+    return y_a + i
+
+
 def detect_cuticle_by_lunula_min(image: np.ndarray, tip_x: int, tip_y: int,
                                  mpp: float, lo_mm: float = 5.0,
                                  hi_mm: float = 24.0, min_prominence: float = 9.0):
@@ -1847,6 +1899,16 @@ def _measure_top(image: np.ndarray, mpp: float,
               f"bare W/L prior — neither colour nor gradient found "
               f"independent evidence for this position. Check the overlay "
               f"against the photo before accepting.")
+
+    # 가이드선이 있으면 손톱 밑 경계(b* 상승)를 가이드선 위아래 CUT_B_SPAN_MM 안에서 직접 찾아 그것을 쓴다.
+    # 위의 후보들이 못 찾아 가이드선 값으로 대신한 경우에도 사용자의 실제 큐티클을 따라가게 하려는 것이다.
+    if guide_y is not None:
+        _cut_b = detect_cuticle_by_b_rise(image, tip_x, nail_half, mpp, guide_y)
+        if _cut_b is not None and _cut_b > tip_y + int(6.0 / mpp):
+            print(f"  [Cuticle] nail-base edge (b* rise): y={_cut_b} "
+                  f"({(_cut_b - guide_y) * mpp:+.1f}mm from the guide row) "
+                  f"[was y={cuticle_y}, {(cuticle_y - tip_y) * mpp:.1f}mm]")
+            cuticle_y = _cut_b
 
     # 큐티클이 정해졌으니 손톱 끝을 흰 띠 시작선으로 옮긴다(위 White tip 주석 참고).
     tip_source = "free_edge" if tip_y < fy else "silhouette"
