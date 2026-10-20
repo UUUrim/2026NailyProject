@@ -119,7 +119,8 @@ from nail_live import (MeasureWorker,                                 # scan/
                         detect_marker_only as _live_detect_marker_only,
                         guide_line_row as _live_guide_line_row,
                         guide_line_offset_mm as _live_guide_offset_mm,
-                        marker_mm_per_px as _live_marker_mm_per_px)
+                        marker_mm_per_px as _live_marker_mm_per_px,
+                        apply_fixed_focus as _live_apply_fixed_focus)
 
 # ─────────────────────────────────────────────────────────────
 BASE   = _THIS_DIR
@@ -835,6 +836,9 @@ def _get_top_cam() -> cv2.VideoCapture:
         if CAMERA_WB_TEMP is not None:
             cap.set(cv2.CAP_PROP_AUTO_WB, 0)
             cap.set(cv2.CAP_PROP_WB_TEMPERATURE, CAMERA_WB_TEMP)
+        # 오토포커스는 박스 바닥에 맞춰져 손톱이 흐려지는 일이 있어서, 손톱(마커)과 같은 높이에 초점을
+        # 고정한다. 값은 scan/nail_live.py 의 CAM_FOCUS.
+        _live_apply_fixed_focus(cap)
         _top_cam       = cap
         _top_cam_index = CAMERA_TOP
         return _top_cam
