@@ -141,7 +141,14 @@
   const capInfo     = document.getElementById("capInfo");
   const applyBtn    = document.getElementById("applyBtn");
 
-  const PAGE_VERSION    = "cal3";   // shown in /phone/side/debug so the desktop can tell which page the phone is running
+  const PAGE_VERSION    = "zoom1";  // shown in /phone/side/debug so the desktop can tell which page the phone is running
+  // 줌 배율. 이 폰은 웹에서 수동 초점을 못 바꾸고 자동 초점이 화면 중앙의 구멍 뒤 배경(선반·얼굴)에 맞아서
+  // 손가락 끝이 흐리다. 손가락 끝은 항상 화면 중앙에 있으니 줌을 올리면 자동 초점 영역이 손가락으로 채워져
+  // 초점이 손가락에 맞을 가능성이 크고, 손가락도 그만큼 크게 찍힌다. 주소에 ?zoom=3 처럼 붙이면 그 값으로 시험.
+  const ZOOM = (() => {
+    const z = parseFloat(new URLSearchParams(location.search).get("zoom"));
+    return Number.isFinite(z) && z >= 1 ? z : 2.0;
+  })();
   const PREVIEW_MS      = 250;    // minimum gap between preview uploads (next one waits for the previous to finish)
   const POLL_MS         = 400;    // capture-request poll interval
   const PREVIEW_MAX_W   = 640;    // preview width sent to desktop (small, so it keeps up through ngrok)
@@ -323,8 +330,16 @@
     }
   }
 
+  async function applyZoom() {
+    const z = caps.zoom;
+    if (!(z && typeof z.min === "number")) return;       // 폰이 줌을 지원하지 않으면 그대로
+    await applyAdv({ zoom: Math.max(z.min, Math.min(z.max, ZOOM)) });
+    await sleep(300);                                    // 줌이 반영될 시간
+  }
+
   async function prepareCamera() {
     if (!track) return;
+    await applyZoom();
     await applyExposure();
     await applyFocus();
     reportCaps("prepare");

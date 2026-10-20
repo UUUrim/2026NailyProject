@@ -1981,6 +1981,13 @@ def phone_side_calib_done(run: int = 0):
         _set_side_note(f"FOCUS CALIBRATION: no clear peak ({prominence:.2f}x) - try again", (60, 60, 255), 30)
         return {"ok": False, "best": None, "prominence": prominence, "message": "no clear sharpness peak"}
     best = float(fds[i])
+    if edge:
+        # 피크가 초점 범위 끝이면 진짜 최적이 아니라 "점수가 평평하거나 단조로움"인 경우다(폰이 박스에 안 장착돼
+        # 방을 찍고 있었는데 fd 0.0 이 저장돼 모든 사이드 촬영에 적용된 일이 있었다). 저장하지 않는다.
+        _set_side_note("FOCUS CALIBRATION FAILED: peak at the edge of the range - check the phone is mounted "
+                       "and the finger is in place, then try again", (60, 60, 255), 30)
+        return {"ok": False, "best": None, "prominence": prominence, "at_edge_of_range": True,
+                "message": "peak at range edge - not saved"}
     _phone_cam.focus_fd = best
     os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
     with open(FOCUS_FILE, "w", encoding="utf-8") as f:
