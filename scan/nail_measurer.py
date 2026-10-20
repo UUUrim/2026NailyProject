@@ -215,7 +215,13 @@ LATERAL_THR = 2.5
 def detect_aruco(image: np.ndarray, aruco_size_mm: float):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     d   = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
-    det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
+    # 기본 errorCorrectionRate(0.6)는 너무 관대해서, 마커 둘레의 흰 종이 여백 바깥 테두리를
+    # 마커로 인식하는 프레임이 있다(같은 마커가 236px 또는 266px로 잡혀 mm/px가 13% 흔들렸다).
+    # 0으로 두면 검은 정사각형만 통과하고, SUBPIX로 코너를 정밀하게 맞춘다.
+    prm = cv2.aruco.DetectorParameters()
+    prm.errorCorrectionRate = 0.0
+    prm.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    det = cv2.aruco.ArucoDetector(d, prm)
     corners, ids, _ = det.detectMarkers(gray)
     if ids is not None and len(ids) > 0:
         # ids is (N,1) on OpenCV 4.x but (N,) on 5.x — np.ravel handles both.
@@ -236,10 +242,55 @@ def detect_aruco(image: np.ndarray, aruco_size_mm: float):
 
 
 # ─────────────────────────────────────────────────────────────
+# 1b. Black finger strip (new box: white A4 paper + black guide strip)
+# ─────────────────────────────────────────────────────────────
+
+# 새 박스는 흰 A4 종이 위에 검정 띠가 있고, 타깃 손가락만 띠 위에 놓이며 나머지 손가락은 띠 양옆
+# 흰 종이 위에 걸친다. 옛 규칙("가장 위 덩어리", "마커에 가까운 덩어리")은 옆 손가락을 합치거나
+# 대신 고르므로, 띠 안쪽 세로 구간(corridor)만 손가락 후보로 본다.
+MARKER_SIZE_MM       = 20.0   # mpp를 못 받았을 때 마커 변 길이로 환산하는 기본값
+STRIP_DARK_L         = 80     # 띠 열의 중앙값 밝기(L) 상한
+STRIP_PAPER_L        = 110    # 띠 왼쪽 바로 옆(흰 종이)이 이보다 밝아야 "종이→띠" 경계로 인정
+STRIP_SEARCH_GAP_MM  = 8.0    # 마커 오른쪽 끝에서 이만큼 떨어진 곳부터 찾는다
+STRIP_LEFT_MARGIN_MM = 1.5    # 띠 왼쪽 경계보다 이만큼 더 왼쪽까지 손가락으로 인정
+STRIP_RIGHT_MM       = 32.0   # 띠 왼쪽 경계에서 이만큼 오른쪽까지 (띠 폭 약 25mm + 여유)
+
+
+def find_finger_strip(image: np.ndarray, aruco_corners: np.ndarray, mpp: float):
+    """검정 띠의 가로 구간 (x0, x1)을 돌려준다. 못 찾으면 None.
+
+    띠는 프레임 위쪽부터 계속 이어지므로, 손가락이 닿지 않는 마커 윗부분 높이의 열별 밝기
+    중앙값에서 "밝은 종이 → 어두운 띠"로 바뀌는 첫 경계를 마커 오른쪽에서 찾는다. 띠 오른쪽은
+    그림자 때문에 종이도 어두워서(L 47~66) 경계가 불분명하므로, 선명한 왼쪽 경계에서 고정 폭을 쓴다.
+    옛 박스(바닥 전체가 어두운 매트)에서는 이 경계가 없어서 None이 되고, 호출한 쪽은 예전 방식
+    그대로 동작한다.
+    """
+    if aruco_corners is None or mpp is None or mpp <= 0:
+        return None
+    H, W = image.shape[:2]
+    top = int(aruco_corners[:, 1].min())
+    y0, y1 = max(0, top - 100), min(H, top + 60)
+    if y1 - y0 < 20:
+        return None
+    L = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)[:, :, 0]
+    med = np.median(L[y0:y1], axis=0)
+    dark = med < STRIP_DARK_L
+    start = int(aruco_corners[:, 0].max() + STRIP_SEARCH_GAP_MM / mpp)
+    lookback = max(5, int(1.5 / mpp))
+    for x in range(max(start, lookback + 1), W - 1):
+        if dark[x] and not dark[x - 1] and med[x - lookback] > STRIP_PAPER_L:
+            x0 = max(0, x - int(STRIP_LEFT_MARGIN_MM / mpp))
+            x1 = min(W, x + int(STRIP_RIGHT_MM / mpp))
+            return x0, x1
+    return None
+
+
+# ─────────────────────────────────────────────────────────────
 # 2. Finger segmentation (resolution-aware)
 # ─────────────────────────────────────────────────────────────
 
-def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
+def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None,
+                   mpp: float = None):
     H, W = image.shape[:2]
     scale    = max(W, H) / 2000.0
     ks_large = max(9,  int(9  * scale) | 1)
@@ -271,6 +322,19 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     _, skin_L = cv2.threshold(L, 120, 255, cv2.THRESH_BINARY)
     skin_A    = (A > 131).astype(np.uint8) * 255   # a* > 3: warm/reddish tone
     skin      = cv2.bitwise_and(skin_L, skin_A)
+
+    # 검정 띠가 있는 박스면 띠 안쪽만 본다 (옆 손가락/다른 손은 띠 밖이라 여기서 사라진다).
+    corridor = None
+    if aruco_corners is not None:
+        if mpp is None:
+            side = float(np.mean([np.linalg.norm(aruco_corners[i] - aruco_corners[(i + 1) % 4])
+                                  for i in range(4)]))
+            mpp = MARKER_SIZE_MM / max(side, 1e-6)
+        corridor = find_finger_strip(image, aruco_corners, mpp)
+    if corridor is not None:
+        skin[:, :corridor[0]] = 0
+        skin[:, corridor[1]:] = 0
+        print(f"  [Segment] black strip found → finger corridor x={corridor[0]}..{corridor[1]}")
     kL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_large, ks_large))
     kS = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_small, ks_small))
     skin = cv2.morphologyEx(skin, cv2.MORPH_CLOSE, kL, iterations=3)
@@ -306,7 +370,9 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     # a wide margin (finger ~0.0, background ~2.9-3.5 on the side-lit photos).
     # Without this, a warm strip at the frame edge that reaches HIGHER than the
     # fingertip beats the finger under the topmost rule below.
-    if aruco_corners is not None and len(valid_cnts) > 1:
+    # (띠 안쪽만 남긴 경우엔 이미 옆 손가락이 걸러졌으므로 이 규칙을 쓰지 않는다 - 띠 위 손가락은
+    # 마커에서 2.5배 이상 떨어져 있어서 오히려 띠 가장자리에 걸친 옆 손가락이 뽑힐 수 있다.)
+    if aruco_corners is not None and corridor is None and len(valid_cnts) > 1:
         mc_x = float(aruco_corners[:, 0].mean())
         m_side = max(cv2.boundingRect(aruco_corners.astype(np.int32))[2], 1)
         def _gap(c):
@@ -2083,7 +2149,7 @@ def measure_finger(top_path: str, finger: str,
 
         print(f"\n[1/3] ArUco + finger segmentation …")
         mpp, aruco_corners, marker_id = detect_aruco(top_img, aruco_size_mm)
-        finger_mask, _, bbox          = segment_finger(top_img, aruco_corners)
+        finger_mask, _, bbox          = segment_finger(top_img, aruco_corners, mpp)
 
         print(f"\n[2/3] Nail measurement + C-curve …")
         data = measure_top(top_img, mpp, finger_mask, bbox,
