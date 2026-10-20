@@ -1076,7 +1076,23 @@ public class NailDesignService {
             }
         }
         shapePriority.addAll(getLiked(slots, "shape"));
+        // ★ scan-auto는 쉐입을 스캔 추천으로 고정하는 흐름인데(위에서 plan.shape에 넣음), 세션에 저장된 쉐입 슬롯
+        // (이전 채팅에서 고른 값, 또는 이전 생성의 플랜이 자동으로 채워 넣은 값)이 enforceAppShape에서 가장 우선이라
+        // 추천이 발레리나여도 슬롯의 아몬드가 이겼다. 슬롯을 스캔 추천으로 맞춰서 프롬프트/AR 템플릿/키워드가 모두 같은 값을 보게 한다.
+        if (scanAuto && handScan != null && scanRecommendedShape(handScan) != null) {
+            SlotData shapeSlot = slots.computeIfAbsent("shape", k -> new SlotData());
+            List<String> before = new ArrayList<>(shapeSlot.getLiked());
+            shapeSlot.getLiked().clear();
+            shapeSlot.getLiked().add(scanRecommendedShape(handScan));
+            if (!before.isEmpty() && !before.equals(shapeSlot.getLiked())) {
+                System.out.println("[Shape] scan-auto: 세션 슬롯 쉐입 " + before + " 를 스캔 추천 '" + scanRecommendedShape(handScan) + "' 로 교체");
+            }
+        }
         enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
+        System.out.println("[Shape] scanAuto=" + scanAuto + " scanId=" + request.getScanId()
+                + " 스캔추천=" + (handScan != null ? scanRecommendedShape(handScan) : null)
+                + " 슬롯=" + getLiked(slots, "shape") + " 플랜=" + (plan != null ? plan.path("shape").asText("") : null)
+                + " 우선순위=" + shapePriority);
 
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
