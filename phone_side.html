@@ -153,6 +153,7 @@
   const DEFAULTS = { af: "poi", ev: -1.0, fd: null, point: { x: 0.47, y: 0.50 } };
   let cfg = loadCfg();
 
+  let videoRetries  = 0;          // 영상이 안 시작됐을 때 카메라를 다시 연 횟수
   let stream        = null;
   let track         = null;
   let imageCapture   = null;
@@ -407,6 +408,10 @@
     }
 
     video.srcObject = stream;
+    // 일부 폰 브라우저(삼성 인터넷 등)는 autoplay 만으로는 영상이 시작되지 않아 videoWidth 가 0 인 채로
+    // 화면이 검고 프리뷰 전송도 멈춘다(서버에는 프레임 0장). 명시적으로 재생을 요청하고, 3초 안에도
+    // 영상 크기가 안 잡히면 카메라를 껐다가 다시 열어 본다(최대 2번).
+    try { await video.play(); } catch (e) { /* autoplay 정책: 아래 재시도로 처리 */ }
     track = stream.getVideoTracks()[0];
     try { caps = track.getCapabilities ? track.getCapabilities() : {}; } catch (e) { caps = {}; }
 
@@ -417,6 +422,15 @@
 
     startScreen.style.display = "none";
     setStatus("프리뷰 전송 중...", "connected");
+    setTimeout(async () => {
+      if (video.videoWidth || videoRetries >= 2) return;
+      videoRetries += 1;
+      setStatus("카메라 영상이 안 나와 다시 시도합니다 (" + videoRetries + "/2)", "err");
+      clearInterval(previewTimer); clearInterval(pollTimer);
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+      video.srcObject = null;
+      await startCamera();
+    }, 3000);
     previewTimer = setInterval(sendPreview, PREVIEW_MS);
     pollTimer    = setInterval(pollCapture, POLL_MS);
     reportCaps("start");
