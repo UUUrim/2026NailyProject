@@ -207,6 +207,12 @@ EXPECTED_MARKER_ID = 0
 # rather than by threshold, so a low value here is safe.
 LATERAL_THR = 2.5
 
+# 가이드선 기준 큐티클 후보 허용 오차(mm). 사용자는 화면의 가이드선에 큐티클을 맞춰서 찍으므로
+# 실제 큐티클은 선에서 1mm 안팎에 있다(가이드 촬영 10장). 허용 오차가 3mm면 손톱 안쪽의
+# 약한 경계(gradient/색 후보)가 창 안에 들어와 큐티클로 뽑혔다(약지: 실제보다 4mm 위, 길이 -2.2mm).
+# 2.5~1.0mm 구간에선 결과가 같아서 가운데 값 2.0mm로 둔다.
+GUIDE_TOL_MM = 2.0
+
 
 # ─────────────────────────────────────────────────────────────
 # 1. ArUco detection
@@ -215,7 +221,13 @@ LATERAL_THR = 2.5
 def detect_aruco(image: np.ndarray, aruco_size_mm: float):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     d   = cv2.aruco.getPredefinedDictionary(ARUCO_DICT_ID)
-    det = cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())
+    # 기본 errorCorrectionRate(0.6)는 너무 관대해서, 마커 둘레의 흰 종이 여백 바깥 테두리를
+    # 마커로 인식하는 프레임이 있다(같은 마커가 236px 또는 266px로 잡혀 mm/px가 13% 흔들렸다).
+    # 0으로 두면 검은 정사각형만 통과하고, SUBPIX로 코너를 정밀하게 맞춘다.
+    prm = cv2.aruco.DetectorParameters()
+    prm.errorCorrectionRate = 0.0
+    prm.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    det = cv2.aruco.ArucoDetector(d, prm)
     corners, ids, _ = det.detectMarkers(gray)
     if ids is not None and len(ids) > 0:
         # ids is (N,1) on OpenCV 4.x but (N,) on 5.x — np.ravel handles both.
@@ -236,10 +248,55 @@ def detect_aruco(image: np.ndarray, aruco_size_mm: float):
 
 
 # ─────────────────────────────────────────────────────────────
+# 1b. Black finger strip (new box: white A4 paper + black guide strip)
+# ─────────────────────────────────────────────────────────────
+
+# 새 박스는 흰 A4 종이 위에 검정 띠가 있고, 타깃 손가락만 띠 위에 놓이며 나머지 손가락은 띠 양옆
+# 흰 종이 위에 걸친다. 옛 규칙("가장 위 덩어리", "마커에 가까운 덩어리")은 옆 손가락을 합치거나
+# 대신 고르므로, 띠 안쪽 세로 구간(corridor)만 손가락 후보로 본다.
+MARKER_SIZE_MM       = 20.0   # mpp를 못 받았을 때 마커 변 길이로 환산하는 기본값
+STRIP_DARK_L         = 80     # 띠 열의 중앙값 밝기(L) 상한
+STRIP_PAPER_L        = 110    # 띠 왼쪽 바로 옆(흰 종이)이 이보다 밝아야 "종이→띠" 경계로 인정
+STRIP_SEARCH_GAP_MM  = 8.0    # 마커 오른쪽 끝에서 이만큼 떨어진 곳부터 찾는다
+STRIP_LEFT_MARGIN_MM = 1.5    # 띠 왼쪽 경계보다 이만큼 더 왼쪽까지 손가락으로 인정
+STRIP_RIGHT_MM       = 32.0   # 띠 왼쪽 경계에서 이만큼 오른쪽까지 (띠 폭 약 25mm + 여유)
+
+
+def find_finger_strip(image: np.ndarray, aruco_corners: np.ndarray, mpp: float):
+    """검정 띠의 가로 구간 (x0, x1)을 돌려준다. 못 찾으면 None.
+
+    띠는 프레임 위쪽부터 계속 이어지므로, 손가락이 닿지 않는 마커 윗부분 높이의 열별 밝기
+    중앙값에서 "밝은 종이 → 어두운 띠"로 바뀌는 첫 경계를 마커 오른쪽에서 찾는다. 띠 오른쪽은
+    그림자 때문에 종이도 어두워서(L 47~66) 경계가 불분명하므로, 선명한 왼쪽 경계에서 고정 폭을 쓴다.
+    옛 박스(바닥 전체가 어두운 매트)에서는 이 경계가 없어서 None이 되고, 호출한 쪽은 예전 방식
+    그대로 동작한다.
+    """
+    if aruco_corners is None or mpp is None or mpp <= 0:
+        return None
+    H, W = image.shape[:2]
+    top = int(aruco_corners[:, 1].min())
+    y0, y1 = max(0, top - 100), min(H, top + 60)
+    if y1 - y0 < 20:
+        return None
+    L = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)[:, :, 0]
+    med = np.median(L[y0:y1], axis=0)
+    dark = med < STRIP_DARK_L
+    start = int(aruco_corners[:, 0].max() + STRIP_SEARCH_GAP_MM / mpp)
+    lookback = max(5, int(1.5 / mpp))
+    for x in range(max(start, lookback + 1), W - 1):
+        if dark[x] and not dark[x - 1] and med[x - lookback] > STRIP_PAPER_L:
+            x0 = max(0, x - int(STRIP_LEFT_MARGIN_MM / mpp))
+            x1 = min(W, x + int(STRIP_RIGHT_MM / mpp))
+            return x0, x1
+    return None
+
+
+# ─────────────────────────────────────────────────────────────
 # 2. Finger segmentation (resolution-aware)
 # ─────────────────────────────────────────────────────────────
 
-def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
+def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None,
+                   mpp: float = None):
     H, W = image.shape[:2]
     scale    = max(W, H) / 2000.0
     ks_large = max(9,  int(9  * scale) | 1)
@@ -271,6 +328,19 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     _, skin_L = cv2.threshold(L, 120, 255, cv2.THRESH_BINARY)
     skin_A    = (A > 131).astype(np.uint8) * 255   # a* > 3: warm/reddish tone
     skin      = cv2.bitwise_and(skin_L, skin_A)
+
+    # 검정 띠가 있는 박스면 띠 안쪽만 본다 (옆 손가락/다른 손은 띠 밖이라 여기서 사라진다).
+    corridor = None
+    if aruco_corners is not None:
+        if mpp is None:
+            side = float(np.mean([np.linalg.norm(aruco_corners[i] - aruco_corners[(i + 1) % 4])
+                                  for i in range(4)]))
+            mpp = MARKER_SIZE_MM / max(side, 1e-6)
+        corridor = find_finger_strip(image, aruco_corners, mpp)
+    if corridor is not None:
+        skin[:, :corridor[0]] = 0
+        skin[:, corridor[1]:] = 0
+        print(f"  [Segment] black strip found → finger corridor x={corridor[0]}..{corridor[1]}")
     kL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_large, ks_large))
     kS = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ks_small, ks_small))
     skin = cv2.morphologyEx(skin, cv2.MORPH_CLOSE, kL, iterations=3)
@@ -306,7 +376,9 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None):
     # a wide margin (finger ~0.0, background ~2.9-3.5 on the side-lit photos).
     # Without this, a warm strip at the frame edge that reaches HIGHER than the
     # fingertip beats the finger under the topmost rule below.
-    if aruco_corners is not None and len(valid_cnts) > 1:
+    # (띠 안쪽만 남긴 경우엔 이미 옆 손가락이 걸러졌으므로 이 규칙을 쓰지 않는다 - 띠 위 손가락은
+    # 마커에서 2.5배 이상 떨어져 있어서 오히려 띠 가장자리에 걸친 옆 손가락이 뽑힐 수 있다.)
+    if aruco_corners is not None and corridor is None and len(valid_cnts) > 1:
         mc_x = float(aruco_corners[:, 0].mean())
         m_side = max(cv2.boundingRect(aruco_corners.astype(np.int32))[2], 1)
         def _gap(c):
@@ -416,10 +488,34 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
                 if mx - 20 <= sx <= mx + mw + 20 and my - 20 <= sy <= my + mh + 20:
                     continue
             samples.append(lab[sy, sx])
+    samples = np.array(samples, dtype=np.float32).reshape(-1, 3)
+
+    # 손 양옆 배경이 서로 다른 색/밝기(예: 한쪽은 흰 종이, 반대쪽은 검은 가이드/바닥)이면 평균/표준
+    # 편차가 두 배경을 섞어 버려서, 흰 끝과 배경의 거리(dist)가 전부 작아지고 흰 끝을 못 잡는다.
+    # 이럴 땐 손끝 바로 위쪽 배경(손톱 끝이 닿을 수 있는 5mm 보다 위)을 기준으로 삼는다. 어두운
+    # 단색 바닥에서는 양옆 밝기 편차가 작아서(L std < 20) 이 분기를 타지 않는다 - 기존 동작 그대로.
+    if len(samples) < 8 or samples[:, 0].std() > 20.0:
+        y_a, y_b = max(0, fy - int(11 / mpp)), max(0, fy - int(6 / mpp))
+        x_a, x_b = max(0, cx - int(fw * 0.4)), min(W, cx + int(fw * 0.4))
+        if y_b - y_a >= 4 and x_b - x_a >= 4:
+            block = lab[y_a:y_b:2, x_a:x_b:2].reshape(-1, 3).astype(np.float32)
+            if marker_box is not None:
+                mx, my, mw, mh = marker_box
+                ys, xs = np.mgrid[y_a:y_b:2, x_a:x_b:2]
+                keep = ~((xs >= mx - 20) & (xs <= mx + mw + 20) &
+                         (ys >= my - 20) & (ys <= my + mh + 20)).reshape(-1)
+                block = block[keep]
+            # 긴 흰 손톱(윗선 위로 6mm 이상)이 이 창까지 올라오면 흰 손톱 픽셀이 배경 샘플에 섞여
+            # 배경 평균/편차가 틀어진다. 배경은 어두운 검정 띠이므로 어두운 픽셀(L<90)만 쓴다.
+            # (띠 밝기가 위쪽일수록 어두워져서 먼 곳에서 샘플을 뽑으면 손가락 근처 띠를 배경으로 못 본다.)
+            dark_block = block[block[:, 0] < MIXED_BG_DARK_L]
+            if len(dark_block) >= 8 and len(dark_block) >= 0.2 * len(block):
+                block = dark_block
+            if len(block) >= 8 and block[:, 0].std() <= 20.0:
+                samples = block
     if len(samples) < 8:
         # Not enough clean background — cannot separate the tip safely.
         return {"tip_y": fy, "edges": {}}
-    samples = np.array(samples, dtype=np.float32)
     bg_mean = samples.mean(0)
     bg_std  = samples.std(0)
 
@@ -489,6 +585,91 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
     else:
         print(f"  [Free edge] none detected (tip flush with flesh)")
     return {"tip_y": tip_y, "edges": edges}
+
+
+# ─────────────────────────────────────────────────────────────
+# 3c. White free-edge band that lies INSIDE the fingertip silhouette
+# ─────────────────────────────────────────────────────────────
+
+# 하얀 띠 판정: 무채색에 가깝고(채도 낮음) 밝은 픽셀. 손가락 살/손톱 바닥은 a*·b*가 10~20대,
+# 하얀 끝은 a*≈0·b*≈5 → 채도 8 이하. 배경(어두운 매트)은 L이 낮아서 밝기 조건으로 제외.
+# 띠 "위쪽 가장자리"만 찾는다 - 띠 아래(손톱 바닥)는 빛 반사로 같이 하얗게 떠 있는 경우가 많아서
+# 띠 두께/아래쪽 색 변화는 신뢰할 수 없다. 대신 위쪽은 항상 분홍 살 → 흰색으로 급하게 바뀐다.
+WHITE_TIP_MAX_CHROMA  = 8.0    # 흰색으로 보는 채도 상한
+WHITE_TIP_PINK_CHROMA = 12.0   # 띠 바로 위가 "분홍 살"이라고 보는 채도 하한
+WHITE_TIP_MIN_L       = 170
+WHITE_TIP_MIN_MM      = 0.5    # 이보다 짧게 끊기는 흰 점은 반사/노이즈로 보고 무시
+WHITE_TIP_EDGE_MM     = 0.6    # 분홍 → 흰색 전환이 이 거리 안에서 일어나야 "급한 경계"
+WHITE_TIP_ABOVE_MM    = 5.0    # 지문 윗선보다 이만큼 위에서부터 찾는다
+WHITE_TIP_BELOW_MM    = 4.0    # 지문 윗선보다 이만큼 아래까지 띠 시작점을 허용
+WHITE_TIP_MIN_COLS    = 0.4    # 손톱 가운데 열 중 이 비율 이상에서 같은 띠가 보여야 인정
+FREE_EDGE_REAL_MM     = 1.0    # 윗선 밖으로 이만큼 이상 나와야 진짜 자유연(그보다 작으면 윤곽 번짐)
+MIXED_BG_DARK_L       = 90     # 양옆 배경이 섞인 박스에서 손끝 위 배경 샘플로 쓰는 어두운 픽셀 상한(L)
+
+
+def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dict:
+    """
+    Find the white free edge of the nail (the milky band at the nail's distal
+    end) and return the row where it STARTS — the real end of the nail.
+
+    detect_free_edge() only sees a free edge that sticks out PAST the finger
+    silhouette (white against the dark mat).  On many nails the white band sits
+    inside the silhouette: the finger pad bulges 1-3 mm beyond the nail, so from
+    above we see   mat -> pink pad -> WHITE BAND -> pink nail bed.   The silhouette
+    top (fy) then lies on the pad, not on the nail, and measuring length from it
+    adds the pad skin to the nail.  The nail ends where the white band begins.
+
+    Per column (centre 50 % of the finger) look for a SHARP pink -> white edge
+    within [fy - 5 mm, fy + 4 mm]; the nail counts as having a white band when
+    40 % of the columns agree.  The band top is the 20th percentile of the
+    columns' edges, so a band tilted by finger rotation still reports its
+    highest point.  A nail without a white band has no such edge (the pad
+    silhouette and the nail plate are both pink), so it returns None and the
+    caller keeps the silhouette top.
+
+    Returns dict:
+      tip_y        : row where the white band starts, or None when no band
+      thickness_mm : 0.0 here - the band's lower edge is unreliable (see above);
+                     kept so callers can show the visible white extent later.
+    """
+    H, W = image.shape[:2]
+    fx, fy, fw, fh = bbox
+    none = {"tip_y": None, "thickness_mm": 0.0}
+
+    lab = cv2.GaussianBlur(image, (5, 5), 0)
+    lab = cv2.cvtColor(lab, cv2.COLOR_BGR2Lab).astype(np.float32)
+    L = lab[:, :, 0]
+    chroma = np.hypot(lab[:, :, 1] - 128.0, lab[:, :, 2] - 128.0)
+    white = (L >= WHITE_TIP_MIN_L) & (chroma <= WHITE_TIP_MAX_CHROMA)
+
+    r_lo = max(0, fy - int(WHITE_TIP_ABOVE_MM / mpp))
+    r_hi = min(H - 1, fy + int((WHITE_TIP_BELOW_MM + 3.0) / mpp))
+    start_hi = fy + int(WHITE_TIP_BELOW_MM / mpp)       # band must START by here
+    min_run = max(3, int(WHITE_TIP_MIN_MM / mpp))
+    edge_px = max(3, int(WHITE_TIP_EDGE_MM / mpp))
+    half = int(fw * 0.25)
+    cols = range(max(0, cx - half), min(W, cx + half + 1))
+
+    tops = []
+    for x in cols:
+        w = white[:, x]
+        for r in range(max(r_lo, edge_px), r_hi):
+            if not w[r] or w[r - 1]:
+                continue                         # only the first row of a white run
+            if r > start_hi:
+                break
+            if not w[r:r + min_run].all():
+                continue
+            if chroma[r - edge_px:r, x].max() < WHITE_TIP_PINK_CHROMA:
+                continue                         # not preceded by pink flesh
+            if L[r - edge_px, x] < WHITE_TIP_MIN_L - 40 and r - edge_px <= fy:
+                continue                         # preceded by the dark mat: fe-detector's job
+            tops.append(r)
+            break
+
+    if len(tops) < WHITE_TIP_MIN_COLS * len(cols):
+        return none
+    return {"tip_y": int(np.percentile(tops, 20)), "thickness_mm": 0.0}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1028,12 +1209,117 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
 # 5. TOP photo full measurement
 # ─────────────────────────────────────────────────────────────
 
+def grow_shadowed_skin(image: np.ndarray, finger_mask: np.ndarray, mpp: float):
+    """
+    Add the SHADED flank of the finger back to a finger mask.
+
+    segment_finger() keeps only pixels brighter than L=120.  With light coming from
+    one side the opposite flank of the finger falls to L 40-110 while its colour is
+    still plainly skin (a* +8..+26), so the mask loses a strip of finger - on a
+    photo with a white sheet on one side and a dark bar on the other it cut the nail
+    in half, which then threw off the width, the nail axis and the fold search.
+    Dark backgrounds sit at a* ≈ 0, so "warm AND not black" picks the flank only.
+
+    Only a 5 mm ring around the existing mask is considered, and only the blob that
+    stays connected to the finger is kept, so a neighbouring finger or the other
+    hand lying nearby is not swallowed.
+
+    Returns (finger_mask, bbox) — the inputs unchanged-equivalent when nothing grew.
+    """
+    H, W = image.shape[:2]
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+    L, A = lab[:, :, 0], lab[:, :, 1]
+    cnts, _ = cv2.findContours(finger_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not cnts:
+        return finger_mask, cv2.boundingRect(finger_mask)
+    r = max(3, int(5.0 / mpp))
+    near = cv2.dilate(finger_mask, cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    dark = ((L > 45) & (A > 136)).astype(np.uint8) * 255
+    extra = cv2.bitwise_and(cv2.bitwise_and(dark, near), cv2.bitwise_not(finger_mask))
+    k = max(3, int(0.5 / mpp) | 1)
+    extra = cv2.morphologyEx(extra, cv2.MORPH_OPEN,
+                             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    if not extra.any():
+        return finger_mask, cv2.boundingRect(max(cnts, key=cv2.contourArea))
+    kc = max(5, int(1.0 / mpp) | 1)
+    merged = cv2.morphologyEx(cv2.bitwise_or(finger_mask, extra), cv2.MORPH_CLOSE,
+                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kc, kc)))
+    n, lbl = cv2.connectedComponents((merged > 0).astype(np.uint8))
+    ys, xs = np.nonzero(finger_mask)
+    keep = set(np.unique(lbl[ys, xs])) - {0}
+    out = np.isin(lbl, list(keep)).astype(np.uint8) * 255
+    return out, cv2.boundingRect(out)
+
+
 def measure_top(image: np.ndarray, mpp: float,
                 finger_mask: np.ndarray, bbox: tuple,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
                 finger: str = None,
-                guide_y: int = None, guide_tol_mm: float = 3.0,
+                guide_y: int = None, guide_tol_mm: float = GUIDE_TOL_MM,
+                skin_image: np.ndarray = None,
+                skin_ref_image: np.ndarray = None) -> dict:
+    """measure_top 본체(_measure_top)를 부르고, 옆 접힘선(lateral fold)을 못 읽어서 너비를
+    마스크 추정(constant_half)으로 때운 경우에만 그늘진 옆면을 살린 마스크로 한 번 더 잰다.
+
+    한쪽 옆면이 그늘진 사진에서는 마스크가 손가락 반쪽을 잃어 접힘선 탐색 창이 어긋나고
+    너비가 3mm 이상 작게 나온다. 처음부터 마스크를 키우면 잘 되던 사진(그늘 약한 사진)의
+    값이 바뀌므로, 접힘선이 읽혔으면 첫 결과를 그대로 쓰고 실패했을 때만 재시도한다.
+    재시도 결과가 예외 없이 나오면 그것을 채택한다.
+    """
+    kw = dict(nail_plate_mask=nail_plate_mask, aruco_corners=aruco_corners,
+              finger=finger, guide_y=guide_y, guide_tol_mm=guide_tol_mm,
+              skin_image=skin_image, skin_ref_image=skin_ref_image)
+    first = _measure_top(image, mpp, finger_mask, bbox, **kw)
+    # silhouette: 첫 마스크의 실루엣 폭으로 폭을 이미 확정했다. 그늘진 옆면까지 키운 마스크는 실루엣이
+    # 더 넓어서(약지 10.1 → 12.2mm) 이 비율(NAIL_SIL_RATIO)이 맞지 않으니 재시도하지 않는다.
+    if first.get("width_source") in ("lateral_folds", "silhouette") or nail_plate_mask is not None:
+        return first
+    grown, gbbox = grow_shadowed_skin(image, finger_mask, mpp)
+    # 마스크가 "눈에 띄게" 잘렸을 때만 다시 잰다: 손톱 구간(윗선에서 22mm)에서 마스크가 10% 이상
+    # 늘어날 때. 기존 40장(밝은 면 위, 그늘 약함)은 전부 3% 이하, 한쪽이 그늘진 새 배경 사진은
+    # 29%였다. 몇 % 수준의 가장자리 번짐으로 재시도하면 접힘선이 그늘진 옆면의 윤곽에 붙어
+    # 오히려 너비가 커진다(기존 사진 131 엄지: 13.8 → 17.0mm).
+    fy0, rows_n = bbox[1], int(22.0 / mpp)
+    base_area = int((finger_mask[fy0:fy0 + rows_n] > 0).sum())
+    if base_area == 0 or int((grown[fy0:fy0 + rows_n] > 0).sum()) < base_area * 1.10:
+        return first
+    try:
+        retry = _measure_top(image, mpp, grown, gbbox, **kw)
+    except Exception:
+        return first
+    # 접힘선을 못 읽은 첫 결과는 어차피 마스크 폭에 기댄 값이라, 잘린 마스크보다 온전한
+    # 마스크에서 나온 값이 더 믿을 만하다 (접힘선이 읽히면 더 좋고, 아니어도 폭이 맞아진다).
+    print(f"  [Mask] shaded flank restored → retry ({retry.get('width_source')}) "
+          f"W {first['width_mm']} → {retry['width_mm']}mm")
+    return retry
+
+
+LATERAL_MIN_SIL_RATIO = 0.82   # 접힘선 폭 / 실루엣 폭이 이보다 작으면 접힘선 결과를 버린다
+NAIL_SIL_RATIO        = 0.95   # 접힘선이 없을 때 손톱 폭 = 실루엣 폭 x 이 값 (실측 25장 평균 약 0.96)
+
+
+def _silhouette_width_px(finger_mask: np.ndarray, tip_y: int, cuticle_y: int):
+    """손톱 구간(윗끝~큐티클의 25~65%)에서 손가락 마스크 폭의 중앙값(px). 못 재면 None."""
+    span = cuticle_y - tip_y
+    if span < 20:
+        return None
+    ws = []
+    for y in range(int(tip_y + 0.25 * span), int(tip_y + 0.65 * span)):
+        if 0 <= y < finger_mask.shape[0]:
+            xs = np.nonzero(finger_mask[y])[0]
+            if len(xs) > 2:
+                ws.append(int(xs.max() - xs.min()))
+    return float(np.median(ws)) if len(ws) >= 10 else None
+
+
+def _measure_top(image: np.ndarray, mpp: float,
+                finger_mask: np.ndarray, bbox: tuple,
+                nail_plate_mask: np.ndarray = None,
+                aruco_corners: np.ndarray = None,
+                finger: str = None,
+                guide_y: int = None, guide_tol_mm: float = GUIDE_TOL_MM,
                 skin_image: np.ndarray = None,
                 skin_ref_image: np.ndarray = None) -> dict:
     """
@@ -1075,6 +1361,25 @@ def measure_top(image: np.ndarray, mpp: float,
     fe          = detect_free_edge(image, finger_mask, bbox, mpp, aruco_corners)
     tip_y       = fe["tip_y"]
     free_edges  = fe["edges"]          # {row: (l, r)} for rows in [tip_y, fy)
+
+    # 흰 끝이 지문(손가락 윗선) 안쪽에 있는 손톱: 손톱 앞에 손가락 살이 1~3mm 더 튀어나와
+    # 있어서 윗선(fy)은 살 끝이지 손톱 끝이 아니다. 손톱은 흰 띠가 시작되는 줄에서 끝난다.
+    # 위의 free edge가 윗선 밖으로 나온 흰 끝을 이미 잡았다면(tip_y < fy) 그쪽이 우선.
+    # 여기서 찾은 값은 큐티클 탐색이 끝난 뒤(아래 length_px 계산 직전)에 tip_y로 반영한다 -
+    # 큐티클 후보 검증(plate_ratio 한도, 윤곽 탐색 구간)은 윗선 기준으로 보정된 값이라서,
+    # tip_y를 먼저 옮기면 실제 큐티클이 아니라 지문 주름이 후보로 통과해 버린다(6mm씩 밀림).
+    # 윗선 밖으로 FREE_EDGE_REAL_MM 미만만 나온 "자유연"은 손톱이 아니라 검정 띠 위 윤곽 번짐(안티앨리어싱)
+    # 이다. 새 박스 25장 전부에서 0.2~0.6mm씩 잡혔고, 이걸 진짜 자유연으로 보면 흰 띠 검출을 건너뛰어
+    # 피부 안에서 끝나는 흰 끝 손톱을 못 잡는다.
+    white_tip_y = None
+    if tip_y >= fy or (fy - tip_y) * mpp < FREE_EDGE_REAL_MM:
+        _top_cols = np.where(finger_mask[min(fy + 2, H - 1)] > 0)[0]
+        _cx = int((_top_cols[0] + _top_cols[-1]) // 2) if len(_top_cols) else fx + fw // 2
+        wt = detect_white_tip(image, bbox, mpp, _cx)
+        if wt["tip_y"] is not None and wt["tip_y"] > fy:
+            white_tip_y = wt["tip_y"]
+            print(f"  [White tip] nail ends {(white_tip_y - fy) * mpp:.1f}mm inside "
+                  f"the fingertip silhouette → tip_y={white_tip_y} (silhouette top {fy})")
 
     # ── Row scan ─────────────────────────────────────────────
     # Use nail plate mask for width/edge scan when available (more accurate).
@@ -1442,6 +1747,11 @@ def measure_top(image: np.ndarray, mpp: float,
               f"independent evidence for this position. Check the overlay "
               f"against the photo before accepting.")
 
+    # 큐티클이 정해졌으니 손톱 끝을 흰 띠 시작선으로 옮긴다(위 White tip 주석 참고).
+    tip_source = "free_edge" if tip_y < fy else "silhouette"
+    if white_tip_y is not None:
+        tip_y, tip_source = white_tip_y, "white_band"
+
     cut_idx   = min(cuticle_y - tip_y, len(widths)-1)
     length_px = float(cuticle_y - tip_y)
 
@@ -1464,6 +1774,25 @@ def measure_top(image: np.ndarray, mpp: float,
     _axis = int(np.median(list(nail_centers.values()))) if nail_centers else tip_x
     lateral = detect_lateral_edges(
         image, finger_mask, _axis, fy, cuticle_y, nail_half, mpp)
+
+    # 손톱 구간의 손가락 실루엣 폭. 새 박스는 손가락이 검정 띠 위에 놓여 윤곽이 선명하고 손톱이
+    # 손가락 폭의 대부분을 차지해서, 실측 폭 / 실루엣 폭이 25장에서 0.89~1.06(대부분 0.93~0.96)으로
+    # 안정적이다. 접힘선 검출이 정상이면 이 비율이 0.87~1.05였고, 한쪽 접힘선만 읽어 거울 복사가
+    # 틀어진 경우(손톱 안쪽 결이 접힘선으로 잡힘)는 0.59~0.78이었다.
+    _width_source = "lateral_folds" if lateral else "constant_half"
+    _sil_px = _silhouette_width_px(finger_mask, tip_y, cuticle_y)
+    if _sil_px is not None:
+        _sil_ratio = None
+        if lateral:
+            _sil_ratio = max(rx - lx for lx, rx in lateral.values()) / _sil_px
+            if _sil_ratio < LATERAL_MIN_SIL_RATIO:
+                print(f"  [Lateral] REJECTED: fold width {max(rx - lx for lx, rx in lateral.values()) * mpp:.2f}mm"
+                      f" is {_sil_ratio:.2f}x the finger silhouette ({_sil_px * mpp:.2f}mm)"
+                      f" < {LATERAL_MIN_SIL_RATIO} → silhouette width")
+                lateral = {}
+        if not lateral:
+            nail_half = _sil_px * NAIL_SIL_RATIO / 2.0
+            _width_source = "silhouette"
 
     # Count the GENUINE fold detections before the hold-extension below fills
     # the gaps, because that count is the honest measure of how much evidence
@@ -1550,13 +1879,14 @@ def measure_top(image: np.ndarray, mpp: float,
     # the free edge detect_free_edge() found above the finger. length_mm
     # (cuticle -> tip_y) already includes it. 0 when the nail does not reach
     # past the fingertip (flush, or cut shorter than the flesh).
-    free_edge_mm = round(float(fy - tip_y) * float(mpp), 2)
+    free_edge_mm = round(max(0.0, float(fy - tip_y)) * float(mpp), 2)
 
     return {
         "width_mm":        w_mm,
-        "width_source":    "lateral_folds" if lateral else "constant_half",
+        "width_source":    _width_source,
         "length_mm":       l_mm,
         "free_edge_mm":    free_edge_mm,
+        "tip_source":      tip_source,
         "skin_tone_hex":   hex_color,
         "skin_L":          skin_lab["L"] if skin_lab else None,
         "skin_a":          skin_lab["a"] if skin_lab else None,
@@ -1875,7 +2205,7 @@ def measure_finger(top_path: str, finger: str,
 
         print(f"\n[1/3] ArUco + finger segmentation …")
         mpp, aruco_corners, marker_id = detect_aruco(top_img, aruco_size_mm)
-        finger_mask, _, bbox          = segment_finger(top_img, aruco_corners)
+        finger_mask, _, bbox          = segment_finger(top_img, aruco_corners, mpp)
 
         print(f"\n[2/3] Nail measurement + C-curve …")
         data = measure_top(top_img, mpp, finger_mask, bbox,

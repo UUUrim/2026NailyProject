@@ -142,3 +142,8 @@ scan/naily_pipeline.py
 # local test output
 sample_dome/
 print_queue_state.json
+
+# 새 박스 테스트용 사진/결과 (깃허브에 올리지 않음)
+new_box_photos/
+scan/tests/test_new_box_photos.py
+stl_shape_test/
