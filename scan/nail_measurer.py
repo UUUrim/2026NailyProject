@@ -505,6 +505,12 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
                 keep = ~((xs >= mx - 20) & (xs <= mx + mw + 20) &
                          (ys >= my - 20) & (ys <= my + mh + 20)).reshape(-1)
                 block = block[keep]
+            # 긴 흰 손톱(윗선 위로 6mm 이상)이 이 창까지 올라오면 흰 손톱 픽셀이 배경 샘플에 섞여
+            # 배경 평균/편차가 틀어진다. 배경은 어두운 검정 띠이므로 어두운 픽셀(L<90)만 쓴다.
+            # (띠 밝기가 위쪽일수록 어두워져서 먼 곳에서 샘플을 뽑으면 손가락 근처 띠를 배경으로 못 본다.)
+            dark_block = block[block[:, 0] < MIXED_BG_DARK_L]
+            if len(dark_block) >= 8 and len(dark_block) >= 0.2 * len(block):
+                block = dark_block
             if len(block) >= 8 and block[:, 0].std() <= 20.0:
                 samples = block
     if len(samples) < 8:
@@ -597,6 +603,8 @@ WHITE_TIP_EDGE_MM     = 0.6    # 분홍 → 흰색 전환이 이 거리 안에�
 WHITE_TIP_ABOVE_MM    = 5.0    # 지문 윗선보다 이만큼 위에서부터 찾는다
 WHITE_TIP_BELOW_MM    = 4.0    # 지문 윗선보다 이만큼 아래까지 띠 시작점을 허용
 WHITE_TIP_MIN_COLS    = 0.4    # 손톱 가운데 열 중 이 비율 이상에서 같은 띠가 보여야 인정
+FREE_EDGE_REAL_MM     = 1.0    # 윗선 밖으로 이만큼 이상 나와야 진짜 자유연(그보다 작으면 윤곽 번짐)
+MIXED_BG_DARK_L       = 90     # 양옆 배경이 섞인 박스에서 손끝 위 배경 샘플로 쓰는 어두운 픽셀 상한(L)
 
 
 def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dict:
@@ -1264,7 +1272,9 @@ def measure_top(image: np.ndarray, mpp: float,
               finger=finger, guide_y=guide_y, guide_tol_mm=guide_tol_mm,
               skin_image=skin_image, skin_ref_image=skin_ref_image)
     first = _measure_top(image, mpp, finger_mask, bbox, **kw)
-    if first.get("width_source") == "lateral_folds" or nail_plate_mask is not None:
+    # silhouette: 첫 마스크의 실루엣 폭으로 폭을 이미 확정했다. 그늘진 옆면까지 키운 마스크는 실루엣이
+    # 더 넓어서(약지 10.1 → 12.2mm) 이 비율(NAIL_SIL_RATIO)이 맞지 않으니 재시도하지 않는다.
+    if first.get("width_source") in ("lateral_folds", "silhouette") or nail_plate_mask is not None:
         return first
     grown, gbbox = grow_shadowed_skin(image, finger_mask, mpp)
     # 마스크가 "눈에 띄게" 잘렸을 때만 다시 잰다: 손톱 구간(윗선에서 22mm)에서 마스크가 10% 이상
@@ -1284,6 +1294,24 @@ def measure_top(image: np.ndarray, mpp: float,
     print(f"  [Mask] shaded flank restored → retry ({retry.get('width_source')}) "
           f"W {first['width_mm']} → {retry['width_mm']}mm")
     return retry
+
+
+LATERAL_MIN_SIL_RATIO = 0.82   # 접힘선 폭 / 실루엣 폭이 이보다 작으면 접힘선 결과를 버린다
+NAIL_SIL_RATIO        = 0.95   # 접힘선이 없을 때 손톱 폭 = 실루엣 폭 x 이 값 (실측 25장 평균 약 0.96)
+
+
+def _silhouette_width_px(finger_mask: np.ndarray, tip_y: int, cuticle_y: int):
+    """손톱 구간(윗끝~큐티클의 25~65%)에서 손가락 마스크 폭의 중앙값(px). 못 재면 None."""
+    span = cuticle_y - tip_y
+    if span < 20:
+        return None
+    ws = []
+    for y in range(int(tip_y + 0.25 * span), int(tip_y + 0.65 * span)):
+        if 0 <= y < finger_mask.shape[0]:
+            xs = np.nonzero(finger_mask[y])[0]
+            if len(xs) > 2:
+                ws.append(int(xs.max() - xs.min()))
+    return float(np.median(ws)) if len(ws) >= 10 else None
 
 
 def _measure_top(image: np.ndarray, mpp: float,
@@ -1340,8 +1368,11 @@ def _measure_top(image: np.ndarray, mpp: float,
     # 여기서 찾은 값은 큐티클 탐색이 끝난 뒤(아래 length_px 계산 직전)에 tip_y로 반영한다 -
     # 큐티클 후보 검증(plate_ratio 한도, 윤곽 탐색 구간)은 윗선 기준으로 보정된 값이라서,
     # tip_y를 먼저 옮기면 실제 큐티클이 아니라 지문 주름이 후보로 통과해 버린다(6mm씩 밀림).
+    # 윗선 밖으로 FREE_EDGE_REAL_MM 미만만 나온 "자유연"은 손톱이 아니라 검정 띠 위 윤곽 번짐(안티앨리어싱)
+    # 이다. 새 박스 25장 전부에서 0.2~0.6mm씩 잡혔고, 이걸 진짜 자유연으로 보면 흰 띠 검출을 건너뛰어
+    # 피부 안에서 끝나는 흰 끝 손톱을 못 잡는다.
     white_tip_y = None
-    if tip_y >= fy:
+    if tip_y >= fy or (fy - tip_y) * mpp < FREE_EDGE_REAL_MM:
         _top_cols = np.where(finger_mask[min(fy + 2, H - 1)] > 0)[0]
         _cx = int((_top_cols[0] + _top_cols[-1]) // 2) if len(_top_cols) else fx + fw // 2
         wt = detect_white_tip(image, bbox, mpp, _cx)
@@ -1744,6 +1775,25 @@ def _measure_top(image: np.ndarray, mpp: float,
     lateral = detect_lateral_edges(
         image, finger_mask, _axis, fy, cuticle_y, nail_half, mpp)
 
+    # 손톱 구간의 손가락 실루엣 폭. 새 박스는 손가락이 검정 띠 위에 놓여 윤곽이 선명하고 손톱이
+    # 손가락 폭의 대부분을 차지해서, 실측 폭 / 실루엣 폭이 25장에서 0.89~1.06(대부분 0.93~0.96)으로
+    # 안정적이다. 접힘선 검출이 정상이면 이 비율이 0.87~1.05였고, 한쪽 접힘선만 읽어 거울 복사가
+    # 틀어진 경우(손톱 안쪽 결이 접힘선으로 잡힘)는 0.59~0.78이었다.
+    _width_source = "lateral_folds" if lateral else "constant_half"
+    _sil_px = _silhouette_width_px(finger_mask, tip_y, cuticle_y)
+    if _sil_px is not None:
+        _sil_ratio = None
+        if lateral:
+            _sil_ratio = max(rx - lx for lx, rx in lateral.values()) / _sil_px
+            if _sil_ratio < LATERAL_MIN_SIL_RATIO:
+                print(f"  [Lateral] REJECTED: fold width {max(rx - lx for lx, rx in lateral.values()) * mpp:.2f}mm"
+                      f" is {_sil_ratio:.2f}x the finger silhouette ({_sil_px * mpp:.2f}mm)"
+                      f" < {LATERAL_MIN_SIL_RATIO} → silhouette width")
+                lateral = {}
+        if not lateral:
+            nail_half = _sil_px * NAIL_SIL_RATIO / 2.0
+            _width_source = "silhouette"
+
     # Count the GENUINE fold detections before the hold-extension below fills
     # the gaps, because that count is the honest measure of how much evidence
     # the width rests on.  Side-lit photos give 52-73% of rows; the flat-lit
@@ -1833,7 +1883,7 @@ def _measure_top(image: np.ndarray, mpp: float,
 
     return {
         "width_mm":        w_mm,
-        "width_source":    "lateral_folds" if lateral else "constant_half",
+        "width_source":    _width_source,
         "length_mm":       l_mm,
         "free_edge_mm":    free_edge_mm,
         "tip_source":      tip_source,
