@@ -994,6 +994,27 @@
     color: #c0392b;
 }
 
+.print-actions__error-detail {
+    margin-top: 0.3rem;
+    font-size: 0.72rem;
+    color: #8a7a80;
+}
+
+.print-actions__error-detail summary {
+    cursor: pointer;
+    width: fit-content;
+}
+
+.print-actions__error-detail code {
+    display: block;
+    margin-top: 0.3rem;
+    max-height: 7rem;
+    overflow: auto;
+    font-family: inherit;
+    word-break: break-all;
+    white-space: pre-wrap;
+}
+
 /* 재출력 버튼 (PrintReprintAction) - 끝난 주문의 진행 상태 카드 안 */
 .print-actions__btn--primary {
     display: inline-flex;

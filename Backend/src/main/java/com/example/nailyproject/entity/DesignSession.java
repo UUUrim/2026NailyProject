@@ -3,11 +3,15 @@ package com.example.nailyproject.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.DynamicUpdate;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "design_sessions")
+// UPDATE할 때 바뀐 칸만 쓴다. 채팅 자동 저장(chat_state)과 수정 요청(슬롯·손가락 지정)이 같은 세션을 거의 동시에 저장해도
+// 서로 상대가 바꾼 칸을 예전 값으로 덮어쓰지 않게 한다.
+@DynamicUpdate
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor

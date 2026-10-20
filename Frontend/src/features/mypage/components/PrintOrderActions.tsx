@@ -6,6 +6,7 @@ import {
     resumePrintOrder,
     type PrintOrderResponse,
 } from '@/entities/print/api'
+import { describeActionError } from '@/features/mypage/shared'
 import '@/styles/print.css'
 
 // 이 주문에 대한 프린터의 상태 — 진행 상황 위젯이 5초마다 확인한 값
@@ -33,7 +34,7 @@ export function PrintOrderActions({ orderId, orderStatus, printerState, onUpdate
     const [busy, setBusy] = useState(false) // 요청을 보내는 중
     const [awaiting, setAwaiting] = useState<'pause' | 'resume' | null>(null) // 요청은 갔고 프린터 상태에 반영되기를 기다리는 중
     const [confirmingCancel, setConfirmingCancel] = useState(false)
-    const [error, setError] = useState<string | null>(null)
+    const [error, setError] = useState<{ message: string; detail?: string } | null>(null)
 
     const showPauseControls = printerState !== undefined
     const canceling = orderStatus === 'CANCELING'
@@ -61,7 +62,11 @@ export function PrintOrderActions({ orderId, orderStatus, printerState, onUpdate
             else setAwaiting(kind)
             onUpdated?.(updated)
         } catch (e) {
-            setError(e instanceof ApiError ? e.message : '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.')
+            setError(
+                e instanceof ApiError
+                    ? describeActionError(e.message)
+                    : { message: '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.' },
+            )
         } finally {
             setBusy(false)
         }
@@ -153,9 +158,15 @@ export function PrintOrderActions({ orderId, orderStatus, printerState, onUpdate
                 </p>
             )}
             {error && (
-                <p className="print-actions__error" role="alert">
-                    {error}
-                </p>
+                <div role="alert">
+                    <p className="print-actions__error">{error.message}</p>
+                    {error.detail && (
+                        <details className="print-actions__error-detail">
+                            <summary>자세히 보기</summary>
+                            <code>{error.detail}</code>
+                        </details>
+                    )}
+                </div>
             )}
         </div>
     )

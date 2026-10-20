@@ -286,15 +286,20 @@ export function NailDesignResultPageContent() {
                                                 </ul>
                                             </div>
                                         )}
-                                        {reflectedStyleKeywords.length > 0 && (
+                                        {(hasStyleKeywords || reflectedStyleKeywords.length > 0) && (
                                             <div className="design-result-v2__origin-stat design-result-v2__origin-stat--reflected">
                                                 <span className="design-result-v2__origin-stat-label">반영된 스타일</span>
                                                 <div className="design-result-v2__origin-keywords">
-                                                    {reflectedStyleKeywords.map((keyword) => (
-                                                        <span className="design-result-v2__keyword-chip" key={keyword}>
-                                                            {keyword}
-                                                        </span>
-                                                    ))}
+                                                    {/* 스캔 기반은 처음 만들 때 keywords를 비워 둔다. 값이 있으면 채팅에서 수정을 거친 것이므로
+                                                        수정까지 반영된 키워드(서버가 수정 후 돌려준 키워드)를 보여 주고,
+                                                        수정하지 않았으면 처음 생성 때 반영된 스타일을 보여 준다. */}
+                                                    {hasStyleKeywords
+                                                        ? styleKeywordChips
+                                                        : reflectedStyleKeywords.map((keyword) => (
+                                                            <span className="design-result-v2__keyword-chip" key={keyword}>
+                                                                {keyword}
+                                                            </span>
+                                                        ))}
                                                 </div>
                                             </div>
                                         )}
@@ -340,7 +345,8 @@ export function NailDesignResultPageContent() {
                                         </div>
                                     )}
 
-                                    {hasStyleKeywords && (
+                                    {/* 스캔 기반(손 분석 정보가 있는 경우)은 키워드를 위쪽 "반영된 스타일"에만 보여 주고 여기서 또 그리지 않는다 */}
+                                    {hasStyleKeywords && !context.handSummary && (
                                         <div className="design-result-v2__origin-block">
                                             <h2>{context.source === 'freeform' ? '대화에서 나눈 스타일을 반영하여 디자인을 생성했어요.' : '선택하신 옵션을 반영하여 디자인을 생성했어요.'}</h2>
                                             <div className="design-result-v2__origin-keywords">{styleKeywordChips}</div>

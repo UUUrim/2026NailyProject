@@ -2606,16 +2606,46 @@ public class NailDesignService {
 
     /** 슬롯 키워드 뒤에 플랜 키워드를 붙이되, 같은 뜻(snowman / snowman art, check pattern / plaid)은 먼저 나온 것만 남기고 전체 MAX_TOTAL_KEYWORDS개까지만. */
     private List<String> mergeKeywords(List<String> primary, List<String> extra) {
-        Set<String> seen = new HashSet<>();
         List<String> out = new ArrayList<>();
+        List<String> outCores = new ArrayList<>(); // out[i]의 정규형
         for (List<String> list : List.of(primary, extra)) {
             for (String k : list) {
                 if (k == null || k.isBlank()) continue;
                 if (VAGUE_KEYWORDS.contains(k.trim().toLowerCase())) continue;
-                if (seen.add(keywordCore(k)) && out.size() < MAX_TOTAL_KEYWORDS) out.add(k.trim());
+                String core = keywordCore(k);
+                int same = -1;
+                for (int i = 0; i < outCores.size(); i++) {
+                    if (isSameKeyword(outCores.get(i), core)) { same = i; break; }
+                }
+                if (same >= 0) {
+                    // 같은 대상이면 꾸밈말 없는 쪽("heart")을 남긴다 — 꾸민 말("clear heart charm")이 먼저 들어와 있었으면 그 자리를 바꾼다
+                    if (core.split(" ").length < outCores.get(same).split(" ").length) {
+                        out.set(same, k.trim());
+                        outCores.set(same, core);
+                    }
+                    continue;
+                }
+                if (out.size() < MAX_TOTAL_KEYWORDS) {
+                    out.add(k.trim());
+                    outCores.add(core);
+                }
             }
         }
         return out;
+    }
+
+    /**
+     * 두 키워드(정규형)가 같은 대상인지: 완전히 같거나, 한쪽이 한 단어("heart")이고 다른 쪽이 그 단어로 끝나는
+     * 꾸민 말("clear heart", "red heart")이면 같은 것으로 본다. ("heart charm"은 정규형이 이미 "heart"다)
+     * 둘 다 여러 단어("pale pink" / "hot pink")면 다른 키워드로 둔다.
+     */
+    private boolean isSameKeyword(String coreA, String coreB) {
+        if (coreA.equals(coreB)) return true;
+        String[] a = coreA.split(" ");
+        String[] b = coreB.split(" ");
+        if (a.length == 1 && b.length > 1) return b[b.length - 1].equals(a[0]);
+        if (b.length == 1 && a.length > 1) return a[a.length - 1].equals(b[0]);
+        return false;
     }
 
     // ── 키워드 한글화 ─────────────────────────────────────────────────────────

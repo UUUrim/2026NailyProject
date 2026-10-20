@@ -65,7 +65,7 @@ def find_local_finger_stls(userid: str, session: str, hand: str, shapes: dict) -
             missing.append(finger)
     return {"paths": paths, "missing": missing}
 
-SPACING_MM = 10.0       # 손가락 사이 간격 (mm)
+SPACING_MM = 15.0       # 손가락 사이 간격 (mm)
 TILT_DEG = 90.0         # 음수 = 반대 방향으로 기울임 40.0
 TILT_AXIS = [1, 0, 0]    # X축 기준 회전 (앞뒤로 기울이고 싶으면 [0,1,0]으로 변경)
 

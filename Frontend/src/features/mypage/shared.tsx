@@ -50,7 +50,18 @@ export function describePrintFailure(reason: string): string {
   if (/slic|슬라이|-101|4294967195|gcode/i.test(reason)) {
     return '출력 준비 중 슬라이싱 문제가 생겼어요.'
   }
-  return '출력 중 문제가 생겼어요. 잠시 후 다시 신청해 주세요.'
+  return '예기치 못한 오류가 발생했어요.'
+}
+
+// 취소/일시정지/재개 요청이 실패했을 때 보여줄 안내. 우리가 쓴 짧은 한글 문구는 그대로 쓰고,
+// 서버/프린터 예외 원문(영어, HTML, 긴 문장 등)은 안내 문구로 바꿔 detail(자세히 보기)로만 보여준다.
+export function describeActionError(raw: string): { message: string; detail?: string } {
+  if (/프린터 서버에 연결|10060|10061|timed? ?out|timeout|connect|connection|응답|연결/i.test(raw)) {
+    return { message: '프린터와 연결하지 못했어요. 프린터 전원과 네트워크를 확인해주세요.', detail: raw }
+  }
+  const looksLikeOurMessage = raw.length <= 60 && /[가-힣]/.test(raw) && !/[<>]|exception|error|http/i.test(raw)
+  if (looksLikeOurMessage) return { message: raw }
+  return { message: '예기치 못한 오류가 발생했어요.', detail: raw }
 }
 
 // 화면에 보여줄 상태. 병합이 끝났어도(MERGED) 앞에 출력 중/대기 중인 주문이 있으면

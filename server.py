@@ -420,6 +420,7 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
     last_percentage = 0
     has_started = already_started  # 서버 재시작 후 이어서 폴링할 땐 이미 출력 중이던 작업
     ACTIVE_GCODE = ("PREPARE", "RUNNING", "PAUSE")
+    last_logged = None  # 진행률/상태가 바뀔 때만 로그를 남긴다
 
     def _fail(msg):
         requests.post(callback_url, json={"success": False, "message": msg})
@@ -432,7 +433,10 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
             gcode = str(status.get("gcodeState", "")).upper()
             pct = status.get("percentage")
             pct = pct if isinstance(pct, (int, float)) else 0
-            print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+            snapshot = (stage, gcode, pct)
+            if snapshot != last_logged:
+                print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+                last_logged = snapshot
 
             stage_active = bool(stage) and "IDLE" not in stage and "UNKNOWN" not in stage
             if not has_started and (gcode in ACTIVE_GCODE or stage_active):
