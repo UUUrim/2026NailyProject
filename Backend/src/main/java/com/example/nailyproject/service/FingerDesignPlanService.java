@@ -727,16 +727,18 @@ public class FingerDesignPlanService {
              corner or the tip. Not an S-curve and not a chain wandering across the middle. Never a ring,
              donut, hollow or outlined circle, white fluffy puff or halo-only dot. The dots are one hue,
              always a deeper, more saturated tone than the base (e.g. wine, plum or lilac on nude, smoke
-             gray on gray), never white, with most of the nail left clean. Often used in funky and chic
-             moods. NOT a flower drawing and NOT outlined or polka dots; the spreading dots are the whole
+             gray on gray), never white, with most of the nail left clean. Blooming suits funky or chic moods, but
+             that is only a suggestion: do not put it in every set, and use it only when it genuinely fits the
+             set or when the user asks for it by name. In other moods (lovely, cute, sweet, romantic, elegant,
+             natural, minimal, vintage, y2k, glam, ...) avoid it unless the user asks. NOT a flower drawing and NOT outlined or polka dots; the spreading dots are the whole
              design of that nail.
         4) Finish (the top surface of the whole set):
            - The whole set is EITHER matte OR glossy, decided once with the top-level "surface". A matte
              set is matte on all five nails (no mixing).
            - Inside a glossy set, individual nails may be plain glossy or powder (finish "powder finish").
            - A matte set uses only solid colors and knit (matte velvet): no syrup, ink, magnetic, glitter
-             or powder; variety comes from base design (gradient, cheek, ink-blot, marble, blooming,
-             french) and parts / motif rendering.
+             or powder; variety comes from base design (gradient, cheek, ink-blot, marble, french;
+             blooming optionally, mainly for funky or chic moods) and parts / motif rendering.
            - If the user's words say matte or glossy, follow them for the whole set.
 
         Mixing rules:
@@ -1032,8 +1034,8 @@ public class FingerDesignPlanService {
      * 사용자가 도트를 직접 말했다면 건드리지 않는다.
      */
     /**
-     * 펑키/시크 무드를 골랐는데 블루밍(번지는 점) 손톱이 하나도 없으면, 패턴/모티프/파츠가 없는 손톱 최대 2개에 블루밍을 넣는다.
-     * 블루밍은 디자인 타입 선택지에 없어서 무드로 켠다. 블루밍을 피해야 한다고 골랐으면 건드리지 않는다.
+     * [현재 호출하지 않음] 펑키/시크 무드를 골랐는데 블루밍(번지는 점) 손톱이 하나도 없으면, 패턴/모티프/파츠가 없는 손톱 최대 2개에
+     * 블루밍을 넣던 강제 후처리. 무드가 블루밍을 항상 나오게 하지 않기로 해서 호출을 뺐다(GPT 프롬프트의 힌트로만 남음).
      */
     private void enforceBloomingForMood(JsonNode plan, String confirmedInput) {
         if (!(plan instanceof ObjectNode root)) return;
@@ -1308,11 +1310,7 @@ public class FingerDesignPlanService {
         }
         // 매트 세트는 전부 솔리드라 글리터/파우더/치크가 없다(자석도 매트에는 쓰지 않는다).
         if (matte) picked.removeIf(d -> List.of("glitter", "powder", "magnetic", "cheek", "ink").contains(d));
-        // 블루밍은 디자인 타입 선택지에 없어서 펑키/시크 무드를 고르면 세트에 넣는다(사용자가 세 가지를 다 골랐으면 네 번째 디자인).
-        if (FUNKY_CHIC.matcher(wantedPart(input)).find() && !avoided.contains("blooming")
-                && !picked.contains("blooming") && picked.size() < 4) {
-            picked.add("blooming");
-        }
+        // (블루밍을 펑키/시크 무드에서 무조건 세트에 넣던 것은 없앴다. 아래 보충 풀에서 확률만 살짝 높이는 힌트로만 남긴다.)
         // 모자란 디자인은 원컬러/그라데이션을 가장 자주(일반적인 세트), 글리터는 가끔, 나머지는 드물게 채운다.
         List<String> pool = new java.util.ArrayList<>(List.of(DESIGN_ONE_COLOR, DESIGN_ONE_COLOR, DESIGN_ONE_COLOR,
                 DESIGN_ONE_COLOR, DESIGN_ONE_COLOR, "gradient", "gradient", "gradient", "gradient", "gradient",
@@ -1324,7 +1322,7 @@ public class FingerDesignPlanService {
         if (wantsOpaque) pool.removeIf(d -> d.equals("cheek"));
         // 니트는 가을/겨울 세트에서 가끔 채운다(항상은 아님 - 사용자가 직접 고르지 않으면 드물게).
         if (AUTUMN_WINTER.matcher(wantedPart(input)).find()) { pool.add("knit"); pool.add("knit"); }
-        // 블루밍은 펑키/시크 계열에서 자주 쓴다 - 그 무드일 때 가끔 채운다.
+        // 블루밍은 펑키/시크 계열에 어울려서 그 무드일 때 보충 풀에 조금 더 넣는다(강제 아님, 확률만 살짝 높임).
         if (FUNKY_CHIC.matcher(wantedPart(input)).find()) { pool.add("blooming"); pool.add("blooming"); }
         // 색 효과(글리터/자석/니트/잉크)는 세트당 하나만 채운다 - 색 표현은 두 종류까지.
         if (picked.stream().anyMatch(EXPRESSION_DESIGNS::contains)) pool.removeIf(EXPRESSION_DESIGNS::contains);
@@ -2241,7 +2239,6 @@ public class FingerDesignPlanService {
             if (!hasImage && (previousPlanJson == null || previousPlanJson.isBlank()) && !scanAutoMode) {
                 enforceDotRules(plan, confirmedInputSummary);
                 enforceHandDrawnCheck(plan, confirmedInputSummary);
-                enforceBloomingForMood(plan, confirmedInputSummary);
                 enforceFunkyParts(plan, confirmedInputSummary);
             }
             // 심플 키워드가 없으면 파츠/디자인을 풍성하게 - 참고 사진 기반 생성도 포함한다(수정 흐름과 원컬러 세트는 제외).
