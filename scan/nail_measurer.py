@@ -207,6 +207,12 @@ EXPECTED_MARKER_ID = 0
 # rather than by threshold, so a low value here is safe.
 LATERAL_THR = 2.5
 
+# 가이드선 기준 큐티클 후보 허용 오차(mm). 사용자는 화면의 가이드선에 큐티클을 맞춰서 찍으므로
+# 실제 큐티클은 선에서 1mm 안팎에 있다(가이드 촬영 10장). 허용 오차가 3mm면 손톱 안쪽의
+# 약한 경계(gradient/색 후보)가 창 안에 들어와 큐티클로 뽑혔다(약지: 실제보다 4mm 위, 길이 -2.2mm).
+# 2.5~1.0mm 구간에선 결과가 같아서 가운데 값 2.0mm로 둔다.
+GUIDE_TOL_MM = 2.0
+
 
 # ─────────────────────────────────────────────────────────────
 # 1. ArUco detection
@@ -1243,7 +1249,7 @@ def measure_top(image: np.ndarray, mpp: float,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
                 finger: str = None,
-                guide_y: int = None, guide_tol_mm: float = 3.0,
+                guide_y: int = None, guide_tol_mm: float = GUIDE_TOL_MM,
                 skin_image: np.ndarray = None,
                 skin_ref_image: np.ndarray = None) -> dict:
     """measure_top 본체(_measure_top)를 부르고, 옆 접힘선(lateral fold)을 못 읽어서 너비를
@@ -1285,7 +1291,7 @@ def _measure_top(image: np.ndarray, mpp: float,
                 nail_plate_mask: np.ndarray = None,
                 aruco_corners: np.ndarray = None,
                 finger: str = None,
-                guide_y: int = None, guide_tol_mm: float = 3.0,
+                guide_y: int = None, guide_tol_mm: float = GUIDE_TOL_MM,
                 skin_image: np.ndarray = None,
                 skin_ref_image: np.ndarray = None) -> dict:
     """
