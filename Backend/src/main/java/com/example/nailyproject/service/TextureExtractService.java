@@ -66,7 +66,16 @@ public class TextureExtractService {
             - Techniques are NOT textures: gradient / ombre / french tip / cheek blush / marble / drawing /
               line art / dots / stripes / plaid / lace never get their own entry. Classify such a nail by the
               gel material underneath it: syrup if it is a translucent syrup gel, otherwise plain_solid.
-            - "color": the primary color of that texture as a descriptive English color name like
+            - Ignore negated mentions. Anything written as "Avoid: ...", "no X", "not X", "never X",
+              "without X", "don't use X", "unless ...", or Korean "X 말고 / X 빼고 / X 넣지 마" is an
+              exclusion, not a material of the design. Never create an entry for a texture that appears only
+              in such a negation (for example "no matte" means matte is NOT used).
+            - "color" and "color_hex" must be the MAIN BASE color of that material: the color that covers the
+              largest area of the nails made with it. Never take the color of parts or decorations (charms,
+              pearls, rhinestones, studs, chains), motifs, drawings or line art, french tip lines, or a tiny /
+              faint accent (for example the barely visible end color of a gradient, or a small spot or drop of
+              color). For gradient / ombre / cheek blush use the dominant base color, not the minor second color.
+            - "color": that main base color as a descriptive English color name like
               "dusty rose pink", "ivory", "Hazelnut".
             - "color_hex": the same color as a 6-digit hex "#RRGGBB" (uppercase). It is REQUIRED for
               syrup, plain_solid, glitter, knit, matte, chrome, and magnetic_chrome, and is used to tint a base
@@ -84,6 +93,35 @@ public class TextureExtractService {
               {"texture": "plain_solid", "color": "warm beige", "color_hex": "#D8C3A5"}
             ]
             """;
+
+    /** 프롬프트에 붙는 제외 절: 전역 "Avoid: no matte, no pink." 과 손톱별 " Avoid: ...". 마침표나 줄 끝까지 지운다. */
+    private static final java.util.regex.Pattern AVOID_CLAUSE = java.util.regex.Pattern.compile("(?i)\\bAvoid:[^.\\n]*\\.?");
+
+    public static String stripAvoidClauses(String prompt) {
+        return prompt == null ? null : AVOID_CLAUSE.matcher(prompt).replaceAll("");
+    }
+
+    /** 키워드 앞(같은 절)에 이 단어가 있으면 "쓰지 않는다"는 부정 표현으로 본다. */
+    private static final java.util.regex.Pattern NEGATION_WORD = java.util.regex.Pattern.compile(
+            "(?i)\\b(no|not|never|without|avoid|unless|except|nor|don'?t|do not|doesn'?t)\\b|말고|빼고|제외|넣지|없이");
+
+    /**
+     * 프롬프트에 keyword가 부정 없이(긍정으로) 한 번이라도 나오는지. "no matte", "never as glitter specks",
+     * "unless the design calls for glitter" 처럼 같은 절 앞쪽에 부정어가 있는 등장은 세지 않는다.
+     * 절 경계: . ; , : 줄바꿈 ( ) — (키워드 앞 40자 안에서만 본다)
+     */
+    public static boolean mentionedPositively(String text, String keyword) {
+        if (text == null || keyword == null || keyword.isBlank()) return false;
+        String lower = text.toLowerCase();
+        String k = keyword.toLowerCase();
+        for (int i = lower.indexOf(k); i >= 0; i = lower.indexOf(k, i + 1)) {
+            String window = lower.substring(Math.max(0, i - 40), i);
+            int cut = -1;
+            for (char b : new char[]{'.', ';', ',', ':', '\n', '(', ')', '—'}) cut = Math.max(cut, window.lastIndexOf(b));
+            if (!NEGATION_WORD.matcher(window.substring(cut + 1)).find()) return true;
+        }
+        return false;
+    }
 
     /**
      * 디자인 프롬프트에서 사용된 텍스처+컬러 쌍 목록을 추출한다.
@@ -114,7 +152,8 @@ public class TextureExtractService {
         // 응답 최상위가 배열이라 response_format=json_object(오브젝트 강제)를 쓸 수 없다 —
         // jsonObjectMode=false로 두고 프롬프트 지시(SYSTEM_PROMPT의 "Respond ONLY with a
         // JSON array")와 아래 markdown 코드펜스 제거 로직에 그대로 의존한다.
-        String text = gptClientService.chat(SYSTEM_PROMPT, designPrompt, 4096, false);
+        // "Avoid: no matte" 같은 제외 절은 텍스처를 쓴다는 뜻이 아닌데 GPT가 "matte가 나왔다"고 읽는 일이 있어서 미리 지운다.
+        String text = gptClientService.chat(SYSTEM_PROMPT, stripAvoidClauses(designPrompt), 4096, false);
 
         try {
             String cleaned = text.replaceAll("```json|```", "").trim();

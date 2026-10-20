@@ -1319,9 +1319,10 @@ public class NailDesignService {
     private LinkedHashSet<String> extractTexturesFromPrompt(String prompt) {
         LinkedHashSet<String> textures = new LinkedHashSet<>();
         if (prompt == null || prompt.isBlank()) return textures;
-        String lower = prompt.toLowerCase();
+        // "no matte", "never as glitter specks" 같은 부정 표현과 "Avoid: ..." 절은 그 텍스처를 쓴다는 뜻이 아니다
+        String cleaned = TextureExtractService.stripAvoidClauses(prompt);
         TEXTURE_KEYWORD_MAP.forEach((keyword, textureKey) -> {
-            if (lower.contains(keyword)) textures.add(textureKey);
+            if (TextureExtractService.mentionedPositively(cleaned, keyword)) textures.add(textureKey);
         });
         return textures;
     }
