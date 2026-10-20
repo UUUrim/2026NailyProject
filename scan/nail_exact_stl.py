@@ -133,7 +133,8 @@ WIDTH_FIT_MARGIN_MM = 0.5
 # 까지 한 번에 완만히 줄어드는 모양.
 DOME_CREST_START = 0.45
 # 돔 최고 높이 배율(측정/하한 C에 곱함).  1.0이면 C 그대로, 낮출수록 천장이 낮아짐.
-DOME_HEIGHT_SCALE = 0.60
+# 1.0 = 사이드뷰로 잰 C-curve 를 그대로 반영한다(2026-10-20: 이전 0.60 에서 변경 - 사용자 STL 생성 기본값).
+DOME_HEIGHT_SCALE = 1.0
 # 큐티클 끝에서 남아 있는 돔 높이 비율(0이면 납작하게 시작).  큐티클 라인도 돔 단면을
 # 따라 둥글게 올라가도록 0이 아닌 값에서 시작한다.
 CUTICLE_DOME_FRAC = 0.7
@@ -676,7 +677,9 @@ def generate_stl(params, output_path):
         # Otherwise the last, nearly zero-width rows keep ~1 mm of height while
         # their sides sit at z=0, which makes a thin upright blade/notch at
         # the tip instead of a rounded hood.
-        C_row  = C * DOME_HEIGHT_SCALE * fade * (hw / (W / 2.0))
+        _dome_scale = params.get("dome_height_scale")
+        _dome_scale = DOME_HEIGHT_SCALE if _dome_scale is None else float(_dome_scale)
+        C_row  = C * _dome_scale * fade * (hw / (W / 2.0))
         # Parabolic cross-section per row (edges at z=0).  Unlike a circular
         # arc it stays valid for any height/width ratio, so the narrow cuticle
         # arch rows can rise smoothly instead of being clamped flat.
@@ -937,6 +940,10 @@ def main():
                    help="Width fit margin in mm added to the measured width "
                         f"(default: {WIDTH_FIT_MARGIN_MM}; 0 = none). "
                         "Ignored in --exact mode")
+    p.add_argument("--dome-height-scale", type=float, default=None,
+                   help="Dome peak height as a fraction of the measured C-curve "
+                        f"(default: {DOME_HEIGHT_SCALE}; 1.0 = the measured C-curve exactly). "
+                        "Ignored in --exact mode")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -1001,6 +1008,7 @@ def main():
             "taper_mm":            taper,
             "exact":               args.exact,
             "fit_margin_mm":       args.fit_margin,
+            "dome_height_scale":   args.dome_height_scale,
         }
 
         out   = os.path.join(args.output, f"nail_{finger}_{args.shape}.stl")
