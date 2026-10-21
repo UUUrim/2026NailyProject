@@ -51,6 +51,38 @@ for _stream in (sys.stdout, sys.stderr):
 # anyway, so a roll does not need undoing.
 TILT_CORRECTION = False
 
+# C-curve 높이 / 손톱 폭 의 허용 범위. "물리적으로 불가능한 값"만 거르려는 넓은 범위다: 스캔 211·212·217·218 의 측정은
+# 0.15~0.44 에 있었고(212 엄지 0.159, 218 검지 0.146), 서 있는 손가락은 0.79 였다. 하한을 너무 올리면 정상 측정을 거부한다.
+SCALE_MM_PER_PX_MAX = 0.024    # 이보다 큰 배율 = 호의 양끝이 잘려 현이 짧게 잡힌 사진 (정상 0.0127~0.022)
+C_RATIO_MIN = 0.14
+C_RATIO_MAX = 0.46
+
+# 사이드 사진 검증(side_photo_check) 기준
+SIDE_PHOTO_MAX_H_FRAC = 0.80   # 손가락 덩어리 높이 / 크롭 높이 (정상 0.40~0.78, 서 있는 손가락 0.86)
+SIDE_PHOTO_MIN_TOP    = 0.12   # 덩어리 위끝 / 크롭 높이 (정상 0.15~0.47, 서 있는 손가락 0.05)
+
+
+def side_photo_check(img: np.ndarray, top=0.38, bottom=0.35, left=0.25, right=0.30):
+    """사이드 사진에 C-curve 를 잴 만한 손가락 끝이 있는가. (ok, 이유) 를 돌려준다.
+
+    손가락이 구멍에 안 들어와 있거나(스캔 217/211 소지: 구멍 너머로 머리카락만 보임) 세로로 서 있으면 측정 영역에서
+    손가락 크기의 덩어리가 없거나 이상한 모양으로 잡힌다. 촬영 직후 이걸 검사해서 다시 찍게 한다.
+    """
+    sm = cv2.resize(img, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
+    H, W = sm.shape[:2]
+    c = sm[int(H * top):H - int(H * bottom), int(W * left):W - int(W * right)]
+    m = _finger_mask_color(c)
+    if m is None:
+        return False, "no finger found in the measurement area"
+    bx, by, bw, bh = cv2.boundingRect((m > 0).astype(np.uint8))
+    h = m.shape[0]
+    if bh / h > SIDE_PHOTO_MAX_H_FRAC:
+        return False, f"finger blob too tall ({bh / h:.2f} of the crop) - finger is upright/tilted"
+    if by / h < SIDE_PHOTO_MIN_TOP:
+        return False, f"finger blob reaches the top of the crop ({by / h:.2f})"
+    return True, "ok"
+
+
 # Otsu(손톱 vs 손가락 살) 임계값을 구하는 핵심 영역: 크롭 폭 기준, 정점 아래로 이 비율의 행까지 / 정점 좌우 이 비율까지.
 OTSU_CORE_ROWS_FRAC = 0.40
 OTSU_CORE_HALF_FRAC = 0.25
@@ -849,6 +881,22 @@ def measure_ccurve(image_path: str, width_mm: float,
 
     if not geom_valid:
         raise RuntimeError(f"Invalid arc geometry: {geom_reason}")
+
+    # 사람 손톱의 C-curve 높이는 폭의 약 0.2~0.45배다. 이 범위 밖이면 손가락이 서 있거나 기울어서 호가 손톱 단면이
+    # 아닌 것이다(스캔 218 소지: 폭 7.04mm 에 h 5.59mm = 0.79배 - 같은 손의 다른 스캔에서는 1.7mm). 그런 값을 쓰면 같은
+    # 손인데 곡률이 들쭉날쭉해지므로 측정 실패로 돌려서 호출한 쪽이 다른 사진/대체값을 쓰게 한다.
+    # 사진 한 장의 배율(mm/px)은 폰 줌을 고정해서 0.0127~0.022 로 모여 있다. 이보다 크면 손톱 띠가 양끝이 잘려 현이
+    # 실제보다 짧게 잡힌 것이다(스캔 222 검지: 현 327px, 배율 0.0278 - 같은 손가락 221 은 현 596px, 배율 0.0154). 현이 짧으면
+    # 같은 호도 곡률이 작게 나와서(h 1.49 vs 2.17mm) 같은 손인데 곡률이 들쭉날쭉해진다. 이런 사진은 측정 실패로 돌려서
+    # 호출한 쪽이 손가락별 평균 곡률로 대체하게 한다.
+    if scale_mm_per_px > SCALE_MM_PER_PX_MAX:
+        raise RuntimeError(f"Nail arc too narrow: chord {chord_px_full:.0f}px gives {scale_mm_per_px:.4f} mm/px "
+                           f"(> {SCALE_MM_PER_PX_MAX}); the nail band is cut off at the sides")
+
+    _c_ratio = (h_mm / width_mm) if (h_mm and width_mm) else 0.0
+    if not (C_RATIO_MIN <= _c_ratio <= C_RATIO_MAX):
+        raise RuntimeError(f"Implausible C-curve: h/W = {_c_ratio:.2f} "
+                           f"(h={h_mm}mm, W={width_mm}mm; expected {C_RATIO_MIN}-{C_RATIO_MAX})")
 
     return {
         "c_curve_mm":    h_mm,

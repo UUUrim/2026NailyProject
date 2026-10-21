@@ -1435,8 +1435,8 @@ def measure_top(image: np.ndarray, mpp: float,
 # 접힘선 폭 / 실루엣 폭 하한. 양쪽 접힘선을 모두 읽었으면 믿는다(0.60 미만만 거절): 사용자 손은 0.87 이상,
 # 예서 손(손가락이 손톱보다 훨씬 두꺼움)은 0.73~0.85 가 정상이다. 한쪽만 읽어 거울 복사한 결과는
 # 손톱 안쪽 결을 접힘선으로 잡으면 0.59~0.78 로 나와서 0.82 미만이면 거절한다.
-LATERAL_MIN_SIL_RATIO = 0.65           # 거울 복사한 결과(mirrored). 0.82 는 승희 소지(0.66)·검지(0.76)처럼 정상 결과를 버렸다
-LATERAL_MIN_SIL_RATIO_BOTH = 0.60      # 양쪽 다 읽은 결과
+LATERAL_MIN_SIL_RATIO = 0.55           # 거울 복사한 결과(mirrored). 0.65 는 도경 소지(0.56)처럼 정상 결과를 버렸다. 이전 0.65. 0.82 는 승희 소지(0.66)·검지(0.76)처럼 정상 결과를 버렸다
+LATERAL_MIN_SIL_RATIO_BOTH = 0.45      # 양쪽 다 읽은 결과. 도경 손(손가락 14mm 에 손톱 9mm, 0.50~0.58)이 0.60 에 걸려 실루엣 폭 13.6mm 로 나왔다
 NAIL_SIL_RATIO        = 0.95   # 접힘선이 없을 때 손톱 폭 = 실루엣 폭 x 이 값 (실측 25장 평균 약 0.96)
 
 
@@ -1937,6 +1937,14 @@ def _measure_top(image: np.ndarray, mpp: float,
     _axis = int(np.median(list(nail_centers.values()))) if nail_centers else tip_x
     lateral = detect_lateral_edges(
         image, _lat_mask, _axis, fy, cuticle_y, nail_half, mpp)
+    # 큐티클 위치와 축이 확정된 뒤의 재검출이 접힘선을 못 읽을 때가 있다(한쪽 접힘선이 약해서 축이 20px 움직이면 읽히다
+    # 말다 한다). 그러면 아래에서 실루엣 폭 x 0.95 로 떨어지는데, 손가락이 손톱보다 훨씬 두꺼운 손은 이 값이 접힘선 폭보다
+    # 30% 크다(스캔 221/222 중지 같은 사진이 접힘선 9.2mm 로도 12.0mm 로도 나와 라이브 게이지가 12.0 에서 "안정"이 됐다).
+    # 같은 사진에서 임시 구간으로 이미 읽은 접힘선이 있으면 실루엣 추정보다 그 실측을 쓴다.
+    if not lateral and _lat_pre:
+        lateral = _LateralEdges(dict(_lat_pre))
+        lateral.mirrored = getattr(_lat_pre, "mirrored", False)
+        print("  [Lateral] final re-scan found no fold - reusing the fold edges read over the provisional range")
 
     # 손톱 구간의 손가락 실루엣 폭. 새 박스는 손가락이 검정 띠 위에 놓여 윤곽이 선명하고 손톱이
     # 손가락 폭의 대부분을 차지해서, 실측 폭 / 실루엣 폭이 25장에서 0.89~1.06(대부분 0.93~0.96)으로
@@ -2306,6 +2314,12 @@ def _save_fallback_annotated(image, finger: str, save_path: str):
 # 8. Single finger pipeline
 # ─────────────────────────────────────────────────────────────
 
+def _extra_side_paths(side_path: str) -> list:
+    """같은 손가락의 추가 사이드 사진(<이름>_2.jpg, <이름>_3.jpg …). 서버가 안정 구간에서 여러 장을 찍어 저장한다."""
+    base, ext = os.path.splitext(side_path)
+    return [p for p in (f"{base}_{n}{ext}" for n in range(2, 6)) if os.path.isfile(p)]
+
+
 def measure_finger(top_path: str, finger: str,
                    aruco_size_mm: float, output_dir: str,
                    ccurve_path: str = None,
@@ -2397,22 +2411,39 @@ def measure_finger(top_path: str, finger: str,
         if use_endon:
             print(f"\n  [C-curve] end-on photo: {ccurve_path}")
             debug_path = os.path.join(output_dir, f"{finger}_ccurve_debug.jpg")
+            # 사이드 사진은 한 장의 곡률이 사진마다 크게 흔들려서(같은 엄지가 3.96 / 3.31mm 등) 여러 장을 찍어 중앙값을 쓴다.
+            # 첫 장은 ccurve_path, 나머지는 같은 이름 뒤에 _2, _3 이 붙은 파일(예: thumb_side_2.jpg). 장마다 따로 재서
+            # 실패한 장은 빼고, 성공한 장들의 중앙값을 최종 곡률로 한다. 전부 실패하면 아래 except 의 평균값 대체.
+            _ccs, _last_err = [], None
+            for _i, _pth in enumerate([ccurve_path] + _extra_side_paths(ccurve_path)):
+                _dbg = debug_path if _i == 0 else os.path.join(output_dir, f"{finger}_ccurve_debug_{_i + 1}.jpg")
+                try:
+                    _ccs.append(_endOn_ccurve(_pth,
+                                              width_mm=data["width_mm"],
+                                              debug_out=_dbg,
+                                              table_edge=ccurve_table_edge,
+                                              top_crop_frac=CCURVE_TOP_CROP_FRAC,
+                                              bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC,
+                                              left_crop_frac=CCURVE_LEFT_CROP_FRAC,
+                                              right_crop_frac=CCURVE_RIGHT_CROP_FRAC))
+                except Exception as e:
+                    _last_err = e
+                    print(f"  [C-curve] 사이드 사진 {_i + 1}번 측정 실패 ({e}) - 이 사진은 중앙값에서 뺀다")
             try:
-                cc = _endOn_ccurve(ccurve_path,
-                                   width_mm=data["width_mm"],
-                                   debug_out=debug_path,
-                                   table_edge=ccurve_table_edge,
-                                   top_crop_frac=CCURVE_TOP_CROP_FRAC,
-                                   bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC,
-                                   left_crop_frac=CCURVE_LEFT_CROP_FRAC,
-                                   right_crop_frac=CCURVE_RIGHT_CROP_FRAC)
+                if not _ccs:
+                    raise _last_err if _last_err is not None else RuntimeError("no side photo measured")
+                _hs = sorted(float(c["c_curve_mm"]) for c in _ccs)
+                _h = float(np.median(_hs))
+                cc = {"c_curve_mm": round(_h, 2),
+                      "arc_radius_mm": round(data["width_mm"] ** 2 / (8 * _h) + _h / 2, 2) if _h > 0 else None}
                 data["c_curve_mm"]    = cc["c_curve_mm"]
                 data["arc_radius_mm"] = cc["arc_radius_mm"]
-                data["_ccurve_method"] = "end-on photo"
+                data["_ccurve_method"] = "end-on photo" if len(_ccs) == 1 else f"end-on photo (median of {len(_ccs)})"
                 data["c_curve_source"] = "end_on"
+                data["c_curve_shots"] = _hs
                 print(f"  [C-curve] OK end-on  "
                       f"h={cc['c_curve_mm']}mm  R={cc['arc_radius_mm']}mm  "
-                      f"(debug -> {debug_path})")
+                      f"(사진 {len(_ccs)}장 {_hs} 의 중앙값, debug -> {debug_path})")
             except Exception as e:
                 fallback_cc = STANDARD_NAILS.get(finger, STANDARD_NAILS["middle"])["c_curve_mm"]
                 print(f"  [C-curve] WARN end-on(폰) 측정 실패 ({e}), "
