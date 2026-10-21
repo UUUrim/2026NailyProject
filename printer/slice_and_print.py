@@ -47,13 +47,15 @@ SUPPORT_OVERRIDES = {
     "enable_support": "1",     #서포트를 꼭 필요한 곳에만 만든다 => 슬라이서가 "꼭 필요하다"고 판단하는 기준이 꽤 엄격하다고 함
     "support_threshold_angle": "40",        # 값이 클수록 서포트가 더 많이 생긴다 (30 -> 55: 네일팁 밑면이 서포트를 못 받던 문제)
     "support_on_build_plate_only": "1",     # 서포트가 네일 곡면 위에 얹히지 않게
-    "support_top_z_distance": "0.12",       # layer_height와 맞춤 (PETG가 너무 붙지 않게)
-    "support_interface_top_layers": "2",    # 접촉면 층 수 최소로 (가볍게)
+    "support_top_z_distance": "0.24",       # 0.12 -> 0.24(2층): PETG는 서포트와 잘 녹아붙어서 간격을 벌려 쉽게 떼게 한다
+    "support_object_xy_distance": "0.4",    # 서포트와 출력물 옆면 사이 간격 (기본 0.35)
+    "support_interface_top_layers": "1",    # 2 -> 1: 출력물에 닿는 촘촘한 접촉층을 한 겹만 (덜 붙는다)
+    "support_interface_spacing": "0.4",     # 접촉층 선 간격: 넓을수록 덜 붙는다
     "support_type": "tree(auto)",
     "support_style": "tree_slim",
     # 네일팁은 작아서(약 15mm) 기본 굵기의 가지/기둥이면 원통처럼 보인다. 가지를 가늘게, 더 촘촘하게.
     "tree_support_branch_diameter": "4",  # 기본 5 -> 2.5: 기둥 굵기
-    "tree_support_tip_diameter": "0.8",      # 출력물에 닿는 끝 지름
+    "tree_support_tip_diameter": "0.6",      # 출력물에 닿는 끝 지름 (0.8 -> 0.6: 닿는 면이 작아서 쉽게 떨어진다)
     "tree_support_branch_distance": "5",   # 가지 사이 간격 (기본 5): 작을수록 가지가 많다
     "support_base_pattern_spacing": "2.0",   # 서포트 안쪽 간격 (기본 2.5): 작을수록 촘촘
 
@@ -81,7 +83,7 @@ SUPPORT_OVERRIDES = {
     "sparse_infill_pattern": "gyroid",
 
     # 레이어
-    "layer_height": "0.12",                 # 0.16 -> 0.12: 층 줄무늬가 덜 보이고, 층끼리 더 많이 겹쳐 붙어서 층 방향으로 덜 갈라진다
+    "layer_height": "0.08",                 # 0.12 -> 0.08: 큐티클 쪽 둥근 끝(면이 수평에 가까운 곳)의 계단이 덜 보인다. 출력 시간은 약 50% 늘어난다
 
     # 시임/속도/Z-hop (속도·가속도 계열은 공식 프로파일처럼 리스트 형식)
     # 시임(seam)은 건드리지 않고 프로파일 기본값(aligned)을 쓴다 — back + scarf 조합은 안쪽 끝 마감이 나빴음
