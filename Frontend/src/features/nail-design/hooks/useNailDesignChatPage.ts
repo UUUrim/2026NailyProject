@@ -32,7 +32,7 @@ import {
     splitSavedPreferenceReplies,
     trimPreferenceReply,
 } from '@/features/nail-design/utils/preferenceReply'
-import type { NailShapeId } from '@/shared/constants/nailShapes'
+import { getNailShape, type NailShapeId } from '@/shared/constants/nailShapes'
 import {
     INITIAL_PREFERENCES,
     PREFERENCE_OPTIONS,
@@ -1445,7 +1445,8 @@ export function useNailDesignChatPage({
                 prompt: data.generatedPrompt,
                 preferences: INITIAL_PREFERENCES,
                 source: 'photo',
-                shapeId: resolveShapeId(INITIAL_PREFERENCES),
+                // 사진 기반 생성은 사용자 스캔 쉐입을 쓰지 않는다: 서버가 확정한 쉐입 > 오발.
+                shapeId: (data.shape && getNailShape(data.shape) ? data.shape : 'oval') as NailShapeId,
                 details: data.details,
                 context: {
                     source: 'photo',

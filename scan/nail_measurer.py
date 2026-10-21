@@ -492,6 +492,89 @@ def detect_free_edge(image: np.ndarray, finger_mask: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────
+# 3c. White free-edge band that lies INSIDE the fingertip silhouette
+# ─────────────────────────────────────────────────────────────
+
+# 하얀 띠 판정: 무채색에 가깝고(채도 낮음) 밝은 픽셀. 손가락 살/손톱 바닥은 a*·b*가 10~20대,
+# 하얀 끝은 a*≈0·b*≈5 → 채도 8 이하. 배경(어두운 매트)은 L이 낮아서 밝기 조건으로 제외.
+# 띠 "위쪽 가장자리"만 찾는다 - 띠 아래(손톱 바닥)는 빛 반사로 같이 하얗게 떠 있는 경우가 많아서
+# 띠 두께/아래쪽 색 변화는 신뢰할 수 없다. 대신 위쪽은 항상 분홍 살 → 흰색으로 급하게 바뀐다.
+WHITE_TIP_MAX_CHROMA  = 8.0    # 흰색으로 보는 채도 상한
+WHITE_TIP_PINK_CHROMA = 12.0   # 띠 바로 위가 "분홍 살"이라고 보는 채도 하한
+WHITE_TIP_MIN_L       = 170
+WHITE_TIP_MIN_MM      = 0.5    # 이보다 짧게 끊기는 흰 점은 반사/노이즈로 보고 무시
+WHITE_TIP_EDGE_MM     = 0.6    # 분홍 → 흰색 전환이 이 거리 안에서 일어나야 "급한 경계"
+WHITE_TIP_ABOVE_MM    = 5.0    # 지문 윗선보다 이만큼 위에서부터 찾는다
+WHITE_TIP_BELOW_MM    = 4.0    # 지문 윗선보다 이만큼 아래까지 띠 시작점을 허용
+WHITE_TIP_MIN_COLS    = 0.4    # 손톱 가운데 열 중 이 비율 이상에서 같은 띠가 보여야 인정
+
+
+def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dict:
+    """
+    Find the white free edge of the nail (the milky band at the nail's distal
+    end) and return the row where it STARTS — the real end of the nail.
+
+    detect_free_edge() only sees a free edge that sticks out PAST the finger
+    silhouette (white against the dark mat).  On many nails the white band sits
+    inside the silhouette: the finger pad bulges 1-3 mm beyond the nail, so from
+    above we see   mat -> pink pad -> WHITE BAND -> pink nail bed.   The silhouette
+    top (fy) then lies on the pad, not on the nail, and measuring length from it
+    adds the pad skin to the nail.  The nail ends where the white band begins.
+
+    Per column (centre 50 % of the finger) look for a SHARP pink -> white edge
+    within [fy - 5 mm, fy + 4 mm]; the nail counts as having a white band when
+    40 % of the columns agree.  The band top is the 20th percentile of the
+    columns' edges, so a band tilted by finger rotation still reports its
+    highest point.  A nail without a white band has no such edge (the pad
+    silhouette and the nail plate are both pink), so it returns None and the
+    caller keeps the silhouette top.
+
+    Returns dict:
+      tip_y        : row where the white band starts, or None when no band
+      thickness_mm : 0.0 here - the band's lower edge is unreliable (see above);
+                     kept so callers can show the visible white extent later.
+    """
+    H, W = image.shape[:2]
+    fx, fy, fw, fh = bbox
+    none = {"tip_y": None, "thickness_mm": 0.0}
+
+    lab = cv2.GaussianBlur(image, (5, 5), 0)
+    lab = cv2.cvtColor(lab, cv2.COLOR_BGR2Lab).astype(np.float32)
+    L = lab[:, :, 0]
+    chroma = np.hypot(lab[:, :, 1] - 128.0, lab[:, :, 2] - 128.0)
+    white = (L >= WHITE_TIP_MIN_L) & (chroma <= WHITE_TIP_MAX_CHROMA)
+
+    r_lo = max(0, fy - int(WHITE_TIP_ABOVE_MM / mpp))
+    r_hi = min(H - 1, fy + int((WHITE_TIP_BELOW_MM + 3.0) / mpp))
+    start_hi = fy + int(WHITE_TIP_BELOW_MM / mpp)       # band must START by here
+    min_run = max(3, int(WHITE_TIP_MIN_MM / mpp))
+    edge_px = max(3, int(WHITE_TIP_EDGE_MM / mpp))
+    half = int(fw * 0.25)
+    cols = range(max(0, cx - half), min(W, cx + half + 1))
+
+    tops = []
+    for x in cols:
+        w = white[:, x]
+        for r in range(max(r_lo, edge_px), r_hi):
+            if not w[r] or w[r - 1]:
+                continue                         # only the first row of a white run
+            if r > start_hi:
+                break
+            if not w[r:r + min_run].all():
+                continue
+            if chroma[r - edge_px:r, x].max() < WHITE_TIP_PINK_CHROMA:
+                continue                         # not preceded by pink flesh
+            if L[r - edge_px, x] < WHITE_TIP_MIN_L - 40 and r - edge_px <= fy:
+                continue                         # preceded by the dark mat: fe-detector's job
+            tops.append(r)
+            break
+
+    if len(tops) < WHITE_TIP_MIN_COLS * len(cols):
+        return none
+    return {"tip_y": int(np.percentile(tops, 20)), "thickness_mm": 0.0}
+
+
+# ─────────────────────────────────────────────────────────────
 # 4. C-curve from nail fold brightness (top photo only)
 #
 # Reinstated as a FALLBACK: the real measurement is the side/phone end-on
@@ -1076,6 +1159,22 @@ def measure_top(image: np.ndarray, mpp: float,
     tip_y       = fe["tip_y"]
     free_edges  = fe["edges"]          # {row: (l, r)} for rows in [tip_y, fy)
 
+    # 흰 끝이 지문(손가락 윗선) 안쪽에 있는 손톱: 손톱 앞에 손가락 살이 1~3mm 더 튀어나와
+    # 있어서 윗선(fy)은 살 끝이지 손톱 끝이 아니다. 손톱은 흰 띠가 시작되는 줄에서 끝난다.
+    # 위의 free edge가 윗선 밖으로 나온 흰 끝을 이미 잡았다면(tip_y < fy) 그쪽이 우선.
+    # 여기서 찾은 값은 큐티클 탐색이 끝난 뒤(아래 length_px 계산 직전)에 tip_y로 반영한다 -
+    # 큐티클 후보 검증(plate_ratio 한도, 윤곽 탐색 구간)은 윗선 기준으로 보정된 값이라서,
+    # tip_y를 먼저 옮기면 실제 큐티클이 아니라 지문 주름이 후보로 통과해 버린다(6mm씩 밀림).
+    white_tip_y = None
+    if tip_y >= fy:
+        _top_cols = np.where(finger_mask[min(fy + 2, H - 1)] > 0)[0]
+        _cx = int((_top_cols[0] + _top_cols[-1]) // 2) if len(_top_cols) else fx + fw // 2
+        wt = detect_white_tip(image, bbox, mpp, _cx)
+        if wt["tip_y"] is not None and wt["tip_y"] > fy:
+            white_tip_y = wt["tip_y"]
+            print(f"  [White tip] nail ends {(white_tip_y - fy) * mpp:.1f}mm inside "
+                  f"the fingertip silhouette → tip_y={white_tip_y} (silhouette top {fy})")
+
     # ── Row scan ─────────────────────────────────────────────
     # Use nail plate mask for width/edge scan when available (more accurate).
     width_mask = nail_plate_mask if nail_plate_mask is not None else finger_mask
@@ -1442,6 +1541,11 @@ def measure_top(image: np.ndarray, mpp: float,
               f"independent evidence for this position. Check the overlay "
               f"against the photo before accepting.")
 
+    # 큐티클이 정해졌으니 손톱 끝을 흰 띠 시작선으로 옮긴다(위 White tip 주석 참고).
+    tip_source = "free_edge" if tip_y < fy else "silhouette"
+    if white_tip_y is not None:
+        tip_y, tip_source = white_tip_y, "white_band"
+
     cut_idx   = min(cuticle_y - tip_y, len(widths)-1)
     length_px = float(cuticle_y - tip_y)
 
@@ -1550,13 +1654,14 @@ def measure_top(image: np.ndarray, mpp: float,
     # the free edge detect_free_edge() found above the finger. length_mm
     # (cuticle -> tip_y) already includes it. 0 when the nail does not reach
     # past the fingertip (flush, or cut shorter than the flesh).
-    free_edge_mm = round(float(fy - tip_y) * float(mpp), 2)
+    free_edge_mm = round(max(0.0, float(fy - tip_y)) * float(mpp), 2)
 
     return {
         "width_mm":        w_mm,
         "width_source":    "lateral_folds" if lateral else "constant_half",
         "length_mm":       l_mm,
         "free_edge_mm":    free_edge_mm,
+        "tip_source":      tip_source,
         "skin_tone_hex":   hex_color,
         "skin_L":          skin_lab["L"] if skin_lab else None,
         "skin_a":          skin_lab["a"] if skin_lab else None,

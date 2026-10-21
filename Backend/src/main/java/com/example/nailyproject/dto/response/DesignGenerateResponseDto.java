@@ -15,6 +15,10 @@ public class DesignGenerateResponseDto {
     private Details details;
     private List<String> keywords;  // ★ 추가: 슬롯에서 추출한 키워드
 
+    // 서버가 확정해서 이미지 생성에 쓴 네일 쉐입(round/oval/almond/stiletto/ballerina/square).
+    // 프론트가 결과 화면/AR 미리보기에서 사용자 스캔 쉐입이 아니라 이 값을 쓰도록 내려준다.
+    private String shape;
+
     // keywords 중 컬러 키워드의 원래 hex — 결과 화면이 그 키워드를 색 스와치 + 색 이름으로 보여준다.
     // name은 keywords에 들어간 표기 그대로다.
     private List<KeywordColor> keywordColors;

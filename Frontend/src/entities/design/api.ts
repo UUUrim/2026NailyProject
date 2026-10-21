@@ -61,6 +61,8 @@ export interface DesignGenerateResponse {
     generatedPrompt: string
     imageUrls: string[] // 1장
     details?: DesignExtractedDetails
+    /** 서버가 확정해서 이미지 생성에 쓴 쉐입(round/oval/almond/stiletto/ballerina/square) */
+    shape?: string | null
     keywords?: string[]
     /** keywords 중 컬러 키워드의 원래 hex */
     keywordColors?: KeywordColor[] | null
