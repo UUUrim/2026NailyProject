@@ -37,34 +37,31 @@ export async function createPrintOrder(params: {
     return res.data
 }
 
-/** 재출력할 수 있는 주문인지 — 양손 손 분석 기록이 모두 있어야 한다 (백엔드가 한 손 출력은 받지 않는다) */
-export function canReprintOrder(order: Pick<PrintOrderResponse, 'leftScanId' | 'rightScanId'>): boolean {
-    return Boolean(order.leftScanId && order.rightScanId)
+/** 재출력할 수 있는 주문인지 — 출력하는 왼손 검지의 손 분석 기록(왼손 스캔)이 있어야 한다 */
+export function canReprintOrder(order: Pick<PrintOrderResponse, 'leftScanId'>): boolean {
+    return Boolean(order.leftScanId)
 }
 
 /**
  * 같은 설정(쉐입, 연장 길이, 손 분석 기록)으로 새 출력 주문을 만든다. 새 주문 번호가 생기고, 이전 주문은 그대로 남는다.
- * 출력 페이지가 주문을 만드는 절차와 같다: 먼저 양손 STL을 이 쉐입/길이로 다시 만들고(같은 스캔으로 다른 설정을 출력했다면
+ * 출력 페이지가 주문을 만드는 절차와 같다(왼손 검지 하나만 출력한다): 먼저 왼손 STL을 이 쉐입/길이로 다시 만들고(같은 스캔으로 다른 설정을 출력했다면
  * 로컬 STL이 그때 값으로 덮여 있을 수 있어서 그대로 재사용하지 않는다), 그다음 출력 주문을 만든다.
  * 이 순서를 지켜야 한다 - STL 생성을 요청하면 스캔 상태가 "생성 중"이 되고, 그래야 주문이 이전 STL이 아니라
  * 새로 만든 STL이 끝나기를 기다린다.
  * 연장 길이를 기록하기 전에 신청된 예전 주문(null)은 쉐입별 기본 길이로 출력됐으므로 그대로 기본 길이로 다시 만든다.
  */
 export async function reprintPrintOrder(order: PrintOrderResponse): Promise<PrintOrderResponse> {
-    const { leftScanId, rightScanId } = order
-    if (!leftScanId || !rightScanId) {
+    const { leftScanId } = order
+    if (!leftScanId) {
         throw new ApiError(400, '손 분석 기록이 없는 예전 주문은 재출력할 수 없어요.')
     }
     const extensionMm = order.tipExtensionMm ?? undefined
-    await Promise.all([
-        generateStl(leftScanId, order.shapeId, extensionMm),
-        generateStl(rightScanId, order.shapeId, extensionMm),
-    ])
+    await generateStl(leftScanId, order.shapeId, extensionMm)
     return createPrintOrder({
         shapeId: order.shapeId,
         shapeLabelKo: order.shapeLabelKo,
         leftScanId,
-        rightScanId,
+        rightScanId: null,
         tipExtensionMm: order.tipExtensionMm ?? null,
     })
 }

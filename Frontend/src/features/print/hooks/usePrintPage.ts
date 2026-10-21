@@ -214,14 +214,17 @@ export function usePrintPage() {
         setIsSubmitting(true)
         setSubmitError(null)
         try {
-            const { leftScanId, rightScanId } = selectedSession
+            // 왼손 검지 하나만 출력한다 - 왼손 스캔의 STL만 만들고, 오른손 스캔은 주문에 넣지 않는다
+            const { leftScanId } = selectedSession
+            if (!leftScanId) {
+                setSubmitError('왼손 스캔 기록이 없어 출력을 신청할 수 없어요.')
+                setPrintModalStep(null)
+                return
+            }
             const extensionMm = tipExtensionMm ?? getDefaultTipExtensionMm(selectedShape)
-            await Promise.all([
-                leftScanId ? generateStl(leftScanId, selectedShape, extensionMm) : Promise.resolve(),
-                rightScanId ? generateStl(rightScanId, selectedShape, extensionMm) : Promise.resolve(),
-            ])
+            await generateStl(leftScanId, selectedShape, extensionMm)
             const shapeLabelKo = getNailShape(selectedShape)?.labelKo ?? selectedShape
-            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId, tipExtensionMm: extensionMm })
+            await createPrintOrder({ shapeId: selectedShape, shapeLabelKo, leftScanId, rightScanId: null, tipExtensionMm: extensionMm })
             setPrintConfirmed(true)
             setPrintModalStep('done')
         } catch (e) {

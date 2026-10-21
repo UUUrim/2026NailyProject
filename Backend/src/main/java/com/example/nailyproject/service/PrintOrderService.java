@@ -40,7 +40,8 @@ public class PrintOrderService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm");
-    private static final List<String> FINGER_ORDER = List.of("thumb", "index", "middle", "ring", "pinky");
+    // 출력하는 손가락: 왼손 검지 하나로 고정 (병합할 STL은 이 손가락의 것만 쓴다)
+    private static final String PRINT_FINGER = "index";
     private static final String CANCELED_MESSAGE = "사용자가 출력을 취소했습니다.";
 
     // printer/server.py 주소 — 로컬 PC에서 돌리는 걸 ngrok으로 터널링한 공개 URL을 여기 넣는다.
@@ -168,35 +169,33 @@ public class PrintOrderService {
 
     /**
      * printer/server.py의 /print/merge-both를 호출한다.
-     * 양손 scanId가 둘 다 있어야 하고, 한쪽만 있으면(한 손 출력) 실패 처리한다.
+     * 왼손 검지 하나만 출력하므로 왼손 scanId만 있으면 된다 (없으면 실패 처리).
      */
     private void requestMerge(PrintOrder order) {
         order.updateStatus(PrintOrder.PrintStatus.MERGING);
         printOrderRepository.save(order);
 
         String userid = String.valueOf(order.getUser().getId());
-        Map<String, String> shapes = FINGER_ORDER.stream()
-                .collect(Collectors.toMap(f -> f, f -> order.getShapeId()));
+        Map<String, String> shapes = Map.of(PRINT_FINGER, order.getShapeId());
         String callbackUrl = backendServerUrl + "/prints/" + order.getId() + "/merge-result";
         // 병합 성공 즉시(확인 단계 없이) 슬라이싱+출력까지 자동으로 이어지도록,
         // printer 서버에 "출력 결과 콜백 주소"도 같이 넘긴다.
         String printCallbackUrl = backendServerUrl + "/prints/" + order.getId() + "/print-result";
 
-        // 한 손 출력은 지원하지 않는다 - 병합 결과(양손 3MF)만 S3에 올라가고, 한 손용 병합 엔드포인트는 없다.
-        if (order.getLeftScanId() == null || order.getRightScanId() == null) {
+        // 왼손 검지만 출력하므로 왼손 스캔이 있어야 한다 (오른손 스캔은 없어도 된다).
+        if (order.getLeftScanId() == null) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
-            order.updateFailReason("네일 팁 출력은 양손 스캔이 모두 필요합니다. 양손을 스캔한 뒤 다시 신청해 주세요.");
+            order.updateFailReason("네일 팁 출력은 왼손 스캔이 필요합니다. 왼손을 스캔한 뒤 다시 신청해 주세요.");
             printOrderRepository.save(order);
             return;
         }
 
         try {
+            // 오른손은 출력하지 않으므로 rightSession/rightShapes를 보내지 않는다 (printer 서버가 생략을 허용한다)
             Map<String, Object> requestBody = Map.of(
                     "userid", userid,
                     "leftSession", String.valueOf(order.getLeftScanId()),
-                    "rightSession", String.valueOf(order.getRightScanId()),
                     "leftShapes", shapes,
-                    "rightShapes", shapes,
                     "callbackUrl", callbackUrl,
                     "printCallbackUrl", printCallbackUrl
             );

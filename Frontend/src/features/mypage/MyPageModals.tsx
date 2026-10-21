@@ -283,6 +283,8 @@ export function MyPageModals({
                 const displayStatus = getDisplayPrintStatus(printDetailOrder)
                 const statusKey = displayStatus.toLowerCase()
                 const hasLinkedScan = Boolean(printDetailOrder.leftScanId || printDetailOrder.rightScanId)
+                // 지금은 왼손 검지 하나만 출력한다. 오른손 스캔이 같이 기록된 건 예전에 양손 10개로 신청한 주문이다.
+                const printTargetText = printDetailOrder.rightScanId ? '네일 팁 10개(양손)' : '왼손 검지 네일 팁 1개'
                 const lengthPct = printDetailScan
                     ? Math.min(100, Math.max(8, (printDetailScan.avgLength / 18) * 100))
                     : 0
@@ -383,8 +385,8 @@ export function MyPageModals({
                       <i aria-hidden="true">{Icon.summaryIcon}</i>
                     </span>
                             {printDetailOrder.tipExtensionMm != null
-                                ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일 팁 10개(양손) 출력을 신청했어요.`
-                                : `${shapeLabel} 쉐입(기본 길이)으로 네일 팁 10개(양손) 출력을 신청했어요.`}
+                                ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 ${printTargetText} 출력을 신청했어요.`
+                                : `${shapeLabel} 쉐입(기본 길이)으로 ${printTargetText} 출력을 신청했어요.`}
                         </p>
 
                         <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">

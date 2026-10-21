@@ -44,10 +44,11 @@ def find_local_finger_stls(userid: str, session: str, hand: str, shapes: dict) -
     있는 것만 돌려준다 (호출하는 쪽에서 "몇 개가 빠졌는지"를 알려야 한다).
 
     shapes: {"thumb": "round", "index": "round", ...}
+            shape가 지정된 손가락만 찾는다 (예: {"index": "round"}면 검지 하나만).
 
     반환값: {
         "paths": {"thumb": "로컬경로", ...},   # 실제로 있는 것만
-        "missing": ["ring", "middle"],          # 파일이 없던 손가락들
+        "missing": ["ring", "middle"],          # 찾으려 했는데 파일이 없던 손가락들
     }
     """
     stl_dir = os.path.join(RESULTS_DIR, userid, session, hand, "stl")
@@ -56,7 +57,7 @@ def find_local_finger_stls(userid: str, session: str, hand: str, shapes: dict) -
     for finger in FINGER_ORDER:
         shape = shapes.get(finger)
         if not shape:
-            raise ValueError(f"'{finger}'의 shape가 지정되지 않았습니다. shapes 딕셔너리를 확인하세요.")
+            continue  # 이 손가락은 출력 대상이 아님
         path = os.path.join(stl_dir, f"nail_{finger}_{shape}.stl")
         if os.path.isfile(path):
             paths[finger] = path
@@ -203,9 +204,9 @@ def merge_hand(userid: str, session: str, hand: str, shapes: dict, output_dir: s
     return {"path": output_path, "missing": missing}
 
 
-def merge_both_hands(userid: str, left_session: str, right_session: str,
+def merge_both_hands(userid: str, left_session: str, right_session: str | None,
                       left_shapes: dict, right_shapes: dict,
-                      output_dir: str | None = None) -> dict:
+                      output_dir: str | None = None, order_id: str | None = None) -> dict:
     """
     양손(최대 10손가락) 로컬 STL을 하나의 3MF로 병합한다.
     왼손은 Y=0 줄에, 오른손은 그보다 ROW_SPACING_MM만큼 떨어진 줄에 배치해서
@@ -215,6 +216,11 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
     하나만 받지 않고 left_session/right_session을 따로 받는다.
 
     left_shapes / right_shapes: {"thumb": "round", ...} 형식, 손별로 따로 지정.
+        shape가 지정된 손가락만 출력한다. 한 손가락만 출력하려면 {"index": "round"}처럼 하나만 넘기고,
+        출력하지 않는 손은 right_session=None(또는 빈 shapes)으로 둔다.
+
+    order_id: 출력 주문 번호. 주면 결과 3MF를 주문마다 따로 만든 폴더(.../both/order_{id}/)에 저장한다.
+        같은 스캔으로 여러 번 출력하거나 재출력해도 앞 주문의 병합 파일을 덮어쓰지 않는다.
 
     반환값: {
         "path": "생성된 3MF 파일의 로컬 경로",
@@ -223,7 +229,10 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
     }
     """
     if output_dir is None:
-        output_dir = os.path.join(BASE, "output", userid, f"{left_session}_{right_session}", "both")
+        pair = f"{left_session}_{right_session}" if right_session else str(left_session)
+        output_dir = os.path.join(BASE, "output", userid, pair, "both")
+        if order_id:
+            output_dir = os.path.join(output_dir, f"order_{order_id}")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"\n[Merge] {userid}/{left_session} 왼손 로컬 STL 확인 중...")
@@ -232,16 +241,18 @@ def merge_both_hands(userid: str, left_session: str, right_session: str,
     if missing_left:
         print(f"[Merge] 주의: 왼손 {missing_left} 손가락 STL이 없어서 제외됩니다.")
 
-    print(f"[Merge] {userid}/{right_session} 오른손 로컬 STL 확인 중...")
-    right_result = find_local_finger_stls(userid, right_session, "right", right_shapes)
-    right_paths, missing_right = right_result["paths"], right_result["missing"]
-    if missing_right:
-        print(f"[Merge] 주의: 오른손 {missing_right} 손가락 STL이 없어서 제외됩니다.")
+    right_paths, missing_right = {}, []
+    if right_session and right_shapes:
+        print(f"[Merge] {userid}/{right_session} 오른손 로컬 STL 확인 중...")
+        right_result = find_local_finger_stls(userid, right_session, "right", right_shapes)
+        right_paths, missing_right = right_result["paths"], right_result["missing"]
+        if missing_right:
+            print(f"[Merge] 주의: 오른손 {missing_right} 손가락 STL이 없어서 제외됩니다.")
 
     if not left_paths and not right_paths:
-        raise RuntimeError(f"{userid}: 양손 모두 STL이 하나도 없어서 병합할 수 없습니다.")
+        raise RuntimeError(f"{userid}: 출력할 손가락의 STL이 하나도 없어서 병합할 수 없습니다.")
 
-    print(f"[Merge] 양손 병합 중 (기울기 {TILT_DEG}°, 손가락 간격 {SPACING_MM}mm, 손 간격 {ROW_SPACING_MM}mm)...")
+    print(f"[Merge] 병합 중 (기울기 {TILT_DEG}°, 손가락 간격 {SPACING_MM}mm, 손 간격 {ROW_SPACING_MM}mm)...")
     scene = trimesh.Scene()
     scene = _build_scene(left_paths, hand_label="left", y_offset=0.0, scene=scene)
     scene = _build_scene(right_paths, hand_label="right", y_offset=ROW_SPACING_MM, scene=scene)

@@ -120,7 +120,7 @@ printer/test_*
 printer/profiles/nail_tip_process2.json
 printer/profiles/combined_settings.json
 printer/profiles/process_fixed.json
-
+printer/check_gcode.py
 
 
 results/

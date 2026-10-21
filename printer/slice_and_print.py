@@ -45,16 +45,21 @@ PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Transluc
 # GUI에서는 같은 파일로도 죽지 않는 걸 보면 CLI(헤드리스) 전용 버그로 보인다.
 SUPPORT_OVERRIDES = {
     "enable_support": "1",     #서포트를 꼭 필요한 곳에만 만든다 => 슬라이서가 "꼭 필요하다"고 판단하는 기준이 꽤 엄격하다고 함
-    "support_threshold_angle": "30",        # 값이 클수록 서포트가 더 많이 생긴다 → 프로파일 기본값(30) 유지
+    "support_threshold_angle": "40",        # 값이 클수록 서포트가 더 많이 생긴다 (30 -> 55: 네일팁 밑면이 서포트를 못 받던 문제)
     "support_on_build_plate_only": "1",     # 서포트가 네일 곡면 위에 얹히지 않게
-    "support_top_z_distance": "0.16",       # layer_height와 맞춤 (PETG가 너무 붙지 않게)
+    "support_top_z_distance": "0.12",       # layer_height와 맞춤 (PETG가 너무 붙지 않게)
     "support_interface_top_layers": "2",    # 접촉면 층 수 최소로 (가볍게)
     "support_type": "tree(auto)",
     "support_style": "tree_slim",
+    # 네일팁은 작아서(약 15mm) 기본 굵기의 가지/기둥이면 원통처럼 보인다. 가지를 가늘게, 더 촘촘하게.
+    "tree_support_branch_diameter": "4",  # 기본 5 -> 2.5: 기둥 굵기
+    "tree_support_tip_diameter": "0.8",      # 출력물에 닿는 끝 지름
+    "tree_support_branch_distance": "5",   # 가지 사이 간격 (기본 5): 작을수록 가지가 많다
+    "support_base_pattern_spacing": "2.0",   # 서포트 안쪽 간격 (기본 2.5): 작을수록 촘촘
 
     # 브림/베드 접착 — 세운 상태 + 굴곡이라 베드에 닿는 면이 가는 곡선이라 넓게
     "brim_type": "outer_only",
-    "brim_width": "6",                      # 5 → 8 → 6 (조금 줄임)
+    "brim_width": "5",                      # 5 → 8 → 6 (조금 줄임)
     "brim_object_gap": "0.05",              # (예전 brim_separation은 Orca에 없는 키라 무시됐음)
     "curr_bed_type": "Textured PEI Plate",
     "initial_layer_line_width": "0.28",     # 첫 줄을 넓게 눌러 붙임
@@ -63,17 +68,20 @@ SUPPORT_OVERRIDES = {
     "initial_layer_acceleration": ["500"],
 
     # 벽/쉘
-    "wall_loops": "3",                      # 5 → 3: 쉘 두께 0.5mm에는 5줄이 들어갈 수 없어 겹쳐 두꺼워짐
-    "top_shell_layers": "6",
+    "wall_loops": "2",                      # 5 → 3: 쉘 두께 0.5mm에는 5줄이 들어갈 수 없어 겹쳐 두꺼워짐
+    "top_shell_layers": "4",
     "bottom_shell_layers": "3",
     "detect_thin_wall": "1",                # 얇은 끝부분 누락 방지
+    # 껍질이 얇아서 약하고 눈에도 얇아 보이는 문제 (STL은 건드리지 않고 슬라이서에서 보강)
+    "outer_wall_line_width": "0.26",        # 0.22 -> 0.26: 선이 굵어서 층끼리 맞닿는 면이 넓어진다
+    "inner_wall_line_width": "0.26",
 
     # 인필
     "sparse_infill_density": "15%",
     "sparse_infill_pattern": "gyroid",
 
     # 레이어
-    "layer_height": "0.16",
+    "layer_height": "0.12",                 # 0.16 -> 0.12: 층 줄무늬가 덜 보이고, 층끼리 더 많이 겹쳐 붙어서 층 방향으로 덜 갈라진다
 
     # 시임/속도/Z-hop (속도·가속도 계열은 공식 프로파일처럼 리스트 형식)
     # 시임(seam)은 건드리지 않고 프로파일 기본값(aligned)을 쓴다 — back + scarf 조합은 안쪽 끝 마감이 나빴음
@@ -84,19 +92,19 @@ SUPPORT_OVERRIDES = {
     "overhang_3_4_speed": ["15"],
     "overhang_4_4_speed": ["10"],
     "z_hop_type": "1",                      # 노즐이 수직으로 올라갔다 이동하는 방식 (0.2만큼)
-    "z_hop": "0.2",
+    "z_hop": "0",                           # 0.2 -> 0: 10개 출력할 때 다른 손가락을 피하려고 뒀는데, 이제 1개만 뽑아서 필요 없다(작은 흔적/실도 줄어든다)
     "enable_overhang_speed": ["1"],
 }
 
 FILAMENT_OVERRIDES = {
     "textured_plate_temp": ["75"],
     "textured_plate_temp_initial_layer": ["80"],        # 첫 레이어만 한 단계 높게
-    "nozzle_temperature": ["230"],
+    "nozzle_temperature": ["235"],                      # 230 -> 240: 층 접착(층 방향으로 부서지는 문제)
     "nozzle_temperature_initial_layer": ["235"],
     "filament_retraction_length": ["0.5"],
     "close_fan_the_first_x_layers": ["4"],
-    "fan_min_speed": ["40"],
-    "fan_max_speed": ["60"],
+    "fan_min_speed": ["20"],                            # 40/60 -> 20/30: 팬이 약해야 PETG 층이 더 잘 붙는다
+    "fan_max_speed": ["50"],
     "fan_cooling_layer_time": ["15"],
     "slow_down_for_cooling": ["1"],
     # 아래 둘은 공정(process)이 아니라 필라멘트 키라 여기로 옮김 (공정에 두면 무시됨)
@@ -120,6 +128,97 @@ def _build_patched_process_profile(output_dir: str) -> str:
         json.dump(data, f, indent=8, ensure_ascii=False)
 
     return patched_path
+
+# 시작 G-code(예열 -> 노즐 닦기 -> ... -> 출력 시작)를 우리가 직접 정한다. 내장 프린터 프로파일의 시작 G-code는
+# OrcaSlicer 버전/노즐 크기마다 달라서, 노즐 닦기가 빠진 결과가 나온 적이 있다. printer/profiles 의 A1 프로파일은
+# 노즐 닦기(wipe nozzle: 베드 끝 청소 부위에 문지르고 솔로 닦는 단계)가 들어 있는 시작 G-code라서 그걸 쓴다.
+_MACHINE_START_GCODE_SOURCE = os.path.join(BASE, "profiles", "bambu_a1_machine.json")
+
+# 출력이 끝난 뒤 베드 위치(Y). A1은 베드가 앞뒤로 움직이고, 노즐 기준 Y가 클수록 베드가 사용자 쪽(앞)으로 나온다.
+# 끝난 출력물을 꺼내기 쉽게 거의 맨 앞까지(최대 256) 내보낸다. 뒤로 가 있으면 이 값을 키우고, 너무 앞이면 줄인다.
+END_PARK_Y = 250
+
+
+def _nail_tip_start_gcode(start_gcode: str) -> str:
+    """시작 G-code를 "예열 -> 홈 -> 노즐 청소 -> 출력"만 남기고 줄인다 (노즐 닦기는 그대로 둔다).
+
+    뺀 것: 베드 레벨링(G29), 압출 보정(calibrating extrusion), XY 기계 진동 점검(mech mode),
+    베드 앞에 긋는 시험 선(extrude cali test), 노즐 청소 중 베드 찍기/철판 문지르기(솔 닦기만 남김). 각각 못 찾으면 그 부분만 건너뛰고 로그를 남긴다.
+
+    원래 흐름: 레벨링 플래그가 켜져 있으면 G29를 하고, 꺼져 있으면 그 자리에 G28(홈)을 한다. 레벨링만 지우고
+    홈은 건너뛰면 Z 기준이 어긋날 수 있으니, 레벨링을 끈 쪽(G28을 하는 쪽)을 항상 실행하도록 만든다.
+    예상한 모양이 아니면(프로파일이 바뀐 경우) 고치지 않고 그대로 돌려준다.
+    """
+    import re
+
+    def cut(text, pattern, replacement, label):
+        out, n = re.subn(pattern, replacement, text, count=1, flags=re.S)
+        if n == 0:
+            print(f"[Slice] 시작 G-code에서 '{label}' 부분을 못 찾아 그대로 둡니다.")
+        return out
+
+    leveling = re.compile(r"M622 J1\n\s+M1002 gcode_claim_action : 1\n.*?M623\n(?=;===== bed leveling end)", re.S)
+    home = ("M1002 judge_flag g29_before_print_flag\nM622 J0\n\n    M1002 gcode_claim_action : 13\n"
+            "    G28\n\nM623\n")
+    head = "M1002 judge_flag g29_before_print_flag\n\nG90\n"
+    if not (leveling.search(start_gcode) and home in start_gcode and head in start_gcode):
+        print("[Slice] 시작 G-code가 예상한 모양이 아니라 레벨링을 빼지 않고 그대로 씁니다.")
+        return start_gcode
+    out = leveling.sub("", start_gcode, count=1)
+    out = out.replace(head, "G90\n", 1)
+    out = out.replace(home, "M1002 gcode_claim_action : 13\nG28\n", 1)
+    out = cut(out, r'M1002 judge_flag extrude_cali_flag\n\nM622 J1\n.*?M623 ; end of "draw extrinsic para cali paint"\n',
+              "", "압출 보정")
+    out = cut(out, r"(;===== mech mode fast check start =+\n).*?(?=;===== mech mode fast check end)",
+              r"\1", "기계 진동 점검")
+    # 노즐 청소는 "솔 닦기"만 남긴다: 베드 앞쪽 끝을 20번 찍는 단계와, 베드 뒤쪽 철판에 동그라미를 그리며 문지르는 단계(2곳)를 뺀다
+    out = cut(out, r";===== remove waste by touching start =+\n.*?;===== remove waste by touching end =+\n",
+              "M83\nG1 E-1 F500\nG90\n", "베드 앞쪽 찍기")
+    out = cut(out, r"G0 X128 Y261 F20000  ; move to exposed steel surface\nG0 Z-1\.01 F1200 +; stop the nozzle\n\nG91\n(?:G2 [^\n]*\n)+\nG90\nG1 Z10 F1200\n",
+              "G90\nG1 Z10 F1200\n", "철판 문지르기(솔 닦기 전)")
+    out = cut(out, r"G1 Y250 F30000\nG1 X138\nG1 Y261\nG0 Z-1\.01 F1200 +; stop the nozzle\n\nG91\n(?:G2 [^\n]*\n)+\n",
+              "", "철판 문지르기(솔 닦기 후)")
+    out = cut(out, r";===== extrude cali test =+\n.*?(?=G1 Z0\.2\n)",
+              "G90\nG1 Z1 F1200\nM109 S{nozzle_temperature_initial_layer[initial_extruder]}\nM400\n",
+              "시험 선 긋기")  # 선은 안 긋지만 원래 흐름처럼 Z를 올리고, 출력 온도까지 "기다린다"(M109). 이 기다림이 없으면 170도 근처에서 출력이 시작된다
+    return out
+
+
+def _nail_tip_end_gcode(end_gcode: str) -> str:
+    """끝 G-code의 마지막 베드 위치(Y)를 END_PARK_Y로 바꾼다. 예상한 줄이 없으면 그대로 돌려준다."""
+    import re
+
+    out, n = re.subn(r"^G1 X-48 Y\d+ F3600$", f"G1 X-48 Y{END_PARK_Y} F3600", end_gcode, count=1, flags=re.M)
+    if n == 0:
+        print("[Slice] 끝 G-code에서 베드 위치 줄을 못 찾아 그대로 씁니다.")
+    return out
+
+
+def _build_patched_machine_profile(output_dir: str) -> str:
+    """내장 machine 프로파일을 읽어서 시작/끝 G-code(machine_start_gcode, machine_end_gcode)만 우리 것으로 바꾼 임시 파일을 만든다.
+    우리 프로파일 파일을 못 읽으면 내장 프로파일을 그대로 쓴다 (슬라이싱이 막히지 않게)."""
+    import json
+
+    try:
+        with open(_MACHINE_START_GCODE_SOURCE, encoding="utf-8") as f:
+            source = json.load(f)
+            start_gcode = _nail_tip_start_gcode(source["machine_start_gcode"])
+            end_gcode = _nail_tip_end_gcode(source["machine_end_gcode"])
+    except (OSError, KeyError, ValueError) as e:
+        print(f"[Slice] 시작 G-code 프로파일을 읽지 못해 내장 프로파일을 그대로 씁니다: {e}")
+        return PRINT_PROFILE_MACHINE
+
+    with open(PRINT_PROFILE_MACHINE, encoding="utf-8") as f:
+        data = json.load(f)
+    data["machine_start_gcode"] = start_gcode
+    data["machine_end_gcode"] = end_gcode
+
+    os.makedirs(output_dir, exist_ok=True)
+    patched_path = os.path.join(output_dir, "machine_patched.json")
+    with open(patched_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=8, ensure_ascii=False)
+    return patched_path
+
 
 def _build_patched_filament_profile(output_dir: str) -> str:
     import json
@@ -165,12 +264,13 @@ def slice_3mf(input_3mf_path: str, output_dir: str) -> str:
 
     process_profile = _build_patched_process_profile(output_dir)
     filament_profile = _build_patched_filament_profile(output_dir)
+    machine_profile = _build_patched_machine_profile(output_dir)
 
     cmd = [
         ORCASLICER_PATH,
         "--slice", "0",              # 0 = 플레이트 전체 슬라이싱
         "--arrange", "0",
-        "--load-settings", f"{PRINT_PROFILE_MACHINE};{process_profile}",
+        "--load-settings", f"{machine_profile};{process_profile}",
         "--load-filaments", filament_profile,
         "--export-3mf", output_path,
         input_3mf_path,

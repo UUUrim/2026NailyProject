@@ -356,14 +356,19 @@ def _stop_printer_quietly():
 def _run_merge_both_hands(userid, left_session, right_session,
                            left_shapes, right_shapes, callback_url, print_callback_url=None):
     try:
-        result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes)
-        s3_key     = f"print/{userid}/{left_session}_{right_session}/both/both_hands_merged.3mf"
+        # 주문마다 폴더를 따로 쓴다: 같은 스캔으로 다시 신청해도 앞 주문의 병합 파일을 덮어쓰지 않는다
+        order_id   = _order_id_from_callback(callback_url)
+        pair       = f"{left_session}_{right_session}" if right_session else str(left_session)
+        result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes,
+                                  order_id=order_id)
+        s3_key     = f"print/{userid}/{pair}/both/order_{order_id}/both_hands_merged.3mf"
         merged_url = _upload_3mf(result["path"], s3_key)
         requests.post(callback_url, json={
             "success": True, "mergedModelUrl": merged_url,
             "missingLeft": result["missingLeft"], "missingRight": result["missingRight"]})
         if print_callback_url:
-            _slice_and_print_local(result["path"], os.path.dirname(result["path"]), print_callback_url)
+            # _slice_and_print_local이 .../both/order_{id}/ 폴더를 만들므로, 병합 폴더(order_{id})의 부모를 넘긴다
+            _slice_and_print_local(result["path"], os.path.dirname(os.path.dirname(result["path"])), print_callback_url)
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
@@ -1780,8 +1785,10 @@ class StlRequest(BaseModel):
     tip_extension_mm: float | None = None
 
 class MergeBothHandsRequest(BaseModel):
-    userid: str; leftSession: str; rightSession: str
-    leftShapes: dict[str, str]; rightShapes: dict[str, str]
+    userid: str; leftSession: str
+    # 한 손가락만 출력할 땐 오른손 정보를 생략한다 (leftShapes에 {"index": "round"}처럼 출력할 손가락만 넣는다)
+    rightSession: str | None = None
+    leftShapes: dict[str, str]; rightShapes: dict[str, str] = {}
     callbackUrl: str; printCallbackUrl: str | None = None
 
 class MergeBothMeasurementsRequest(BaseModel):
@@ -2209,7 +2216,7 @@ def merge_both(request: MergeBothHandsRequest):
               request.callbackUrl, request.printCallbackUrl),
         daemon=True,
     ).start()
-    return {"status": "started", "message": "양손 병합이 시작되었습니다."}
+    return {"status": "started", "message": "병합이 시작되었습니다."}
 
 
 @app.post("/print/start")
