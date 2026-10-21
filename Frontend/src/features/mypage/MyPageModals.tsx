@@ -1,6 +1,7 @@
 // 찜/디자인/스캔/출력 탭에서 공통으로 열리는 상세 모달들.
 // 상태와 핸들러는 MyPageLayout(및 useMyPageData)이 들고 있고, 이 컴포넌트는 그걸 받아 그리기만 한다.
 // 항상 MyPageLayout 트리 안(Outlet 바깥)에 마운트되어 어떤 탭이 활성화되어 있어도 뜰 수 있어야 한다.
+import { useEffect, type ReactNode } from 'react'
 import { getNailShape } from '@/shared/constants/nailShapes'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
 import { FavoriteFolderModal } from '@/shared/components/FavoriteFolderModal'
@@ -21,8 +22,81 @@ import {
     dateKeyOf,
     formatDateTimeFull,
     formatNavDate,
+    formatTimeHms,
     formatTipExtension,
 } from './shared'
+
+// 아직 끝나지 않은 출력 — 내역에서 지워도 printer 서버의 출력은 그대로 진행된다 (출력 중인 PRINTING은 지울 수 없다)
+const PENDING_PRINT_STATUSES: ReadonlySet<NailTipPrintOrder['status']> = new Set([
+    'QUEUED',
+    'MERGING',
+    'MERGED',
+    'WAITING_IN_QUEUE',
+])
+
+// 손 분석 기록·출력 내역 삭제 확인 창 — 찜 폴더 삭제 확인 창(mypage-x__confirm)과 같은 모양
+function RecordDeleteConfirm({
+    ariaLabel,
+    title,
+    description,
+    confirmLabel,
+    error,
+    isBusy,
+    onCancel,
+    onConfirm,
+}: {
+    ariaLabel: string
+    title: ReactNode
+    description: ReactNode
+    confirmLabel: string
+    error: string | null
+    isBusy: boolean
+    onCancel: () => void
+    onConfirm: () => void
+}) {
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onCancel()
+        }
+        document.addEventListener('keydown', handleKeyDown)
+        return () => document.removeEventListener('keydown', handleKeyDown)
+    }, [onCancel])
+
+    return (
+        <div className="mypage-x__modal" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+            <button type="button" className="mypage-x__modal-backdrop" aria-label="닫기" onClick={onCancel} />
+            <div className="mypage-x__modal-panel mypage-x__confirm-panel">
+                <button
+                    type="button"
+                    className="mypage-x__modal-close mypage-x__modal-close--plain"
+                    onClick={onCancel}
+                    aria-label="닫기"
+                    disabled={isBusy}
+                >
+                    ✕
+                </button>
+
+                <div className="mypage-x__confirm-icon mypage-x__confirm-icon--danger" aria-hidden="true">
+                    {Icon.trash}
+                </div>
+
+                <h2 className="mypage-x__confirm-title">{title}</h2>
+                <p className="mypage-x__confirm-desc">{description}</p>
+
+                {error && <p className="mypage-x__message is-error">{error}</p>}
+
+                <div className="mypage-x__modal-actions">
+                    <button type="button" onClick={onCancel} disabled={isBusy}>
+                        취소
+                    </button>
+                    <button type="button" className="mypage-x__modal-action--danger" onClick={onConfirm} disabled={isBusy}>
+                        <span>{isBusy ? '삭제 중...' : confirmLabel}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
 
 type Props = {
     // ── 이미지 상세 모달 ──
@@ -53,6 +127,15 @@ type Props = {
     printDetailScan: ScanDetail | null
     isLoadingPrintDetail: boolean
     closePrintDetail: () => void
+
+    // ── 손 분석 기록 / 출력 내역 삭제 확인 모달 ──
+    scanToDelete: ScanSession | null
+    printToDelete: NailTipPrintOrder | null
+    isDeletingRecord: boolean
+    recordDeleteError: string | null
+    closeDeleteRecordModal: () => void
+    confirmDeleteScan: () => Promise<void>
+    confirmDeletePrint: () => Promise<void>
 }
 
 export function MyPageModals({
@@ -75,6 +158,13 @@ export function MyPageModals({
                                  printDetailScan,
                                  isLoadingPrintDetail,
                                  closePrintDetail,
+                                 scanToDelete,
+                                 printToDelete,
+                                 isDeletingRecord,
+                                 recordDeleteError,
+                                 closeDeleteRecordModal,
+                                 confirmDeleteScan,
+                                 confirmDeletePrint,
                              }: Props) {
     return (
         <>
@@ -202,9 +292,9 @@ export function MyPageModals({
 
                 return (
                     <ScanXModalShell
-                        ariaLabel="네일팁 출력 상세"
+                        ariaLabel="네일 팁 출력 상세"
                         eyebrow="Nail Tips Print"
-                        title="네일팁 출력"
+                        title="네일 팁 출력"
                         subtitle={subtitle}
                         onClose={closePrintDetail}
                     >
@@ -235,7 +325,7 @@ export function MyPageModals({
                         )}
                         <section className="mypage-x__scanx-shape">
                             <div className="mypage-x__scanx-shape-copy">
-                                <p className="mypage-x__scanx-kicker">신청한 네일팁 쉐입</p>
+                                <p className="mypage-x__scanx-kicker">신청한 네일 팁 쉐입</p>
                                 <strong>{shapeLabel}</strong>
                                 {shapeEn && <span>{shapeEn}</span>}
                                 <p className="mypage-x__scanx-shape-length">
@@ -258,8 +348,8 @@ export function MyPageModals({
                       <i aria-hidden="true">{Icon.summaryIcon}</i>
                     </span>
                             {printDetailOrder.tipExtensionMm != null
-                                ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일팁 10개(양손) 출력을 신청했어요.`
-                                : `${shapeLabel} 쉐입(기본 길이)으로 네일팁 10개(양손) 출력을 신청했어요.`}
+                                ? `${shapeLabel} 쉐입, 연장 길이 ${formatTipExtension(printDetailOrder.tipExtensionMm)}로 네일 팁 10개(양손) 출력을 신청했어요.`
+                                : `${shapeLabel} 쉐입(기본 길이)으로 네일 팁 10개(양손) 출력을 신청했어요.`}
                         </p>
 
                         <section className="mypage-x__scanx-metrics" aria-label="출력에 사용된 손톱 지표">
@@ -322,6 +412,67 @@ export function MyPageModals({
                     </ScanXModalShell>
                 )
             })()}
+
+            {/* ── 손 분석 기록 삭제 확인 모달 ───────────────────────────────── */}
+            {scanToDelete && (
+                <RecordDeleteConfirm
+                    ariaLabel="손 분석 기록 삭제 확인"
+                    title={
+                        <>
+                            <strong>
+                                {formatNavDate(dateKeyOf(scanToDelete.scannedAt))} {formatTimeHms(scanToDelete.scannedAt)}
+                            </strong>
+                            <br />
+                            손 분석 기록을 삭제할까요?
+                        </>
+                    }
+                    description={
+                        <>
+                            삭제한 기록은 마이페이지와 디자인 채팅·네일 팁 출력의
+                            <br />
+                            손 분석 기록 목록에서 사라지고 되돌릴 수 없어요.
+                        </>
+                    }
+                    confirmLabel="기록 삭제"
+                    error={recordDeleteError}
+                    isBusy={isDeletingRecord}
+                    onCancel={closeDeleteRecordModal}
+                    onConfirm={() => void confirmDeleteScan()}
+                />
+            )}
+
+            {/* ── 네일 팁 출력 내역 삭제 확인 모달 ─────────────────────────── */}
+            {printToDelete && (
+                <RecordDeleteConfirm
+                    ariaLabel="출력 내역 삭제 확인"
+                    title={
+                        <>
+                            <strong>
+                                {getNailShape(printToDelete.shapeId)?.labelKo ?? printToDelete.shapeLabelKo} 네일 팁
+                            </strong>{' '}
+                            출력 내역을 삭제할까요?
+                        </>
+                    }
+                    description={
+                        <>
+                            {formatDateTimeFull(printToDelete.orderedAt)}에 신청한 내역이에요.
+                            <br />
+                            {PENDING_PRINT_STATUSES.has(printToDelete.status) ? (
+                                <>
+                                    내역만 지워지고, <strong>이미 신청한 출력은 취소되지 않아요.</strong>
+                                </>
+                            ) : (
+                                '삭제한 내역은 되돌릴 수 없어요.'
+                            )}
+                        </>
+                    }
+                    confirmLabel="내역 삭제"
+                    error={recordDeleteError}
+                    isBusy={isDeletingRecord}
+                    onCancel={closeDeleteRecordModal}
+                    onConfirm={() => void confirmDeletePrint()}
+                />
+            )}
         </>
     )
 }

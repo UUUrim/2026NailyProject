@@ -306,7 +306,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
 
             <section className="mypage-x__scanx-shape">
               <div className="mypage-x__scanx-shape-copy">
-                <p className="mypage-x__scanx-kicker">추천 네일팁 쉐입</p>
+                <p className="mypage-x__scanx-kicker">추천 네일 팁 쉐입</p>
                 <strong>{shapeLabel ?? '미정'}</strong>
                 {shapeEn && <span>{shapeEn}</span>}
               </div>

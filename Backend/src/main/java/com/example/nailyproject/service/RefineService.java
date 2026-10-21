@@ -207,6 +207,18 @@ public class RefineService {
               "where suitable", "if possible", "may". The image model treats them as optional and often
               changes almost nothing. Instead state concrete actions: "add small heart charms to two of
               the nails", "give each nail a soft pastel base".
+            - GORGEOUS / ART-LIKE REQUESTS - VERY IMPORTANT: when the user asks for "화려하게", "아트적으로",
+              "포인트 많이", "더 예쁘게", "gorgeous", "more artistic" or similar without naming an element, they
+              mean more NAIL ART like a real market nail-art display sheet, NOT more rhinestones, stars or
+              glitter scattered over the same nails. Write concrete actions that give the five nails clearly
+              DIFFERENT art: hand-drawn thin-line doodle motifs (bow outline, hearts, stars, crosses,
+              butterflies, cherries, music notes) in black, dark brown or a deeper tone of the nail's own color
+              on some nails; one or two pattern nails (leopard print, plaid check, polka dots or stripes); a
+              french-tip variant (thin black french, leopard french, glitter french or double french) on one
+              nail; a soft wash such as a smoky aura gradient or cat-eye glow on one nail; and one or two small
+              raised 3D charms such as a polished silver bow or a chrome cross. Drawn motifs and patterns may
+              be medium sized (up to about half of the nail). Gem or glitter accents appear on at most two
+              nails and are never the main change. Keep it as one coordinated set in the original color family.
             - KEEP COLORS CLOSE TO THE ORIGINAL - VERY IMPORTANT: unless the user explicitly asks for a
               color change, do not tell the model to move to a different color family (for example
               "shift the color palette toward pastel tones"). Keep each nail's original color family and
@@ -326,7 +338,7 @@ public class RefineService {
 
             [keywordsAdd / keywordsRemove]
             The result page shows short English keyword chips describing the whole nail set (for
-            example "jelly", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
+            example "syrup", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
             "pearl"). After your edit, list in "keywordsAdd" the 0 to 4 chips that the edit newly adds
             to the set (a finish, pattern, motif or decoration that now visibly exists), and in
             "keywordsRemove" the chips that no longer apply because the edit replaced or removed them
@@ -463,6 +475,12 @@ public class RefineService {
                 session.getFingerDislikes(), session::updateFingerDislikes);
         designSessionRepository.save(session);
 
+        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
+        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
+                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
+        // 결과 화면 키워드 중 사전에 없는 말의 한글 번역(GPT)을 이미지를 고치는 동안 끝내 둔다
+        nailDesignService.prefetchDesignKeywordTranslations(slots, session, nextPlanJson);
+
         // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄.
         //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
         //    합성본이라 모델이 흰 배경을 그대로 그려 불투명으로 줄 수도 있는데, 그러면 아래 크롭 단계가 서버 누끼로 처리한다.
@@ -503,10 +521,6 @@ public class RefineService {
         // 흰색으로 번지는 손톱 끝이 잘린다.
         String nailTipCropsJson = nailDesignService.createNailTipCrops(user.getId(), editedBase64, displayBase64);
 
-        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
-        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
-                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
-
         // 5. 새 NailDesign 저장 (플랜은 그대로 유지, 수정 지시문을 프롬프트로 기록)
         NailDesign newDesign = NailDesign.builder()
                 .user(user)
@@ -537,6 +551,8 @@ public class RefineService {
                 .imageUrls(newDesign.getImageUrls())
                 .details(nailDesignService.buildDetails(newDesign))
                 .keywords(nailDesignService.extractDesignKeywords(slots, session, nextPlanJson))
+                .keywordColors(nailDesignService.extractKeywordColors(slots))
+                .slotKeywords(nailDesignService.extractSlotKeywords(slots, session))
                 .build();
     }
 

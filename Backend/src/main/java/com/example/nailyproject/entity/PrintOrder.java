@@ -61,6 +61,11 @@ public class PrintOrder {
     @Column(name = "ordered_at", nullable = false, updatable = false)
     private LocalDateTime orderedAt;
 
+    // 사용자가 마이페이지 출력 내역에서 지운 주문. 내역에서만 빠지고 행은 남긴다 - 아직 진행 중인 주문이면
+    // printer 서버 콜백과 대기 순번 계산이 이 행을 계속 쓴다 (지운다고 출력이 취소되지는 않는다). null이면 지우지 않음.
+    @Column(name = "history_deleted")
+    private Boolean historyDeleted;
+
     public enum PrintStatus {
         QUEUED,     // 신청만 된 상태
         MERGING,    // printer 서버에 병합 요청 보냄, 응답 대기 중
@@ -77,6 +82,15 @@ public class PrintOrder {
 
     public void updateMergedModelUrl(String mergedModelUrl) {
         this.mergedModelUrl = mergedModelUrl;
+    }
+
+    public boolean isHistoryDeleted() {
+        return Boolean.TRUE.equals(historyDeleted);
+    }
+
+    // 출력 내역에서 지우기
+    public void deleteHistory() {
+        this.historyDeleted = true;
     }
 
     public void updateFailReason(String failReason) {

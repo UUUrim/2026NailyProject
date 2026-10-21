@@ -14,4 +14,6 @@ public class ChatResponseDto {
     private List<String> options; //실제 선택지 목록 (한국어임)
     private Map<String, List<String>> optionColors; // 옵션 라벨 -> 대표 색상 hex 목록 (color 질문일 때만 채워짐)
     private boolean isComplete; //필요정보 다 모였냐?
+    // 아직 안 채워진 필수 카테고리 — 프론트가 다 모였을 때만 "바로 생성해 드릴까요?" 확인 창을 띄우는 데 쓴다 (화면 표시용)
+    private List<String> remainingCategories;
 }

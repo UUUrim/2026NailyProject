@@ -183,7 +183,7 @@ public class PrintOrderService {
         // 한 손 출력은 지원하지 않는다 - 병합 결과(양손 3MF)만 S3에 올라가고, 한 손용 병합 엔드포인트는 없다.
         if (order.getLeftScanId() == null || order.getRightScanId() == null) {
             order.updateStatus(PrintOrder.PrintStatus.FAILED);
-            order.updateFailReason("네일팁 출력은 양손 스캔이 모두 필요합니다. 양손을 스캔한 뒤 다시 신청해 주세요.");
+            order.updateFailReason("네일 팁 출력은 양손 스캔이 모두 필요합니다. 양손을 스캔한 뒤 다시 신청해 주세요.");
             printOrderRepository.save(order);
             return;
         }
@@ -365,8 +365,24 @@ public class PrintOrderService {
     @Transactional(readOnly = true)
     public List<PrintOrderResponseDto> getMyPrintOrders(User user) {
         return printOrderRepository.findAllByUserOrderByOrderedAtDesc(user).stream()
+                .filter(order -> !order.isHistoryDeleted())
                 .map(this::toDto)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 출력 내역 삭제 DELETE /users/me/prints/{orderId}
+     * 출력 중(PRINTING)인 주문만 빼고 지울 수 있다. 내역에서만 빠지고 행은 남는다 - 아직 진행 중인 주문은
+     * printer 서버 콜백과 대기 순번 계산이 계속 쓰고, printer 서버에 취소 기능이 없어 출력도 그대로 진행된다.
+     */
+    public void deletePrintOrder(User user, Long orderId) {
+        PrintOrder order = printOrderRepository.findById(orderId)
+                .filter(o -> o.getUser().getId().equals(user.getId()) && !o.isHistoryDeleted())
+                .orElseThrow(() -> new IllegalArgumentException("해당 출력 내역을 찾을 수 없습니다."));
+        if (order.getStatus() == PrintOrder.PrintStatus.PRINTING) {
+            throw new IllegalStateException("출력 중인 내역은 삭제할 수 없습니다.");
+        }
+        order.deleteHistory();
     }
 
     public void completePrintOrder(User user, Long orderId) {
