@@ -39,6 +39,32 @@ def ref_path_for(skin_path: str) -> str:
     return os.path.splitext(skin_path)[0] + "_ref.jpg"
 
 
+AUTO_WHITE_MIN_MEAN = 140        # 측정(자동 노출) 사진의 마커 흰색이 이보다 어두우면 보정 기준으로 약하다
+
+
+def auto_photo_white_ok(frame_bgr: np.ndarray, aruco_size_mm: float = 20.0) -> bool:
+    """측정(자동 노출) 사진 자체로 마커 흰색 보정을 믿고 쓸 수 있는지.
+
+    촬영 환경이 밝기를 잘 맞춰서 마커 흰 여백이 안 날아가고(포화 아님), 너무 어둡지도 않고, 무채색에 가까우면
+    True - 이때는 확인용 사진(노출을 바꿔 한 번 더 찍기) 없이 이 사진에서 바로 피부색을 잰다.
+    마커를 못 읽거나 하나라도 조건이 어긋나면 False(= 확인용 사진을 찍는다)."""
+    try:
+        import contextlib
+        import io
+        import nail_measurer as nm
+        import skin_color as sc
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, corners, _ = nm.detect_aruco(frame_bgr, aruco_size_mm)
+        white = sc.marker_white_rgb(frame_bgr, corners)
+        if white is None:
+            return False
+        return (float(white.mean()) >= AUTO_WHITE_MIN_MEAN
+                and float(white.max()) <= sc.WB_MAX_WHITE_CHANNEL
+                and float(np.max(np.abs(white / white.mean() - 1.0))) <= sc.WB_MAX_CAST)
+    except Exception:                                   # noqa: BLE001 - 판단 못 하면 예전처럼 확인용 사진을 찍는다
+        return False
+
+
 def _remove(path: str) -> None:
     try:
         if os.path.isfile(path):

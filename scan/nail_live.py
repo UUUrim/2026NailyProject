@@ -90,11 +90,12 @@ STABLE_N       = MEDIAN_N
 DISPLAY_H = 820         # window height; the full-res frame is what gets saved
 
 # Fixed offset from the ArUco marker's bottom edge, same for every finger -
-# the guide line now sits at one constant position (marker bottom + 6mm
+# the guide line now sits at one constant position (marker bottom + 11mm
 # toward the hand) instead of being tuned per finger.
-# 6mm: new box (white A4 + black strip). On the new_box_photos the cuticle sits
-# 4~8mm below the marker's bottom edge; the old 9mm drew the line 3~5mm below it.
-GUIDE_LINE_OFFSET_MM = 6.0
+# 11mm: 사이드뷰 세팅을 마친 뒤(검정 막대·마커 위치가 조금 움직임) 찍은 엄지 사진 기준.
+# 마커 아래 끝(엄지 열 y=414)에서 손톱 밑 경계(큐티클, y≈540)까지 126px x 0.0865mm/px = 10.9mm.
+# (세팅 전 사진들은 6mm 였다 - scan/tests/test_new_box_photos.py 의 OLD_RIG_GUIDE_MM)
+GUIDE_LINE_OFFSET_MM = 11.0
 
 
 def guide_line_offset_mm(finger: str) -> float:
@@ -927,6 +928,29 @@ class Camera:
         self._cap.release()
 
 
+# 탑뷰 카메라(C920) 초점. 오토포커스는 박스 바닥(검정 띠 표면 등)에 맞추는 일이 있어서 손톱(마커와
+# 같은 높이)이 흐려졌다. 카메라와 박스가 고정이라 손톱 높이에 맞는 값으로 고정한다.
+# 초점 0~255 를 훑어 본 결과. 오토포커스는 박스 바닥 쪽(60)을 잡아 손톱 선명도가 절반 수준이었다.
+# 손가락을 올려놓고 훑으면 손톱 질감·손가락 윤곽이 가장 선명한 값이 박스 세팅에 따라 75~80 이다:
+#   - 사이드뷰 세팅 전: 75 (80 은 손톱 질감 30% 낮음)
+#   - 사이드뷰 세팅 후(검정 막대·마커가 조금 움직임, 2026-10-20): 80 최고, 75·85 는 96% (75~85 가 평평)
+# 검정 띠 표면은 65~70 에서 선명하다(손 높이보다 낮은 면). 박스를 또 움직이면 다시 훑어야 한다.
+# DirectShow 값: 작을수록 멀리, 클수록 가까이에 맞는다. None 이면 오토포커스 그대로.
+CAM_FOCUS = 80
+
+
+def apply_fixed_focus(cap, focus=None):
+    """오토포커스를 끄고 초점을 *focus*(기본 CAM_FOCUS)로 고정한다. 카메라 설정 실패는 무시."""
+    focus = CAM_FOCUS if focus is None else focus
+    if focus is None:
+        return
+    try:
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+        cap.set(cv2.CAP_PROP_FOCUS, focus)
+    except Exception as e:
+        print(f"[Camera] 초점 고정 실패: {e!r}")
+
+
 def open_camera(index, rotate=0):
     backend = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
     cap = cv2.VideoCapture(index, backend)
@@ -934,6 +958,7 @@ def open_camera(index, rotate=0):
         sys.exit(f"ERROR: cannot open camera index {index}")
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAM_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+    apply_fixed_focus(cap)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"[Camera] index {index}  {w}x{h}"

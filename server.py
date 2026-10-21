@@ -122,7 +122,8 @@ from nail_live import (MeasureWorker,                                 # scan/
                         detect_marker_only as _live_detect_marker_only,
                         guide_line_row as _live_guide_line_row,
                         guide_line_offset_mm as _live_guide_offset_mm,
-                        marker_mm_per_px as _live_marker_mm_per_px)
+                        marker_mm_per_px as _live_marker_mm_per_px,
+                        apply_fixed_focus as _live_apply_fixed_focus)
 
 # ─────────────────────────────────────────────────────────────
 BASE   = _THIS_DIR
@@ -925,6 +926,9 @@ def _get_top_cam() -> cv2.VideoCapture:
         if CAMERA_WB_TEMP is not None:
             cap.set(cv2.CAP_PROP_AUTO_WB, 0)
             cap.set(cv2.CAP_PROP_WB_TEMPERATURE, CAMERA_WB_TEMP)
+        # 오토포커스는 박스 바닥에 맞춰져 손톱이 흐려지는 일이 있어서, 손톱(마커)과 같은 높이에 초점을
+        # 고정한다. 값은 scan/nail_live.py 의 CAM_FOCUS.
+        _live_apply_fixed_focus(cap)
         _top_cam       = cap
         _top_cam_index = CAMERA_TOP
         return _top_cam
@@ -1259,9 +1263,19 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
         # 손톱 측정 사진은 카메라 원래(자동 노출) 설정 그대로 두고, 이 사진은 노출을 잠깐 낮춰서
         # 마커 흰색이 날아가지 않게 찍은 것이라 피부색(톤) 계산에만 쓴다 (scan/skin_snapshot.py).
         # top_capture_busy가 아직 켜져 있어서 idle 미리보기 스레드가 같은 카메라를 읽지 않는다.
+        # 단, 자동 노출 사진에서 마커 흰색이 이미 안 날아갔으면(촬영 환경이 밝기를 잘 맞춘 경우) 건너뛴다:
+        # 그 사진에서 바로 마커 흰색 보정으로 피부색을 잴 수 있고, 여기서 노출을 더 올린 사진(-7)을 찍으면
+        # 오히려 하얗게 날아간다 (새 촬영 세팅에서 확인: 자동 -8에서 흰색 195~226, -7은 254/255로 포화).
+        skin_path = os.path.join(os.path.dirname(save_path), f"{finger}_skin.jpg")
+        for stale in (skin_path, skin_snapshot.ref_path_for(skin_path)):
+            try:
+                if os.path.isfile(stale): os.remove(stale)      # 이번엔 안 찍으니 옛 사진이 섞이지 않게
+            except OSError:
+                pass
         if CAMERA_EXPOSURE is None:
-            skin_path = os.path.join(os.path.dirname(save_path), f"{finger}_skin.jpg")
-            if skin_snapshot.capture_skin_snapshot(cap, skin_path, crop_top_px=CROP_TOP_PX):
+            if skin_snapshot.auto_photo_white_ok(accepted["frame"]):
+                print(f"  [{finger}] 측정 사진의 마커 흰색이 안 날아가서 피부 확인용 사진은 생략 (측정 사진에서 피부색을 잰다)")
+            elif skin_snapshot.capture_skin_snapshot(cap, skin_path, crop_top_px=CROP_TOP_PX):
                 print(f"  [{finger}] 피부 확인용 사진 저장: {skin_path}")
             else:
                 print(f"  [{finger}] 피부 확인용 사진을 못 찍음 - 피부색은 측정 사진에서 대신 잰다")
@@ -2076,6 +2090,13 @@ def phone_side_calib_done(run: int = 0):
         _set_side_note(f"FOCUS CALIBRATION: no clear peak ({prominence:.2f}x) - try again", (60, 60, 255), 30)
         return {"ok": False, "best": None, "prominence": prominence, "message": "no clear sharpness peak"}
     best = float(fds[i])
+    if edge:
+        # 피크가 초점 범위 끝이면 진짜 최적이 아니라 "점수가 평평하거나 단조로움"인 경우다(폰이 박스에 안 장착돼
+        # 방을 찍고 있었는데 fd 0.0 이 저장돼 모든 사이드 촬영에 적용된 일이 있었다). 저장하지 않는다.
+        _set_side_note("FOCUS CALIBRATION FAILED: peak at the edge of the range - check the phone is mounted "
+                       "and the finger is in place, then try again", (60, 60, 255), 30)
+        return {"ok": False, "best": None, "prominence": prominence, "at_edge_of_range": True,
+                "message": "peak at range edge - not saved"}
     _phone_cam.focus_fd = best
     os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
     with open(FOCUS_FILE, "w", encoding="utf-8") as f:

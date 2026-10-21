@@ -141,7 +141,14 @@
   const capInfo     = document.getElementById("capInfo");
   const applyBtn    = document.getElementById("applyBtn");
 
-  const PAGE_VERSION    = "cal3";   // shown in /phone/side/debug so the desktop can tell which page the phone is running
+  const PAGE_VERSION    = "zoom1";  // shown in /phone/side/debug so the desktop can tell which page the phone is running
+  // 줌 배율. 이 폰은 웹에서 수동 초점을 못 바꾸고 자동 초점이 화면 중앙의 구멍 뒤 배경(선반·얼굴)에 맞아서
+  // 손가락 끝이 흐리다. 손가락 끝은 항상 화면 중앙에 있으니 줌을 올리면 자동 초점 영역이 손가락으로 채워져
+  // 초점이 손가락에 맞을 가능성이 크고, 손가락도 그만큼 크게 찍힌다. 주소에 ?zoom=3 처럼 붙이면 그 값으로 시험.
+  const ZOOM = (() => {
+    const z = parseFloat(new URLSearchParams(location.search).get("zoom"));
+    return Number.isFinite(z) && z >= 1 ? z : 2.0;
+  })();
   const PREVIEW_MS      = 250;    // minimum gap between preview uploads (next one waits for the previous to finish)
   const POLL_MS         = 400;    // capture-request poll interval
   const PREVIEW_MAX_W   = 640;    // preview width sent to desktop (small, so it keeps up through ngrok)
@@ -153,6 +160,7 @@
   const DEFAULTS = { af: "poi", ev: -1.0, fd: null, point: { x: 0.47, y: 0.50 } };
   let cfg = loadCfg();
 
+  let videoRetries  = 0;          // 영상이 안 시작됐을 때 카메라를 다시 연 횟수
   let stream        = null;
   let track         = null;
   let imageCapture   = null;
@@ -322,8 +330,16 @@
     }
   }
 
+  async function applyZoom() {
+    const z = caps.zoom;
+    if (!(z && typeof z.min === "number")) return;       // 폰이 줌을 지원하지 않으면 그대로
+    await applyAdv({ zoom: Math.max(z.min, Math.min(z.max, ZOOM)) });
+    await sleep(300);                                    // 줌이 반영될 시간
+  }
+
   async function prepareCamera() {
     if (!track) return;
+    await applyZoom();
     await applyExposure();
     await applyFocus();
     reportCaps("prepare");
@@ -407,6 +423,10 @@
     }
 
     video.srcObject = stream;
+    // 일부 폰 브라우저(삼성 인터넷 등)는 autoplay 만으로는 영상이 시작되지 않아 videoWidth 가 0 인 채로
+    // 화면이 검고 프리뷰 전송도 멈춘다(서버에는 프레임 0장). 명시적으로 재생을 요청하고, 3초 안에도
+    // 영상 크기가 안 잡히면 카메라를 껐다가 다시 열어 본다(최대 2번).
+    try { await video.play(); } catch (e) { /* autoplay 정책: 아래 재시도로 처리 */ }
     track = stream.getVideoTracks()[0];
     try { caps = track.getCapabilities ? track.getCapabilities() : {}; } catch (e) { caps = {}; }
 
@@ -417,6 +437,15 @@
 
     startScreen.style.display = "none";
     setStatus("프리뷰 전송 중...", "connected");
+    setTimeout(async () => {
+      if (video.videoWidth || videoRetries >= 2) return;
+      videoRetries += 1;
+      setStatus("카메라 영상이 안 나와 다시 시도합니다 (" + videoRetries + "/2)", "err");
+      clearInterval(previewTimer); clearInterval(pollTimer);
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+      video.srcObject = null;
+      await startCamera();
+    }, 3000);
     previewTimer = setInterval(sendPreview, PREVIEW_MS);
     pollTimer    = setInterval(pollCapture, POLL_MS);
     reportCaps("start");

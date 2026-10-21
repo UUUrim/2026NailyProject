@@ -51,6 +51,10 @@ for _stream in (sys.stdout, sys.stderr):
 # anyway, so a roll does not need undoing.
 TILT_CORRECTION = False
 
+# Otsu(손톱 vs 손가락 살) 임계값을 구하는 핵심 영역: 크롭 폭 기준, 정점 아래로 이 비율의 행까지 / 정점 좌우 이 비율까지.
+OTSU_CORE_ROWS_FRAC = 0.40
+OTSU_CORE_HALF_FRAC = 0.25
+
 
 def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
     """Threshold separating background b* (border median) from the finger.
@@ -560,10 +564,23 @@ def measure_ccurve(image_path: str, width_mm: float,
         print(f"  [Tilt] new bbox x={fx} y={fy} w={fw} h={fh}")
 
     # ── 3. Nail vs pulp: Otsu on a* inside the finger ────────
-    vals = A[fmask > 0]
+    # 임계값은 손가락 마스크 전체가 아니라 정점 주변 핵심 영역(위쪽 OTSU_CORE_ROWS_FRAC, 가운데 좌우
+    # OTSU_CORE_HALF_FRAC)에서만 구한다. 구멍 뒤의 팔·손 피부가 마스크에 붙어 있으면 그만큼 a* 분포가 바뀌어
+    # 같은 손가락 사진인데도 임계값이 달라지고(스캔 211/212 엄지: h 2.37 vs 4.11mm), 손톱 띠가 다르게 잡혔다.
+    # 임계값은 핵심 영역에서 구하되, 적용은 예전처럼 마스크 전체에 한다.
+    _top_rows = max(3, int(0.03 * fh))
+    _xs_top = np.nonzero(fmask[fy:fy + _top_rows])[1]
+    _cx = float(np.median(_xs_top)) if len(_xs_top) else fx + fw / 2.0
+    core = np.zeros(fmask.shape, bool)
+    core[fy:int(fy + OTSU_CORE_ROWS_FRAC * W_img),
+         max(0, int(_cx - OTSU_CORE_HALF_FRAC * W_img)):int(_cx + OTSU_CORE_HALF_FRAC * W_img)] = True
+    core &= (fmask > 0)
+    if int(core.sum()) < 500:        # 핵심 영역이 너무 작으면 예전처럼 마스크 전체
+        core = fmask > 0
+    vals = A[core]
     a8 = np.clip((A - vals.min()) / (np.ptp(vals) + 1e-6) * 255,
                  0, 255).astype(np.uint8)
-    t, _ = cv2.threshold(a8[fmask > 0], 0, 255,
+    t, _ = cv2.threshold(a8[core], 0, 255,
                          cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     thr_a = vals.min() + t / 255.0 * np.ptp(vals)
     print(f"  [Nail/pulp] a* Otsu split at {thr_a:.1f}")
