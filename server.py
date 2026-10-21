@@ -1169,9 +1169,19 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
         # 손톱 측정 사진은 카메라 원래(자동 노출) 설정 그대로 두고, 이 사진은 노출을 잠깐 낮춰서
         # 마커 흰색이 날아가지 않게 찍은 것이라 피부색(톤) 계산에만 쓴다 (scan/skin_snapshot.py).
         # top_capture_busy가 아직 켜져 있어서 idle 미리보기 스레드가 같은 카메라를 읽지 않는다.
+        # 단, 자동 노출 사진에서 마커 흰색이 이미 안 날아갔으면(촬영 환경이 밝기를 잘 맞춘 경우) 건너뛴다:
+        # 그 사진에서 바로 마커 흰색 보정으로 피부색을 잴 수 있고, 여기서 노출을 더 올린 사진(-7)을 찍으면
+        # 오히려 하얗게 날아간다 (새 촬영 세팅에서 확인: 자동 -8에서 흰색 195~226, -7은 254/255로 포화).
+        skin_path = os.path.join(os.path.dirname(save_path), f"{finger}_skin.jpg")
+        for stale in (skin_path, skin_snapshot.ref_path_for(skin_path)):
+            try:
+                if os.path.isfile(stale): os.remove(stale)      # 이번엔 안 찍으니 옛 사진이 섞이지 않게
+            except OSError:
+                pass
         if CAMERA_EXPOSURE is None:
-            skin_path = os.path.join(os.path.dirname(save_path), f"{finger}_skin.jpg")
-            if skin_snapshot.capture_skin_snapshot(cap, skin_path, crop_top_px=CROP_TOP_PX):
+            if skin_snapshot.auto_photo_white_ok(accepted["frame"]):
+                print(f"  [{finger}] 측정 사진의 마커 흰색이 안 날아가서 피부 확인용 사진은 생략 (측정 사진에서 피부색을 잰다)")
+            elif skin_snapshot.capture_skin_snapshot(cap, skin_path, crop_top_px=CROP_TOP_PX):
                 print(f"  [{finger}] 피부 확인용 사진 저장: {skin_path}")
             else:
                 print(f"  [{finger}] 피부 확인용 사진을 못 찍음 - 피부색은 측정 사진에서 대신 잰다")

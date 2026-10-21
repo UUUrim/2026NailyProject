@@ -94,7 +94,16 @@ def lab_to_rgb_hex(L: float, a: float, b: float) -> str:
 
 WB_MIN_WHITE_MEAN = 110      # 마커 흰색의 평균 밝기(0~255)가 이보다 어두우면 기준으로 안 씀
 WB_MAX_WHITE_CHANNEL = 247   # 한 채널이라도 이보다 높으면 포화(날아감)로 보고 기준으로 안 씀
-WB_GAIN_MIN, WB_GAIN_MAX = 0.75, 1.30      # 채널 사이 색 보정 이득 한계 (이 범위를 벗어나면 보정 안 함)
+# 마커 흰색으로 색 쏠림을 보정하는 세기 (0~1). 새 박스(흰 배경 + 받침대 위 마커)에서는 0이다:
+# 카메라 자동 화이트밸런스가 큰 흰 배경을 기준으로 이미 잘 맞춰 놓는데, 받침대 위 마커 흰색은 조명에 더 가까워서
+# 푸른빛이 더 강하게 보인다. 이걸 기준으로 100% 보정하면 빨강이 과하게 올라가서(a* 12 -> 22, 채도 22 -> 33)
+# 실제 손보다 붉고 진한 색이 나온다. 같은 손가락의 카메라 원본/보정본/배경 기준 보정본을 사람 눈으로 비교했을 때
+# 카메라 원본이 실제 손과 가장 비슷했다 (2026-10-21). 예전 박스(검은 매트, 과노출)에서는 1이 맞았다.
+# 밝기 정규화(WB_TARGET_WHITE)는 이 값과 상관없이 그대로 적용된다.
+WB_COLOR_STRENGTH = 0.0
+WB_GAIN_MIN, WB_GAIN_MAX = 0.75, 1.50      # 채널 사이 색 보정 이득 한계 (이 범위를 벗어나면 보정 안 함)
+# (새 박스는 마커 흰색이 푸른 쪽(예 195,221,226)이라 빨강 이득이 1.25~1.35 근처에서 오간다. 1.30이면 같은 스캔의
+#  어떤 손가락은 보정되고 어떤 손가락은 안 돼서 값이 섞인다 - 실제 스캔에서 엄지 하나가 보정이 빠져 색상각 64도로 튀었다.)
 # 보정 후 마커 흰색이 갖게 될 밝기(0~255). 조명이 그때그때 조금 달라도(램프 밝기, 노출) 피부 밝기가
 # "마커 흰색 대비"로 같은 기준이 되게 한다. 이 값은 피부 L*의 절대 크기를 정한다(nail_palette의
 # SKIN_LIGHT_L/SKIN_DARK_L 기준과 같이 본다).
@@ -168,6 +177,8 @@ def white_balance_to_marker(image_bgr: np.ndarray, aruco_corners: np.ndarray, re
     if float(color_gain.min()) < WB_GAIN_MIN or float(color_gain.max()) > WB_GAIN_MAX:
         info["reason"] = "gain_out_of_range"
         return image_bgr, info
+    info["color_gain_full"] = [round(float(g), 4) for g in color_gain]       # 100% 보정했을 때의 이득 (기록용)
+    color_gain = color_gain ** WB_COLOR_STRENGTH        # 0 = 색은 그대로(밝기만 맞춤), 1 = 마커 흰색을 완전히 무채색으로
     # 밝기 정규화: 마커 흰색이 WB_TARGET_WHITE가 되도록 전체 밝기 배율을 곱한다. 배율이 너무 크면
     # (조명이 너무 어둡거나 너무 밝으면) 믿기 어려우니 색 보정만 하고 밝기는 그대로 둔다.
     brightness = float(_srgb_to_lin(np.array([WB_TARGET_WHITE] * 3))[0]) / float(wl.mean())
@@ -298,6 +309,32 @@ TONE_HUE_COOL_MAX = 55.0   # 색상각이 이보다 작으면 쿨
 TONE_HUE_WARM_MIN = 63.0   # 색상각이 이보다 크면 웜 (둘 사이는 뉴트럴)
 
 # 피부 밝기/채도 구분은 네일 컬러 개수 배분에만 쓴다 (nail_palette.SKIN_*_L 참고)
+
+
+# =============================================================================
+# 3-b. 사용자에게 보여 주는 피부색 보정 (새 박스 전용 1점 보정)
+# =============================================================================
+# 새 박스에서 카메라 원본으로 잰 피부색(L 65, a 12.8, b 19.5, 색상각 57도)은 실제보다 어둡고 칙칙해 보였다.
+# 카메라가 흰 배경에 노출을 맞춰서 피부가 어둡게 찍히고, 채도도 낮게 나오기 때문이다. 본인 손 하나를 기준으로
+# 후보 색을 눈으로 비교해서 아래 값을 정했다 (2026-10-21):
+#   1차(L 80, 채도 x1.8, 색상각 +5도)는 #FFB681로 너무 누렇고 진했다 (빨강 채널이 255로 잘리기도 했다).
+#   2차 시트에서 L 76 / 색상각 +0 / 채도 x1.4(#EBAE8A)와 x1.6(#F1AC83) 사이가 가장 비슷하다고 골랐다 -> x1.5.
+# 대표 피부색 칩(skinToneHex)과 명도(brightness), 추천 컬러의 밝기 구간에만 쓰고, 쿨/웜 판정(색상각)과 채도 슬라이더는
+# 보정 전 측정값을 그대로 쓴다. 한 사람 기준이라 다른 사람에게도 맞는지는 사람을 더 찍어서 확인해야 한다.
+# 박스/카메라를 또 바꾸면 이 값을 다시 맞춘다. 끄려면 DISPLAY_CAL_ENABLED = False.
+DISPLAY_CAL_ENABLED = True
+DISPLAY_CAL_L_OFFSET = 11.3       # 밝기에 더하는 값 (측정 L 64.7 -> 약 76)
+DISPLAY_CAL_CHROMA_SCALE = 1.5    # 채도(붉기+노랑)에 곱하는 값
+DISPLAY_CAL_HUE_OFFSET = 0.0      # 색상각에 더하는 값(도)
+
+
+def display_skin_lab(L: float, a: float, b: float) -> tuple:
+    """측정 Lab를 화면에 보여 줄 피부 Lab로 바꾼다 (위 1점 보정). 꺼져 있으면 그대로."""
+    if not DISPLAY_CAL_ENABLED:
+        return L, a, b
+    chroma = math.hypot(a, b) * DISPLAY_CAL_CHROMA_SCALE
+    hue = math.radians(skin_hue(a, b) + DISPLAY_CAL_HUE_OFFSET)
+    return min(L + DISPLAY_CAL_L_OFFSET, 100.0), chroma * math.cos(hue), chroma * math.sin(hue)
 
 
 def skin_hue(a: float, b: float) -> float:

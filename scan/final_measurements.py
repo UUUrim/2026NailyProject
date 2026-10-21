@@ -26,9 +26,11 @@ import os
 from datetime import datetime
 from typing import Optional
 
+import numpy as np
+
 from nail_measurer import (merge_hand_measurements, classify_size_totals,
                            recommend_nail_shape)
-from skin_color import recommend_nail_colors, lab_to_rgb_hex
+from skin_color import recommend_nail_colors, lab_to_rgb_hex, display_skin_lab
 
 FINGER_ORDER   = ["thumb", "index", "middle", "ring", "pinky"]
 FINGER_FILE    = "nail_measurements.json"
@@ -133,6 +135,8 @@ def _hand_block(session: str, payloads: dict) -> dict:
     return block
 
 
+SKIN_OUTLIER_MAD = 3.5
+SKIN_OUTLIER_MIN_SPREAD = {"skin_L": 2.0, "skin_a": 1.5, "skin_b": 1.5}   # 손가락 값이 아주 촘촘해도 이 폭 안쪽은 정상으로 본다
 SKIN_MIN_L, SKIN_MAX_L, SKIN_MIN_A = 45.0, 92.0, 8.0   # L이 이 범위 밖(바닥처럼 어둡거나 하얗게 날아감)이거나 붉은기(a*)가 이보다 적으면 피부가 아니다
 
 
@@ -154,6 +158,22 @@ def _skin_and_colors(all_nails: list) -> tuple:
                if SKIN_MIN_L <= float(n["skin_L"]) <= SKIN_MAX_L and float(n["skin_a"]) >= SKIN_MIN_A]
     if not metrics:
         return None, []
+    # 마커 흰색 보정이 적용된 손가락이 충분히(5개 이상) 있으면 그것만 쓴다. 보정된 값과 안 된 값을 평균 내면
+    # 안 된 손가락이 색상각을 크게 흔든다 (보정이 빠진 손가락은 색 쏠림이 그대로 남아 있다).
+    balanced = [n for n in metrics if (n.get("skin_wb") or {}).get("applied")]
+    if len(balanced) >= 5:
+        metrics = balanced
+    # 손가락 하나만 다른 손가락들과 크게 어긋나면(하이라이트/그림자/자세 문제) 평균에서 뺀다.
+    # 손가락 10개의 중앙값에서 L/a/b 중 하나라도 SKIN_OUTLIER_MAD배(최소 폭 SKIN_OUTLIER_MIN_SPREAD) 넘게 벗어난 손가락.
+    # 7개 이상 남을 때만 뺀다 (손가락이 적으면 어느 쪽이 맞는지 알 수 없다).
+    if len(metrics) >= 8:
+        vals = {k: np.array([float(n[k]) for n in metrics]) for k in ("skin_L", "skin_a", "skin_b")}
+        keep = np.ones(len(metrics), bool)
+        for k, floor in SKIN_OUTLIER_MIN_SPREAD.items():
+            med = np.median(vals[k]); spread = max(1.4826 * np.median(np.abs(vals[k] - med)), floor)
+            keep &= np.abs(vals[k] - med) <= SKIN_OUTLIER_MAD * spread
+        if keep.sum() >= 7:
+            metrics = [n for n, ok in zip(metrics, keep) if ok]
 
     def avg(key):
         return sum(float(n[key]) for n in metrics) / len(metrics)
@@ -161,14 +181,16 @@ def _skin_and_colors(all_nails: list) -> tuple:
     L, a, b = avg("skin_L"), avg("skin_a"), avg("skin_b")
     saturation = avg("skin_saturation")
 
-    result = recommend_nail_colors(L, a, b)
+    # 화면에 보여 줄 피부색은 새 박스 전용 보정(skin_color.display_skin_lab)을 거친다. 쿨/웜 판정(색상각)은 측정값 그대로.
+    L_disp, a_disp, b_disp = display_skin_lab(L, a, b)
+    result = recommend_nail_colors(L_disp, a, b)
     summary = result["skin_summary"]
     skin = {
-        "skinToneHex": lab_to_rgb_hex(L, a, b),
+        "skinToneHex": lab_to_rgb_hex(L_disp, a_disp, b_disp),
         "tone":        summary["tone"],
         "hue":         summary["skin_hue"],
         "warmness":    summary["warmness"],
-        "brightness":  round(L / 100.0, 3),
+        "brightness":  round(L_disp / 100.0, 3),
         "saturation":  round(saturation, 3),
         "L":           round(L, 2),
         "a":           round(a, 2),
