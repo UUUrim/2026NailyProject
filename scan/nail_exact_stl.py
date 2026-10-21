@@ -146,6 +146,11 @@ TIP_DOME_FRAC    = 0.35
 # 폭 방향 돔 단면의 지수.  2.0이면 포물선(가운데만 볼록), 클수록 윗면이 넓게
 # 퍼지고 가장자리 쪽에서 더 급히 내려간다(테두리는 항상 z=0).
 DOME_SHAPE_POWER = 3.0
+# 폭 방향 돔 단면의 종류.  "power" 는 위의 지수 곡선(가운데가 평평하고 어깨에서 많이 휨),
+# "arc" 는 가장자리가 z=0, 가운데가 돔 높이인 원호(굽는 정도가 가운데부터 가장자리까지 일정).
+DOME_PROFILE = "arc"
+# 폭 방향 메시 칸 수.  늘릴수록 곡면의 면 사이 각이 작아져 매끈해진다(100 = 50 의 절반, 파일 2배).
+GRID_COLS_DEFAULT = 100
 
 # 양 끝(큐티클/팁 끝)에서 껍질 두께가 줄어드는 최소값(mm).  몸통은 --thickness 그대로,
 # 양 끝으로 갈수록 이 값까지 부드럽게 얇아져 바닥 평면으로 스무스하게 떨어진다.
@@ -563,7 +568,7 @@ def generate_stl(params, output_path):
         tip_h = W * TIP_HEIGHT_FACTOR.get(shape, 0.50)
 
     # ── Build structured grid ─────────────────────────────────
-    nx = 50   # columns across width
+    nx = int(params.get("grid_cols") or GRID_COLS_DEFAULT)   # columns across width (--grid-cols)
     # Rows along the length.  The cuticle arch's width changes like sqrt(y)
     # near its bottom point, so evenly spaced rows leave only a few vertices
     # there and the arc renders as a faceted polyline.  Cosine spacing packs
@@ -685,7 +690,21 @@ def generate_stl(params, output_path):
         # arc it stays valid for any height/width ratio, so the narrow cuticle
         # arch rows can rise smoothly instead of being clamped flat.
         u      = (grid_x - xc_row[:, None]) / np.maximum(hw, 1e-6)[:, None]
-        z_bot  = C_row[:, None] * np.maximum(1.0 - np.abs(u) ** DOME_SHAPE_POWER, 0.0)
+        _profile = params.get("dome_profile") or DOME_PROFILE
+        if _profile == "arc":
+            # Circular arc through (±hw, 0) with height C_row at the centre:
+            # R = (hw² + C²) / (2C), z = sqrt(R² − x²) − (R − C).  Valid for
+            # any height/width ratio since R >= hw always.
+            _hw = np.maximum(hw, 1e-6)[:, None]
+            _c  = np.maximum(C_row, 1e-6)[:, None]
+            _R  = (_hw ** 2 + _c ** 2) / (2.0 * _c)
+            _x  = np.minimum(np.abs(u), 1.0) * _hw
+            z_bot = np.where(C_row[:, None] > 1e-6,
+                             np.sqrt(np.maximum(_R ** 2 - _x ** 2, 0.0)) - (_R - _c),
+                             0.0)
+            z_bot = np.maximum(z_bot, 0.0)
+        else:
+            z_bot  = C_row[:, None] * np.maximum(1.0 - np.abs(u) ** DOME_SHAPE_POWER, 0.0)
     if EXACT or C < 0.05 or CUT_CURVE > 1e-6:
         thick_row = np.full(ny, THICK)
     z_top = z_bot + thick_row[:, None]             # (ny, nx)  shell
@@ -945,6 +964,15 @@ def main():
                    help="Dome peak height as a fraction of the measured C-curve "
                         f"(default: {DOME_HEIGHT_SCALE}; 1.0 = the measured C-curve exactly). "
                         "Ignored in --exact mode")
+    p.add_argument("--grid-cols", type=int, default=None,
+                   help="Mesh columns across the width (default "
+                        f"{GRID_COLS_DEFAULT}). Higher = a smoother curved surface "
+                        "(less facet-to-facet angle) at the cost of a larger file")
+    p.add_argument("--dome-profile", choices=("power", "arc"), default=None,
+                   help="Width-direction dome cross-section: 'arc' (circular arc, "
+                        "evenly rounded edge to edge) or 'power' (flat centre, "
+                        f"bends at the shoulders). Default: {DOME_PROFILE}. Ignored "
+                        "in --exact mode")
     args = p.parse_args()
 
     with open(args.input) as f:
@@ -1010,6 +1038,8 @@ def main():
             "exact":               args.exact,
             "fit_margin_mm":       args.fit_margin,
             "dome_height_scale":   args.dome_height_scale,
+            "dome_profile":        args.dome_profile,
+            "grid_cols":           args.grid_cols,
         }
 
         out   = os.path.join(args.output, f"nail_{finger}_{args.shape}.stl")
