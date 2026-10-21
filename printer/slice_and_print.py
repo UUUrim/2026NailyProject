@@ -44,7 +44,7 @@ PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Transluc
 # 큰 값을 계산하다가 "found slicing or export error"로 조용히 죽는 버그가 있었다.
 # GUI에서는 같은 파일로도 죽지 않는 걸 보면 CLI(헤드리스) 전용 버그로 보인다.
 SUPPORT_OVERRIDES = {
-    "enable_support": "1",
+    "enable_support": "1",     #서포트를 꼭 필요한 곳에만 만든다 => 슬라이서가 "꼭 필요하다"고 판단하는 기준이 꽤 엄격하다고 함
     "support_threshold_angle": "30",        # 값이 클수록 서포트가 더 많이 생긴다 → 프로파일 기본값(30) 유지
     "support_on_build_plate_only": "1",     # 서포트가 네일 곡면 위에 얹히지 않게
     "support_top_z_distance": "0.16",       # layer_height와 맞춤 (PETG가 너무 붙지 않게)
