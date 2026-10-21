@@ -69,7 +69,7 @@ export const CAPTURE_COPY: Record<CaptureStatus, CaptureCopy> = {
     button: '지금 촬영',
   },
   capturing: {
-    title: () => '촬영하고 있어요',
+    title: () => '촬영하고 있어요 — 손가락을 그대로 두세요',
     button: '촬영 중…',
   },
   switching: {

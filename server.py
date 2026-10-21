@@ -104,11 +104,13 @@ from slice_and_print import (slice_and_send_to_printer,           # printer/
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
 try:
     from measure_ccurve import side_edge_blur_px, find_finger_point, focus_score, finger_box_norm   # scan/ - 초점 확인, 손가락 위치, 초점 점수
+    from measure_ccurve import side_photo_check                  # scan/ - 사이드 사진에 손가락 끝이 제대로 있는지
 except Exception:                                                # 없어도 스캔은 돌아가야 한다
     side_edge_blur_px = None
     find_finger_point = None
     focus_score = None
     finger_box_norm = None
+    side_photo_check = None
 import skin_snapshot                                             # scan/ - 피부색 확인용 사진 한 장
 
 # 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
@@ -177,6 +179,14 @@ TOP_VIEW_MIN_W_PX          = 480   # 창이 이보다 좁아지면 예전 방식
 # 손가락이 잠깐 인식 안 된 한두 측정 사이클 동안 가이드 선이 마커 기준
 # 추정 위치로 튀지 않도록 마지막 실측 guide_y를 유지하는 시간.
 GUIDE_LIVE_HOLD_SEC  = 0.5
+
+# 사이드뷰(폰) 사진은 버튼을 누른 뒤 폰이 요청을 받아(폴링) 촬영 설정을 다시 하고 고화질 촬영을 마칠 때까지 1.5~3.5초가
+# 걸려서, 그 사이 손가락이 빠지면 손가락 없는 사진이나 서 있는 손가락 사진이 찍혔다(스캔 217/218 소지). 그래서 탑뷰가
+# "촬영 가능(ready)" 상태로 이만큼 이어지면 버튼을 누르기 전에 사이드 사진을 미리 찍어 두고, 버튼을 누르면 그 사진을 쓴다.
+SIDE_PREFETCH_HOLD_S    = 2.0    # 탑뷰 측정이 시작(게이지가 차오르기 시작)된 뒤 이만큼 끊김 없이 이어지면 사이드 사진을 찍는다
+SIDE_SHOTS              = 3      # 사이드 사진을 이만큼 찍어 둔다(곡률은 사진마다 흔들려서 측정 단계에서 중앙값을 쓴다)
+SIDE_PREFETCH_MAX_AGE_S = 12.0   # 이보다 오래된 사진은 버리고 새로 찍는다(손가락이 그 사이 움직였을 수 있다)
+SIDE_PHOTO_MAX_ATTEMPTS = 3      # 사진 검증에 실패하면(손가락 없음/서 있음) 다시 찍는 최대 횟수
 
 # ─────────────────────────────────────────────────────────────
 app = FastAPI(title="Naily 통합 서버")
@@ -740,8 +750,137 @@ class _StreamState:
         # cancel_capture를 켠다 - 켜지면 탑뷰/사이드뷰 촬영 루프가 다음 손가락을 기다리지 않고 빠져나온다.
         self.capture_session: tuple | None = None
         self.cancel_capture: threading.Event = threading.Event()
+        # ── 사이드 사진 미리 찍기 (측정 시작 후 SIDE_PREFETCH_HOLD_S 뒤; _manage_side_prefetch 참고) ──
+        # side_prefetch: [{"finger", "t"(요청 시각), "frame"}, ...] 최대 SIDE_SHOTS 장. gen 은 손가락이 바뀌거나 측정이 끊기거나
+        # 불안정해질 때마다 올라가서, 그 전에 시작된 촬영 결과가 뒤늦게 도착해도 버려지게 한다. side_cap_lock 은 폰 촬영(요청→수신)이
+        # 한 번에 하나만 돌게 해서 미리 찍기와 버튼 촬영이 서로의 사진을 가로채지 않게 한다.
+        # measure_since: 측정 이력이 끊김 없이 쌓이기 시작한 시각 (이력이 비면 None).
+        self.side_prefetch: list = []
+        self.side_prefetch_gen: int = 0
+        self.side_prefetch_busy: threading.Event = threading.Event()
+        self.side_cap_lock: threading.Lock = threading.Lock()
+        self.measure_since: float | None = None
 
 _S = _StreamState()
+
+
+def _side_photo_valid(frame) -> tuple:
+    """사이드 사진 검증 (ok, 이유). 검증 모듈이 없으면 통과."""
+    if side_photo_check is None:
+        return True, "unchecked"
+    try:
+        return side_photo_check(frame)
+    except Exception as e:
+        return True, f"check error ignored: {e!r}"
+
+
+def _reset_side_prefetch():
+    """새 손가락 시작 등: 미리 찍은 사진과 진행 중인 촬영 결과를 모두 무효로 한다."""
+    _S.side_prefetch_gen += 1
+    _S.side_prefetch = []
+    _S.measure_since = None
+
+
+def _prefetch_side_photo(finger: str, gen: int):
+    """(스레드) 폰에 사이드 사진 한 장을 요청해서 검증하고, 아직 유효하면 _S.side_prefetch 목록에 보탠다."""
+    try:
+        # 검증과 보관까지 잠금 안에서 한다. 잠금을 풀고 나서 보관하면 그 틈에 버튼 쪽(_acquire_side_photo)이 잠금을 먼저 잡고
+        # 보관된 사진을 못 본 채 새로 찍어서 같은 손가락을 두 번 찍게 된다.
+        with _S.side_cap_lock:
+            if gen != _S.side_prefetch_gen:          # 기다리는 사이 손가락이 바뀌었거나 ready 가 깨졌다
+                return
+            t_req = time.time()
+            _phone_cam.request_capture()
+            frame = _phone_cam.capture_full(timeout=15.0)
+            if frame is None:
+                print(f"  [{finger}] 사이드 사진 미리 찍기 실패(타임아웃) - 버튼 시점에 다시 찍는다")
+                return
+            ok, why = _side_photo_valid(frame)
+            if gen != _S.side_prefetch_gen or _S.current_finger != finger:
+                print(f"  [{finger}] 미리 찍은 사이드 사진 폐기 (그 사이 손가락이 움직임/바뀜)")
+                return
+            if not ok:
+                print(f"  [{finger}] 미리 찍은 사이드 사진 검증 실패({why}) - 폐기")
+                return
+            _S.side_prefetch = _S.side_prefetch + [{"finger": finger, "t": t_req, "frame": frame}]
+            print(f"  [{finger}] 사이드 사진 미리 확보 {len(_S.side_prefetch)}/{SIDE_SHOTS} "
+                  f"(안정 상태에서 촬영, 약 {time.time() - t_req:.1f}초 걸림)")
+    except Exception as e:
+        print(f"  [{finger}] 사이드 사진 미리 찍기 오류: {e!r}")
+    finally:
+        _S.side_prefetch_busy.clear()
+
+
+def _manage_side_prefetch(finger: str, measuring: bool, is_stable: bool):
+    """탑뷰 루프가 매 프레임 부른다. measuring: 측정 이력이 쌓이는 중(게이지가 차오르기 시작한 뒤). 측정이 시작된 뒤
+    SIDE_PREFETCH_HOLD_S 동안 끊김 없이 이어지고 그 순간 안정(ready)이면 사이드 사진을 미리 찍는다. 측정이 끊기면(손가락이
+    빠지거나 측정 실패) 시간을 처음부터 다시 재고, 불안정해지면(손가락이 움직임) 미리 찍은 사진만 무효로 한다.
+    한 장을 확보하면 이어서 SIDE_SHOTS 장이 찰 때까지 계속 찍는다(찍는 데 장당 1.5~3.5초)."""
+    now = time.time()
+    if not measuring:
+        if _S.measure_since is not None or _S.side_prefetch:
+            _reset_side_prefetch()
+        return
+    if _S.measure_since is None:
+        _S.measure_since = now
+    if not is_stable:
+        if _S.side_prefetch:
+            _S.side_prefetch_gen += 1
+            _S.side_prefetch = []
+        return
+    if CAMERA_SIDE != -2 or not _phone_cam.is_connected():
+        return
+    if now - _S.measure_since < SIDE_PREFETCH_HOLD_S:
+        return
+    # 너무 오래된 사진은 버리고 그만큼 다시 찍는다
+    _S.side_prefetch = [p for p in _S.side_prefetch
+                        if p["finger"] == finger and now - p["t"] < SIDE_PREFETCH_MAX_AGE_S]
+    if (len(_S.side_prefetch) >= SIDE_SHOTS or _S.side_prefetch_busy.is_set()
+            or _S.force_capture_side.is_set()):
+        return
+    _S.side_prefetch_busy.set()
+    threading.Thread(target=_prefetch_side_photo, args=(finger, _S.side_prefetch_gen), daemon=True).start()
+
+
+def _take_prefetched_side_photos(finger: str) -> list:
+    """미리 찍어 둔 사진(오래되지 않은 이 손가락 것)을 꺼내 가고, 진행 중인 촬영 결과는 버리게(gen) 한다."""
+    now = time.time()
+    got = [p for p in _S.side_prefetch if p["finger"] == finger and now - p["t"] <= SIDE_PREFETCH_MAX_AGE_S]
+    stale = len(_S.side_prefetch) - len(got)
+    _S.side_prefetch = []
+    _S.side_prefetch_gen += 1
+    if stale:
+        print(f"  [{finger}] 너무 오래된 사이드 사진 {stale}장 버림")
+    return got
+
+
+def _acquire_side_photo(finger: str):
+    """버튼을 누른 순간의 사이드 사진들(목록, 1~SIDE_SHOTS장). 미리 찍어 둔 유효한 사진이 있으면 그걸 바로 쓰고(지연 0,
+    진행 중인 촬영은 기다리지 않고 버린다), 하나도 없을 때는 진행 중인 촬영이 끝나길 기다렸다가 쓰고, 그래도 없으면 새로
+    찍는다. 새로 찍은 사진이 검증에 실패하면(손가락 없음/서 있음) 다시 찍는다. 못 얻으면 None."""
+    if _S.side_prefetch:
+        got = _take_prefetched_side_photos(finger)
+        if got:
+            print(f"  [{finger}] 미리 찍어 둔 사이드 사진 {len(got)}장 사용 "
+                  f"(버튼보다 {time.time() - got[-1]['t']:.1f}~{time.time() - got[0]['t']:.1f}초 전, 지연 없음)")
+            return [p["frame"] for p in got]
+    with _S.side_cap_lock:                     # 미리 찍는 중이면 여기서 끝날 때까지 기다린다
+        got = _take_prefetched_side_photos(finger)
+        if got:
+            print(f"  [{finger}] 미리 찍어 둔 사이드 사진 {len(got)}장 사용 (찍는 중이던 것을 기다림)")
+            return [p["frame"] for p in got]
+        for attempt in range(1, SIDE_PHOTO_MAX_ATTEMPTS + 1):
+            _phone_cam.request_capture()
+            full = _phone_cam.capture_full(timeout=15.0)
+            if full is None:
+                print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃, {attempt}/{SIDE_PHOTO_MAX_ATTEMPTS})")
+                continue
+            ok, why = _side_photo_valid(full)
+            if ok:
+                return [full]
+            print(f"  [{finger}] 사이드 사진 검증 실패({why}) → 다시 촬영 ({attempt}/{SIDE_PHOTO_MAX_ATTEMPTS})")
+            _set_side_note(f"{finger.upper()}: finger not in the photo - retaking", (0, 220, 255), 4)
+        return None
 
 
 # 취소된 스캔 세션 (userid, session). 사용자가 촬영 도중 "다시 촬영해야 한다"는 경고를 확인하고
@@ -1182,6 +1321,9 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
                 "ratio": min(len(history) / _LIVE_MEDIAN_N, 1.0),
                 "ready": is_stable,
             }
+            # 측정이 시작되고 SIDE_PREFETCH_HOLD_S 뒤(그때 안정이면) 사이드 사진을 미리 찍어 둔다 - 버튼을 누른 뒤의 폰 지연
+            # 동안 손가락이 빠져서 손가락 없는 사진이 찍히던 문제(스캔 217/218) 방지.
+            _manage_side_prefetch(finger, len(history) > 0, is_stable)
 
             # measure_frame silences nail_measurer's own prints (see
             # quiet()), so without this the operator has no way to see
@@ -1390,13 +1532,10 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",
                                     (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
                         _push_frame(_S.side_frame, _with_side_note(disp))
-                    full = None
-                    for attempt in (1, 2):
-                        cap.request_capture()
-                        full = cap.capture_full(timeout=15.0)
-                        if full is not None:
-                            break
-                        print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃, {attempt}/2)")
+                    # 버튼을 누르기 전에 안정 상태에서 미리 찍어 둔 사진이 있으면 그걸 쓴다(지연 없음). 없으면 새로
+                    # 찍고, 손가락이 없거나 서 있는 사진이면 다시 찍는다 (_acquire_side_photo).
+                    shots = _acquire_side_photo(finger)
+                    full = shots[0] if shots else None
                     if full is None:
                         # 예전에는 640px 프리뷰를 사이드 사진으로 저장했지만, 프리뷰는 화각이 달라 손가락이
                         # 측정 영역 밖에 있어서 C-curve 가 엉뚱한 값으로 나왔다 → 저장하지 않고 건너뛴다.
@@ -1405,6 +1544,18 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
                               f"(폰 카메라 페이지가 열려있는지/Wi-Fi 확인)")
                         return False
                     cv2.imwrite(save_path, full)
+                    # 나머지 사진은 <이름>_2.jpg, _3.jpg 로 저장한다 - 측정이 장마다 곡률을 재서 중앙값을 쓴다
+                    # (scan/nail_measurer.py _extra_side_paths). 예전 손가락/세션의 같은 이름 파일이 섞이지 않게 먼저 지운다.
+                    _base, _ext = os.path.splitext(save_path)
+                    for _n in range(2, 6):
+                        _old = f"{_base}_{_n}{_ext}"
+                        if os.path.isfile(_old):
+                            try: os.remove(_old)
+                            except OSError: pass
+                    for _n, _extra in enumerate(shots[1:], start=2):
+                        cv2.imwrite(f"{_base}_{_n}{_ext}", _extra)
+                    if len(shots) > 1:
+                        print(f"  [{finger}] 사이드 사진 {len(shots)}장 저장 (곡률은 중앙값)")
                 else:
                     cv2.imwrite(save_path, frame)
                 print(f"  [{finger}] 사이드뷰 저장: {save_path}")
@@ -1429,6 +1580,8 @@ def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str, hand: s
 
     def capture_side():
         side_result[0] = _capture_side_stream(cap_side, finger, side_path)
+
+    _reset_side_prefetch()     # 새 손가락: 앞 손가락의 미리 찍은 사진/진행 중 촬영 결과를 무효로
 
     threads = [threading.Thread(target=capture_top)]
     if cap_side:

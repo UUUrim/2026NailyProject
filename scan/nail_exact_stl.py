@@ -131,7 +131,8 @@ WIDTH_FIT_MARGIN_MM = 0.5
 # 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
 # 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → 팁 끝(C*TIP_DOME_FRAC)
 # 까지 한 번에 완만히 줄어드는 모양.
-DOME_CREST_START = 0.45
+# 0.22 = 정점이 손톱 길이의 22% 지점(큐티클 쪽)에 온다(2026-10-21: 이전 0.45 에서 변경 - 돔을 큐티클 라인 쪽으로 당김).
+DOME_CREST_START = 0.22
 # 돔 최고 높이 배율(측정/하한 C에 곱함).  1.0이면 C 그대로, 낮출수록 천장이 낮아짐.
 # 1.0 = 사이드뷰로 잰 C-curve 를 그대로 반영한다(2026-10-20: 이전 0.60 에서 변경 - 사용자 STL 생성 기본값).
 DOME_HEIGHT_SCALE = 1.0
@@ -450,7 +451,7 @@ def generate_stl(params, output_path):
     arc_r     = float(params["arc_radius_mm"])
     THICK     = float(params.get("thickness_mm", 0.6))
     EXACT     = bool(params.get("exact"))
-    CUT_DEPTH = float(params.get("cuticle_depth_mm", 2.7))
+    CUT_DEPTH = float(params.get("cuticle_depth_mm", 1.9))
     # Extra dome height (mm) at the cuticle end, blending to 0 at the free
     # edge — makes the inner cavity rounder where the finger flesh is rounder.
     # Forced to 0 in exact mode (validation replica must stay true).
@@ -880,9 +881,9 @@ def main():
                    help="Extra mm beyond nail tip (default: 7mm for almond, "
                         "8mm for stiletto, 12mm for ballerina, 3mm for all "
                         "other shapes)")
-    p.add_argument("--cuticle-depth",  type=float, default=2.7,
+    p.add_argument("--cuticle-depth",  type=float, default=1.9,
                    help="Depth of cuticle arch below cuticle line in mm "
-                        "(default 2.7 — increase for deeper arch; also "
+                        "(default 1.9 — increase for deeper arch; also "
                         "sets the ceiling for --cuticle-round)")
     p.add_argument("--cuticle-curve",  type=float, default=0.0,
                    help="Extra inner-dome height in mm at the cuticle end, "
@@ -890,11 +891,11 @@ def main():
                         "(default 0 — OFF, uses the plain measured C-curve; "
                         "set >0 to re-enable the cuticle-side rounding). "
                         "Ignored in --exact mode")
-    p.add_argument("--cuticle-round",  type=float, default=2.35,
+    p.add_argument("--cuticle-round",  type=float, default=1.4,
                    help="Plan-view (XY) blend radius (mm) for the corner "
                         "where the straight body meets the top of the "
                         "cuticle arch — applies to EVERY shape (default "
-                        "2.35; 0 = sharp corner, matching the arch's raw "
+                        "1.4; 0 = sharp corner, matching the arch's raw "
                         "tangent exactly). Capped at ~90%% of "
                         "--cuticle-depth — raise that too for more room")
     p.add_argument("--min-c-curve",    type=float,

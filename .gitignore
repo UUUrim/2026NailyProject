@@ -147,3 +147,6 @@ print_queue_state.json
 new_box_photos/
 scan/tests/test_new_box_photos.py
 stl_shape_test/
+
+### 수동 확인용 STL 출력
+stl_check_220/
