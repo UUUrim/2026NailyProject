@@ -90,9 +90,11 @@ STABLE_N       = MEDIAN_N
 DISPLAY_H = 820         # window height; the full-res frame is what gets saved
 
 # Fixed offset from the ArUco marker's bottom edge, same for every finger -
-# the guide line now sits at one constant position (marker bottom + 9mm
+# the guide line now sits at one constant position (marker bottom + 6mm
 # toward the hand) instead of being tuned per finger.
-GUIDE_LINE_OFFSET_MM = 9.0
+# 6mm: new box (white A4 + black strip). On the new_box_photos the cuticle sits
+# 4~8mm below the marker's bottom edge; the old 9mm drew the line 3~5mm below it.
+GUIDE_LINE_OFFSET_MM = 6.0
 
 
 def guide_line_offset_mm(finger: str) -> float:
@@ -384,7 +386,7 @@ def measure_frame(frame, finger, aruco_size_mm, prev_guide_y=None,
 
     try:
         with quiet():
-            finger_mask, _, bbox = nm.segment_finger(frame, corners)
+            finger_mask, _, bbox = nm.segment_finger(frame, corners, mpp)
     except Exception as e:
         result["err"] = str(e).split("\n")[0]
         return result
