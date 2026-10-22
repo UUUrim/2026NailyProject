@@ -723,9 +723,10 @@ export function DesignChatSidebar({
     const shouldBundleEmptyRecords = emptyRecordGroups.length >= 4 && emptyRecordGroups.length < historyGroups.length
     const listedGroups = shouldBundleEmptyRecords ? historyGroups.filter((group) => !isBundlable(group)) : historyGroups
 
-    // 새 채팅 옆 '다른 분석 기록으로 새 채팅' — 지금 기록 말고 + 로 새 채팅을 열 수 있는 기록이 있을 때만 보인다.
+    // 새 채팅 옆 '다른 분석 기록으로 새 채팅' — + 로 새 채팅을 열 수 있는 분석 기록이 2개 이상일 때만 보인다
+    // (분석 기록 없이 만든 채팅은 기록으로 세지 않는다).
     // 누르면 접어 둔 기록까지 펼치고, 다른 기록의 + 를 잠깐 깜빡여 어디서 고르는지 알려 준다.
-    const hasOtherRecords = canSelectSession && historyGroups.some((group) => group.canStartChat && group.scanKey !== currentScanKey)
+    const hasOtherRecords = canSelectSession && historyGroups.filter((group) => group.canStartChat).length >= 2
     const [recordHintId, setRecordHintId] = useState(0)
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const pointToOtherRecords = () => {
