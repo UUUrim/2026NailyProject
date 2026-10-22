@@ -586,6 +586,8 @@ type UseNailDesignChatPageParams = {
     onStatusChange?: (status: ConversationStatus) => void
     // "처음부터 새로 만들게요" — 새 채팅을 연다
     onStartNewChat?: () => void
+    // 보기만 하는 채팅 (손 촬영에서 이어 온 진입에서 연 다른 분석 기록의 채팅) — 입력·전송·선택 창을 막는다
+    isReadOnly?: boolean
     // 답변·디자인을 기다리는 중에 다른 채팅·다른 페이지로 옮겨 화면에서만 숨긴 채팅 — 그대로 계속 진행하고 저장하되,
     // 채팅 화면(지금 채팅 표시)·뒤로가기 복원에는 끼어들지 않는다
     isBackground?: boolean
@@ -606,6 +608,7 @@ export function useNailDesignChatPage({
     onSaved,
     onStatusChange,
     onStartNewChat,
+    isReadOnly = false,
     isBackground = false,
 }: UseNailDesignChatPageParams) {
     const navigate = useNavigate()
@@ -1945,7 +1948,7 @@ export function useNailDesignChatPage({
 
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────
     const handlePhotoFileChange = async (originalFile: File | null) => {
-        if (!originalFile) return
+        if (!originalFile || isReadOnly) return
         // avif 등 생성 API가 받지 못하는 형식은 PNG로 바꿔서 쓴다.
         let file: File
         try {
@@ -1987,7 +1990,7 @@ export function useNailDesignChatPage({
     // 사진 + (입력창에 적은) 추가 요청으로 생성. note가 비어 있으면 사진만 사용한다.
     // 내 말풍선은 사진만 담은 것 하나, 그 아래에 적은 글이 있으면 글 말풍선을 따로 하나 보낸다.
     const confirmPhotoWithNote = (note: string) => {
-        if (!selectedPhotoFile || !selectedPhotoPreviewUrl || isSending) return
+        if (!selectedPhotoFile || !selectedPhotoPreviewUrl || isSending || isReadOnly) return
         setActiveQuickReply(null)
         clearInput()
         const photoBubbleId = makeId()
@@ -2112,7 +2115,7 @@ export function useNailDesignChatPage({
 
     const handleSubmitInput = () => {
         const text = inputValue.trim()
-        if ((!text && !hasPhotoAttachment) || isSending || isPreferenceInputLocked || isPhotoInputLocked) return
+        if ((!text && !hasPhotoAttachment) || isSending || isPreferenceInputLocked || isPhotoInputLocked || isReadOnly) return
         // 참고 사진을 입력창에 첨부해 둔 상태에서 보내면, 사진 + 이 문장(없으면 사진만)으로 바로 생성한다.
         if (hasPhotoAttachment) {
             confirmPhotoWithNote(text)
@@ -2147,7 +2150,7 @@ export function useNailDesignChatPage({
     }
 
     const handleQuickReplyClick = (option: QuickReplyOption) => {
-        if (isSending) return
+        if (isSending || isReadOnly) return
         if (option.value === '__go_to_scan__') {
             navigate('/process')
             return
@@ -2297,6 +2300,7 @@ export function useNailDesignChatPage({
         isAwaitingGenerateConfirm,
         isPreferenceInputLocked,
         isReopenedAfterConfirm,
+        isReadOnly,
         selectedInQuickReply,
         freeformSelectedColors,
         activeNoteStep,

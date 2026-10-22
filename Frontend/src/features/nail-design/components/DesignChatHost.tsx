@@ -116,6 +116,7 @@ export function DesignChatHost() {
                       onSaved={handleSaved}
                       onStatusChange={(status) => reportChatStatus(foreground.chat.instanceKey, status)}
                       onStartNewChat={foreground.onStartNewChat}
+                      isReadOnly={foreground.chat.readOnly}
                       isBackground={false}
                   />,
               ]

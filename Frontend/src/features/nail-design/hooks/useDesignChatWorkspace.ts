@@ -180,7 +180,7 @@ export function useDesignChatWorkspace() {
     // 결과 화면 "디자인 다시 생성하기"로 들어왔으면 그 디자인을 만든 채팅에 반영했던 기록을 그대로 쓴다
     const [regenerateEntry] = useState(() => (entry.restored ? null : navState?.regenerate ?? null))
 
-    // 단독 진입의 새 채팅은 "새 채팅" 버튼과 같이 최근에 사용한 기록을 기본으로 반영한다 — 기록 목록과 채팅 이력을
+    // 단독 진입의 첫 새 채팅은 최근에 사용한 기록을 기본으로 반영한다 — 기록 목록과 채팅 이력을
     // 다 불러오면 한 번 정한다 (렌더 중에 정해서 첫 화면부터 바로 쓴다)
     if (selectedScanKey === undefined && scanSessionsQuery.isFetched && chatSummariesQuery.isFetched) {
         const regeneratedChat = regenerateEntry?.sessionId
@@ -280,9 +280,16 @@ export function useDesignChatWorkspace() {
 
     // 지금 채팅을 화면에서 내리기 전에 마지막 상태를 기억해 둔다 (다시 열 때 바로 보여 주기 위함).
     // 답변·디자인을 기다리는 채팅은 숨겨 둔 채 계속 진행되고, 다시 열면 그 채팅을 그대로 보여 주므로 기억하지 않는다.
+    // 보기만 하는 채팅도 바뀐 게 없으니 기억하지 않는다.
     const rememberActiveChat = () => {
         const snapshot = getLiveConversationSnapshot()
-        if (activeSessionId && snapshot?.sessionId === activeSessionId && status.hasProgress && !status.isBusy) {
+        if (
+            activeSessionId &&
+            snapshot?.sessionId === activeSessionId &&
+            status.hasProgress &&
+            !status.isBusy &&
+            !activeChat.readOnly
+        ) {
             localChatsRef.current.set(activeSessionId, { snapshot, scanKey: selectedScanKey ?? null })
         }
     }
@@ -302,8 +309,17 @@ export function useDesignChatWorkspace() {
      * 새 채팅을 열었거나 이미 새 채팅이면 true
      */
     const startNewChat = (options: { scanKey?: string | null } = {}) => {
-        // 기록을 정해 주지 않은 새 채팅(사이드바 "새 채팅")은 단독 진입이면 최근에 사용한 기록으로, 손 촬영에서 이어 온 진입이면 그때 고른 기록으로
-        const nextScanKey = options.scanKey !== undefined ? options.scanKey : canSelectSession ? recentlyUsedScanKey : fixedScanKey
+        // 기록을 정해 주지 않은 새 채팅(사이드바 "새 채팅") — 손 촬영에서 이어 온 진입은 늘 그때 고른 기록으로(이력에서 다른 기록의
+        // 채팅을 열어 두었어도), 단독 진입은 지금 채팅의 기록(사이드바 위 손 분석 카드의 기록)으로 연다.
+        // 단독 진입에서 아직 기록을 정하지 못했으면(처음 불러오는 중) 최근에 사용한 기록으로
+        const nextScanKey =
+            options.scanKey !== undefined
+                ? options.scanKey
+                : !canSelectSession
+                    ? fixedScanKey
+                    : selectedScanKey !== undefined
+                        ? selectedScanKey
+                        : recentlyUsedScanKey
         if (isFreshChat && nextScanKey === selectedScanKey) {
             setIsMobileSidebarOpen(false)
             return true
@@ -316,21 +332,29 @@ export function useDesignChatWorkspace() {
         return true
     }
 
-    /** 이력의 채팅 열기 — 지금 채팅은 그 채팅을 실제로 띄울 때 화면에서 내려간다 (불러오다 실패하면 지금 채팅이 그대로 보인다) */
+    /**
+     * 이력의 채팅 열기 — 지금 채팅은 그 채팅을 실제로 띄울 때 화면에서 내려간다 (불러오다 실패하면 지금 채팅이 그대로 보인다).
+     * 손 촬영에서 이어 온 진입에서 이번 촬영이 아닌 기록(또는 기록 없이 만든)의 채팅은 보기만 한다 — 입력·전송을 막고,
+     * 지금 채팅의 기록(사이드바 위 손 분석 카드)은 이번 촬영 기록 그대로 둔다.
+     */
     const openChat = async (summary: ChatSummary) => {
         if (summary.sessionId === activeSessionId) {
             setIsMobileSidebarOpen(false)
             return
         }
         rememberActiveChat()
+        const readOnly = !canSelectSession && summary.scanKey !== fixedScanKey
+        const applyScanKey = (scanKey: string | null) => {
+            if (!readOnly) setSelectedScanKey(scanKey)
+        }
 
         const requestId = ++openRequestRef.current
         // 숨겨 둔 채 진행하던 채팅이면 그대로 다시 보여 준다 (아직 만드는 중이면 생성 중 카드로, 다 만들었으면 결과까지)
         const background = getBackgroundChat(summary.sessionId)
         if (background) {
             setOpeningSessionId(null)
-            setSelectedScanKey(background.scanKey)
-            setActiveChat(background.chat)
+            applyScanKey(background.scanKey)
+            setActiveChat(readOnly ? { ...background.chat, readOnly } : background.chat)
             setActiveSessionId(background.sessionId)
             setChatError(null)
             setIsMobileSidebarOpen(false)
@@ -340,8 +364,8 @@ export function useDesignChatWorkspace() {
         const local = localChatsRef.current.get(summary.sessionId)
         if (local) {
             setOpeningSessionId(null)
-            setSelectedScanKey(local.scanKey)
-            showChat({ snapshot: local.snapshot, regenerate: null }, summary.sessionId)
+            applyScanKey(local.scanKey)
+            showChat({ snapshot: local.snapshot, regenerate: null, readOnly }, summary.sessionId)
             return
         }
 
@@ -354,8 +378,8 @@ export function useDesignChatWorkspace() {
                 setChatError('이 채팅을 불러오지 못했어요.')
                 return
             }
-            setSelectedScanKey(res.scanKey ?? null)
-            showChat({ snapshot: { ...snapshot, sessionId: summary.sessionId }, regenerate: null }, summary.sessionId)
+            applyScanKey(res.scanKey ?? null)
+            showChat({ snapshot: { ...snapshot, sessionId: summary.sessionId }, regenerate: null, readOnly }, summary.sessionId)
         } catch {
             if (requestId === openRequestRef.current) setChatError('채팅을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.')
         } finally {
@@ -486,20 +510,72 @@ export function useDesignChatWorkspace() {
     }, [chatSummariesQuery.data, scanSessionsQuery.data, recordPreviewByKey, selectableSessions, canSelectSession, fixedScanKey])
 
     // ── 분석 결과 상세 패널: 지금 채팅에 반영 중인 기록 ──────────────────────────────────────────────
-    // 사이드바의 '분석 결과 상세 보기'(접힌 줄에서는 손 아이콘)로만 열고 닫는다 — 채팅 이력의 기록 줄은 그 기록의 채팅을 연다.
+    // 사이드바의 '분석 결과 상세 보기'(접힌 줄에서는 손 아이콘)로 열고 닫는다 — 채팅 이력의 기록 줄은 그 기록의 채팅을 연다.
     // 다른 기록의 채팅을 열면 지금 채팅의 기록이 바뀌므로, 열려 있던 패널도 그 기록으로 바뀐다.
+    // 단, 손 촬영에서 이어 온 진입에서 이번 촬영이 아닌 기록 줄을 누르면 그 기록을 패널에 띄워 보기만 한다(viewRecord —
+    // 지금 채팅의 기록은 그대로). null = 지금 채팅의 기록을 따라간다
+    const [panelScanKey, setPanelScanKey] = useState<string | null>(null)
+    const panelRecordKey = panelScanKey ?? selectedScanKey ?? null
+    const isPanelOtherRecord = panelScanKey !== null && panelScanKey !== selectedScanKey
+    const panelAnalysisQuery = useQuery({
+        queryKey: ['scans', 'hand-analysis', panelScanKey],
+        queryFn: () => fetchHandAnalysis(panelScanKey as string),
+        enabled: isAnalysisPanelOpen && isPanelOtherRecord,
+        staleTime: Infinity,
+    })
+    const panelLeftAnalysis = isPanelOtherRecord ? panelAnalysisQuery.data?.leftAnalysis ?? null : null
+    const panelRightAnalysis = isPanelOtherRecord ? panelAnalysisQuery.data?.rightAnalysis ?? null : null
+    const otherRecordSummary = useMemo(
+        () => buildHandAnalysisSummary(panelLeftAnalysis, panelRightAnalysis),
+        [panelLeftAnalysis, panelRightAnalysis],
+    )
+    const isPanelLoading = isPanelOtherRecord && panelAnalysisQuery.isPending
     const panelRecord = {
-        isFixedRecord: !canSelectSession && selectedScanKey === fixedScanKey,
-        summary: analysisSummary,
-        preview: currentRecordPreview,
+        isOtherRecord: isPanelOtherRecord,
+        isFixedRecord: !canSelectSession && panelRecordKey === fixedScanKey,
+        summary: isPanelOtherRecord ? otherRecordSummary : analysisSummary,
+        preview: isPanelOtherRecord
+            ? recordPreviewByKey.get(panelScanKey) ??
+              buildHandRecordPreviewFromAnalysis({ leftAnalysis: panelLeftAnalysis, rightAnalysis: panelRightAnalysis })
+            : currentRecordPreview,
+        isLoading: isPanelLoading,
+        // 불러오지 못한 기록 (분석 결과가 지워진 등) — 지금 채팅의 기록이 없을 때의 "손 촬영하러 가기"와 구분한다
+        loadFailed: isPanelOtherRecord && !isPanelLoading && !otherRecordSummary,
+        // 이력의 + 와 같은 조건으로 '이 기록으로 새 채팅'을 보여 준다
+        canStartChat: isPanelOtherRecord && !!historyGroups.find((group) => group.scanKey === panelScanKey)?.canStartChat,
     }
 
-    const closeAnalysisPanel = () => setIsAnalysisPanelOpen(false)
+    const closeAnalysisPanel = () => {
+        setIsAnalysisPanelOpen(false)
+        setPanelScanKey(null)
+    }
 
-    /** 사이드바 위 '분석 결과 상세 보기' — 지금 채팅의 기록을 열고 닫는다 */
+    /** 사이드바 위 '분석 결과 상세 보기' — 지금 채팅의 기록을 열고 닫는다 (다른 기록을 보던 중이면 지금 기록으로 바꿔 보여 준다) */
     const toggleCurrentRecordPanel = () => {
         setIsMobileSidebarOpen(false)
-        setIsAnalysisPanelOpen((prev) => !prev)
+        if (isAnalysisPanelOpen && !isPanelOtherRecord) {
+            closeAnalysisPanel()
+            return
+        }
+        setPanelScanKey(null)
+        setIsAnalysisPanelOpen(true)
+    }
+
+    /** 손 촬영에서 이어 온 진입의 다른 기록 줄 — 그 기록의 분석 결과 상세를 연다 (이미 그 기록을 띄워 두었으면 닫는다) */
+    const viewRecord = (scanKey: string) => {
+        setIsMobileSidebarOpen(false)
+        if (isAnalysisPanelOpen && panelRecordKey === scanKey) {
+            closeAnalysisPanel()
+            return
+        }
+        setPanelScanKey(scanKey)
+        setIsAnalysisPanelOpen(true)
+    }
+
+    /** 패널의 '이 기록으로 새 채팅' — 패널이 채팅을 덮는 화면에서는 새 채팅이 보이도록 패널을 닫는다 */
+    const startChatWithPanelRecord = () => {
+        if (!panelScanKey || !startChatWithRecord(panelScanKey)) return
+        if (window.matchMedia('(max-width: 1180px)').matches) closeAnalysisPanel()
     }
 
     return {
@@ -527,11 +603,17 @@ export function useDesignChatWorkspace() {
         historyGroups,
         isHistoryLoading: chatSummariesQuery.isPending,
         isAnalysisPanelOpen,
-        // 패널을 열어 두었는지 (사이드바 위 버튼이 '분석 결과 상세 닫기'가 된다)
-        isCurrentRecordPanelOpen: isAnalysisPanelOpen,
+        // 패널에 지금 채팅의 기록을 띄워 두었는지 (사이드바 위 버튼이 '분석 결과 상세 닫기'가 된다)
+        isCurrentRecordPanelOpen: isAnalysisPanelOpen && !isPanelOtherRecord,
+        // 손 촬영에서 이어 온 진입 — 이번 촬영 기록(이 기록이 아닌 기록 줄은 누르면 패널에 띄워 보기만 한다)
+        fixedScanKey,
+        // 기록 줄을 눌러 패널에 띄워 보고 있는 기록 — 채팅 이력에서 그 기록 줄을 강조한다
+        viewingRecordKey: isAnalysisPanelOpen ? panelScanKey : null,
         panelRecord,
         toggleCurrentRecordPanel,
+        viewRecord,
         closeAnalysisPanel,
+        startChatWithPanelRecord,
         isSidebarCollapsed,
         setIsSidebarCollapsed,
         isMobileSidebarOpen,

@@ -632,7 +632,8 @@
     margin-top: 8px;
 }
 
-/* 묶음 머리(분석 기록) — [기록 · 날짜] 를 누르면 그 기록의 최근 채팅을 열고(지금 채팅의 기록이면 접힌 채팅 목록 펼치기),
+/* 묶음 머리(분석 기록) — [기록 · 날짜] 를 누르면 그 기록의 최근 채팅을 열고(지금 채팅의 기록이면 접힌 채팅 목록 펼치기,
+   손 촬영에서 이어 온 진입의 다른 기록이면 그 기록의 분석 결과 상세 패널과 최근 채팅(보기 전용)을 연다),
    화살표는 채팅 목록 펼치기/접기(접기는 화살표로만), 오른쪽 끝 + 는 이 기록으로 새 채팅 */
 .dcw-history__group-head {
     display: flex;
@@ -644,6 +645,12 @@
 
 .dcw-history__group-head:hover {
     background: var(--dcw-hover);
+}
+
+/* 기록 줄을 눌러 분석 결과 상세 패널에 띄워 보고 있는 기록 (손 촬영에서 이어 온 진입의 다른 기록) */
+.dcw-history__group-head.is-viewing {
+    background: var(--dcw-selected);
+    box-shadow: var(--dcw-selected-shadow);
 }
 
 /* 지금 채팅에 반영 중인 기록 — 피부색 동그라미에 고리를 두르고 깜빡인다
