@@ -11,6 +11,7 @@ import { ScanProgressDots } from '@/features/hand-scan/components/ScanProgressDo
 import { CAPTURE_COPY, getCaptureStatus, toGuidePhase } from '@/features/hand-scan/utils/captureStatus'
 import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { PillButton } from '@/shared/components/PillButton'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
 import { analyzeSkinTone, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { formatMetricCurve } from '@/shared/utils/scanDetail'
@@ -200,10 +201,9 @@ export function HandScanPageContent() {
     const session = latestCompletedSession
     const dateLabel = formatScanDateLabel(session.scannedAt)
     const skinHex = session.skinToneHex
-    const toneLabel = (
-      skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
-      (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
-    )?.replace(/\s+/g, '') ?? '미분석'
+    const skinAnalysis =
+      skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation) ??
+      (skinHex ? analyzeSkinTone(skinHex) : null)
     const shapeLabel = session.recommendedShape
         ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
@@ -248,7 +248,13 @@ export function HandScanPageContent() {
                   />
                   <span className="hand-scan-rescan-gate__record-body">
                     <strong className="hand-scan-rescan-gate__record-date">{dateLabel}</strong>
-                    <span className="hand-scan-rescan-gate__record-season">{toneLabel}</span>
+                    <span className="hand-scan-rescan-gate__record-season">
+                      {skinAnalysis ? (
+                        <SkinBaseTag kind={skinAnalysis.baseKind}>{skinAnalysis.tone.label}</SkinBaseTag>
+                      ) : (
+                        '미분석'
+                      )}
+                    </span>
                     <span className="hand-scan-rescan-gate__record-metrics">{metricsLine}</span>
                     <span className="hand-scan-rescan-gate__record-shape">
                       추천 쉐입: {shapeLabel ?? '미정'}

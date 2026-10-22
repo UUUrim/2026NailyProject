@@ -1286,7 +1286,7 @@ export function useNailDesignChatPage({
         const shapeLabel = analysisSummary?.detectedShapeLabel ?? null
 
         const name = userName ? `${userName}님` : '회원님'
-        const tonePart = toneLabel ?? '피부톤'
+        const tonePart = toneLabel ?? '피부 톤'
         const shapePart = shapeLabel ? `${shapeLabel} 추천 쉐입` : '추천 쉐입'
 
         return `${name}의 스캔 정보를 기반으로 NAILY가 디자인을 추천해요. ${tonePart}에 어울리는 추천 컬러와 ${shapePart}을 반영해 ${name}께 어울리는 디자인을 만들어 드릴게요!`

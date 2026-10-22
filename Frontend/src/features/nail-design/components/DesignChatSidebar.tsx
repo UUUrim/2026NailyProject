@@ -7,6 +7,7 @@ import type { ChatHistoryGroup } from '@/features/nail-design/hooks/useDesignCha
 import type { ChatDesignStatus } from '@/features/nail-design/hooks/designChatRuntime'
 import { formatRecordDate, type HandRecordPreview } from '@/features/nail-design/utils/handAnalysisSummary'
 import { HandIcon } from '@/features/nail-design/components/ChatBubbleParts'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 
 // 디자인 채팅 사이드바 — 위에서부터 검색·접기/펼치기, 반영 중인 손 분석(결과 보기·다른 기록 안내), 새 채팅,
 // 손 분석 기록별 채팅 이력(기록 줄: 결과 보기 · 화살표: 펼치기/접기 · +: 새 채팅), 맨 아래 프로필. 넓은 화면에서는 접으면 아이콘만 남는 좁은 줄이 되고,
@@ -109,19 +110,22 @@ function SidebarIcon({ name, size = 20 }: { name: IconName; size?: number }) {
     )
 }
 
-// 손 분석 기록 미리보기 — 대표 피부색 동그라미 옆에 피부톤(웜/쿨/뉴트럴 색 글자)과 추천 컬러 6개, 오른쪽 끝에 작은 날짜
+// 손 분석 기록 미리보기 — 대표 피부색 동그라미 옆에 베이스(마이페이지 손 분석 목록과 같은 베이스 색 알약)와 추천 컬러 6개,
+// 오른쪽 끝에 작은 날짜
 function RecordPreviewView({ preview, size = 'md' }: { preview: HandRecordPreview; size?: 'sm' | 'md' }) {
     return (
         <span className={`dcw-record dcw-record--${size}`}>
             <span className="dcw-record__swatch" style={{ background: preview.skinToneHex ?? '#de869f' }} aria-hidden="true" />
             <span className="dcw-record__body">
-                {/* 큰 카드(사이드바 위 손 분석)는 피부톤 옆에 대표 피부색 헥스값도 쓴다 */}
+                {/* 큰 카드(사이드바 위 손 분석)는 베이스 옆에 대표 피부색 헥스값도 쓴다 */}
                 {(preview.toneLabel || (size === 'md' && preview.skinToneHex)) && (
                     <span className="dcw-record__head">
+                        {/* 사이드바 폭에는 '뉴트럴 베이스' 전체가 헥스값·추천 컬러·날짜·고정 배지와 같이 들어가지 않아서
+                            '베이스'를 뗀 핑크/뉴트럴/옐로우만 쓰고, 전체 이름은 title로 보여 준다 */}
                         {preview.toneLabel && (
-                            <span className={`dcw-record__tone${preview.toneKind ? ` dcw-record__tone--${preview.toneKind}` : ''}`}>
-                                {preview.toneLabel}
-                            </span>
+                            <SkinBaseTag kind={preview.baseKind} title={preview.toneLabel} className="dcw-record__tone">
+                                {preview.toneLabel.replace(/\s*베이스$/, '')}
+                            </SkinBaseTag>
                         )}
                         {size === 'md' && preview.skinToneHex && (
                             <span className="dcw-record__hex">{preview.skinToneHex.toUpperCase()}</span>

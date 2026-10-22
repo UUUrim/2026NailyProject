@@ -13,6 +13,7 @@ import {
   type ScanSession,
 } from '@/shared/utils/scanDetail'
 import { ScanXModalShell } from '@/shared/components/ScanXModalShell'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 import '@/styles/mypage.css'
 
 type Props = {
@@ -184,7 +185,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
         const analysis =
           skinToneAnalysisFromMetrics(detail.tone, detail.warmness, detail.brightness, detail.saturation) ??
           (detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null)
-        const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
+        const toneLabel = analysis ? analysis.tone.label : '분석 결과 없음'
         // .mypage-x__scanx-palette(6열)에 정렬 순서 그대로 흘려 넣는다 — 비슷한 색끼리 잇는 TSP 경로, 연한 색 → 진한 색
         const palette = sortRecommendedColors(
           detail.recommendedColors.length > 0
@@ -256,10 +257,16 @@ export function ScanDetailModal({ session, onClose }: Props) {
                 />
                 <div className="mypage-x__scanx-hero-copy">
                   <p className="mypage-x__scanx-kicker">대표 피부색</p>
-                  <h3 className="mypage-x__scanx-season">{toneLabel}</h3>
+                  {/* 제목 — 대표 피부색 헥스값 알약(바탕은 핑크/뉴트럴/옐로우 베이스 색), 아래 칩은 베이스·명도·채도 */}
+                  <h3 className="mypage-x__scanx-season">
+                    {detail.skinToneHex ? (
+                      <SkinBaseTag kind={analysis?.baseKind ?? null}>{detail.skinToneHex.toUpperCase()}</SkinBaseTag>
+                    ) : (
+                      toneLabel
+                    )}
+                  </h3>
                   {analysis && (
                     <div className="mypage-x__scanx-chips">
-                      <span>{skinHex}</span>
                       <span>{toneLabel}</span>
                       <span>{analysis.brightness.level}명도</span>
                       <span>{analysis.saturation.level}채도</span>
@@ -270,12 +277,12 @@ export function ScanDetailModal({ session, onClose }: Props) {
             </section>
 
             {analysis && (
-              <section className="mypage-x__scanx-tone-card" aria-label="피부톤 분석">
-                <p className="mypage-x__scanx-section-label">피부톤 분석</p>
+              <section className="mypage-x__scanx-tone-card" aria-label="피부 톤 분석">
+                <p className="mypage-x__scanx-section-label">피부 톤 분석</p>
                 <div className="mypage-x__scanx-tone-bars">
                   <div className="mypage-x__scanx-tone-bar">
                     <div className="mypage-x__scanx-tone-bar-head">
-                      <span>톤</span>
+                      <span>베이스</span>
                       <span>{analysis.tone.label}</span>
                     </div>
                     <div className="mypage-x__scanx-tone-bar-track mypage-x__scanx-tone-bar-track--tone">

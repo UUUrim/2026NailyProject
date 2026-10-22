@@ -312,7 +312,7 @@
     min-width: 0;
 }
 
-/* 피부톤 (+ 큰 카드에서는 그 옆에 대표 피부색 헥스값) */
+/* 베이스 (+ 큰 카드에서는 그 옆에 대표 피부색 헥스값) */
 .dcw-record__head {
     display: flex;
     align-items: center;
@@ -329,30 +329,22 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* 피부톤 — 웜/쿨/뉴트럴마다 어울리는 글자색 (분석 결과 패널의 톤 막대: 쿨 #8fb4e6 → 웜 #f0c069 와 같은 계열) */
+/* 베이스 — 마이페이지 손 분석 목록과 같은 알약(SkinBaseTag, 바탕은 핑크/뉴트럴/옐로우 베이스 색).
+   사이드바에서는 글자도 그 베이스 색을 진하게 한 색으로 쓴다 */
 .dcw-record__tone {
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: #f4eff1;
-    color: var(--dcw-text);
     font-size: 0.74rem;
-    font-weight: 800;
-    white-space: nowrap;
 }
 
-.dcw-record__tone--warm {
-    background: #fdf0e1;
-    color: #c4651f;
+.dcw-record__tone.skin-base-tag--pink {
+    color: #c4456f;
 }
 
-.dcw-record__tone--cool {
-    background: #e9f1fc;
-    color: #3f72bd;
+.dcw-record__tone.skin-base-tag--neutral {
+    color: #7d6450;
 }
 
-.dcw-record__tone--neutral {
-    background: #f3eee8;
-    color: #8a6f5a;
+.dcw-record__tone.skin-base-tag--yellow {
+    color: #966700;
 }
 
 .dcw-record__palette {
@@ -379,7 +371,7 @@
     white-space: nowrap;
 }
 
-/* 작은 크기 (채팅 이력 묶음 머리, 기록 고르기 목록) — 한 줄: 피부색 · 피부톤 · 추천 컬러 · 날짜 */
+/* 작은 크기 (채팅 이력 묶음 머리, 기록 고르기 목록) — 한 줄: 피부색 · 베이스 · 추천 컬러 · 날짜 */
 .dcw-record--sm {
     gap: 0.5rem;
 }

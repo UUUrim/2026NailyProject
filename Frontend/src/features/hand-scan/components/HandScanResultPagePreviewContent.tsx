@@ -140,11 +140,11 @@ export function HandScanResultPagePreviewContent() {
                         </div>
                         <div className="skin-tone-card__body">
                             <SkinToneSlider
-                                label="톤"
+                                label="베이스"
                                 valueLabel={skinToneAnalysis.tone.label}
                                 percent={skinToneAnalysis.tone.percent}
-                                minLabel="쿨"
-                                maxLabel="웜"
+                                minLabel="분홍기"
+                                maxLabel="노란기"
                                 trackClass="skin-tone-slider__track--tone"
                             />
                             <SkinToneSlider

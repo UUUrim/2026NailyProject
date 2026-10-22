@@ -81,7 +81,7 @@ export function pickSpreadColors<T>(items: T[], count: number): T[] {
   return Array.from({ length: count }, (_, i) => items[Math.floor(i * step)])
 }
 
-/** 낮음 → 높음 축의 3단계. 톤은 쿨→뉴트럴→웜에 대응한다. */
+/** 낮음 → 높음 축의 3단계. 톤은 쿨→뉴트럴→웜(화면에는 핑크→뉴트럴→옐로우 베이스)에 대응한다. */
 export type SkinLevel = '저' | '중' | '고'
 
 export type SkinToneMetric = {
@@ -92,7 +92,20 @@ export type SkinToneMetric = {
   level: SkinLevel
 }
 
+/** 피부 베이스 — 백엔드 tone의 cool/neutral/warm을 화면에서는 핑크/뉴트럴/옐로우 베이스로 부른다 */
+export type SkinBaseKind = 'pink' | 'neutral' | 'yellow'
+
+const SKIN_BASE_LABEL: Record<SkinBaseKind, string> = {
+  pink: '핑크 베이스',
+  neutral: '뉴트럴 베이스',
+  yellow: '옐로우 베이스',
+}
+
+const SKIN_BASE_LEVEL: Record<SkinBaseKind, SkinLevel> = { pink: '저', neutral: '중', yellow: '고' }
+
 export type SkinToneAnalysis = {
+  /** tone.label과 같은 기준의 베이스 종류 — 손 분석 기록 제목(SkinBaseTag)의 바탕색에 쓴다 */
+  baseKind: SkinBaseKind
   tone: SkinToneMetric
   brightness: SkinToneMetric
   saturation: SkinToneMetric
@@ -133,10 +146,10 @@ export function skinToneAnalysisFromMetrics(
   if (tone == null || brightness == null || saturation == null) return null
 
   // 백엔드가 'warm'/'WARM'/' Warm ' 등 대소문자·공백이 섞여 내려줘도 웜/쿨로 인식되도록
-  // 정규화한다 — 정확 일치만 보던 이전 코드는 이런 값을 전부 '뉴트럴톤'으로 떨어뜨렸다.
+  // 정규화한다 — 정확 일치만 보던 이전 코드는 이런 값을 전부 뉴트럴로 떨어뜨렸다.
+  // 백엔드 값은 warm/cool/neutral 그대로 두고, 화면에는 옐로우/핑크/뉴트럴 베이스로 보여 준다.
   const normalizedTone = tone.trim().toLowerCase()
-  const toneLabel = normalizedTone === 'warm' ? '웜톤' : normalizedTone === 'cool' ? '쿨톤' : '뉴트럴톤'
-  const toneLevel: SkinLevel = normalizedTone === 'warm' ? '고' : normalizedTone === 'cool' ? '저' : '중'
+  const baseKind: SkinBaseKind = normalizedTone === 'warm' ? 'yellow' : normalizedTone === 'cool' ? 'pink' : 'neutral'
   // 바 위치는 연속 스칼라(warmness)가 있으면 그 실측값으로 잡고, 없으면(구버전 스캔) 범주별
   // 고정 위치로 폴백한다.
   const toneScore =
@@ -151,10 +164,23 @@ export function skinToneAnalysisFromMetrics(
   const saturationLevel: SkinLevel = saturation > 0.5 ? '고' : saturation < 0.3 ? '저' : '중'
 
   return {
-    tone: { percent: toneScore, label: toneLabel, level: toneLevel },
+    baseKind,
+    tone: { percent: toneScore, label: SKIN_BASE_LABEL[baseKind], level: SKIN_BASE_LEVEL[baseKind] },
     brightness: { percent: Math.round(Math.min(100, Math.max(0, brightness * 100))), label: brightnessLabel, level: brightnessLevel },
     saturation: { percent: Math.round(Math.min(100, Math.max(0, saturation * 100))), label: saturationLabel, level: saturationLevel },
   }
+}
+
+// 웜톤/쿨톤/뉴트럴톤으로 부르던 때 저장된 채팅(디자인 생성 맥락의 손 분석 요약)에 남아 있는 이름 → 지금 이름
+const LEGACY_TONE_LABELS: Record<string, string> = {
+  웜톤: '옐로우 베이스',
+  쿨톤: '핑크 베이스',
+  뉴트럴톤: '뉴트럴 베이스',
+}
+
+/** 저장돼 있던 톤 이름을 지금 표기(핑크/뉴트럴/옐로우 베이스)로 맞춘다 — 이미 지금 이름이거나 모르는 값은 그대로 */
+export function toCurrentToneLabel(label: string): string {
+  return LEGACY_TONE_LABELS[label.replace(/\s+/g, '')] ?? label
 }
 
 /** 대표 피부색 hex만으로 톤(쿨~웜)/명도/채도(혈색) 슬라이더 값을 계산한다 (백엔드 값이 없을 때의 대체 추정치) */
@@ -164,8 +190,7 @@ export function analyzeSkinTone(hex: string): SkinToneAnalysis {
 
   // 웜/쿨 축: b*(황색기)에서 a*(적색기)를 절반만큼 뺀 값이 클수록 웜(황금빛), 작을수록 쿨(핑크빛)
   const warmScore = bLab - a * 0.5
-  const toneLabel = warmScore > 8 ? '웜톤' : warmScore < 5 ? '쿨톤' : '뉴트럴톤'
-  const toneLevel: SkinLevel = warmScore > 8 ? '고' : warmScore < 5 ? '저' : '중'
+  const baseKind: SkinBaseKind = warmScore > 8 ? 'yellow' : warmScore < 5 ? 'pink' : 'neutral'
 
   const brightnessLabel = L > 65 ? '밝은 편' : L < 55 ? '어두운 편' : '보통 밝기'
   const brightnessLevel: SkinLevel = L > 65 ? '고' : L < 55 ? '저' : '중'
@@ -175,7 +200,8 @@ export function analyzeSkinTone(hex: string): SkinToneAnalysis {
   const saturationLevel: SkinLevel = chroma > 20 ? '고' : chroma < 12 ? '저' : '중'
 
   return {
-    tone: { percent: clampPercent(warmScore, -10, 30), label: toneLabel, level: toneLevel },
+    baseKind,
+    tone: { percent: clampPercent(warmScore, -10, 30), label: SKIN_BASE_LABEL[baseKind], level: SKIN_BASE_LEVEL[baseKind] },
     brightness: { percent: clampPercent(L, 20, 95), label: brightnessLabel, level: brightnessLevel },
     saturation: { percent: clampPercent(chroma, 8, 32), label: saturationLabel, level: saturationLevel },
   }

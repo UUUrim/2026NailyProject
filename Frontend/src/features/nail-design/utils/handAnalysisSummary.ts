@@ -1,5 +1,11 @@
 import { getScanResult, type ScanResultResponse } from '@/entities/scan/api'
-import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import {
+    analyzeSkinTone,
+    generateSkinTonePalette,
+    pickSpreadColors,
+    skinToneAnalysisFromMetrics,
+    type SkinBaseKind,
+} from '@/shared/utils/skinTone'
 import { parseDateFlexible } from '@/shared/utils/scanDetail'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
@@ -128,23 +134,14 @@ export function buildHandAnalysisSummary(
 
 // ── 사이드바에 보여 줄 손 분석 기록 미리보기 (대표 피부색·톤·추천 컬러 6개·날짜) ──
 
-export type SkinToneKind = 'warm' | 'cool' | 'neutral'
-
 export type HandRecordPreview = {
     skinToneHex: string | null
+    // 베이스 이름 (예: 핑크 베이스)
     toneLabel: string | null
-    // 웜/쿨/뉴트럴 — 톤 이름을 각자 어울리는 글자색으로 보여 준다
-    toneKind: SkinToneKind | null
+    // 핑크/뉴트럴/옐로우 — 제목(대표 피부색 헥스값)의 바탕을 이 베이스 색으로 칠한다
+    baseKind: SkinBaseKind | null
     palette: string[]
     dateLabel: string
-}
-
-function toneKindOf(toneLabel: string | null): SkinToneKind | null {
-    if (!toneLabel) return null
-    if (toneLabel.startsWith('웜')) return 'warm'
-    if (toneLabel.startsWith('쿨')) return 'cool'
-    if (toneLabel.startsWith('뉴트럴')) return 'neutral'
-    return null
 }
 
 type HandRecordSource = {
@@ -170,10 +167,9 @@ export function formatRecordDate(raw: string | null | undefined): string {
 /** 마이페이지 손 분석 기록 줄(ScanSessionRow)과 같은 기준 — 정렬한 추천 컬러에서 고르게 6색을 뽑는다 */
 export function buildHandRecordPreview(source: HandRecordSource): HandRecordPreview {
     const skinToneHex = source.skinToneHex ?? null
-    const toneLabel =
-        (skinToneAnalysisFromMetrics(source.tone ?? null, source.warmness ?? null, source.brightness ?? null, source.saturation ?? null)
-            ?.tone.label ??
-            (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null))?.replace(/\s+/g, '') ?? null
+    const skinAnalysis =
+        skinToneAnalysisFromMetrics(source.tone ?? null, source.warmness ?? null, source.brightness ?? null, source.saturation ?? null) ??
+        (skinToneHex ? analyzeSkinTone(skinToneHex) : null)
     const colors = source.recommendedColors?.length
         ? source.recommendedColors
         : skinToneHex
@@ -181,8 +177,8 @@ export function buildHandRecordPreview(source: HandRecordSource): HandRecordPrev
             : []
     return {
         skinToneHex,
-        toneLabel,
-        toneKind: toneKindOf(toneLabel),
+        toneLabel: skinAnalysis?.tone.label ?? null,
+        baseKind: skinAnalysis?.baseKind ?? null,
         palette: pickSpreadColors(sortRecommendedColors(colors), 6),
         dateLabel: formatRecordDate(source.scannedAt),
     }

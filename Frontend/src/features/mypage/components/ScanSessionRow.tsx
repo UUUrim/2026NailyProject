@@ -5,6 +5,7 @@ import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { type ScanSession } from '@/shared/utils/scanDetail'
 import { formatMetricCurve, formatDateTimeFull } from '@/features/mypage/shared'
 import { RowActionMenu } from '@/features/mypage/components/RowActionMenu'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 
 type ScanSessionRowProps = {
     session: ScanSession
@@ -35,10 +36,9 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
     const skinHex = session.skinToneHex
-    const toneLabel = (
-        skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
-        (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
-    )?.replace(/\s+/g, '') ?? '미분석'
+    const skinAnalysis =
+        skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation) ??
+        (skinHex ? analyzeSkinTone(skinHex) : null)
     // 화면 표시용으로 정렬한 추천 컬러(sortRecommendedColors: 비슷한 색끼리 잇는 TSP 경로)에서
     // 균등 간격으로 6색만 뽑아 미리보기로 쓴다 — 경로 전체에서 고르게 뽑으니 짧은 스와치에도 서로
     // 다른 색과 밝기가 골고루 섞여 보이고, 미리보기도 같은 순서를 따른다.
@@ -74,7 +74,14 @@ export const ScanSessionRow = memo(function ScanSessionRow({
                 aria-hidden="true"
             />
             <div className="mypage-x__scan-info">
-                <p className="mypage-x__scan-season">{toneLabel}</p>
+                {/* 제목 — 베이스 이름, 바탕은 핑크/뉴트럴/옐로우 베이스 색 */}
+                <p className="mypage-x__scan-season">
+                    {skinAnalysis ? (
+                        <SkinBaseTag kind={skinAnalysis.baseKind}>{skinAnalysis.tone.label}</SkinBaseTag>
+                    ) : (
+                        '미분석'
+                    )}
+                </p>
                 <p className="mypage-x__scan-metrics">{metricsLine}</p>
                 <p className="mypage-x__scan-shape-line">추천 쉐입: {shapeLabel ?? '미정'}</p>
                 {palettePreview.length > 0 && (

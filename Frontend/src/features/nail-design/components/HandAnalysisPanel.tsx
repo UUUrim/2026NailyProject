@@ -125,7 +125,7 @@ export function HandAnalysisPanel({
                                 <div className="design-chat-sidebar__tone-bars">
                                     <div className="design-chat-sidebar__tone-bar">
                                         <div className="design-chat-sidebar__tone-bar-head">
-                                            <span>톤</span>
+                                            <span>베이스</span>
                                             <span>{analysisSummary.skinToneAnalysis.tone.label}</span>
                                         </div>
                                         <div className="design-chat-sidebar__tone-bar-track design-chat-sidebar__tone-bar-track--tone">
