@@ -200,10 +200,8 @@ export function ScanDetailModal({ session, onClose }: Props) {
         const shapeEn = detail.shapeId
           ? getNailShape(detail.shapeId)?.labelEn ?? detail.shapeId
           : null
-        const lengthPct = Math.min(100, Math.max(8, (detail.avgLength / 18) * 100))
-        const widthPct = Math.min(100, Math.max(8, (detail.avgWidth / 14) * 100))
-        // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
-        const curvePct = Math.min(100, Math.max(8, (detail.avgCurve / 5) * 100))
+        // 막대는 스캔 서버의 5단계 평균 판정 위치(10/30/50/70/90%)만큼 채운다.
+        const { lengthPct, widthPct, curvePct } = detail
         const fingerList = detail.fingers.filter((f) => f.hand === fingerHand)
         // 세션 자체가 양손 스캔 페어링 결과라 leftScanId/rightScanId는 항상 둘 다 존재한다.
         // detail.fingers 유무로 탭을 판단하면, 한쪽 분석이 실패해서 손가락 데이터가 비어 있을 때

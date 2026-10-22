@@ -276,16 +276,10 @@ export function MyPageModals({
                 const displayStatus = getDisplayPrintStatus(printDetailOrder)
                 const statusKey = displayStatus.toLowerCase()
                 const hasLinkedScan = Boolean(printDetailOrder.leftScanId || printDetailOrder.rightScanId)
-                const lengthPct = printDetailScan
-                    ? Math.min(100, Math.max(8, (printDetailScan.avgLength / 18) * 100))
-                    : 0
-                const widthPct = printDetailScan
-                    ? Math.min(100, Math.max(8, (printDetailScan.avgWidth / 14) * 100))
-                    : 0
-                // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
-                const curvePct = printDetailScan
-                    ? Math.min(100, Math.max(8, (printDetailScan.avgCurve / 5) * 100))
-                    : 0
+                // 막대는 스캔 서버의 5단계 평균 판정 위치(10/30/50/70/90%)만큼 채운다.
+                const lengthPct = printDetailScan?.lengthPct ?? 0
+                const widthPct = printDetailScan?.widthPct ?? 0
+                const curvePct = printDetailScan?.curvePct ?? 0
 
                 const subtitle = formatDateTimeFull(printDetailOrder.orderedAt)
                     || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))

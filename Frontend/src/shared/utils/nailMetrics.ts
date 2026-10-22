@@ -1,7 +1,10 @@
-// 손톱 실측 평균값을 "평균보다 긴/짧은 편" 같은 비교 문구·percentile 막대로 바꾸는 공용 로직.
-// 전체 사용자 모집단 통계 API가 아직 없어, 성인 평균 손톱 규격을 고정 기준값으로 사용한다.
-// (mean: 기준 평균값, spread: 이 값만큼 벗어나면 percentile이 대략 상/하위 16% 지점에 닿도록 잡은 폭
-//  = 모집단 표준편차)
+import type { ScanResultResponse } from '@/entities/scan/api'
+
+// 손톱 평균 기준값과, 열 손가락 평균 판정을 "평균보다 긴/짧은 편" 같은 비교 문구·막대로 바꾸는 공용 로직.
+// 평균 판정 자체는 화면에서 계산하지 않고 스캔 서버(scan/nail_measurer.py classify_size_totals)가
+// 통합 measurements.json 상단 summary에 남긴 length_size/width_size/c_curve_size를 그대로 쓴다 (nailSummaryMetrics).
+// 아래 NAIL_BASELINE은 성인 평균 손톱 규격 고정값이다.
+// (mean: 기준 평균값, spread: 모집단 표준편차)
 //
 // cCurve는 0~1 지수가 아니라 스캔 파이프라인(scan/nail_measurer.py)이 내려주는 C-curve
 // sagitta 깊이(mm) — 손톱 너비에 걸친 단면 활이 얼마나 깊은지다. 기준값은 STANDARD_NAILS의
@@ -46,16 +49,84 @@ export const FINGER_SIZE_MM: { lengthMm: number; widthMm: number; cCurveMm: numb
   { lengthMm: 9.82, widthMm: 7.85, cCurveMm: 1.71 }, // 소지
 ]
 
-// 실측 평균값이 기준값(mean)에서 얼마나 벗어났는지를 0~100 percentile로 근사한다.
-// (표준정규분포 근사: 기준값에서 spread만큼 벗어나면 약 상/하위 16% 지점)
-export function percentileAgainstBaseline(value: number, baseline: { mean: number; spread: number }): number {
-  const z = (value - baseline.mean) / baseline.spread
-  const percentile = 50 + z * 34
-  return Math.round(Math.min(97, Math.max(3, percentile)))
+// 스캔 서버의 5단계 평균 판정 (손가락별 z-score = (실측 - 그 손가락 평균) / SD 를 -2/-1/+1/+2에서 나누고, 열 손가락 다수결)
+type NailSizeLevel = 'much_smaller' | 'smaller' | 'average' | 'larger' | 'much_larger'
+
+const NAIL_SIZE_LABELS: Record<'length' | 'width' | 'cCurve', Record<NailSizeLevel, string>> = {
+  length: {
+    much_smaller: '평균보다 많이 짧은 편',
+    smaller: '평균보다 짧은 편',
+    average: '평균 범위',
+    larger: '평균보다 긴 편',
+    much_larger: '평균보다 많이 긴 편',
+  },
+  width: {
+    much_smaller: '평균보다 많이 좁은 편',
+    smaller: '평균보다 좁은 편',
+    average: '평균 범위',
+    larger: '평균보다 넓은 편',
+    much_larger: '평균보다 많이 넓은 편',
+  },
+  cCurve: {
+    much_smaller: '평균보다 많이 완만한 편',
+    smaller: '평균보다 완만한 편',
+    average: '평균 범위',
+    larger: '평균보다 뚜렷한 편',
+    much_larger: '평균보다 많이 뚜렷한 편',
+  },
 }
 
-export function labelByPercentile(percentile: number, small: string, large: string, average: string): string {
-  if (percentile < 35) return small
-  if (percentile > 65) return large
-  return average
+// 판정 막대가 채워지는 정도(%) — 5단계를 고르게 나눈 칸의 가운데. 평균 범위가 딱 절반이다.
+const NAIL_SIZE_BAR_PERCENT: Record<NailSizeLevel, number> = {
+  much_smaller: 10,
+  smaller: 30,
+  average: 50,
+  larger: 70,
+  much_larger: 90,
+}
+
+// 측정값을 읽지 못했을 때 대신 보여 줄 열 손가락 여성 평균(mm) — 손가락별 여성 평균(FINGER_SIZE_MM = STANDARD_NAILS)을
+// 서버(scan/final_measurements.py)가 avg_*_mm을 만들 때처럼 평균 내 소수 둘째 자리로 반올림한 값 (11.48 / 10.07 / 2.32)
+const femaleAverageMm = (key: keyof (typeof FINGER_SIZE_MM)[number]) =>
+  Math.round((FINGER_SIZE_MM.reduce((sum, f) => sum + f[key], 0) / FINGER_SIZE_MM.length) * 100) / 100
+const FEMALE_AVERAGE_MM: Record<keyof typeof NAIL_SIZE_LABELS, number> = {
+  length: femaleAverageMm('lengthMm'),
+  width: femaleAverageMm('widthMm'),
+  cCurve: femaleAverageMm('cCurveMm'),
+}
+
+export type NailSummaryMetric = {
+  valueMm: number // 열 손가락 평균(mm) — 서버 summary 값, 읽지 못하면 여성 평균
+  label: string // 평균 판정 문구 — 판정을 읽지 못하면 average(평균 범위)
+  barPercent: number // 판정 막대 채움(%)
+}
+
+type ScanSummarySource = Pick<
+  ScanResultResponse,
+  'avgLengthMm' | 'avgWidthMm' | 'avgCurve' | 'lengthSize' | 'widthSize' | 'curveSize'
+>
+
+/** 열 손가락 평균 길이·너비·곡률과 평균 판정 — 통합 measurements.json 상단 summary 값이라 왼손/오른손 응답이 같다.
+ *  측정값을 읽지 못하면 여성 평균 수치, 판정을 읽지 못하면 average로 대체한다 (값·판정 각각 따로). */
+export function nailSummaryMetrics(left: ScanSummarySource | null, right: ScanSummarySource | null) {
+  const pick = <K extends keyof ScanSummarySource>(key: K): ScanSummarySource[K] | null => left?.[key] ?? right?.[key] ?? null
+  const metric = (axis: keyof typeof NAIL_SIZE_LABELS, valueMm: number | null, size: string | null): NailSummaryMetric => {
+    const level: NailSizeLevel = size && size in NAIL_SIZE_BAR_PERCENT ? (size as NailSizeLevel) : 'average'
+    return {
+      valueMm: valueMm ?? FEMALE_AVERAGE_MM[axis],
+      label: NAIL_SIZE_LABELS[axis][level],
+      barPercent: NAIL_SIZE_BAR_PERCENT[level],
+    }
+  }
+  return {
+    length: metric('length', pick('avgLengthMm'), pick('lengthSize')),
+    width: metric('width', pick('avgWidthMm'), pick('widthSize')),
+    cCurve: metric('cCurve', pick('avgCurve'), pick('curveSize')),
+  }
+}
+
+/** 평균 판정 한줄 요약 */
+export function nailSummaryComment(metrics: ReturnType<typeof nailSummaryMetrics>): string {
+  const { length, width, cCurve } = metrics
+  return `손톱 길이는 ${length.label}이고 너비는 ${width.label}이며, 곡률(C-curve)은 ${cCurve.label}입니다.`
 }
