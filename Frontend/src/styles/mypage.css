@@ -1099,12 +1099,19 @@
 
 .mypage-x__scan-season {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 800;
+  font-size: 0.98rem;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.25;
-  /* 제목은 베이스 이름(SkinBaseTag — 검정 글자, 바탕은 베이스 색). 분석값이 없을 때의 '미분석'도 검정 */
-  color: #1a1a1a;
+  /* 제목은 베이스 이름(SkinBaseTag, 바탕은 베이스 색) — 글자는 아래 수치·쉐입 줄(#555)과 어우러지게 한 단계만 진한 회색 */
+  color: #444;
+}
+
+/* 바탕 알약이 글자를 넉넉히 감싸도록 여백을 조금 넓히고, 굵기도 한 단계 낮춘다 */
+.mypage-x__scan-season .skin-base-tag {
+  padding: 0.2em 0.78em;
+  color: inherit;
+  font-weight: 700;
 }
 
 .mypage-x__scan-metrics {
