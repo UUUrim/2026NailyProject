@@ -87,6 +87,7 @@ export function captureFill(status: CaptureStatus, ratio: number): number {
 
 /** 탑뷰 가이드 오버레이 단계 — 가이드 선 위치와는 무관, 표시 방식만 바뀐다. */
 export function toGuidePhase(status: CaptureStatus): FingerGuidePhase {
+  if (status === 'switching') return 'hidden'
   if (status === 'ready' || status === 'capturing') return 'ready'
   if (status === 'measuring' || status === 'unsteady') return 'measuring'
   return 'place'

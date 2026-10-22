@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { CameraSetupPreview } from '@/features/hand-scan/components/CameraSetupPreview'
+import { TopViewStream } from '@/features/hand-scan/components/TopViewStream'
 import { TopViewFingerGuide } from '@/features/hand-scan/components/TopViewFingerGuide'
 import { TopViewNailMeasure } from '@/features/hand-scan/components/TopViewNailMeasure'
 import { FeedScanState } from '@/features/hand-scan/components/FeedScanState'
@@ -88,13 +89,10 @@ export function HandScanPageContent() {
             </header>
 
             <div className="hand-scan-fs__feeds">
-              {/* 탑뷰: 스캔 서버 MJPEG 스트림 + 손가락/큐티클 가이드(프론트에서 그림) */}
+              {/* 탑뷰: 스캔 서버 MJPEG 스트림 + 손가락/큐티클 가이드(프론트에서 그림).
+                  지지대가 가이드 가운데에 오도록 영상은 화면에서만 확대·이동한다 (TopViewStream) */}
               <div className="hand-scan-fs__feed">
-                <img
-                    src={`${SCAN_SERVER_URL}/stream/top`}
-                    className="hand-scan-fs__video"
-                    alt="탑뷰 스캔 피드"
-                />
+                <TopViewStream src={`${SCAN_SERVER_URL}/stream/top`} guide={topGuide} />
                 <TopViewFingerGuide
                     guide={topGuide}
                     finger={currentFinger}
