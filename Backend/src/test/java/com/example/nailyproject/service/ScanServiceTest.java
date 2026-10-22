@@ -5,6 +5,7 @@ import com.example.nailyproject.dto.request.ScanStartRequestDto;
 import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.User;
+import com.example.nailyproject.repository.DesignSessionRepository;
 import com.example.nailyproject.repository.HandScanRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +51,7 @@ class ScanServiceTest {
         webClientBuilder = mock(WebClient.Builder.class, RETURNS_DEEP_STUBS);
         service = new ScanService(
                 handScanRepository,
+                mock(DesignSessionRepository.class),
                 webClientBuilder,
                 mock(PrintOrderService.class),
                 new ScanResultFileService(results.toString()));
