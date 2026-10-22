@@ -55,6 +55,7 @@ const PROFILE_QUERY_KEY = ['mypage', 'profile'] as const
 type WorkspaceSnapshot = {
     canSelectSession: boolean
     fixedScanKey: string | null
+    printedScanKey: string | null
     selectedScanKey: string | null | undefined
     activeSessionId: number | null
     isAnalysisPanelOpen: boolean
@@ -118,6 +119,10 @@ export function useDesignChatWorkspace() {
         leftScanId?: number | null
         rightScanId?: number | null
         scanId?: number | null
+        // 출력 화면에서 넘어온 경우: 손 촬영에서 이어 온 출력인지, 네일 팁 출력에 쓴 기록
+        fromHandScan?: boolean
+        printedLeftScanId?: number | null
+        printedRightScanId?: number | null
         regenerate?: RegenerateNavState | null
     }
         | null) ?? null
@@ -136,17 +141,22 @@ export function useDesignChatWorkspace() {
         return { restored: null, liveSnapshot: null, background: null }
     })
 
-    // 손 촬영 → 출력에서 scanId를 콕 집어 넘겨준 경우(= 메인 "시작하기"로 이어진 흐름)엔 그때 분석한 기록에 고정하고,
-    // 단독으로 들어온 경우(사이드바·헤더 링크 등)에만 반영할 손 분석 기록을 고를 수 있다.
-    const [canSelectSession] = useState(
-        () => entry.restored?.canSelectSession ?? !(navState?.leftScanId || navState?.rightScanId || navState?.scanId),
+    // 손 촬영 → 출력에서 이어 온 경우(fromHandScan = 메인 "시작하기"로 이어진 흐름)엔 그때 촬영한 기록에 고정하고,
+    // 그 밖의 경우(헤더 등에서 바로 연 출력 화면, 사이드바·헤더 링크 등)엔 반영할 손 분석 기록을 고를 수 있다 —
+    // 출력 화면에서 넘어왔으면 첫 채팅은 출력에 쓴 기록으로 시작한다 (entryScanKey).
+    const [navScanKey] = useState<string | null>(() =>
+        entry.restored ? null : buildScanKey(navState?.leftScanId ?? navState?.scanId ?? null, navState?.rightScanId ?? null),
     )
+    const [canSelectSession] = useState(() => entry.restored?.canSelectSession ?? !(navState?.fromHandScan && navScanKey))
     const [fixedScanKey] = useState<string | null>(() =>
+        entry.restored ? entry.restored.fixedScanKey : canSelectSession ? null : navScanKey,
+    )
+    const entryScanKey = canSelectSession ? navScanKey : null
+    // 네일 팁 출력에 쓴 기록 — 분석 결과 패널에 따로 표시한다 (지금 채팅에 반영 중인 기록이어도 함께 표시)
+    const [printedScanKey] = useState<string | null>(() =>
         entry.restored
-            ? entry.restored.fixedScanKey
-            : canSelectSession
-                ? null
-                : buildScanKey(navState?.leftScanId ?? navState?.scanId ?? null, navState?.rightScanId ?? null),
+            ? entry.restored.printedScanKey
+            : buildScanKey(navState?.printedLeftScanId ?? null, navState?.printedRightScanId ?? null),
     )
 
     // ── 데이터 ──────────────────────────────────────────────────────────────
@@ -172,9 +182,10 @@ export function useDesignChatWorkspace() {
     const recentlyUsedScanKey = pickRecentlyUsedScanKey(chatSummariesQuery.data ?? [])
 
     // ── 지금 채팅에 반영 중인 손 분석 기록 ───────────────────────────────────
-    // undefined = 아직 정하지 못함 (단독 진입에서 기록 목록을 불러오는 중), null = 반영할 기록 없음
+    // undefined = 아직 정하지 못함 (단독 진입에서 기록 목록을 불러오는 중), null = 반영할 기록 없음.
+    // 출력 화면에서 넘어왔으면 그 기록으로 바로 시작한다
     const [selectedScanKey, setSelectedScanKey] = useState<string | null | undefined>(() =>
-        entry.restored ? entry.restored.selectedScanKey : canSelectSession ? undefined : fixedScanKey,
+        entry.restored ? entry.restored.selectedScanKey : canSelectSession ? entryScanKey ?? undefined : fixedScanKey,
     )
 
     // 결과 화면 "디자인 다시 생성하기"로 들어왔으면 그 디자인을 만든 채팅에 반영했던 기록을 그대로 쓴다
@@ -272,6 +283,7 @@ export function useDesignChatWorkspace() {
         workspaceSnapshot = {
             canSelectSession,
             fixedScanKey,
+            printedScanKey,
             selectedScanKey,
             activeSessionId,
             isAnalysisPanelOpen,
@@ -533,6 +545,7 @@ export function useDesignChatWorkspace() {
     const panelRecord = {
         isOtherRecord: isPanelOtherRecord,
         isFixedRecord: !canSelectSession && panelRecordKey === fixedScanKey,
+        isPrintedRecord: !!printedScanKey && panelRecordKey === printedScanKey,
         summary: isPanelOtherRecord ? otherRecordSummary : analysisSummary,
         preview: isPanelOtherRecord
             ? recordPreviewByKey.get(panelScanKey) ??

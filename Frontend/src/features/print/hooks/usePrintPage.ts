@@ -60,6 +60,18 @@ export function usePrintPage() {
         () => (scansQuery.data ?? []).filter(isFullyAnalyzedSession),
         [scansQuery.data],
     )
+    // 이전 화면(손 촬영 결과·재스캔 안내 카드)에서 지정해 넘겨준 기록
+    const preselectedSession = useMemo(
+        () =>
+            preselect
+                ? sessions.find(
+                    (s) =>
+                        (preselect.leftScanId != null && s.leftScanId === preselect.leftScanId) ||
+                        (preselect.rightScanId != null && s.rightScanId === preselect.rightScanId),
+                ) ?? null
+                : null,
+        [sessions, preselect],
+    )
     const [selectedKey, setSelectedKey] = useState<string | null>(snapshot?.selectedKey ?? null)
     const [selectedShape, setSelectedShape] = useState<string | null>(snapshot?.selectedShape ?? null)
     // 네일팁 길이(mm) - 쉐입이 바뀌면 그 쉐입의 기본 연장 길이로 다시 맞춘다(아래 handleSelectSession/
@@ -131,14 +143,7 @@ export function usePrintPage() {
         }
 
         // 이전 화면(재스캔 안내 카드 등)에서 특정 스캔을 지정해 넘어온 경우 그 기록을 우선 선택
-        const preselected = preselect
-            ? sessions.find(
-                (s) =>
-                    (preselect.leftScanId != null && s.leftScanId === preselect.leftScanId) ||
-                    (preselect.rightScanId != null && s.rightScanId === preselect.rightScanId),
-            )
-            : null
-        const initial = preselected ?? sessions[0] ?? null
+        const initial = preselectedSession ?? sessions[0] ?? null
         if (initial) {
             const initialShape = initial.recommendedShape ?? initial.shape ?? 'round'
             setSelectedKey(initial.key)
@@ -163,13 +168,21 @@ export function usePrintPage() {
         sessionCurrentPage * SESSIONS_PAGE_SIZE,
     )
 
+    // 손 촬영(촬영 결과·재스캔 안내 카드)에서 기록을 지정해 넘어왔으면 디자인 채팅을 그 기록에 고정하고(fromHandScan),
+    // 헤더 등에서 바로 연 출력 화면이면 출력에 쓴 기록으로 첫 채팅을 시작한다.
+    // 출력에 쓴 기록(printed*)은 디자인 채팅의 분석 결과 패널에 따로 표시한다.
     const handleGoToDesign = () => {
         if (!selectedSession) return
+        const fromHandScan = preselect?.leftScanId != null || preselect?.rightScanId != null
+        const chatSession = (fromHandScan ? preselectedSession : null) ?? selectedSession
         navigate('/design/chat', {
             state: {
-                scanId: selectedSession.leftScanId ?? selectedSession.rightScanId ?? null,
-                leftScanId: selectedSession.leftScanId,
-                rightScanId: selectedSession.rightScanId,
+                scanId: chatSession.leftScanId ?? chatSession.rightScanId ?? null,
+                leftScanId: chatSession.leftScanId,
+                rightScanId: chatSession.rightScanId,
+                fromHandScan,
+                printedLeftScanId: selectedSession.leftScanId,
+                printedRightScanId: selectedSession.rightScanId,
             },
         })
     }
