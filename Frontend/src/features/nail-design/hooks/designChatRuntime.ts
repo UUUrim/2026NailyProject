@@ -29,6 +29,8 @@ export type ForegroundChat = {
     isContextReady: boolean
     userName: string
     canSelectSession: boolean
+    // 고를 수 있는 손 분석 기록 수 (새 채팅 인사말에 쓴다)
+    recordCount: number
     analysis: ConversationAnalysis
     onSessionReady: (sessionId: number) => void
     onStartNewChat: () => void

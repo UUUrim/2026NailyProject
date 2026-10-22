@@ -145,11 +145,17 @@ function RecordPreviewView({ preview, size = 'md' }: { preview: HandRecordPrevie
     )
 }
 
-// 사이드바 위 손 분석 카드 배경 — 마이페이지 손 분석 결과 모달(ScanDetailModal) 위 카드와 같은, 대표 피부색이 은은하게 번지는
-// 그라데이션. 모달은 흰 판 위라 같은 색이 나도록 맨 아래에 흰색을 깐다. 헥스값이 없으면 원래 배경 그대로.
-function skinToneCardBackground(hex: string | null): CSSProperties | undefined {
-    if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return undefined
-    return { background: `linear-gradient(145deg, ${hex}22 0%, #fff 48%, ${hex}14 100%), #fff` }
+const isSkinToneHex = (hex: string | null): hex is string => !!hex && /^#[0-9a-f]{6}$/i.test(hex)
+
+// 사이드바 위 손 분석 카드 — 배경은 마이페이지 손 분석 결과 모달(ScanDetailModal) 위 카드와 같은, 대표 피부색이 은은하게 번지는
+// 그라데이션(모달은 흰 판 위라 같은 색이 나도록 맨 아래에 흰색을 깐다), 테두리는 배경처럼 연한 대표 피부색(.has-tone, 불투명도 30%).
+// 헥스값이 없으면 원래 배경·테두리 그대로.
+function skinToneCardStyle(hex: string | null): CSSProperties | undefined {
+    if (!isSkinToneHex(hex)) return undefined
+    return {
+        background: `linear-gradient(145deg, ${hex}22 0%, #fff 48%, ${hex}14 100%), #fff`,
+        '--dcw-record-border': `${hex}4d`,
+    } as CSSProperties
 }
 
 const DESIGN_STATUS_LABELS: Record<ChatDesignStatus, string> = {
@@ -619,13 +625,9 @@ type DesignChatSidebarProps = {
     currentScanKey: string | null
     currentRecordPreview: HandRecordPreview | null
     recordPreviewByKey: Map<string, HandRecordPreview>
-    // 분석 결과 상세 패널에 지금 채팅의 기록을 띄워 두었는지 — 위쪽 버튼이 '분석 결과 상세 닫기'가 된다
+    // 분석 결과 상세 패널을 열어 두었는지 — 위쪽 버튼이 '분석 결과 상세 닫기'가 된다
     isCurrentRecordPanelOpen: boolean
     onToggleAnalysisPanel: () => void
-    // 분석 결과 상세 패널에 띄운 기록 (닫혀 있으면 null) — 채팅 이력에서 그 기록 줄을 강조한다
-    panelRecordKey: string | null
-    // 채팅 이력의 분석 기록 줄을 누르면 그 기록의 분석 결과 상세를 연다
-    onViewRecord: (scanKey: string) => void
     // 채팅 이력
     historyGroups: ChatHistoryGroup[]
     isHistoryLoading: boolean
@@ -663,8 +665,6 @@ export function DesignChatSidebar({
     recordPreviewByKey,
     isCurrentRecordPanelOpen,
     onToggleAnalysisPanel,
-    panelRecordKey,
-    onViewRecord,
     historyGroups,
     isHistoryLoading,
     activeSessionId,
@@ -680,11 +680,14 @@ export function DesignChatSidebar({
 
     // 분석 기록별 채팅 이력 펼치기/접기
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups)
-    const toggleGroup = (groupKey: string) => {
+    // collapsed를 주지 않으면 지금과 반대로 바꾼다
+    const toggleGroup = (groupKey: string, collapsed?: boolean) => {
         setCollapsedGroups((prev) => {
+            const shouldCollapse = collapsed ?? !prev.has(groupKey)
+            if (shouldCollapse === prev.has(groupKey)) return prev
             const next = new Set(prev)
-            if (next.has(groupKey)) next.delete(groupKey)
-            else next.add(groupKey)
+            if (shouldCollapse) next.add(groupKey)
+            else next.delete(groupKey)
             try {
                 window.localStorage.setItem(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify([...next]))
             } catch {
@@ -696,10 +699,12 @@ export function DesignChatSidebar({
 
     // 아직 채팅이 없는 분석 기록 — 4개 이상 쌓이고 채팅이 있는 묶음도 있으면 이력 맨 아래 '채팅 없는 분석 기록 N개'로 접어 둔다
     // (채팅이 하나도 없을 때는 기록이 이력의 전부라 접지 않는다). 펼침은 이번 화면에서만 기억한다.
+    // 지금 채팅에 반영 중인 기록은 채팅이 없어도 접어 두지 않는다 — 어느 기록을 반영 중인지 늘 보이게
     const [isEmptyRecordsOpen, setIsEmptyRecordsOpen] = useState(false)
-    const emptyRecordGroups = historyGroups.filter((group) => group.chats.length === 0)
+    const isBundlable = (group: ChatHistoryGroup) => group.chats.length === 0 && !(group.scanKey && group.scanKey === currentScanKey)
+    const emptyRecordGroups = historyGroups.filter(isBundlable)
     const shouldBundleEmptyRecords = emptyRecordGroups.length >= 4 && emptyRecordGroups.length < historyGroups.length
-    const listedGroups = shouldBundleEmptyRecords ? historyGroups.filter((group) => group.chats.length > 0) : historyGroups
+    const listedGroups = shouldBundleEmptyRecords ? historyGroups.filter((group) => !isBundlable(group)) : historyGroups
 
     // 새 채팅 옆 '다른 분석 기록으로 새 채팅' — 지금 기록 말고 + 로 새 채팅을 열 수 있는 기록이 있을 때만 보인다.
     // 누르면 접어 둔 기록까지 펼치고, 다른 기록의 + 를 잠깐 깜빡여 어디서 고르는지 알려 준다.
@@ -769,37 +774,60 @@ export function DesignChatSidebar({
     )
 
     // 채팅 이력의 분석 기록 묶음 하나 — 머리(기록 · 날짜 · 펼치기 화살표 · +)와 그 기록의 채팅 목록.
-    // 기록 줄을 누르면 그 기록의 분석 결과 상세를 열고(보기만 — 지금 채팅의 기록은 그대로), 화살표로 채팅 목록을 펼치거나 접는다.
+    // 다른 기록의 줄을 누르면 그 기록의 채팅 목록을 펼치고 가장 최근에 한 채팅을 연다 (채팅이 없으면 그 기록으로 새 채팅 — + 와 같다).
+    // 그러면 지금 채팅의 기록이 바뀌어 사이드바 위 손 분석 카드도 그 기록으로 바뀐다. 지금 채팅에 반영 중인 기록의 줄은 접힌 채팅 목록을 펼친다.
+    // 기록 줄은 채팅 목록을 펼치기만 하고, 접는 건 화살표 버튼으로만 한다.
+    // (분석 결과 상세 패널은 기록 줄이 아니라 위쪽 '분석 결과 상세 보기'로만 연다)
+    // 지금 채팅에 반영 중인 기록은 피부색 동그라미에 깜빡이는 핑크 고리를 두른다.
     const renderHistoryGroup = (group: ChatHistoryGroup) => {
         const hasChats = group.chats.length > 0
         const isGroupCollapsed = hasChats && collapsedGroups.has(group.key)
         const groupScanKey = group.scanKey
         const isHinted = recordHintId > 0 && group.canStartChat && groupScanKey !== currentScanKey
-        const isViewing = !!groupScanKey && groupScanKey === panelRecordKey
+        const isCurrent = !!groupScanKey && groupScanKey === currentScanKey
         const foldLabel = isGroupCollapsed ? '채팅 목록 펼치기' : '채팅 목록 접기'
+        // 기록 줄을 눌렀을 때 하는 일과 그 설명
+        const recordAction = isCurrent
+            ? isGroupCollapsed
+                ? { label: '채팅 목록 펼치기', run: () => toggleGroup(group.key, false) }
+                : null
+            : hasChats
+                ? {
+                    label: '이 분석 기록의 최근 채팅 열기',
+                    run: () => {
+                        toggleGroup(group.key, false)
+                        onOpenChat(group.chats[0])
+                    },
+                }
+                : group.canStartChat && groupScanKey
+                    ? { label: '이 분석 기록으로 새 채팅', run: () => onStartChatWithRecord(groupScanKey) }
+                    : null
         return (
             <div key={group.key} className={`dcw-history__group${isGroupCollapsed ? ' is-collapsed' : ''}`}>
-                <div className={`dcw-history__group-head${isHinted ? ' is-hinted' : ''}${isViewing ? ' is-viewing' : ''}`}>
+                <div className={`dcw-history__group-head${isHinted ? ' is-hinted' : ''}${isCurrent ? ' is-current' : ''}`}>
                     {group.preview && groupScanKey ? (
                         <button
                             type="button"
                             className="dcw-history__group-main"
-                            onClick={() => onViewRecord(groupScanKey)}
-                            aria-pressed={isViewing}
-                            aria-label={`${group.preview.dateLabel} 손 분석 결과 상세 ${isViewing ? '닫기' : '보기'}`}
-                            title={isViewing ? '분석 결과 상세 닫기' : '이 분석 기록의 결과 상세 보기'}
+                            onClick={recordAction?.run}
+                            disabled={!recordAction}
+                            aria-expanded={isCurrent && hasChats ? !isGroupCollapsed : undefined}
+                            aria-label={`${group.preview.dateLabel} 손 분석 기록${isCurrent ? ' (지금 채팅에 반영 중)' : ''}${
+                                recordAction ? ` — ${recordAction.label}` : ''
+                            }`}
+                            title={recordAction?.label}
                         >
                             <RecordPreviewView preview={group.preview} size="sm" />
                         </button>
                     ) : (
-                        // 기록 없이 만든 채팅·목록에 없는 기록 — 띄울 분석 결과가 없어서 누르면 채팅 목록을 펼치거나 접는다
+                        // 기록 없이 만든 채팅·목록에 없는 기록 — 누르면 접힌 채팅 목록을 펼친다 (접는 건 화살표 버튼으로만)
                         <button
                             type="button"
                             className="dcw-history__group-main"
-                            onClick={() => toggleGroup(group.key)}
-                            disabled={!hasChats}
+                            onClick={() => toggleGroup(group.key, false)}
+                            disabled={!isGroupCollapsed}
                             aria-expanded={hasChats ? !isGroupCollapsed : undefined}
-                            title={hasChats ? foldLabel : undefined}
+                            title={isGroupCollapsed ? '채팅 목록 펼치기' : undefined}
                         >
                             <span className="dcw-history__group-label">{group.label}</span>
                         </button>
@@ -936,7 +964,10 @@ export function DesignChatSidebar({
                             </div>
                         ) : currentRecordPreview ? (
                             <div className="dcw-analysis__record">
-                                <div className="dcw-analysis__card" style={skinToneCardBackground(currentRecordPreview.skinToneHex)}>
+                                <div
+                                    className={`dcw-analysis__card${isSkinToneHex(currentRecordPreview.skinToneHex) ? ' has-tone' : ''}`}
+                                    style={skinToneCardStyle(currentRecordPreview.skinToneHex)}
+                                >
                                     <RecordPreviewView preview={currentRecordPreview} />
                                     {/* 바꿀 수 없는 기록 — 이유는 마우스를 올리면 보이는 설명(title)으로만 알려 준다 */}
                                     {!canSelectSession && (

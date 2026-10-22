@@ -435,6 +435,7 @@ export function useDesignChatWorkspace() {
             isContextReady,
             userName,
             canSelectSession,
+            recordCount: selectableSessions.length,
             analysis,
             onSessionReady: handleSessionReady,
             onStartNewChat: () => startNewChat(),
@@ -484,70 +485,21 @@ export function useDesignChatWorkspace() {
             .sort((a, b) => order(a) - order(b))
     }, [chatSummariesQuery.data, scanSessionsQuery.data, recordPreviewByKey, selectableSessions, canSelectSession, fixedScanKey])
 
-    // ── 분석 결과 상세 패널: 지금 채팅의 기록(사이드바 위 버튼) 또는 채팅 이력에서 누른 기록 ──────────
-    // 이력의 기록 줄을 누르면 그 기록을 띄운다 (보기만 — 지금 채팅의 기록은 그대로). null = 지금 채팅의 기록을 따라간다
-    const [panelScanKey, setPanelScanKey] = useState<string | null>(null)
-    const panelRecordKey = panelScanKey ?? selectedScanKey ?? null
-    const isPanelOtherRecord = panelScanKey !== null && panelScanKey !== selectedScanKey
-    const panelAnalysisQuery = useQuery({
-        queryKey: ['scans', 'hand-analysis', panelScanKey],
-        queryFn: () => fetchHandAnalysis(panelScanKey as string),
-        enabled: isAnalysisPanelOpen && isPanelOtherRecord,
-        staleTime: Infinity,
-    })
-    const panelLeftAnalysis = isPanelOtherRecord ? panelAnalysisQuery.data?.leftAnalysis ?? null : null
-    const panelRightAnalysis = isPanelOtherRecord ? panelAnalysisQuery.data?.rightAnalysis ?? null : null
-    const otherRecordSummary = useMemo(
-        () => buildHandAnalysisSummary(panelLeftAnalysis, panelRightAnalysis),
-        [panelLeftAnalysis, panelRightAnalysis],
-    )
-    const isPanelLoading = isPanelOtherRecord && panelAnalysisQuery.isPending
+    // ── 분석 결과 상세 패널: 지금 채팅에 반영 중인 기록 ──────────────────────────────────────────────
+    // 사이드바의 '분석 결과 상세 보기'(접힌 줄에서는 손 아이콘)로만 열고 닫는다 — 채팅 이력의 기록 줄은 그 기록의 채팅을 연다.
+    // 다른 기록의 채팅을 열면 지금 채팅의 기록이 바뀌므로, 열려 있던 패널도 그 기록으로 바뀐다.
     const panelRecord = {
-        isOtherRecord: isPanelOtherRecord,
-        isFixedRecord: !canSelectSession && panelRecordKey === fixedScanKey,
-        summary: isPanelOtherRecord ? otherRecordSummary : analysisSummary,
-        preview: isPanelOtherRecord
-            ? recordPreviewByKey.get(panelScanKey) ??
-              buildHandRecordPreviewFromAnalysis({ leftAnalysis: panelLeftAnalysis, rightAnalysis: panelRightAnalysis })
-            : currentRecordPreview,
-        isLoading: isPanelLoading,
-        // 불러오지 못한 기록 (분석 결과가 지워진 등) — 지금 채팅의 기록이 없을 때의 "손 촬영하러 가기"와 구분한다
-        loadFailed: isPanelOtherRecord && !isPanelLoading && !otherRecordSummary,
-        // 이력의 + 와 같은 조건으로 '이 기록으로 새 채팅'을 보여 준다
-        canStartChat: isPanelOtherRecord && !!historyGroups.find((group) => group.scanKey === panelScanKey)?.canStartChat,
+        isFixedRecord: !canSelectSession && selectedScanKey === fixedScanKey,
+        summary: analysisSummary,
+        preview: currentRecordPreview,
     }
 
-    const closeAnalysisPanel = () => {
-        setIsAnalysisPanelOpen(false)
-        setPanelScanKey(null)
-    }
+    const closeAnalysisPanel = () => setIsAnalysisPanelOpen(false)
 
-    /** 사이드바 위 '분석 결과 상세 보기' — 지금 채팅의 기록을 열고 닫는다 (다른 기록을 보던 중이면 지금 기록으로 바꿔 보여 준다) */
+    /** 사이드바 위 '분석 결과 상세 보기' — 지금 채팅의 기록을 열고 닫는다 */
     const toggleCurrentRecordPanel = () => {
         setIsMobileSidebarOpen(false)
-        if (isAnalysisPanelOpen && !isPanelOtherRecord) {
-            closeAnalysisPanel()
-            return
-        }
-        setPanelScanKey(null)
-        setIsAnalysisPanelOpen(true)
-    }
-
-    /** 채팅 이력의 분석 기록 줄 — 그 기록의 분석 결과 상세를 연다 (이미 그 기록을 띄워 두었으면 닫는다) */
-    const viewRecord = (scanKey: string) => {
-        setIsMobileSidebarOpen(false)
-        if (isAnalysisPanelOpen && panelRecordKey === scanKey) {
-            closeAnalysisPanel()
-            return
-        }
-        setPanelScanKey(scanKey)
-        setIsAnalysisPanelOpen(true)
-    }
-
-    /** 패널의 '이 기록으로 새 채팅' — 패널이 채팅을 덮는 화면에서는 새 채팅이 보이도록 패널을 닫는다 */
-    const startChatWithPanelRecord = () => {
-        if (!panelScanKey || !startChatWithRecord(panelScanKey)) return
-        if (window.matchMedia('(max-width: 1180px)').matches) closeAnalysisPanel()
+        setIsAnalysisPanelOpen((prev) => !prev)
     }
 
     return {
@@ -575,15 +527,11 @@ export function useDesignChatWorkspace() {
         historyGroups,
         isHistoryLoading: chatSummariesQuery.isPending,
         isAnalysisPanelOpen,
-        // 패널에 지금 채팅의 기록을 띄워 두었는지 (사이드바 위 버튼이 '분석 결과 상세 닫기'가 된다)
-        isCurrentRecordPanelOpen: isAnalysisPanelOpen && !isPanelOtherRecord,
-        // 패널에 띄운 기록 — 채팅 이력에서 그 기록 줄을 강조한다
-        panelRecordKey: isAnalysisPanelOpen ? panelRecordKey : null,
+        // 패널을 열어 두었는지 (사이드바 위 버튼이 '분석 결과 상세 닫기'가 된다)
+        isCurrentRecordPanelOpen: isAnalysisPanelOpen,
         panelRecord,
         toggleCurrentRecordPanel,
-        viewRecord,
         closeAnalysisPanel,
-        startChatWithPanelRecord,
         isSidebarCollapsed,
         setIsSidebarCollapsed,
         isMobileSidebarOpen,

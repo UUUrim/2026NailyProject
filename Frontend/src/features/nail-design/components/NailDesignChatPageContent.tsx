@@ -52,8 +52,6 @@ export function NailDesignChatPageContent() {
                 recordPreviewByKey={workspace.recordPreviewByKey}
                 isCurrentRecordPanelOpen={workspace.isCurrentRecordPanelOpen}
                 onToggleAnalysisPanel={workspace.toggleCurrentRecordPanel}
-                panelRecordKey={workspace.panelRecordKey}
-                onViewRecord={workspace.viewRecord}
                 historyGroups={workspace.historyGroups}
                 isHistoryLoading={workspace.isHistoryLoading}
                 activeSessionId={workspace.activeSessionId}
@@ -115,10 +113,10 @@ export function NailDesignChatPageContent() {
                         analysisSummary={panelRecord.summary}
                         dateLabel={panelRecord.preview?.dateLabel ?? ''}
                         isFixedRecord={panelRecord.isFixedRecord}
-                        isOtherRecord={panelRecord.isOtherRecord}
-                        isLoading={panelRecord.isLoading}
-                        loadFailed={panelRecord.loadFailed}
-                        onStartChat={panelRecord.canStartChat ? workspace.startChatWithPanelRecord : undefined}
+                        // 패널은 늘 지금 채팅에 반영 중인 기록을 보여 준다 (다른 기록은 채팅 이력의 기록 줄로 그 기록의 채팅을 연다)
+                        isOtherRecord={false}
+                        isLoading={false}
+                        loadFailed={false}
                         onClose={workspace.closeAnalysisPanel}
                         onGoToScan={() => workspace.goTo('/scan/hand')}
                     />

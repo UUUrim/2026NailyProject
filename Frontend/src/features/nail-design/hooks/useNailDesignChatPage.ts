@@ -574,6 +574,8 @@ type UseNailDesignChatPageParams = {
     userName: string
     // 손 촬영 → 출력에서 이어 온 흐름이면 false (그때 분석한 기록에 고정)
     canSelectSession: boolean
+    // 고를 수 있는(분석이 다 끝난) 손 분석 기록 수 — 새 채팅 인사말 마지막 줄을 정하는 데 쓴다 (모르면 여러 개로 본다)
+    recordCount?: number
     analysis: ConversationAnalysis
     onSessionReady?: (sessionId: number) => void
     onSaved?: (summary: ChatSummary) => void
@@ -595,6 +597,7 @@ export function useNailDesignChatPage({
     isContextReady,
     userName,
     canSelectSession,
+    recordCount,
     analysis,
     onSessionReady,
     onSaved,
@@ -1018,19 +1021,20 @@ export function useNailDesignChatPage({
         const greetingName = userName ? `${userName}님` : '회원님'
         // 마지막 줄은 진입 상황마다 다르다 —
         // 분석 결과를 못 불러왔으면(촬영/분석 기록 없음) 스캔을 권하고, 있으면 어느 기록을 반영하는지 알려 준 뒤
-        // 단독으로 들어왔으면(기록을 고를 수 있음) 다른 기록으로 새 채팅을 여는 법(채팅 이력의 +)을,
-        // 손 촬영 → 출력에서 이어 온 흐름(그때 분석한 결과에 고정)이면 결과 다시 보기(사이드바 '분석 결과 상세 보기')를 안내한다.
+        // 단독으로 들어왔고 고를 수 있는 기록이 여러 개면 다른 기록으로 새 채팅을 여는 법(채팅 이력의 +)을,
+        // 기록이 하나뿐이거나 손 촬영 → 출력에서 이어 온 흐름(그때 분석한 결과에 고정)이면 결과 다시 보기(사이드바 '분석 결과 상세 보기')를 안내한다.
         const hasScanAnalysis = !!(leftAnalysis || rightAnalysis)
-        // 반영하는 기록은 피부톤과 대표 피부색 헥스값으로 알려 준다 — 예: "웜톤(#E8C4A8) 결과에 맞춰…"
-        const toneLabel = analysisSummary?.detectedToneLabel?.replace(/\s+/g, '') ?? null
+        // 반영하는 기록은 피부톤과 대표 피부색 헥스값으로 알려 준다 — 예: "옐로우 베이스(#E8C4A8) 결과에 맞춰…"
+        const toneLabel = analysisSummary?.detectedToneLabel ?? null
         const toneHex = analysisSummary?.skinToneHex?.toUpperCase() ?? null
         const recordName = toneLabel && toneHex ? `${toneLabel}(${toneHex})` : toneLabel ?? toneHex
         const recordLine = recordName ? `${recordName} 결과에 맞춰 디자인해 드릴게요.` : '선택한 손 분석 결과에 맞춰 디자인해 드릴게요.'
+        const hasOtherRecords = (recordCount ?? 2) > 1
         const guideLine = !hasScanAnalysis
             ? `손을 스캔하면 ${greetingName}의 손에 더욱 어울리는 디자인을 생성할 수 있어요.`
-            : canSelectSession
+            : canSelectSession && hasOtherRecords
                 ? `${recordLine} 다른 분석 기록으로 만들고 싶다면 왼쪽 채팅 이력에서 그 기록의 + 버튼을 눌러 주세요.`
-                : `${recordLine} 분석 결과는 왼쪽의 '분석 결과 상세 보기'에서 다시 확인할 수 있어요.`
+                : `${recordLine} 분석 결과는 왼쪽의 '분석 결과 상세 보기'에서 다시 확인하실 수 있어요.`
         setBubbles((prev) => [
             {
                 id: makeId(),
