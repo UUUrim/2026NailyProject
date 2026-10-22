@@ -680,6 +680,15 @@ export function DesignChatSidebar({
 
     // 분석 기록별 채팅 이력 펼치기/접기
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(readCollapsedGroups)
+
+    // 지금 채팅의 기록이 다른 기록으로 바뀌면(이력에서 다른 기록의 채팅을 연 때 등) 위쪽 손 분석 카드를 한 번 반짝여 바뀐 걸 알린다.
+    // 처음 기록을 정할 때(기록 없음 → 기록)는 반짝이지 않는다. 반짝임이 끝나면 지워서, 카드를 다시 그려도(검색을 닫는 등) 또 반짝이지 않게 한다.
+    const [shownScanKey, setShownScanKey] = useState(currentScanKey)
+    const [changedScanKey, setChangedScanKey] = useState<string | null>(null)
+    if (currentScanKey !== shownScanKey) {
+        setShownScanKey(currentScanKey)
+        setChangedScanKey(shownScanKey && currentScanKey ? currentScanKey : null)
+    }
     // collapsed를 주지 않으면 지금과 반대로 바꾼다
     const toggleGroup = (groupKey: string, collapsed?: boolean) => {
         setCollapsedGroups((prev) => {
@@ -965,8 +974,15 @@ export function DesignChatSidebar({
                         ) : currentRecordPreview ? (
                             <div className="dcw-analysis__record">
                                 <div
-                                    className={`dcw-analysis__card${isSkinToneHex(currentRecordPreview.skinToneHex) ? ' has-tone' : ''}`}
+                                    // 기록이 바뀌면 새로 그려 반짝임을 처음부터 다시 보여 준다
+                                    key={currentScanKey ?? undefined}
+                                    className={`dcw-analysis__card${isSkinToneHex(currentRecordPreview.skinToneHex) ? ' has-tone' : ''}${
+                                        changedScanKey && changedScanKey === currentScanKey ? ' is-changed' : ''
+                                    }`}
                                     style={skinToneCardStyle(currentRecordPreview.skinToneHex)}
+                                    onAnimationEnd={(e) => {
+                                        if (e.animationName.startsWith('dcw-record-changed')) setChangedScanKey(null)
+                                    }}
                                 >
                                     <RecordPreviewView preview={currentRecordPreview} />
                                     {/* 바꿀 수 없는 기록 — 이유는 마우스를 올리면 보이는 설명(title)으로만 알려 준다 */}

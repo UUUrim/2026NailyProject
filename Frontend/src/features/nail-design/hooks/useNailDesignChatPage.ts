@@ -1036,7 +1036,7 @@ export function useNailDesignChatPage({
         const guideLine = !hasScanAnalysis
             ? `손을 스캔하면 ${greetingName}의 손에 더욱 어울리는 디자인을 생성할 수 있어요.`
             : canSelectSession && hasOtherRecords
-                ? `${recordLine} 다른 분석 기록으로 만들고 싶다면 왼쪽 채팅 이력에서 그 기록의 + 버튼을 눌러 주세요.`
+                ? `${recordLine} 다른 분석 기록으로 만들고 싶다면 왼쪽에서 해당 기록의 + 버튼을 눌러 주세요.`
                 : `${recordLine} 분석 결과는 왼쪽의 '분석 결과 상세 보기'에서 다시 확인하실 수 있어요.`
         setBubbles((prev) => [
             {
