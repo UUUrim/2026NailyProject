@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import { useNavigate } from 'react-router-dom'
 import type { ScanResultResponse } from '@/entities/scan/api'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
+import type { SkinLevel } from '@/shared/utils/skinTone'
 import {
     createChatSession,
     sendChatMessage,
@@ -152,8 +153,10 @@ type GenerationContext = {
         avgLength: number
         avgWidth: number
         avgCurve: number
-        // scan-auto 전용: 대표 피부색 / 쉐입 이미지 + 추천 팔레트 전체 + 그 중 실제 반영된 색 + 반영된 무드/디자인 타입
+        // scan-auto 전용: 대표 피부색(+ 명도·채도) / 쉐입 이미지 + 추천 팔레트 전체 + 그 중 실제 반영된 색 + 반영된 무드/디자인 타입
         skinToneHex?: string | null
+        skinBrightnessLevel?: SkinLevel | null
+        skinSaturationLevel?: SkinLevel | null
         shapeImage?: string | null
         recommendedColors?: string[]
         usedColors?: string[]
@@ -1338,6 +1341,9 @@ export function useNailDesignChatPage({
                                 avgWidth: analysisSummary.avgWidth,
                                 avgCurve: analysisSummary.avgCurve,
                                 skinToneHex: analysisSummary.skinToneHex,
+                                // 결과 화면 피부 톤 카드에 베이스(toneLabel)와 함께 "고명도 · 중채도"처럼 보여 줄 명도·채도 단계 — "?" 패널과 같은 분석값
+                                skinBrightnessLevel: analysisSummary.skinToneAnalysis?.brightness.level ?? null,
+                                skinSaturationLevel: analysisSummary.skinToneAnalysis?.saturation.level ?? null,
                                 shapeImage: analysisSummary.shapeImage,
                                 // 추천 팔레트는 "?" 패널과 동일하게 정렬해서, 실제 반영된 색을 강조 표시한다.
                                 recommendedColors: sortRecommendedColors(

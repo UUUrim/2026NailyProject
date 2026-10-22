@@ -326,8 +326,11 @@ export function MyPageModals({
                         <section className="mypage-x__scanx-shape">
                             <div className="mypage-x__scanx-shape-copy">
                                 <p className="mypage-x__scanx-kicker">신청한 네일 팁 쉐입</p>
-                                <strong>{shapeLabel}</strong>
-                                {shapeEn && <span>{shapeEn}</span>}
+                                {/* 한글 이름 옆에 영어 이름을 작게 붙인다 (손 분석 결과 화면의 추천 쉐입 카드처럼) */}
+                                <strong className="mypage-x__scanx-shape-name">
+                                    {shapeLabel}
+                                    {shapeEn && <em>{shapeEn}</em>}
+                                </strong>
                                 <p className="mypage-x__scanx-shape-length">
                                     {printDetailOrder.tipExtensionMm != null && '연장 길이 '}
                                     <b>{formatTipExtension(printDetailOrder.tipExtensionMm)}</b>

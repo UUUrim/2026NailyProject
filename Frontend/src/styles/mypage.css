@@ -1869,6 +1869,22 @@
   color: #a08992;
 }
 
+/* 네일 팁 출력 상세 — 쉐입 한글 이름 옆에 영어 이름 */
+.mypage-x__scanx-shape-copy .mypage-x__scanx-shape-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.4rem;
+}
+
+.mypage-x__scanx-shape-name em {
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #a08992;
+}
+
 /* 신청한 팁 연장 길이 — 쉐입 이름 아래 작은 핑크 필 */
 .mypage-x__scanx-shape-length {
   display: inline-flex;
