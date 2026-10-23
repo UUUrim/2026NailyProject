@@ -30,7 +30,6 @@ import numpy as np
 
 from nail_measurer import (merge_hand_measurements, classify_size_totals,
                            recommend_nail_shape)
-from color_card import absolute_L
 from skin_color import (recommend_nail_colors, lab_to_rgb_hex, display_skin_lab,
                         brightness_ui, saturation_ui, base_tone)
 
@@ -208,17 +207,6 @@ def _skin_and_colors(all_nails: list) -> tuple:
         "fingerCount": len(metrics),
         "whiteBalancedFingers": sum(1 for n in metrics if (n.get("skin_wb") or {}).get("applied")),
     }
-    # 컬러 기준 카드(scan/color_card.py)가 읽힌 손가락이 있으면 카드 10칸의 [L, a, b] 중앙값을 남긴다 (참고용, 보정에는 아직 안 씀)
-    cards = [n["skin_card"] for n in metrics if n.get("skin_card")]
-    if cards:
-        skin["card"] = {"fingers": len(cards),
-                        "patches": {k: [round(float(np.median([c[k][i] for c in cards if k in c])), 2) for i in range(3)]
-                                    for k in cards[0]}}
-        # 카드 흰색에 맞춘 절대 밝기(L*): 손가락별로 같은 사진의 카드 흰색으로 환산해서 평균 (참고용, 화면 명도에는 아직 안 씀)
-        abs_L = [absolute_L(float(n["skin_L"]), float(n["skin_card"]["white"][0]))
-                 for n in metrics if n.get("skin_card") and n["skin_card"].get("white")]
-        if abs_L:
-            skin["LAbs"] = round(sum(abs_L) / len(abs_L), 2)
     return skin, [c["hex"] for c in result["best"]]
 
 
