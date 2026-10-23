@@ -101,6 +101,10 @@ WB_MAX_WHITE_CHANNEL = 247   # 한 채널이라도 이보다 높으면 포화(�
 # 카메라 원본이 실제 손과 가장 비슷했다 (2026-10-21). 예전 박스(검은 매트, 과노출)에서는 1이 맞았다.
 # 밝기 정규화(WB_TARGET_WHITE)는 이 값과 상관없이 그대로 적용된다.
 WB_COLOR_STRENGTH = 0.0
+# 마커 흰색 기준 밝기 정규화(마커 흰색을 WB_TARGET_WHITE로 맞추기)도 이 박스에서는 끈다: 밝은 손은 마커와 배경에도 빛을 되비춰서
+# 마커 흰색이 같이 올라가는데(2번 분 237, 1번 분 212, 4번 분 204), 그걸 기준으로 눌러 버리면 사람 사이의 밝기 차이가 63~68로
+# 거의 사라진다. 노출을 고정한 원본 밝기를 그대로 쓴다. 예전 박스(과노출)에서는 True가 맞았다.
+WB_BRIGHTNESS_NORMALIZE = False
 WB_GAIN_MIN, WB_GAIN_MAX = 0.75, 1.50      # 채널 사이 색 보정 이득 한계 (이 범위를 벗어나면 보정 안 함)
 # (새 박스는 마커 흰색이 푸른 쪽(예 195,221,226)이라 빨강 이득이 1.25~1.35 근처에서 오간다. 1.30이면 같은 스캔의
 #  어떤 손가락은 보정되고 어떤 손가락은 안 돼서 값이 섞인다 - 실제 스캔에서 엄지 하나가 보정이 빠져 색상각 64도로 튀었다.)
@@ -183,7 +187,7 @@ def white_balance_to_marker(image_bgr: np.ndarray, aruco_corners: np.ndarray, re
     # (조명이 너무 어둡거나 너무 밝으면) 믿기 어려우니 색 보정만 하고 밝기는 그대로 둔다.
     brightness = float(_srgb_to_lin(np.array([WB_TARGET_WHITE] * 3))[0]) / float(wl.mean())
     info["brightness_scale"] = round(brightness, 3)
-    if reference_bgr is not None or not (WB_BRIGHTNESS_MIN <= brightness <= WB_BRIGHTNESS_MAX):
+    if not WB_BRIGHTNESS_NORMALIZE or reference_bgr is not None or not (WB_BRIGHTNESS_MIN <= brightness <= WB_BRIGHTNESS_MAX):
         info["brightness_normalized"] = False
         brightness = 1.0
     else:
@@ -192,6 +196,95 @@ def white_balance_to_marker(image_bgr: np.ndarray, aruco_corners: np.ndarray, re
     info["gain"] = [round(float(g), 4) for g in gain]
 
     # 채널별 256단계 변환표(LUT)로 한 번에 적용 - 큰 사진에서도 빠르다. LUT는 BGR 순서.
+    levels = np.arange(256, dtype=np.float32)
+    lut = np.zeros((256, 1, 3), np.uint8)
+    for rgb_idx, bgr_idx in ((0, 2), (1, 1), (2, 0)):
+        lut[:, 0, bgr_idx] = np.round(_lin_to_srgb255(_srgb_to_lin(levels) * gain[rgb_idx])).astype(np.uint8)
+    info["applied"] = True
+    return cv2.LUT(image_bgr, lut), info
+
+
+# =============================================================================
+# 1-c. 흰 종이(배경) 기준 화이트밸런스 - 새 박스(흰 배경 + 받침대 위 마커)
+# =============================================================================
+# 카메라의 자동 화이트밸런스는 화면에 피부가 많이 보일수록 빨강을 깎는다. 같은 흰 종이가 빈 박스에서는 중성(RGB 149,152,150,
+# 빨강/파랑 0.99)인데 손가락 하나가 있으면 0.87~0.92, 손등이 크게 보이면 0.67~0.71로 푸르게 찍힌다 (노출을 -8로 고정해도
+# 마찬가지). 피부색도 같은 비율로 붉기가 깎여서 실제보다 채도가 낮게 나온다. 그래서 같은 사진 안의 흰 종이(손이 닿지 않는
+# 마커 아래 왼쪽 구역)를 중성 기준으로 삼아 색 쏠림을 되돌린다. 받침대 위 마커는 조명에 더 가까워 푸른빛이 강해서
+# 기준으로 쓰기 어렵다 (마커 기준 보정은 붉기가 과해진다: a* 12 -> 22).
+# (2026-10-21, 사람 4명 손가락 밴드 -8 고정: 채도 평균 오차 자연광 대비 2.6, 색상각 55~57도로 모임. 손등 사진은 이득이
+#  1.6~1.8로 커서 같은 사람도 채도 +-2, 색상각 +-2도 흔들린다 - 손가락만 있는 장면에서 쓴다.)
+PAPER_REF_MPP = 0.0866              # 아래 오프셋을 잰 기준 mm/px (다른 스케일이면 비례해서 늘린다)
+PAPER_PATCH_X = (120.0, 130.0)      # 기준 구역 가로: 마커 왼쪽 끝 + 120px ~ 마커 오른쪽 끝 + 130px
+PAPER_PATCH_Y = (150.0, 490.0)      # 기준 구역 세로: 마커 아래 끝 + 150px ~ + 490px (받침대 아래, 손이 안 닿는 흰 종이)
+PAPER_MIN_PIXELS = 20000
+PAPER_MIN_MEAN, PAPER_MAX_CHANNEL = 90.0, 247.0     # 너무 어둡거나 날아간 종이는 기준으로 안 씀
+PAPER_INLIER_TOL = 0.15                             # 구역 밝기 중앙값에서 이 비율(15%) 안쪽 픽셀을 "종이"로 본다 (그림자/가장자리 픽셀 제외)
+PAPER_MIN_INLIER = 0.70                             # 구역의 70% 이상이 종이로 보여야 기준으로 쓴다 (아니면 손/팔이 구역을 가린 것)
+PAPER_MAX_CAST = 0.6                                # 세 채널이 평균에서 이만큼(60%) 넘게 벗어나면 흰 종이가 아님
+PAPER_GAIN_MIN, PAPER_GAIN_MAX = 0.6, 2.2
+PAPER_WB_STRENGTH = 1.0                             # 0~1. 1 = 종이를 완전히 무채색으로
+
+
+def paper_white_rgb(image_bgr: np.ndarray, aruco_corners: np.ndarray, mpp: float):
+    """마커 아래 왼쪽 흰 종이 구역의 RGB(그림자/가장자리 픽셀을 뺀 중앙값)와 종이로 보이는 픽셀 비율. 구역이 화면 밖이면 (None, None).
+
+    구역 한쪽 모서리에 올리브색 받침대 그림자나 종이 가장자리가 조금 걸려도(밝기 표준편차가 커져도) 중앙값 주변의 대부분은
+    정상 종이라서, 표준편차로 통째로 버리지 않고 중앙값 근처 픽셀만 쓴다 (2026-10-21 스캔에서 10개 중 2개가 표준편차
+    23.0/22.7로 기준 22를 겨우 넘겨 보정에서 빠졌다)."""
+    pts = np.asarray(aruco_corners, dtype=np.float32).reshape(-1, 2)
+    if pts.shape[0] < 4 or not mpp or mpp <= 0:
+        return None, None
+    s = PAPER_REF_MPP / float(mpp)
+    H, W = image_bgr.shape[:2]
+    x0 = int(max(pts[:, 0].min() + PAPER_PATCH_X[0] * s, 0)); x1 = int(min(pts[:, 0].max() + PAPER_PATCH_X[1] * s, W))
+    y0 = int(max(pts[:, 1].max() + PAPER_PATCH_Y[0] * s, 0)); y1 = int(min(pts[:, 1].max() + PAPER_PATCH_Y[1] * s, H - 5))
+    if x1 - x0 < 60 or y1 - y0 < 60:
+        return None, None
+    patch = image_bgr[y0:y1, x0:x1].reshape(-1, 3)[:, ::-1].astype(np.float32)        # RGB
+    if patch.shape[0] < PAPER_MIN_PIXELS:
+        return None, None
+    lum = patch.mean(axis=1)
+    med = float(np.median(lum))
+    inlier = np.abs(lum - med) <= PAPER_INLIER_TOL * med
+    frac = float(inlier.mean())
+    white = np.median(patch[inlier], axis=0) if int(inlier.sum()) >= PAPER_MIN_PIXELS // 2 else np.median(patch, axis=0)
+    return white, frac
+
+
+def white_balance_to_paper(image_bgr: np.ndarray, aruco_corners: np.ndarray, mpp: float):
+    """흰 종이를 무채색으로 맞춘 (이미지 BGR uint8, 정보 dict). 밝기는 건드리지 않는다(채널 이득의 평균이 1).
+
+    보정하지 않은 경우에도 원본을 그대로 돌려주고 info["applied"]=False와 사유를 담는다.
+    info: {"applied", "reason", "white_rgb", "gain"(RGB), "method": "paper"}
+    """
+    info = {"applied": False, "reason": "", "white_rgb": None, "gain": None, "method": "paper"}
+    if aruco_corners is None:
+        info["reason"] = "no_marker"
+        return image_bgr, info
+    white, inlier_frac = paper_white_rgb(image_bgr, aruco_corners, mpp)
+    if white is None:
+        info["reason"] = "paper_patch_unavailable"
+        return image_bgr, info
+    info["white_rgb"] = [round(float(x), 1) for x in white]
+    if float(white.mean()) < PAPER_MIN_MEAN:
+        info["reason"] = "paper_too_dark"
+        return image_bgr, info
+    if float(white.max()) > PAPER_MAX_CHANNEL:
+        info["reason"] = "paper_clipped"
+        return image_bgr, info
+    if inlier_frac is not None and inlier_frac < PAPER_MIN_INLIER:
+        info["reason"] = "paper_patch_not_uniform"
+        return image_bgr, info
+    if float(np.max(np.abs(white / white.mean() - 1.0))) > PAPER_MAX_CAST:
+        info["reason"] = "paper_not_neutral_enough"
+        return image_bgr, info
+    wl = _srgb_to_lin(white)
+    gain = (float(wl.mean()) / wl) ** PAPER_WB_STRENGTH
+    if float(gain.min()) < PAPER_GAIN_MIN or float(gain.max()) > PAPER_GAIN_MAX:
+        info["reason"] = "gain_out_of_range"
+        return image_bgr, info
+    info["gain"] = [round(float(g), 4) for g in gain]
     levels = np.arange(256, dtype=np.float32)
     lut = np.zeros((256, 1, 3), np.uint8)
     for rgb_idx, bgr_idx in ((0, 2), (1, 1), (2, 0)):
@@ -296,17 +389,31 @@ def analyze_skin(image_bgr: np.ndarray, mask: np.ndarray,
 # =============================================================================
 # 3. 톤 판정 + 네일 컬러 추천
 # =============================================================================
-# 톤(웜/쿨/뉴트럴)은 피부 Lab의 색상각 h = atan2(b, a)로 판정한다. 값이 클수록 노란/황금빛(웜),
-# 작을수록 붉은/분홍빛(쿨)이다. 예전에는 b - 0.5a 한 숫자를 다른 카메라/조명에서 맞춘 기준(13.45/12.39)
-# 으로 잘랐는데, 과노출/조명 색 때문에 거의 항상 웜으로 쏠렸다.
+# 톤(웜/쿨/뉴트럴)은 노란기 점수 warm_score = b* - 0.5*a* (피부 Lab에서 노랑 성분에서 붉기의 절반을 뺀 값)로 판정한다.
+# 클수록 노란/웜, 작을수록 붉은/분홍빛(쿨). 색상각 h = atan2(b, a)(노랑과 붉기의 비율)로 판정하던 방식은 2026-10-21에
+# 이 점수로 바꿨다. 이유: 새 박스에서 정답을 아는 3명(겨울쿨, 겨울쿨, 봄 브라이트)을 정식 스캔해 보니 색상각 순서가
+# 정답과 맞지 않았다 (봄 브라이트 52.9도 < 겨울쿨 54.7도). 봄 브라이트인 사람은 노랑뿐 아니라 붉기도 높아서 비율이 겨울쿨과
+# 같아진다. 같은 3명과 자연광 사진 손등 4명(겨울쿨 둘, 봄 브라이트, 겨울/여름쿨 사이)의 b - 0.5a는 둘 다 봄 브라이트가
+# 가장 높게 나왔다 (스캔: 14.05 / 14.90 / 15.65, 자연광: 13.65 / 13.40 / 15.85 / 10.85).
+# (예전 카메라/조명에서도 이 점수를 썼었다: 과노출 때문에 웜으로 쏠려서 색상각으로 바꿨는데, 과노출이 고쳐지고 나니 색상각이
+#  구분을 못 해서 다시 이 점수로 돌아왔다.)
 #
-# [임시 기준] 아래 두 값은 사람 한 명(본인 손, 쿨톤이라고 본인이 판단)의 측정값과 동양인 피부 색상각의
-# 일반적인 범위(약 50~65도)를 참고해서 잡은 값이다. 같은 설정(촬영 직후 노출을 낮춘 확인용 사진 + 마커 흰색
-# 보정)으로 잰 이 사람의 색상각은 약 53~54도였고(3회 반복에서 +-1도), 과노출된 원래 사진을 그대로 쓰면
-# 76~77도(웜)로 잘못 나왔다. 톤을 아는 여러 사람을 같은 방식으로 스캔해서 맞춰야 한다. 바꿀 때는 여기 두 줄과
-# Frontend/src/shared/utils/skinTone.ts 의 WARMNESS_*_CUTOFF(같은 값)를 함께 바꾼다.
-TONE_HUE_COOL_MAX = 55.0   # 색상각이 이보다 작으면 쿨
-TONE_HUE_WARM_MIN = 63.0   # 색상각이 이보다 크면 웜 (둘 사이는 뉴트럴)
+# [임시 기준] 점이 3~4개뿐이다. 두 경계는 정답 쿨(스캔 최고 14.90)과 웜(스캔 15.65) 사이 15.27을 가운데로 잡은 값이고,
+# 한 사람 안에서 점수가 +-0.4 정도 흔들려서 경계 근처 사람은 뉴트럴로 나올 수 있다. 사람을 더 모아서 다시 맞춘다.
+TONE_SCORE_COOL_MAX = 15.1   # 점수가 이보다 작으면 쿨
+TONE_SCORE_WARM_MIN = 15.45  # 점수가 이보다 크면 웜 (둘 사이는 뉴트럴)
+
+# 프론트 슬라이더(Frontend/src/shared/utils/skinTone.ts)는 예전부터 warmness를 "색상각(도) 척도"로 읽고 쿨 경계를 55, 웜 경계를
+# 63으로 해석한다. 프론트를 바꾸지 않고 그대로 쓰도록, 새 점수를 그 척도로 환산해서 warmness로 내보낸다.
+# 쿨 경계 점수 -> 55, 웜 경계 점수 -> 63, 그 안쪽은 직선, 바깥은 점수 1당 3도씩 이어진다 (경계 폭이 좁아서 안쪽 기울기가
+# 가파르므로 바깥은 완만하게 잡아야 슬라이더가 양끝으로만 쏠리지 않는다).
+WARMNESS_SCALE_COOL = 55.0
+WARMNESS_SCALE_WARM = 63.0
+WARMNESS_SCALE_OUTSIDE_SLOPE = 3.0
+
+# (참고: 예전 색상각 기준. 지금은 판정에 쓰지 않는다.)
+TONE_HUE_COOL_MAX = 55.0
+TONE_HUE_WARM_MIN = 63.0
 
 # 피부 밝기/채도 구분은 네일 컬러 개수 배분에만 쓴다 (nail_palette.SKIN_*_L 참고)
 
@@ -314,17 +421,21 @@ TONE_HUE_WARM_MIN = 63.0   # 색상각이 이보다 크면 웜 (둘 사이는 �
 # =============================================================================
 # 3-b. 사용자에게 보여 주는 피부색 보정 (새 박스 전용 1점 보정)
 # =============================================================================
-# 새 박스에서 카메라 원본으로 잰 피부색(L 65, a 12.8, b 19.5, 색상각 57도)은 실제보다 어둡고 칙칙해 보였다.
-# 카메라가 흰 배경에 노출을 맞춰서 피부가 어둡게 찍히고, 채도도 낮게 나오기 때문이다. 본인 손 하나를 기준으로
-# 후보 색을 눈으로 비교해서 아래 값을 정했다 (2026-10-21):
-#   1차(L 80, 채도 x1.8, 색상각 +5도)는 #FFB681로 너무 누렇고 진했다 (빨강 채널이 255로 잘리기도 했다).
-#   2차 시트에서 L 76 / 색상각 +0 / 채도 x1.4(#EBAE8A)와 x1.6(#F1AC83) 사이가 가장 비슷하다고 골랐다 -> x1.5.
-# 대표 피부색 칩(skinToneHex)과 명도(brightness), 추천 컬러의 밝기 구간에만 쓰고, 쿨/웜 판정(색상각)과 채도 슬라이더는
-# 보정 전 측정값을 그대로 쓴다. 한 사람 기준이라 다른 사람에게도 맞는지는 사람을 더 찍어서 확인해야 한다.
-# 박스/카메라를 또 바꾸면 이 값을 다시 맞춘다. 끄려면 DISPLAY_CAL_ENABLED = False.
+# 새 박스에서 측정한 피부색(흰 종이 기준 색 보정 + 노출 -8 고정: 밝기 L 60~72, 채도 27~31, 색상각 55~58도)을 사용자에게
+# 보여 줄 대표색으로 바꾸는 1점 보정이다.
+#  - 밝기: -8 고정 노출은 자연광보다 어둡게 찍힌다 (같은 사람 4명 평균 L 65 대 자연광 손등 75). 그래서 +11을 더한다.
+#    (이 값은 검지 한 손가락 촬영 4명 평균으로 맞췄다. 10손가락 평균으로 다시 보면 1~3번이 자연광보다 +7.3/+12.9/+6.8
+#    (평균 +9)라서 칩이 실제보다 2 정도 밝을 수 있다. 자연광 쪽은 휴대폰 사진 한 장이라 절대값은 +-3 정도로 본다.)
+#  - 채도: 자연광 손등 평균 채도는 27.6으로 우리 측정(28.7)과 거의 같다. 그런데 앞서 사용자가 화면 칩을 눈으로 비교해서
+#    고른 색(#EEAD87, 채도 약 35)을 그대로 유지하려고 x1.2를 곱했다. 자연광에 맞추려면 1.0으로 내린다.
+#  - 색상각은 그대로 둔다.
+# 대표 피부색 칩(skinToneHex)과 추천 컬러의 밝기 구간에만 쓰고, 쿨/웜 판정(점수), 채도 슬라이더, 명도(brightness)는 보정 전
+# 측정값을 그대로 쓴다. 명도는 프론트 라벨(0.55/0.65)과 백엔드 어두운 피부 판정(0.55)의 기준이 측정 L이라 보정하지 않는다.
+# 본인 포함 몇 명 기준이라 더 많은 사람으로 확인해야 한다. 박스/카메라를 바꾸면 다시 맞춘다.
+# 끄려면 DISPLAY_CAL_ENABLED = False.
 DISPLAY_CAL_ENABLED = True
-DISPLAY_CAL_L_OFFSET = 11.3       # 밝기에 더하는 값 (측정 L 64.7 -> 약 76)
-DISPLAY_CAL_CHROMA_SCALE = 1.5    # 채도(붉기+노랑)에 곱하는 값
+DISPLAY_CAL_L_OFFSET = 11.0       # 밝기에 더하는 값
+DISPLAY_CAL_CHROMA_SCALE = 1.2    # 채도(붉기+노랑)에 곱하는 값
 DISPLAY_CAL_HUE_OFFSET = 0.0      # 색상각에 더하는 값(도)
 
 
@@ -337,6 +448,55 @@ def display_skin_lab(L: float, a: float, b: float) -> tuple:
     return min(L + DISPLAY_CAL_L_OFFSET, 100.0), chroma * math.cos(hue), chroma * math.sin(hue)
 
 
+# =============================================================================
+# 3-c. 명도/채도 슬라이더 눈금 (프론트 라벨 기준에 맞춘 환산) + 베이스톤 이름
+# =============================================================================
+# 프론트는 brightness/saturation(0~1)을 그대로 슬라이더 위치(x100)로 쓰고, 라벨은 고정 기준으로 나눈다:
+#   명도 0.55 미만 "어두운 편" / 0.65 초과 "밝은 편",  채도 0.30 미만 "혈색이 적은 편" / 0.50 초과 "혈색이 있는 편".
+# 새 박스의 측정값(명도 L 64~70, 채도 M 17~21)을 이 기준에 맞게 환산한다. 환산은 "같은 사람을 다시 스캔했을 때 값이 얼마나
+# 흔들리는지"를 보고 정했다 (2026-10-23, 1번 5회 스캔): 같은 사람이어도 스캔마다 명도 L SD 1.5 (63.8~66.9),
+# 혈색 채도 M SD 1.7 (16.6~21.2), 노란기 점수 SD 0.9 (13.8~16.4)로 흔들린다. 손가락 피부가 자세/압력/체온에 따라 변하는 것으로
+# 카드 기준 환경 변화(-1.6, a -0.5)로는 설명되지 않는다. 이 흔들림보다 좁은 라벨 구간으로 나누면 같은 사람이 스캔마다 라벨이
+# 바뀐다 (예전 눈금: 같은 사람 채도가 0.52 -> 0.10으로, 명도가 중 <-> 저로 오감).
+# 그래서 "보통" 구간(명도 0.55~0.65, 채도 0.30~0.50)이 스캔 8건(1번 5, 2번 1, 3번 2)의 평균 +-1.7 SD를 덮도록 폭을 정했다:
+#  - 명도: 평균 L 65.8, 보통 구간 L 63.2~68.2. 1번 5회와 3번은 모두 보통, 2번(L 70.0)만 "밝은 편".
+#    (눈으로 정한 정답은 1번 중/2번 고/3번 저명도인데, 1번과 3번의 L 차이(65.1 대 65.6)가 1번 자신의 흔들림(+-1.5)보다 작아서
+#     손가락 측정으로는 가를 수 없다.)
+#  - 채도: 프론트 라벨이 "혈색"이라 붉은기 중심으로 센다: M = hypot(a, 0.3*b). 평균 M 19.1, 보통 구간 M 16.1~22.1.
+#    8건 모두 보통 (정답은 1번 고/2번 저/3번 중인데, 사람 사이 차이가 같은 사람의 흔들림보다 작아서 가를 수 없다).
+# 이 눈금은 명도/채도 슬라이더와 라벨에만 쓰고, 팔레트 선택과 쿨/웜 판정은 기존 측정값 그대로 쓴다.
+# 더 가르려면 흔들림을 줄여야 한다 (여러 번 스캔 평균, 카드 기준 보정, 손 상태 통제). 박스/카메라를 바꾸면 다시 맞춘다.
+BRIGHTNESS_UI_L0 = 63.2          # 이 L에서 명도 0.55
+BRIGHTNESS_UI_SLOPE = 0.02       # L 1당 명도 변화 (보통 구간 L 5폭)
+SATURATION_UI_AB_WEIGHT = 0.3    # 혈색 채도 M = hypot(a, 이 값 * b)
+SATURATION_UI_M0 = 16.1          # 이 M에서 채도 0.30
+SATURATION_UI_SLOPE = 0.033      # M 1당 채도 변화 (보통 구간 M 6폭)
+
+
+def brightness_ui(L: float) -> float:
+    """측정 L -> 프론트 명도 슬라이더 값(0~1). 위 눈금 참고."""
+    return min(1.0, max(0.0, 0.55 + (L - BRIGHTNESS_UI_L0) * BRIGHTNESS_UI_SLOPE))
+
+
+def redness_chroma(a: float, b: float) -> float:
+    """붉은기 중심 채도 M = hypot(a, 0.3*b) (프론트 채도 라벨이 '혈색'이라서)."""
+    return math.hypot(a, SATURATION_UI_AB_WEIGHT * b)
+
+
+def saturation_ui(a: float, b: float) -> float:
+    """측정 a,b -> 프론트 채도 슬라이더 값(0~1). 위 눈금 참고."""
+    return min(1.0, max(0.0, 0.30 + (redness_chroma(a, b) - SATURATION_UI_M0) * SATURATION_UI_SLOPE))
+
+
+# 베이스톤 이름: 내부 tone 값(cool/neutral/warm)은 그대로 두고, 화면용 이름만 따로 내보낸다.
+BASE_TONE_NAMES = {"cool": ("pink", "핑크베이스"), "neutral": ("neutral", "뉴트럴"), "warm": ("yellow", "옐로베이스")}
+
+
+def base_tone(tone: str) -> tuple:
+    """tone(cool/neutral/warm) -> (코드, 화면 이름). 모르는 값은 뉴트럴."""
+    return BASE_TONE_NAMES.get(tone, BASE_TONE_NAMES["neutral"])
+
+
 def skin_hue(a: float, b: float) -> float:
     """피부 Lab의 색상각(도). 0~360."""
     return math.degrees(math.atan2(b, a)) % 360
@@ -346,7 +506,33 @@ def skin_chroma(a: float, b: float) -> float:
     return math.hypot(a, b)
 
 
+def warm_score(a: float, b: float) -> float:
+    """노란기 점수 b* - 0.5*a*. 클수록 노란/웜, 작을수록 붉은/분홍(쿨)."""
+    return b - 0.5 * a
+
+
+def tone_from_score(score: float) -> str:
+    if score < TONE_SCORE_COOL_MAX:
+        return "cool"
+    if score > TONE_SCORE_WARM_MIN:
+        return "warm"
+    return "neutral"
+
+
+def warmness_from_score(score: float) -> float:
+    """노란기 점수를 프론트 슬라이더가 읽는 색상각(도) 척도로 환산한다 (위 설명 참고)."""
+    lo, hi = TONE_SCORE_COOL_MAX, TONE_SCORE_WARM_MIN
+    if score < lo:
+        w = WARMNESS_SCALE_COOL - (lo - score) * WARMNESS_SCALE_OUTSIDE_SLOPE
+    elif score > hi:
+        w = WARMNESS_SCALE_WARM + (score - hi) * WARMNESS_SCALE_OUTSIDE_SLOPE
+    else:
+        w = WARMNESS_SCALE_COOL + (score - lo) / (hi - lo) * (WARMNESS_SCALE_WARM - WARMNESS_SCALE_COOL)
+    return w
+
+
 def tone_from_hue(hue: float) -> str:
+    """(예전 방식, 지금은 쓰지 않는다) 색상각으로 톤 판정."""
     if hue < TONE_HUE_COOL_MAX:
         return "cool"
     if hue > TONE_HUE_WARM_MIN:
@@ -364,7 +550,7 @@ def recommend_nail_colors(
     n_worst: int = 10,
 ) -> dict:
     """
-    피부 Lab에서 톤을 판정하고(라벨용), 피부 Lab(밝기/색상각/채도)으로 연속 점수를 매겨서 어울리는 네일 컬러
+    피부 Lab에서 톤을 판정하고(노란기 점수 b - 0.5a, 라벨용), 피부 Lab(밝기/노란기/채도)으로 연속 점수를 매겨서 어울리는 네일 컬러
     n_best개 + 안 어울리는 n_worst개를 돌려준다. (nail_palette.pick_palette 참고)
     (warmness, saturation 인자는 예전 호출부 호환용으로 남겨 두며 판정에는 쓰지 않는다.)
 
@@ -372,17 +558,19 @@ def recommend_nail_colors(
         {
             "best":  [{"hex","name","name_ko","score","tone","band","L","C","H"}, ...],
             "worst": [{...}, ...],
-            "skin_summary": {"tone", "skin_hue", "warmness"(=색상각), "chroma", "L"}
+            "skin_summary": {"tone", "skin_hue", "warm_score", "warmness"(슬라이더용 환산값), "chroma", "L"}
         }
     """
     import nail_palette
 
     hue = skin_hue(a, b)
-    tone = tone_from_hue(hue)
+    score = warm_score(a, b)
+    tone = tone_from_score(score)
     summary = {
         "tone":       tone,
         "skin_hue":   round(hue, 2),
-        "warmness":   round(hue, 2),      # 화면의 웜/쿨 슬라이더가 쓰는 값 = 색상각(도)
+        "warm_score": round(score, 2),                              # 판정에 쓰는 노란기 점수 b - 0.5a
+        "warmness":   round(warmness_from_score(score), 2),         # 화면 슬라이더용: 점수를 예전 색상각(도) 척도로 환산한 값
         "chroma":     round(skin_chroma(a, b), 1),
         "L":          round(L, 1),
     }

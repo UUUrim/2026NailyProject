@@ -102,6 +102,7 @@ CCURVE_RIGHT_CROP_FRAC  = 0.30
 try:
     from skin_color import analyze_skin as _analyze_skin
     from skin_color import white_balance_to_marker as _white_balance_to_marker
+    from skin_color import white_balance_to_paper as _white_balance_to_paper
     _SKIN_COLOR_AVAILABLE = True
 except ImportError:
     _SKIN_COLOR_AVAILABLE = False
@@ -1849,9 +1850,17 @@ def _measure_top(image: np.ndarray, mpp: float,
             skin_band = eroded
     skin_wb = None
     skin_balanced = skin_src
+    ref = None
     if _SKIN_COLOR_AVAILABLE and aruco_corners is not None:
-        ref = skin_ref_image if (skin_ref_image is not None and skin_ref_image.shape == skin_src.shape) else None
-        skin_balanced, skin_wb = _white_balance_to_marker(skin_src, aruco_corners, reference_bgr=ref)
+        # 새 박스: 같은 사진 안의 흰 종이를 중성 기준으로 색 쏠림을 보정한다 (skin_color.white_balance_to_paper).
+        # 종이 구역을 못 쓰면(손/그림자가 걸림 등) 예전 마커 기준으로 되돌아간다.
+        skin_balanced, skin_wb = _white_balance_to_paper(skin_src, aruco_corners, mpp)
+        if not skin_wb["applied"]:
+            paper_reason = skin_wb["reason"]
+            ref = skin_ref_image if (skin_ref_image is not None and skin_ref_image.shape == skin_src.shape) else None
+            skin_balanced, skin_wb = _white_balance_to_marker(skin_src, aruco_corners, reference_bgr=ref)
+            skin_wb["paper_reason"] = paper_reason
+            skin_wb["method"] = "marker"
     if skin_wb is not None:
         skin_wb["source"] = skin_source
         skin_wb["white_from_reference"] = bool(ref is not None)
