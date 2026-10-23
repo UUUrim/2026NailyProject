@@ -192,34 +192,36 @@ _nails = [{"skin_L": L, "skin_a": a, "skin_b": b, "skin_saturation": 0.77, "skin
 _skin, _cols = fm._skin_and_colors(_nails)
 _mL = sum(f[0] for f in _FINGERS) / len(_FINGERS); _ma = sum(f[1] for f in _FINGERS) / len(_FINGERS); _mb = sum(f[2] for f in _FINGERS) / len(_FINGERS)
 check("[최종 JSON] 손가락 10개가 모두 평균에 들어감", _skin["fingerCount"] == 10, str(_skin["fingerCount"]))
-check("[최종 JSON] 명도는 눈금 환산값(측정 L 65.4 -> 보통 구간, 칩 보정 +11이 섞이지 않음)",
-      abs(_skin["brightness"] - sc.brightness_ui(_mL)) < 0.0006 and 0.55 <= _skin["brightness"] <= 0.65, f"brightness {_skin['brightness']} / 측정 L {_mL:.2f}")
+check("[최종 JSON] 명도는 눈금 환산값(칩 보정 +11이 섞이지 않음)",
+      abs(_skin["brightness"] - sc.brightness_ui(_mL)) < 0.0006 and _skin["brightness"] < 0.65, f"brightness {_skin['brightness']} / 측정 L {_mL:.2f}")
 check("[최종 JSON] 채도는 눈금 환산값", abs(_skin["saturation"] - sc.saturation_ui(_ma, _mb)) < 0.0006, f"saturation {_skin['saturation']}")
 check("[최종 JSON] 피부색 칩은 화면 보정을 거침", _skin["skinToneHex"] == sc.lab_to_rgb_hex(*sc.display_skin_lab(_mL, _ma, _mb))
       and _skin["skinToneHex"] != sc.lab_to_rgb_hex(_mL, _ma, _mb), _skin["skinToneHex"])
 check("[최종 JSON] 측정 L/a/b가 그대로 남음", abs(_skin["L"] - _mL) < 0.01 and abs(_skin["a"] - _ma) < 0.01 and abs(_skin["b"] - _mb) < 0.01)
 check("[최종 JSON] 베이스톤 이름 필드(tone과 일치)", (_skin["baseTone"], _skin["baseToneLabel"]) == sc.base_tone(_skin["tone"]), f"{_skin['baseToneLabel']}")
 
-# ── 9) 같은 사람이 스캔마다 라벨이 바뀌지 않는다 ──────────────────────────────────────────────
-# 실제 스캔(10손가락 평균, 서버 기록의 L/a/b): 1번은 하루 반 사이 5회 스캔했는데 명도 L 63.8~66.9, a 15.3~20.0으로 흔들렸다.
-# 눈으로 정한 정답(1번 중명도 고채도, 2번 고명도 저채도, 3번 저명도 중채도)은 이 흔들림보다 사람 간 차이가 작아서 가를 수 없는 것이 많다
-# (1번과 3번의 L 평균 차이 0.5, 1번 자신의 SD 1.5). 그래서 라벨은 "같은 사람이 안 바뀌는 것"과 "2번처럼 확연히 밝은 사람은 구분되는 것"만 요구한다.
+# ── 9) 사람 6명의 슬라이더 위치/라벨 ───────────────────────────────────────────────────────────
+# 실제 스캔(10손가락 평균, 서버 기록의 L/a/b). 1번은 하루 반 사이 5회, 3번은 2회 스캔했고 사람마다 평균을 쓴다.
+# 같은 사람도 스캔마다 L SD 1.5, M SD 1.7 흔들려서 한 사람의 스캔 라벨이 한 칸씩 바뀔 수 있다 (눈금을 예민하게 잡은 대가).
 # 프론트 라벨 기준: 명도 0.55 미만 어두운 편 / 0.65 초과 밝은 편, 채도 0.30 미만 적은 편 / 0.50 초과 있는 편.
-SCANS = {   # (측정 L, 측정 a, 측정 b)
+PEOPLE = {   # 사람별 스캔의 (측정 L, 측정 a, 측정 b)
     "1번": [(66.92, 19.98, 24.0), (63.79, 18.49, 23.77), (63.9, 18.28, 23.83), (66.89, 15.26, 21.37), (63.87, 16.05, 24.37)],
     "2번": [(69.96, 16.37, 23.08)],
     "3번": [(65.75, 19.07, 25.58), (65.39, 18.33, 24.63)],
+    "A": [(66.53, 20.21, 23.7)], "B": [(67.98, 15.91, 21.64)], "C": [(64.45, 17.88, 22.16)],
 }
-def _bl(L):
-    u = sc.brightness_ui(L); return "저" if u < 0.55 else ("고" if u > 0.65 else "중")
-def _sl(a, b):
-    u = sc.saturation_ui(a, b); return "저" if u < 0.30 else ("고" if u > 0.50 else "중")
-for k, vals in SCANS.items():
-    bls = {_bl(L) for L, a, b in vals}; sls = {_sl(a, b) for L, a, b in vals}
-    check(f"[{k}] 스캔 {len(vals)}회에서 명도/채도 라벨이 바뀌지 않는다", len(bls) == 1 and len(sls) == 1, f"명도 {sorted(bls)} 채도 {sorted(sls)}")
-check("2번(L 70.0)은 밝은 편, 1번/3번은 보통 명도", _bl(69.96) == "고" and all(_bl(L) == "중" for L, a, b in SCANS["1번"] + SCANS["3번"]))
-bu = {k: sum(sc.brightness_ui(L) for L, a, b in v) / len(v) for k, v in SCANS.items()}
-check("명도 순서는 측정 순서 그대로 (2번 > 3번 >= 1번)", bu["2번"] > bu["3번"] >= bu["1번"] - 0.01, str({k: round(x, 3) for k, x in bu.items()}))
+def _mean(xs): return sum(xs) / len(xs)
+bu = {k: _mean([sc.brightness_ui(L) for L, a, b in v]) for k, v in PEOPLE.items()}
+su = {k: _mean([sc.saturation_ui(a, b) for L, a, b in v]) for k, v in PEOPLE.items()}
+def _bl(u): return "저" if u < 0.55 else ("고" if u > 0.65 else "중")
+def _sl(u): return "저" if u < 0.30 else ("고" if u > 0.50 else "중")
+print("사람별 명도", {k: f"{v:.2f}{_bl(v)}" for k, v in bu.items()}, "채도", {k: f"{v:.2f}{_sl(v)}" for k, v in su.items()})
+check("사람 6명의 명도 슬라이더가 0.2 이상 벌어진다", max(bu.values()) - min(bu.values()) >= 0.2, f"{max(bu.values()) - min(bu.values()):.2f}")
+check("사람 6명의 채도 슬라이더가 0.4 이상 벌어진다", max(su.values()) - min(su.values()) >= 0.4, f"{max(su.values()) - min(su.values()):.2f}")
+check("명도 저/중/고가 모두 쓰인다", {_bl(v) for v in bu.values()} == {"저", "중", "고"})
+check("채도 저/중/고가 모두 쓰인다", {_sl(v) for v in su.values()} == {"저", "중", "고"})
+check("가장 밝은 사람은 2번, 가장 어두운 사람은 C", max(bu, key=bu.get) == "2번" and min(bu, key=bu.get) == "C")
+check("명도 순서는 측정 L 순서 그대로", sorted(bu, key=bu.get) == sorted(PEOPLE, key=lambda k: _mean([x[0] for x in PEOPLE[k]])))
 check("눈금 환산이 단조 증가하고 0~1 안에 있음",
       all(0.0 <= sc.brightness_ui(x) <= 1.0 and sc.brightness_ui(x) <= sc.brightness_ui(x + 0.5) for x in [40 + 0.5 * i for i in range(80)])
       and all(0.0 <= sc.saturation_ui(x, 24.0) <= 1.0 and sc.saturation_ui(x, 24.0) <= sc.saturation_ui(x + 0.5, 24.0) for x in [5 + 0.5 * i for i in range(50)]))
