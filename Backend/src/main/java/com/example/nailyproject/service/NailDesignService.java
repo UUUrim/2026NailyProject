@@ -6,8 +6,6 @@ import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.response.DesignImageResponseDto;
 import com.example.nailyproject.dto.response.DesignDetailResponseDto;
-import com.example.nailyproject.dto.response.DesignLikeResponseDto;
-import com.example.nailyproject.dto.response.CommunityDesignResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -15,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.transaction.Transactional;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
@@ -51,6 +50,9 @@ public class NailDesignService {
     private final FinishReferenceService finishReferenceService;
     private final ScanResultFileService scanResultFileService;
     private final KeywordTranslationService keywordTranslationService;
+    // '둘러보기' 공유 갤러리 DB (각자 로컬 DB를 써도 공유 디자인은 여기 모인다)
+    private final CommunityDesignStore communityDesignStore;
+    private final LocalOriginService localOriginService;
     // 색상
 //    private final JsonColorMapper jsonColorMapper;
 
@@ -117,7 +119,9 @@ public class NailDesignService {
                              GptClientService gptClientService,
                              FinishReferenceService finishReferenceService,
                              ScanResultFileService scanResultFileService,
-                             KeywordTranslationService keywordTranslationService) {
+                             KeywordTranslationService keywordTranslationService,
+                             CommunityDesignStore communityDesignStore,
+                             LocalOriginService localOriginService) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -137,6 +141,8 @@ public class NailDesignService {
         this.finishReferenceService = finishReferenceService;
         this.scanResultFileService = scanResultFileService;
         this.keywordTranslationService = keywordTranslationService;
+        this.communityDesignStore = communityDesignStore;
+        this.localOriginService = localOriginService;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -322,6 +328,7 @@ public class NailDesignService {
             design.updateNailTipCropsJson(objectMapper.writeValueAsString(urls));
             nailDesignRepository.save(design);
             System.out.println("[NailTipCrops] designId=" + design.getId() + " 크롭이 없어 새로 만들어 저장했습니다 (로컬 누끼).");
+            refreshCommunitySnapshot(design);
         } catch (Exception e) {
             System.err.println("[NailTipCrops] designId=" + design.getId() + " 크롭 보강 실패: " + e.getMessage());
         }
@@ -594,6 +601,7 @@ public class NailDesignService {
                                 d.updateSwatchesJson(objectMapper.writeValueAsString(swatchUrlMap));
                                 nailDesignRepository.save(d);
                                 System.out.println("[Swatch] " + swatchUrlMap.size() + "개 스와치 저장 완료: " + swatchUrlMap.keySet());
+                                refreshCommunitySnapshot(d);
                             } catch (Exception e) {
                                 System.err.println("[Swatch] DB 저장 실패: " + e.getMessage());
                             }
@@ -777,78 +785,7 @@ public class NailDesignService {
         }
     }
 
-    /**
-     * 커뮤니티 갤러리 GET /designs/community
-     */
-    public List<CommunityDesignResponseDto> getCommunityGallery(User user) {
-        List<NailDesign> designs = nailDesignRepository.findTop60BySharedTrueOrderBySharedAtDesc();
-
-        List<Long> designIds = designs.stream().map(NailDesign::getId).toList();
-        Map<Long, Long> likeCountByDesignId = new HashMap<>();
-        if (!designIds.isEmpty()) {
-            for (Object[] row : designLikeRepository.countLikesByDesignIds(designIds)) {
-                likeCountByDesignId.put((Long) row[0], (Long) row[1]);
-            }
-        }
-
-        Set<Long> myLikedDesignIds = user != null
-                ? new HashSet<>(designLikeRepository.findDesignIdsByUserId(user.getId()))
-                : Set.of();
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
-        List<CommunityDesignResponseDto> resultList = new ArrayList<>();
-
-        for (NailDesign design : designs) {
-            if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) continue;
-
-            LocalDateTime displayAt = design.getSharedAt() != null ? design.getSharedAt() : design.getGeneratedAt();
-            String formattedDate = displayAt != null ? displayAt.format(formatter) : "";
-            long likeCount = likeCountByDesignId.getOrDefault(design.getId(), 0L);
-
-            resultList.add(CommunityDesignResponseDto.builder()
-                    .designId(design.getId())
-                    .imageUrl(design.getImageUrls().get(0))
-                    .createdAt(formattedDate)
-                    .likeCount(likeCount)
-                    .likedByMe(myLikedDesignIds.contains(design.getId()))
-                    .details(buildDetails(design))
-                    .build());
-        }
-
-        resultList.sort(Comparator
-                .comparingLong(CommunityDesignResponseDto::getLikeCount).reversed()
-                .thenComparing(CommunityDesignResponseDto::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())));
-
-        return resultList;
-    }
-
-    @Transactional
-    public DesignLikeResponseDto addDesignLike(User user, Long designId) {
-        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
-        NailDesign design = nailDesignRepository.findById(designId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
-        if (!design.isShared()) throw new IllegalArgumentException("공유된 디자인만 좋아요할 수 있습니다.");
-        if (!designLikeRepository.existsByUserAndNailDesign(user, design)) {
-            designLikeRepository.save(DesignLike.builder().user(user).nailDesign(design).build());
-        }
-        return DesignLikeResponseDto.builder()
-                .designId(designId)
-                .likeCount(designLikeRepository.countByNailDesign(design))
-                .liked(true).build();
-    }
-
-    @Transactional
-    public DesignLikeResponseDto removeDesignLike(User user, Long designId) {
-        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
-        NailDesign design = nailDesignRepository.findById(designId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
-        designLikeRepository.findByUserAndNailDesign(user, design)
-                .ifPresent(designLikeRepository::delete);
-        return DesignLikeResponseDto.builder()
-                .designId(designId)
-                .likeCount(designLikeRepository.countByNailDesign(design))
-                .liked(false).build();
-    }
+    // 둘러보기 목록·상세·좋아요는 갤러리 DB를 읽는 CommunityGalleryService가 맡는다 (다른 로컬 DB 사용자의 공유도 보이게)
 
     public DesignDetailResponseDto getDesignDetail(User user, Long designId) {
         NailDesign design = nailDesignRepository.findById(designId)
@@ -924,7 +861,15 @@ public class NailDesignService {
         if (design.getImageUrls() == null || design.getImageUrls().isEmpty())
             throw new IllegalArgumentException("이미지가 없는 디자인은 공유할 수 없습니다.");
         design.share();
-        return getDesignDetail(user, designId);
+        // 상세 조회가 손톱팁 크롭을 채워 주므로, 그 뒤에 스냅샷을 만들어 갤러리 DB에 올린다.
+        // 두 DB를 한 트랜잭션으로 묶을 수 없어서, 갤러리 DB에 못 쓰면 예외로 로컬 공유도 되돌린다.
+        DesignDetailResponseDto detail = getDesignDetail(user, designId);
+        try {
+            communityDesignStore.upsertShared(buildCommunitySnapshot(design), design.getSharedAt());
+        } catch (DataAccessException e) {
+            throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 공유하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+        }
+        return detail;
     }
 
     @Transactional
@@ -933,6 +878,11 @@ public class NailDesignService {
         NailDesign design = nailDesignRepository.findByIdAndUserId(designId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("본인의 디자인만 공유 해제할 수 있습니다."));
         design.unshare();
+        try {
+            communityDesignStore.markUnshared(localOriginService.getOriginId(), designId);
+        } catch (DataAccessException e) {
+            throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 공유를 해제하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+        }
         return getDesignDetail(user, designId);
     }
 
@@ -943,12 +893,59 @@ public class NailDesignService {
         if (!design.getUser().getId().equals(user.getId()))
             throw new IllegalArgumentException("본인의 디자인만 삭제할 수 있습니다.");
 
+        // 갤러리 DB에서 먼저 지운다. 공유 중인데 못 지우면 S3 이미지만 사라져 둘러보기에 깨진 이미지가 남으므로 삭제를 막는다.
+        // 공유 해제된 디자인의 남은 행(남들의 찜·좋아요 보존용)은 못 지워도 진행하고, 다음 서버 시작 때 CommunityGallerySync가 정리한다.
+        try {
+            communityDesignStore.deleteByOrigin(localOriginService.getOriginId(), designId);
+        } catch (DataAccessException e) {
+            if (design.isShared()) {
+                throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+            }
+            System.err.println("[CommunityGallery] designId=" + designId + " 갤러리 DB 정리 실패 (다음 서버 시작 때 정리): " + e.getMessage());
+        }
+
         savedDesignRepository.deleteAllByNailDesign(design);
         designLikeRepository.deleteAllByNailDesign(design);
         if (design.getImageUrls() != null) {
             for (String imageUrl : design.getImageUrls()) s3Service.deleteFile(imageUrl);
         }
         nailDesignRepository.delete(design);
+    }
+
+    /**
+     * 갤러리 DB에 올릴 공유 스냅샷. 다른 로컬 DB의 백엔드는 이 디자인 행을 읽을 수 없으므로
+     * 둘러보기 상세 모달과 AR에 필요한 값을 여기서 다 담는다. (서버 시작 때 예전 공유분을 올리는 CommunityGallerySync도 쓴다)
+     */
+    public CommunityDesignStore.Snapshot buildCommunitySnapshot(NailDesign design) {
+        return new CommunityDesignStore.Snapshot(
+                localOriginService.getOriginId(),
+                design.getId(),
+                design.getUser().getId(),
+                design.getImageUrls() != null ? List.copyOf(design.getImageUrls()) : List.of(),
+                writeDetailsJson(design),
+                extractShape(design),
+                extractNailTipCropUrls(design),
+                design.getGeneratedAt());
+    }
+
+    /** 공유 뒤에 늦게 채워지는 스와치·손톱팁 크롭을 갤러리 DB 스냅샷에도 반영한다 (실패해도 원래 작업은 그대로 진행) */
+    private void refreshCommunitySnapshot(NailDesign design) {
+        if (!design.isShared()) return;
+        try {
+            communityDesignStore.updateDetails(localOriginService.getOriginId(), design.getId(),
+                    writeDetailsJson(design), extractShape(design), extractNailTipCropUrls(design));
+        } catch (Exception e) {
+            System.err.println("[CommunityGallery] designId=" + design.getId() + " 갤러리 스냅샷 갱신 실패: " + e.getMessage());
+        }
+    }
+
+    private String writeDetailsJson(NailDesign design) {
+        try {
+            return objectMapper.writeValueAsString(buildDetails(design));
+        } catch (JsonProcessingException e) {
+            System.err.println("[CommunityGallery] designId=" + design.getId() + " details 직렬화 실패: " + e.getMessage());
+            return null;
+        }
     }
 
 
@@ -1258,10 +1255,10 @@ public class NailDesignService {
         }
 
         // ★ textures: confirm 후엔 swatchMap 키 사용, 그 전엔 프롬프트 키워드 폴백
-        String fullPrompt = buildFullPromptForSwatch(nailDesign);
+        // (프롬프트는 폴백할 때만 읽는다 — 스와치 저장 스레드처럼 세션을 읽을 수 없는 곳에서도 부를 수 있게)
         LinkedHashSet<String> textures = !swatchMap.isEmpty()
                 ? new LinkedHashSet<>(swatchMap.keySet())
-                : extractTexturesFromPrompt(fullPrompt);
+                : extractTexturesFromPrompt(buildFullPromptForSwatch(nailDesign));
 
         return DesignGenerateResponseDto.Details.builder()
                 .colorPalette(colorPalette)

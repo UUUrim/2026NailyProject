@@ -84,10 +84,12 @@ export const ImageGrid = memo(function ImageGrid({
                         : liked
                             ? findFavoriteFolder(item.designId, item.imageUrl)
                             : null
+                // 갤러리 id로 찜한 남의 디자인은 designId가 내 디자인 id와 겹칠 수 있어서 내 디자인 목록과 맞춰 보지 않는다
+                const community = 'community' in item && Boolean(item.community)
                 const isShared =
                     'shared' in item
                         ? Boolean(item.shared)
-                        : designs.some((d) => d.designId === item.designId && d.shared)
+                        : !community && designs.some((d) => d.designId === item.designId && d.shared)
                 return (
                     <article
                         key={key}
@@ -108,6 +110,7 @@ export const ImageGrid = memo(function ImageGrid({
                                     createdAt: modalDate,
                                     liked,
                                     folder,
+                                    community,
                                 })
                             }}
                         >

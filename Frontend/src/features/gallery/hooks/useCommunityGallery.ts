@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
     addDesignReaction,
+    getCommunityDesignDetail,
     getCommunityDesigns,
-    getDesignDetail,
     getLikedDesigns,
     likeDesign,
     moveLikedDesign,
@@ -30,13 +30,11 @@ export type ArPreviewTarget = {
     nailTipCropUrls: string[] | null
 }
 
-export function favKeyOf(designId: number, imageUrl: string) {
-    return `${designId}-${imageUrl}`
-}
-
 /**
  * 둘러보기(갤러리) 화면의 데이터와 동작.
  * 찜(폴더에 저장)과 좋아요(공감 수)는 서로 다른 기능이다 — 찜은 내 찜 목록, 좋아요는 공개 카운트.
+ * 목록의 designId는 갤러리 id라서 상세·좋아요·찜은 갤러리 API를 쓴다. 찜 여부는 이미지 URL(S3 경로, 디자인마다 고유)로
+ * 맞춘다 — 내 로컬 DB의 디자인은 서버가 예전처럼 내 디자인 id로 찜해 두므로 designId로는 맞출 수 없다.
  */
 export function useCommunityGallery() {
     const navigate = useNavigate()
@@ -46,6 +44,7 @@ export function useCommunityGallery() {
     const [loadFailed, setLoadFailed] = useState(false)
     const [reloadKey, setReloadKey] = useState(0)
 
+    // 둘 다 이미지 URL이 키
     const [favoritedKeys, setFavoritedKeys] = useState<Set<string>>(new Set())
     const [favoriteFolders, setFavoriteFolders] = useState<Record<string, FolderRef>>({})
     const [favoriteModalTarget, setFavoriteModalTarget] = useState<FavoriteModalTarget | null>(null)
@@ -86,10 +85,10 @@ export function useCommunityGallery() {
             getLikedDesigns()
                 .then((favorites) => {
                     if (cancelled) return
-                    setFavoritedKeys(new Set(favorites.map((f) => favKeyOf(f.designId, f.imageUrl))))
+                    setFavoritedKeys(new Set(favorites.map((f) => f.imageUrl)))
                     const folderMap: Record<string, FolderRef> = {}
                     favorites.forEach((f) => {
-                        if (f.folder) folderMap[favKeyOf(f.designId, f.imageUrl)] = f.folder
+                        if (f.folder) folderMap[f.imageUrl] = f.folder
                     })
                     setFavoriteFolders(folderMap)
                 })
@@ -117,7 +116,7 @@ export function useCommunityGallery() {
         setDetailShape(null)
         setDetailNailTipCropUrls(null)
         setDetailLoading(true)
-        void getDesignDetail(design.designId)
+        void getCommunityDesignDetail(design.designId)
             .then((detail) => {
                 if (requestId !== detailRequestRef.current) return
                 setDetailDesign((prev) =>
@@ -152,7 +151,7 @@ export function useCommunityGallery() {
     const openAr = (design: CommunityDesignResponse) => {
         const requestId = ++arRequestRef.current
         setArLoadingId(design.designId)
-        void getDesignDetail(design.designId)
+        void getCommunityDesignDetail(design.designId)
             .then((detail) => ({ shape: detail.shape ?? null, nailTipCropUrls: detail.nailTipCropUrls ?? null }))
             // 상세 조회에 실패하면 2D·로컬 손톱 인식으로 폴백
             .catch(() => ({ shape: null, nailTipCropUrls: null }))
@@ -177,14 +176,11 @@ export function useCommunityGallery() {
     }
 
     // ── 찜 / 좋아요 (완전 분리) ──────
-    const isFavorited = (design: CommunityDesignResponse) =>
-        favoritedKeys.has(favKeyOf(design.designId, design.imageUrl))
+    const isFavorited = (design: CommunityDesignResponse) => favoritedKeys.has(design.imageUrl)
 
-    const folderNameOf = (design: CommunityDesignResponse) =>
-        favoriteFolders[favKeyOf(design.designId, design.imageUrl)]?.name ?? '기본'
+    const folderNameOf = (design: CommunityDesignResponse) => favoriteFolders[design.imageUrl]?.name ?? '기본'
 
-    const folderIdOf = (design: CommunityDesignResponse) =>
-        favoriteFolders[favKeyOf(design.designId, design.imageUrl)]?.folderId ?? null
+    const folderIdOf = (design: CommunityDesignResponse) => favoriteFolders[design.imageUrl]?.folderId ?? null
 
     const applyReactionState = (designId: number, likeCount: number, liked: boolean) => {
         const apply = (item: CommunityDesignResponse) =>
@@ -199,14 +195,14 @@ export function useCommunityGallery() {
             return
         }
         if (isBusy) return
-        const key = favKeyOf(design.designId, design.imageUrl)
+        const key = design.imageUrl
         if (!favoritedKeys.has(key)) {
             setFavoriteModalTarget({ design, mode: 'like' })
             return
         }
         setIsBusy(true)
         try {
-            await unlikeDesign(design.designId, design.imageUrl)
+            await unlikeDesign(design.designId, design.imageUrl, true)
             setFavoritedKeys((prev) => {
                 const next = new Set(prev)
                 next.delete(key)
@@ -246,11 +242,11 @@ export function useCommunityGallery() {
     const confirmFavoriteWithFolder = async (choice: { folderId?: number; newFolderName?: string }) => {
         if (!favoriteModalTarget) return
         const { design, mode } = favoriteModalTarget
-        const key = favKeyOf(design.designId, design.imageUrl)
+        const key = design.imageUrl
         const saved =
             mode === 'move'
-                ? await moveLikedDesign(design.designId, design.imageUrl, choice)
-                : await likeDesign(design.designId, design.imageUrl, choice)
+                ? await moveLikedDesign(design.designId, design.imageUrl, choice, true)
+                : await likeDesign(design.designId, design.imageUrl, choice, true)
         setFavoritedKeys((prev) => new Set(prev).add(key))
         if (saved.folder) {
             setFavoriteFolders((prev) => ({ ...prev, [key]: saved.folder! }))

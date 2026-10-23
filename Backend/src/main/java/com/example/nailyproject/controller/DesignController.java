@@ -87,21 +87,7 @@ public class DesignController {
                 .body(ApiResponse.success(202, "디자인 생성 요청되었습니다.", data));
     }
 
-    /**
-     * '둘러보기' 커뮤니티 갤러리 GET /designs/community
-     * 로그인 여부와 상관없이 누구나 조회 가능 (SecurityConfig에서 permitAll 처리)
-     * user가 있으면(로그인 상태) 각 디자인에 내가 좋아요 눌렀는지(likedByMe) 함께 내려준다.
-     */
-    @GetMapping("/community")
-    public ResponseEntity<ApiResponse<java.util.List<com.example.nailyproject.dto.response.CommunityDesignResponseDto>>> getCommunityDesigns(
-            @AuthenticationPrincipal User user) {
-
-        var data = nailDesignService.getCommunityGallery(user);
-
-        return ResponseEntity.ok(
-                ApiResponse.success(200, "둘러보기 갤러리 조회 성공.", data)
-        );
-    }
+    // '둘러보기' 갤러리(GET /designs/community 등)는 갤러리 DB를 읽는 CommunityController가 맡는다
 
     /**
      * 디자인 상세 조회 GET /designs/{designId}
