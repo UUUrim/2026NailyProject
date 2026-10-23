@@ -13,6 +13,7 @@ import {
   type ScanSession,
 } from '@/shared/utils/scanDetail'
 import { ScanXModalShell } from '@/shared/components/ScanXModalShell'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 import '@/styles/mypage.css'
 
 type Props = {
@@ -184,7 +185,7 @@ export function ScanDetailModal({ session, onClose }: Props) {
         const analysis =
           skinToneAnalysisFromMetrics(detail.tone, detail.warmness, detail.brightness, detail.saturation) ??
           (detail.skinToneHex ? analyzeSkinTone(detail.skinToneHex) : null)
-        const toneLabel = analysis ? analysis.tone.label.replace(/\s+/g, '') : '분석 결과 없음'
+        const toneLabel = analysis ? analysis.tone.label : '분석 결과 없음'
         // .mypage-x__scanx-palette(6열)에 정렬 순서 그대로 흘려 넣는다 — 비슷한 색끼리 잇는 TSP 경로, 연한 색 → 진한 색
         const palette = sortRecommendedColors(
           detail.recommendedColors.length > 0
@@ -199,10 +200,8 @@ export function ScanDetailModal({ session, onClose }: Props) {
         const shapeEn = detail.shapeId
           ? getNailShape(detail.shapeId)?.labelEn ?? detail.shapeId
           : null
-        const lengthPct = Math.min(100, Math.max(8, (detail.avgLength / 18) * 100))
-        const widthPct = Math.min(100, Math.max(8, (detail.avgWidth / 14) * 100))
-        // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
-        const curvePct = Math.min(100, Math.max(8, (detail.avgCurve / 5) * 100))
+        // 막대는 스캔 서버의 5단계 평균 판정 위치(10/30/50/70/90%)만큼 채운다.
+        const { lengthPct, widthPct, curvePct } = detail
         const fingerList = detail.fingers.filter((f) => f.hand === fingerHand)
         // 세션 자체가 양손 스캔 페어링 결과라 leftScanId/rightScanId는 항상 둘 다 존재한다.
         // detail.fingers 유무로 탭을 판단하면, 한쪽 분석이 실패해서 손가락 데이터가 비어 있을 때
@@ -256,10 +255,16 @@ export function ScanDetailModal({ session, onClose }: Props) {
                 />
                 <div className="mypage-x__scanx-hero-copy">
                   <p className="mypage-x__scanx-kicker">대표 피부색</p>
-                  <h3 className="mypage-x__scanx-season">{toneLabel}</h3>
+                  {/* 제목 — 대표 피부색 헥스값 알약(바탕은 핑크/뉴트럴/옐로우 베이스 색), 아래 칩은 베이스·명도·채도 */}
+                  <h3 className="mypage-x__scanx-season">
+                    {detail.skinToneHex ? (
+                      <SkinBaseTag kind={analysis?.baseKind ?? null}>{detail.skinToneHex.toUpperCase()}</SkinBaseTag>
+                    ) : (
+                      toneLabel
+                    )}
+                  </h3>
                   {analysis && (
                     <div className="mypage-x__scanx-chips">
-                      <span>{skinHex}</span>
                       <span>{toneLabel}</span>
                       <span>{analysis.brightness.level}명도</span>
                       <span>{analysis.saturation.level}채도</span>
@@ -270,12 +275,12 @@ export function ScanDetailModal({ session, onClose }: Props) {
             </section>
 
             {analysis && (
-              <section className="mypage-x__scanx-tone-card" aria-label="피부톤 분석">
-                <p className="mypage-x__scanx-section-label">피부톤 분석</p>
+              <section className="mypage-x__scanx-tone-card" aria-label="피부 톤 분석">
+                <p className="mypage-x__scanx-section-label">피부 톤 분석</p>
                 <div className="mypage-x__scanx-tone-bars">
                   <div className="mypage-x__scanx-tone-bar">
                     <div className="mypage-x__scanx-tone-bar-head">
-                      <span>톤</span>
+                      <span>베이스</span>
                       <span>{analysis.tone.label}</span>
                     </div>
                     <div className="mypage-x__scanx-tone-bar-track mypage-x__scanx-tone-bar-track--tone">

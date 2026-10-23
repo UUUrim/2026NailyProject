@@ -195,8 +195,9 @@
     border-radius: 999px;
 }
 
+/* 베이스 — 왼쪽 핑크 베이스(분홍) → 오른쪽 옐로우 베이스(노랑), 손 분석 결과 화면의 막대와 같은 색 */
 .design-chat-sidebar__tone-bar-track--tone {
-    background: linear-gradient(90deg, #8fb4e6 0%, #f0c069 100%);
+    background: linear-gradient(90deg, #eda0bb 0%, #f0c069 100%);
 }
 
 .design-chat-sidebar__tone-bar-track--brightness {
@@ -317,7 +318,7 @@
     margin: 0;
     font-size: 0.7rem;
     font-weight: 600;
-    /* 대표 피부색 카드의 "웜톤"/"밝은 편"/"보통" 라벨(tone-bar-head 마지막 span)과 동일한 색 */
+    /* 대표 피부색 카드의 "옐로우 베이스"/"밝은 편"/"보통" 라벨(tone-bar-head 마지막 span)과 동일한 색 */
     color: var(--naily-pink-hover, #d0768f);
 }
 

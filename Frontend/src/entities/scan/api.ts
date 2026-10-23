@@ -28,6 +28,13 @@ export interface ScanResultResponse {
     brightness: number | null // 0~1
     saturation: number | null // 0~1
     overallSize: string
+    // 양손 10손가락 평균 치수(mm)와 평균 판정 — 스캔 서버 통합 measurements.json 상단 summary 값 (왼손/오른손 응답이 같은 값)
+    avgLengthMm: number | null
+    avgWidthMm: number | null
+    avgCurve: number | null
+    lengthSize: string | null // much_smaller / smaller / average / larger / much_larger
+    widthSize: string | null
+    curveSize: string | null  // 곡률을 판정할 손가락이 없으면 null
     fingers: FingerResult[]
     scannedAt: string
 }

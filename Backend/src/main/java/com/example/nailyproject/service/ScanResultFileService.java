@@ -39,7 +39,7 @@ public class ScanResultFileService {
     /** 손가락 하나의 화면용 데이터 - measurementsJson은 프론트가 JSON.parse하는 문자열 */
     public record FingerView(String finger, String measurementsJson, String size) {}
 
-    /** 한 손(scanId) 기준으로 잘라낸 분석 값. 피부/컬러/쉐입/크기 판정은 양손 10개 기준 값이다. */
+    /** 한 손(scanId) 기준으로 잘라낸 분석 값. 피부/컬러/쉐입/평균 치수/크기 판정은 양손 10개 기준 값이다. */
     public record ScanAnalysis(
             String skinToneHex,
             List<String> recommendedColors,
@@ -49,9 +49,14 @@ public class ScanResultFileService {
             Double saturation,
             String recommendedShape,
             String overallSize,
+            // 평균 치수와 평균 판정은 최종 JSON 상단 summary 값이다 (left/right의 손별 summary가 아니다)
             Double avgLengthMm,
             Double avgWidthMm,
             Double avgCurveMm,
+            // much_smaller / smaller / average / larger / much_larger. 곡률을 판정할 손가락이 없으면 curveSize는 null
+            String lengthSize,
+            String widthSize,
+            String curveSize,
             // 손톱이 손가락 살 끝보다 평균 몇 mm 나와 있는지 (스캔 사진 기준). 이 값이 없던 예전 스캔은 null
             Double avgFreeEdgeMm,
             List<FingerView> fingers) {}
@@ -169,17 +174,12 @@ public class ScanResultFileService {
             at = LocalDateTime.ofInstant(Instant.ofEpochMilli(modifiedMillis), ZoneId.systemDefault());
         }
         JsonNode summary = root.path("summary");
-        // 손톱 끝 위치는 손마다 따로 잰 값이라 두 손 평균을 쓴다 (없으면 있는 쪽 값)
-        Double l = number(root.path("left").path("summary"), "avg_free_edge_mm");
-        Double r = number(root.path("right").path("summary"), "avg_free_edge_mm");
-        Double freeEdge;
-        if (l != null && r != null) freeEdge = (l + r) / 2.0;
-        else freeEdge = l != null ? l : r;   // (삼항 한 줄로 쓰면 null인 Double이 double로 풀리며 NPE)
+        // 손톱 끝 위치(출력 화면 "내 손톱 끝")도 상단 summary의 양손 10개 평균을 쓴다 (손별 summary가 아니다)
         return new SessionSummary(left, right, at,
                 a.skinToneHex(), a.recommendedColors(), a.tone(), a.warmness(), a.brightness(), a.saturation(),
                 a.recommendedShape(),
                 number(summary, "avg_length_mm"), number(summary, "avg_width_mm"), number(summary, "avg_c_curve_mm"),
-                freeEdge);
+                number(summary, "avg_free_edge_mm"));
     }
 
     // ── 파일 찾기/읽기 ──────────────────────────────────────────────────
@@ -231,6 +231,7 @@ public class ScanResultFileService {
         boolean isLeft = String.valueOf(scanId).equals(root.path("leftSession").asText());
         JsonNode hand = root.path(isLeft ? "left" : "right");
         JsonNode skin = root.path("skin");
+        JsonNode summary = root.path("summary");
         JsonNode handSummary = hand.path("summary");
 
         List<String> colors = new ArrayList<>();
@@ -258,10 +259,13 @@ public class ScanResultFileService {
                 number(skin, "brightness"),
                 number(skin, "saturation"),
                 text(root, "recommendedShape"),
-                text(root.path("summary"), "nail_size"),
-                number(handSummary, "avg_length_mm"),
-                number(handSummary, "avg_width_mm"),
-                number(handSummary, "avg_c_curve_mm"),
+                text(summary, "nail_size"),
+                number(summary, "avg_length_mm"),
+                number(summary, "avg_width_mm"),
+                number(summary, "avg_c_curve_mm"),
+                text(summary, "length_size"),
+                text(summary, "width_size"),
+                text(summary, "c_curve_size"),
                 number(handSummary, "avg_free_edge_mm"),
                 fingers);
     }

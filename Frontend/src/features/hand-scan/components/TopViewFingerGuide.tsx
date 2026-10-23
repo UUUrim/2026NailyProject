@@ -1,9 +1,12 @@
 import type { Finger } from '@/features/hand-scan/hooks/useHandScanPage'
 import { useBoxSize } from '@/features/hand-scan/hooks/useBoxSize'
-import { buildFingerGuideShape, coverMap, type TopViewGuide } from '@/features/hand-scan/utils/topViewGuide'
+import { buildFingerGuideShape, topViewDisplayMap, type TopViewGuide } from '@/features/hand-scan/utils/topViewGuide'
 
-/** place: 손가락을 놓기 전 / measuring: 손가락 인식돼 측정 중 / ready: 촬영 가능 */
-export type FingerGuidePhase = 'place' | 'measuring' | 'ready'
+/**
+ * place: 손가락을 놓기 전 / measuring: 손가락 인식돼 측정 중 / ready: 촬영 가능
+ * hidden: 방금 찍은 손가락을 빼기를 기다리는 중 — 다음 손가락을 먼저 올리지 않게 가이드를 숨긴다
+ */
+export type FingerGuidePhase = 'place' | 'measuring' | 'ready' | 'hidden'
 
 type TopViewFingerGuideProps = {
   guide: TopViewGuide | null
@@ -21,9 +24,10 @@ const HIDE_BELOW_PX    = 96   // 제목("큐티클 라인")조차 안 들어가�
 /**
  * 탑뷰 스트림 위에 겹치는 손가락 위치/큐티클 라인 가이드.
  *
- * 스트림 <img>는 object-fit: cover(가운데 정렬)라 프레임 일부가 잘려 보이므로,
- * 같은 cover 계산으로 프레임 좌표를 이 박스의 픽셀 좌표로 옮겨서 그린다 —
- * 그래야 큐티클 라인이 측정이 실제로 쓰는 행과 정확히 겹친다.
+ * 스트림 <img>는 object-fit: cover에 지지대 맞춤 확대·이동(TopViewStream)까지 더해 그려지므로,
+ * 같은 계산(topViewDisplayMap)으로 프레임 좌표를 이 박스의 픽셀 좌표로 옮겨서 그린다 —
+ * 그래야 큐티클 라인이 측정이 실제로 쓰는 행과 정확히 겹치고, 실루엣도 확대된 손가락 크기와 맞는다.
+ * 가로 중심은 실제 지지대 가운데(화면에선 예전 가이드 자리 그대로).
  */
 export function TopViewFingerGuide({ guide, finger, fingerLabel, phase }: TopViewFingerGuideProps) {
   const [boxRef, box] = useBoxSize<HTMLDivElement>()
@@ -32,8 +36,8 @@ export function TopViewFingerGuide({ guide, finger, fingerLabel, phase }: TopVie
   let content = null
 
   if (canDraw) {
-    const map = coverMap(box.w, box.h, guide.aspect)
-    const cx = map.x(guide.centerX)
+    const map = topViewDisplayMap(box.w, box.h, guide)
+    const cx = map.x(map.supportX)
     const cy = map.y(guide.cuticleY)
     const pxPerMm = guide.mmToH * map.scale
 
@@ -57,7 +61,6 @@ export function TopViewFingerGuide({ guide, finger, fingerLabel, phase }: TopVie
             <path className="hand-scan-guide__finger" d={shape.fingerPath} />
             <path className="hand-scan-guide__nail" d={shape.nailPath} />
 
-            <line className="hand-scan-guide__track" x1={-cx} x2={box.w - cx} y1={0} y2={0} />
             <line className="hand-scan-guide__line-glow" x1={-lineHalf} x2={lineHalf} y1={0} y2={0} />
             <line className="hand-scan-guide__line-halo" x1={-lineHalf} x2={lineHalf} y1={0} y2={0} />
             <line className="hand-scan-guide__line" x1={-lineHalf} x2={lineHalf} y1={0} y2={0} />

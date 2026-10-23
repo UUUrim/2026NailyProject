@@ -11,8 +11,9 @@ import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { useNailDesignResultPage } from '@/features/nail-design/hooks/useNailDesignResultPage'
 import { cleanKeywordChip } from '@/features/nail-design/utils/keywordChip'
 import { INITIAL_PREFERENCES } from '@/shared/constants/designPreferences'
-import type { NailShapeId } from '@/shared/constants/nailShapes'
+import { NAIL_SHAPES, type NailShapeId } from '@/shared/constants/nailShapes'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
+import { toCurrentToneLabel } from '@/shared/utils/skinTone'
 import '@/styles/nail-design.css'
 import '@/styles/mypage.css'
 
@@ -25,6 +26,11 @@ function isLightColor(hex: string): boolean {
     const g = (int >> 8) & 255
     const b = int & 255
     return 0.299 * r + 0.587 * g + 0.114 * b > 150
+}
+
+// 생성 맥락엔 쉐입 한글명(분석 못 했으면 쉐입 id)만 저장돼 있어서, 영문명은 쉐입 목록에서 거꾸로 찾는다 (예전에 저장된 맥락도 그대로 된다)
+function findShapeLabelEn(shapeLabel: string): string | null {
+    return NAIL_SHAPES.find((shape) => shape.labelKo === shapeLabel || shape.id === shapeLabel)?.labelEn ?? null
 }
 
 export function NailDesignResultPageContent() {
@@ -142,8 +148,19 @@ export function NailDesignResultPageContent() {
     )
 
     // 반영된 추천 컬러 — 다른 화면들과 같은 순서(가장 연한 색에서 출발해 비슷한 색끼리 잇는 TSP 경로).
-    // 웹은 한 줄, 모바일은 6열 그리드로 이 순서를 그대로 흘려 넣는다.
+    // 10열 그리드(30색이면 3행 × 10열)에 이 순서를 그대로 흘려 넣는다.
     const recommendedPalette = sortRecommendedColors(context?.handSummary?.recommendedColors ?? [])
+
+    // 피부 톤 카드에 한 줄로 적는 분석 결과 — 마이페이지 손 분석 상세의 칩과 같은 표기(핑크 베이스 · 고명도 · 중채도).
+    // 베이스는 늘 있고, 명도·채도는 이 값을 담기 전에 저장된 맥락이면 없어서 뺀다
+    const skinToneTerms = handSummary
+        ? [
+            toCurrentToneLabel(handSummary.toneLabel),
+            handSummary.skinBrightnessLevel ? `${handSummary.skinBrightnessLevel}명도` : null,
+            handSummary.skinSaturationLevel ? `${handSummary.skinSaturationLevel}채도` : null,
+        ].filter((term): term is string => !!term)
+        : []
+    const shapeLabelEn = handSummary ? findShapeLabelEn(handSummary.shapeLabel) : null
 
     return (
         <AppShell mainClassName="design-result-page">
@@ -231,31 +248,45 @@ export function NailDesignResultPageContent() {
                                             : '내 손 분석 결과를 반영하여 디자인을 생성했어요.'}
                                     </h2>
                                     <div className="design-result-v2__origin-hand design-result-v2__origin-hand--scan-auto">
-                                        <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
-                                            <span className="design-result-v2__origin-stat-label">피부 톤</span>
-                                            <div className="design-result-v2__origin-stat-media-row">
-                                                {context.handSummary.skinToneHex && (
-                                                    <span
-                                                        className="design-result-v2__origin-stat-swatch"
-                                                        style={{ backgroundColor: context.handSummary.skinToneHex }}
-                                                        aria-hidden="true"
-                                                    />
-                                                )}
-                                                <span className="design-result-v2__origin-stat-value">{context.handSummary.toneLabel}</span>
+                                        {/* 왼쪽(2): 피부 톤 위 · 추천 쉐입 아래 / 오른쪽(3): 반영된 추천 컬러 */}
+                                        <div
+                                            className={`design-result-v2__origin-hand-side${recommendedPalette.length > 0 ? '' : ' is-full'}`}
+                                        >
+                                            <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
+                                                <span className="design-result-v2__origin-stat-label">피부 톤</span>
+                                                <div className="design-result-v2__origin-stat-media-row">
+                                                    {context.handSummary.skinToneHex && (
+                                                        <span
+                                                            className="design-result-v2__origin-stat-swatch"
+                                                            style={{ backgroundColor: context.handSummary.skinToneHex }}
+                                                            aria-hidden="true"
+                                                        />
+                                                    )}
+                                                    <span className="design-result-v2__origin-stat-value design-result-v2__origin-tone-terms">
+                                                        {skinToneTerms.map((term) => (
+                                                            <span key={term}>{term}</span>
+                                                        ))}
+                                                    </span>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
-                                            <span className="design-result-v2__origin-stat-label">추천 쉐입</span>
-                                            <div className="design-result-v2__origin-stat-media-row">
-                                                {context.handSummary.shapeImage && (
-                                                    <img
-                                                        className="design-result-v2__origin-stat-shape"
-                                                        src={context.handSummary.shapeImage}
-                                                        alt=""
-                                                        aria-hidden="true"
-                                                    />
-                                                )}
-                                                <span className="design-result-v2__origin-stat-value">{context.handSummary.shapeLabel}</span>
+                                            <div className="design-result-v2__origin-stat design-result-v2__origin-stat--media">
+                                                <span className="design-result-v2__origin-stat-label">추천 쉐입</span>
+                                                <div className="design-result-v2__origin-stat-media-row">
+                                                    {context.handSummary.shapeImage && (
+                                                        <img
+                                                            className="design-result-v2__origin-stat-shape"
+                                                            src={context.handSummary.shapeImage}
+                                                            alt=""
+                                                            aria-hidden="true"
+                                                        />
+                                                    )}
+                                                    <span className="design-result-v2__origin-stat-value design-result-v2__origin-stat-value--shape">
+                                                        {context.handSummary.shapeLabel}
+                                                        {shapeLabelEn && (
+                                                            <span className="design-result-v2__origin-stat-en">{shapeLabelEn}</span>
+                                                        )}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
                                         {recommendedPalette.length > 0 && (

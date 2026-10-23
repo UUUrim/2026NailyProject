@@ -285,16 +285,11 @@ export function MyPageModals({
                 const hasLinkedScan = Boolean(printDetailOrder.leftScanId || printDetailOrder.rightScanId)
                 // 지금은 왼손 검지 하나만 출력한다. 오른손 스캔이 같이 기록된 건 예전에 양손 10개로 신청한 주문이다.
                 const printTargetText = printDetailOrder.rightScanId ? '네일 팁 10개(양손)' : '왼손 검지 네일 팁 1개'
-                const lengthPct = printDetailScan
-                    ? Math.min(100, Math.max(8, (printDetailScan.avgLength / 18) * 100))
-                    : 0
-                const widthPct = printDetailScan
-                    ? Math.min(100, Math.max(8, (printDetailScan.avgWidth / 14) * 100))
-                    : 0
-                // avgCurve는 C-curve sagitta 깊이(mm, 대략 0~5). 막대는 5mm를 가득 찬 상태로 본다.
-                const curvePct = printDetailScan
-                    ? Math.min(100, Math.max(8, (printDetailScan.avgCurve / 5) * 100))
-                    : 0
+
+                // 막대는 스캔 서버의 5단계 평균 판정 위치(10/30/50/70/90%)만큼 채운다.
+                const lengthPct = printDetailScan?.lengthPct ?? 0
+                const widthPct = printDetailScan?.widthPct ?? 0
+                const curvePct = printDetailScan?.curvePct ?? 0
 
                 const subtitle = formatDateTimeFull(printDetailOrder.orderedAt)
                     || formatNavDate(dateKeyOf(printDetailOrder.orderedAt))
@@ -363,8 +358,11 @@ export function MyPageModals({
                         <section className="mypage-x__scanx-shape">
                             <div className="mypage-x__scanx-shape-copy">
                                 <p className="mypage-x__scanx-kicker">신청한 네일 팁 쉐입</p>
-                                <strong>{shapeLabel}</strong>
-                                {shapeEn && <span>{shapeEn}</span>}
+                                {/* 한글 이름 옆에 영어 이름을 작게 붙인다 (손 분석 결과 화면의 추천 쉐입 카드처럼) */}
+                                <strong className="mypage-x__scanx-shape-name">
+                                    {shapeLabel}
+                                    {shapeEn && <em>{shapeEn}</em>}
+                                </strong>
                                 <p className="mypage-x__scanx-shape-length">
                                     {printDetailOrder.tipExtensionMm != null && '연장 길이 '}
                                     <b>{formatTipExtension(printDetailOrder.tipExtensionMm)}</b>

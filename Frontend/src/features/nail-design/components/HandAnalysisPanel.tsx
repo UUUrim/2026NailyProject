@@ -4,12 +4,15 @@ import type { HandAnalysisSummary } from '@/features/nail-design/utils/handAnaly
 // 손 분석 결과 패널 — 사이드바의 "분석 결과 상세 보기"로 채팅 오른쪽에 연다 (좁은 화면에서는 채팅 위에 덮는다).
 // 지금 채팅에 반영 중인 기록, 또는 채팅 이력에서 누른 다른 기록의 대표 피부색·추천 컬러·추천 쉐입·손톱 측정값을 보여 준다.
 // 다른 기록이면 그 사실을 맨 위에 알리고, 그 기록으로 새 채팅을 열 수 있으면 아래에 '이 기록으로 새 채팅'을 둔다.
+// 출력 화면에서 넘어왔으면 네일 팁 출력에 쓴 기록에 노란 알약을 덧붙인다.
 export function HandAnalysisPanel({
     userName,
     analysisSummary,
     dateLabel,
     isFixedRecord,
     isOtherRecord,
+    isPrintedRecord = false,
+    isFixedEntry = false,
     isLoading,
     loadFailed,
     onStartChat,
@@ -24,6 +27,10 @@ export function HandAnalysisPanel({
     isFixedRecord: boolean
     // 지금 채팅에 반영 중인 기록이 아니라 채팅 이력에서 누른 다른 기록인지
     isOtherRecord: boolean
+    // 출력 화면에서 넘어온 채팅에서, 네일 팁 출력에 쓴 기록인지
+    isPrintedRecord?: boolean
+    // 손 촬영 → 출력에서 이어 와 이번 촬영 기록에 고정된 진입인지 — 알약 문구를 '방금 촬영한·방금 선택한'으로 바꾼다
+    isFixedEntry?: boolean
     isLoading: boolean
     // 다른 기록의 분석 결과를 불러오지 못했는지
     loadFailed: boolean
@@ -49,12 +56,32 @@ export function HandAnalysisPanel({
                             </span>
                         )}
                     </div>
-                    {/* 지금 채팅의 기록인지, 보기만 하는 다른 기록인지 */}
+                    {/* 지금 채팅의 기록인지, 보기만 하는 다른 기록인지 + 네일 팁 출력에 쓴 기록인지 */}
                     {hasRecord && (
-                        <p className={`dcw-panel-status dcw-panel-status--${isOtherRecord ? 'other' : 'current'}`}>
-                            <span className="dcw-panel-status__dot" aria-hidden="true" />
-                            {isOtherRecord ? '지금 채팅과 다른 분석 기록' : '지금 채팅에 반영 중'}
-                        </p>
+                        <div className="dcw-panel-tags">
+                            <p className={`dcw-panel-status dcw-panel-status--${isOtherRecord ? 'other' : 'current'}`}>
+                                <span className="dcw-panel-status__dot" aria-hidden="true" />
+                                {isOtherRecord
+                                    ? '지금 채팅과 다른 분석 기록'
+                                    : isFixedEntry
+                                        ? '방금 촬영한 분석 기록(채팅 반영 중)'
+                                        : '지금 채팅에 반영 중'}
+                            </p>
+                            {isPrintedRecord && (
+                                <p className="dcw-panel-status dcw-panel-status--printed">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                        <path
+                                            d="M7 9V4h10v5M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2M7 14h10v6H7z"
+                                            stroke="currentColor"
+                                            strokeWidth="2.2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                    </svg>
+                                    {isFixedEntry ? '방금 선택한 네일 팁 출력 분석 기록' : '네일 팁 출력에 사용된 분석 기록'}
+                                </p>
+                            )}
+                        </div>
                     )}
                 </div>
                 <button type="button" className="design-chat-sidebar__close" aria-label="분석 결과 상세 닫기" onClick={onClose}>
@@ -125,7 +152,7 @@ export function HandAnalysisPanel({
                                 <div className="design-chat-sidebar__tone-bars">
                                     <div className="design-chat-sidebar__tone-bar">
                                         <div className="design-chat-sidebar__tone-bar-head">
-                                            <span>톤</span>
+                                            <span>베이스</span>
                                             <span>{analysisSummary.skinToneAnalysis.tone.label}</span>
                                         </div>
                                         <div className="design-chat-sidebar__tone-bar-track design-chat-sidebar__tone-bar-track--tone">

@@ -4,7 +4,13 @@ import type { PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/a
 import type { DesignImageResponse, SavedDesignResponse } from '@/entities/design/api'
 import type { ScanResultResponse } from '@/entities/scan/api'
 import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
-import { FALLBACK_C_CURVE_MM, FALLBACK_LENGTH_MM, FALLBACK_WIDTH_MM, NAIL_BASELINE } from '@/shared/utils/nailMetrics'
+import {
+  FALLBACK_C_CURVE_MM,
+  FALLBACK_LENGTH_MM,
+  FALLBACK_WIDTH_MM,
+  nailSummaryComment,
+  nailSummaryMetrics,
+} from '@/shared/utils/nailMetrics'
 
 export type SectionId = 'dashboard' | 'profile' | 'timeline' | 'scans' | 'prints' | 'designs' | 'favorites'
 
@@ -129,6 +135,10 @@ export type ScanDetail = {
   avgLength: number
   avgWidth: number
   avgCurve: number
+  // 판정 막대 채움(%) — 스캔 서버의 5단계 평균 판정
+  lengthPct: number
+  widthPct: number
+  curvePct: number
   fingers: FingerStat[]
   comment: string
 }
@@ -179,15 +189,12 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
     })),
   ]
 
-  const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
-  const avgLength = Number(avg(fingers.map((f) => f.lengthMm)).toFixed(1))
-  const avgWidth = Number(avg(fingers.map((f) => f.widthMm)).toFixed(1))
-  const avgCurve = Number(avg(fingers.map((f) => f.cCurve)).toFixed(1))
-
-  const isLong = avgLength >= 12.5
-  const isNarrow = avgWidth <= 10
-  // avgCurve는 C-curve sagitta 깊이(mm). 기준 평균(mm)보다 얕으면 "완만한 편".
-  const isLowCurve = avgCurve <= NAIL_BASELINE.cCurve.mean
+  // 열 손가락 평균 길이·너비·곡률과 평균 판정은 스캔 서버 통합 measurements.json 상단 summary 값을 그대로 쓴다
+  // (읽지 못하면 여성 평균 수치와 average)
+  const metrics = nailSummaryMetrics(left, right)
+  const avgLength = Number(metrics.length.valueMm.toFixed(1))
+  const avgWidth = Number(metrics.width.valueMm.toFixed(1))
+  const avgCurve = Number(metrics.cCurve.valueMm.toFixed(1))
 
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
@@ -198,8 +205,11 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
     avgLength,
     avgWidth,
     avgCurve,
+    lengthPct: metrics.length.barPercent,
+    widthPct: metrics.width.barPercent,
+    curvePct: metrics.cCurve.barPercent,
     fingers,
-    comment: `평균보다 손톱이 ${isLong ? '긴' : '짧은'} 편이고, ${isNarrow ? '좁은' : '넓은'} 편이에요. 곡률(C-curve)은 ${isLowCurve ? '완만한' : '뚜렷한'} 편입니다.`,
+    comment: nailSummaryComment(metrics),
   }
 }
 

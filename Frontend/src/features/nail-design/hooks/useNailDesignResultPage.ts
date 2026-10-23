@@ -15,6 +15,7 @@ import {
 } from '@/entities/design/api'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
+import type { SkinLevel } from '@/shared/utils/skinTone'
 
 const SAMPLE_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 312">
@@ -48,6 +49,8 @@ export type GenerationContext = {
     avgWidth: number
     avgCurve: number
     skinToneHex?: string | null
+    skinBrightnessLevel?: SkinLevel | null
+    skinSaturationLevel?: SkinLevel | null
     shapeImage?: string | null
     recommendedColors?: string[]
     usedColors?: string[]

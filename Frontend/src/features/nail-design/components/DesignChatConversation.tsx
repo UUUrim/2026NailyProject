@@ -257,6 +257,7 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
         isAwaitingGenerateConfirm,
         isPreferenceInputLocked,
         isReopenedAfterConfirm,
+        isReadOnly,
         selectedInQuickReply,
         freeformSelectedColors,
         activeNoteStep,
@@ -338,7 +339,10 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
     // 수정 요청을 받는 때(수정 모드, 선택지 기반으로 만든 뒤 돌아와 입력이 열린 때)는 수정 내용을 적으라고 안내하고,
     // 자유 입력으로 채팅하는 중(제안 선택 창이 없을 때)엔 안내 문구를 띄우지 않는다.
     // (선택지를 다 고른 뒤 서버 답장을 기다리는 동안도 디자인을 만드는 과정이라 같은 문구를 쓴다)
-    const inputPlaceholder = isGeneratingDesign || (mode === 'preference' && isSending)
+    // 보기만 하는 채팅(손 촬영에서 이어 온 진입에서 연 다른 분석 기록의 채팅)은 입력·전송·선택 창을 막고 그 이유를 안내한다.
+    const inputPlaceholder = isReadOnly
+        ? '다른 분석 기록의 채팅이라 보기만 할 수 있어요.'
+        : isGeneratingDesign || (mode === 'preference' && isSending)
         ? '디자인을 만들고 있어요. 잠시만 기다려 주세요.'
         : (isPreferenceInputLocked && preferenceStepNumber > 0) || isAwaitingGenerateConfirm
             ? '위 선택지에서 골라 주세요.'
@@ -434,7 +438,7 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
                 </div>
 
                 {/* 사진을 첨부하면 사진 선택 창은 숨긴다 — 사진은 입력창에서 보고 "사진 변경하기"로 바꾼다 */}
-                {activeQuickReply && !hasPhotoAttachment && (
+                {activeQuickReply && !hasPhotoAttachment && !isReadOnly && (
                     <div className={`design-chat__quickreply${isQuickReplyCollapsed ? ' is-collapsed' : ''}`}>
                         <div
                             className={`design-chat__quickreply-header${
@@ -1089,7 +1093,7 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
                                 handleSubmitInput()
                             }
                         }}
-                        disabled={isSending || isAwaitingGenerateConfirm || isPreferenceInputLocked || isPhotoInputLocked}
+                        disabled={isReadOnly || isSending || isAwaitingGenerateConfirm || isPreferenceInputLocked || isPhotoInputLocked}
                     />
                     {!inputValue && (
                         <span className="design-chat__input-placeholder" aria-hidden="true">
@@ -1104,6 +1108,7 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
                         aria-label="전송"
                         onClick={handleSubmitInput}
                         disabled={
+                            isReadOnly ||
                             isSending ||
                             isAwaitingGenerateConfirm ||
                             isPreferenceInputLocked ||

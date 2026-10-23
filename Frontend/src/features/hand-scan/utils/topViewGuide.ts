@@ -73,6 +73,68 @@ export function coverMap(w: number, h: number, aspect: number) {
   }
 }
 
+/**
+ * 실제 손가락 지지대 가로 중심이 서버의 손가락 자리(guide.centerX — 마커 오른쪽 끝 +
+ * server.py FINGER_SLOT_FROM_MARKER_MM)보다 오른쪽으로 떨어진 거리(mm). 흰 배경 + 받침대 위
+ * 마커 세팅에서 찍은 탑뷰 화면으로 잰 값 — 지지대(검은 직사각형) 가운데가 가이드보다 6.5mm 오른쪽.
+ * 받침대 배치가 바뀌면 여기만 다시 잰다.
+ */
+const SUPPORT_FROM_SLOT_MM = 6.5
+// 지지대를 가운데로 당기면서 화면 끝이 비지 않게 하려면 영상을 키워야 하는데, 서버가 손가락 자리를
+// 화면 끝 가까이에 둔 예외 크롭(server.py _top_view_rect의 좁은 창)에서는 그 배율이 커진다 —
+// 이보다 더 키우지는 않는다(그때만 화면 끝에 띠가 조금 남을 수 있다).
+const MAX_DISPLAY_ZOOM = 1.5
+// 브라우저가 소수점 픽셀을 그리는 과정의 오차로 영상 끝이 칸 끝에 못 미쳐 가는 선이 비치지 않도록
+// 좌우를 이만큼(CSS px) 더 덮는다 — 배율이 0.1~0.5% 커질 뿐, 가이드도 같은 배율로 그려 크기는 그대로 맞다.
+const EDGE_OVERSCAN_PX = 1
+
+/**
+ * 탑뷰 화면 표시용 좌표 변환 — coverMap에 "지지대 맞춤 확대·이동"을 더한 것.
+ * 영상(<img>)·손가락 가이드·W/L 표시가 모두 이 하나로 그려져서 서로 정확히 겹친다.
+ *
+ * - 지지대 가운데(서버 손가락 자리 + SUPPORT_FROM_SLOT_MM)가 예전 가이드 자리(coverMap의 centerX)에 온다.
+ * - 그렇게 옆으로 옮겨도 화면 끝이 비지 않을 만큼만(좌우 EDGE_OVERSCAN_PX 여유 포함) 영상을 키운다
+ *   (세로는 화면 가운데 기준).
+ * - 같은 배율로 그리므로 가이드 실루엣·W/L 치수선도 확대된 영상 속 손가락과 같은 크기가 된다.
+ *
+ * 순수 표시용이다: 서버가 보내는 스트림 프레임, 측정, 저장 사진, 서버가 주는 가이드/측정 값은
+ * 하나도 바뀌지 않고, 그 값을 화면 어디에 그릴지만 정한다.
+ * scale은 프레임 높이 1에 해당하는 화면 픽셀 수(coverMap과 같은 뜻, 확대 배율 포함).
+ */
+export function topViewDisplayMap(w: number, h: number, guide: TopViewGuide) {
+  const base = coverMap(w, h, guide.aspect)
+  const targetX = base.x(guide.centerX)   // 지지대 가운데가 놓일 화면 x (예전 가이드 가운데)
+  // 지지대 가운데 — 프레임 가로 비율. mm 기준이라 카메라 높이/화면 크기와 무관하게 같은 실제 거리.
+  let supportX = guide.centerX + (SUPPORT_FROM_SLOT_MM * guide.mmToH) / guide.aspect
+  let fromX = base.x(supportX)
+  let zoom = 1
+  // 확대 전, 지지대 가운데에서 영상 왼쪽/오른쪽 끝까지
+  const spaceL = fromX - base.x(0)
+  const spaceR = base.x(1) - fromX
+  if (spaceL > 0 && spaceR > 0) {
+    zoom = Math.min(
+      Math.max(1, (targetX + EDGE_OVERSCAN_PX) / spaceL, (w - targetX + EDGE_OVERSCAN_PX) / spaceR),
+      MAX_DISPLAY_ZOOM,
+    )
+  } else {
+    // 지지대가 영상 밖으로 계산되는 이상한 값 — 맞추지 않고 서버 가이드 그대로 둔다
+    supportX = guide.centerX
+    fromX = targetX
+  }
+  // 화면 좌표 p → p' = t + zoom·p. 가로는 지지대 가운데가 targetX로, 세로는 화면 가운데 고정.
+  const tx = targetX - zoom * fromX
+  const ty = (h / 2) * (1 - zoom)
+  return {
+    scale: base.scale * zoom,
+    x: (fracOfWidth: number) => tx + zoom * base.x(fracOfWidth),
+    y: (fracOfHeight: number) => ty + zoom * base.y(fracOfHeight),
+    /** 손가락 가이드 가로 중심(프레임 가로 비율) = 지지대 가운데 */
+    supportX,
+    /** object-fit: cover로 그려진 <img>에 그대로 씌우는 CSS transform (transform-origin: 0 0) */
+    imageTransform: `translate(${tx}px, ${ty}px) scale(${zoom})`,
+  }
+}
+
 /** 실루엣 크기용 성인 평균 치수(mm) — 안내용일 뿐 측정에는 쓰이지 않는다. */
 const FINGER_GUIDE_MM: Record<Finger, { finger: number; nailW: number; nailL: number }> = {
   THUMB:  { finger: 20,   nailW: 14,   nailL: 13 },

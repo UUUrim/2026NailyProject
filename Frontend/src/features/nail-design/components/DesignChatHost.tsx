@@ -110,11 +110,13 @@ export function DesignChatHost() {
                       isContextReady={foreground.isContextReady}
                       userName={foreground.userName}
                       canSelectSession={foreground.canSelectSession}
+                      recordCount={foreground.recordCount}
                       analysis={foreground.analysis}
                       onSessionReady={foreground.onSessionReady}
                       onSaved={handleSaved}
                       onStatusChange={(status) => reportChatStatus(foreground.chat.instanceKey, status)}
                       onStartNewChat={foreground.onStartNewChat}
+                      isReadOnly={foreground.chat.readOnly}
                       isBackground={false}
                   />,
               ]

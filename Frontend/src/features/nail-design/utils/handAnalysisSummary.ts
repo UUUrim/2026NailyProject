@@ -1,8 +1,14 @@
 import { getScanResult, type ScanResultResponse } from '@/entities/scan/api'
-import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
+import {
+    analyzeSkinTone,
+    generateSkinTonePalette,
+    pickSpreadColors,
+    skinToneAnalysisFromMetrics,
+    type SkinBaseKind,
+} from '@/shared/utils/skinTone'
 import { parseDateFlexible } from '@/shared/utils/scanDetail'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { nailSummaryMetrics } from '@/shared/utils/nailMetrics'
 import { getNailShape } from '@/shared/constants/nailShapes'
 
 // 디자인 채팅에 반영하는 손 분석 기록 — 사이드바(분석 결과 상세 보기·기록별 새 채팅)와 채팅(추천 컬러·쉐입·스캔 자동 생성)이 같이 쓴다
@@ -47,32 +53,10 @@ export function buildHandAnalysisSummary(
 ) {
     if (!leftAnalysis && !rightAnalysis) return null
 
-    // 손 분석 결과 화면과 동일하게: 왼손 5손가락 + 오른손 5손가락 = 10손가락 실측 평균
-    const combinedFingers = [...(leftAnalysis?.fingers ?? []), ...(rightAnalysis?.fingers ?? [])]
-
-    const details = combinedFingers.map((finger, index) => {
-        let measurements: { lengthMm?: number; length?: number; widthMm?: number; width?: number; cCurveMm?: number; cCurve?: number; curve?: number }
-        try {
-            measurements = JSON.parse(finger.measurements ?? '{}') || {}
-        } catch {
-            measurements = {}
-        }
-        // index는 0~9(왼손 0~4 + 오른손 5~9)이므로, 손가락 종류(엄지~소지)는 %5로 구한다.
-        const fingerSize = FINGER_SIZE_MM[index % 5]
-        // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
-        // — cCurve/curve는 옛 목업 호환용. 값이 없으면 해당 손가락의 실측 평균값을 쓴다.
-        return {
-            lengthMm: Number(measurements.lengthMm ?? measurements.length ?? fingerSize.lengthMm),
-            widthMm: Number(measurements.widthMm ?? measurements.width ?? fingerSize.widthMm),
-            cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? fingerSize.cCurveMm),
-        }
-    })
-
-    const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
-    const avgLength = Number(avg(details.map((d) => d.lengthMm)).toFixed(1))
-    const avgWidth = Number(avg(details.map((d) => d.widthMm)).toFixed(1))
-    // cCurve는 C-curve sagitta 깊이(mm). 소수 첫째 자리까지만 보여 준다.
-    const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(1))
+    // 손 분석 결과 화면과 동일하게: 열 손가락 평균 길이·너비·곡률과 평균 판정은 스캔 서버 통합 measurements.json
+    // 상단 summary 값을 그대로 쓴다 (읽지 못하면 여성 평균 수치와 average). 값은 소수 첫째 자리까지만 보여 준다.
+    const metrics = nailSummaryMetrics(leftAnalysis, rightAnalysis)
+    const toDisplayMm = (mm: number) => Number(mm.toFixed(1))
 
     // 톤/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
     // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는
@@ -90,11 +74,6 @@ export function buildHandAnalysisSummary(
     const shapeId = leftAnalysis?.recommendedShape ?? rightAnalysis?.recommendedShape ?? null
     const shapeInfo = shapeId ? getNailShape(shapeId) : undefined
 
-    // 손 분석 결과 화면과 동일한 기준값으로 막대 위치·비교 문구를 계산한다
-    const lengthPct = percentileAgainstBaseline(avgLength, NAIL_BASELINE.length)
-    const widthPct = percentileAgainstBaseline(avgWidth, NAIL_BASELINE.width)
-    const curvePct = percentileAgainstBaseline(avgCurve, NAIL_BASELINE.cCurve)
-
     return {
         scannedAt: leftAnalysis?.scannedAt ?? rightAnalysis?.scannedAt ?? null,
         // 실제로 분석된 톤 이름 (분석값이 없으면 null — 아래 toneLabel은 '분석 중'으로 채운다)
@@ -105,15 +84,16 @@ export function buildHandAnalysisSummary(
         detectedShapeLabel: shapeInfo ? shapeInfo.labelKo : shapeId,
         shapeLabel: shapeInfo ? shapeInfo.labelKo : shapeId || '분석 중',
         shapeImage: shapeInfo?.image ?? null,
-        avgLength,
-        avgWidth,
-        avgCurve,
-        lengthPct,
-        widthPct,
-        curvePct,
-        lengthCompareLabel: labelByPercentile(lengthPct, '평균보다 짧은 편', '평균보다 긴 편', '평균과 비슷함'),
-        widthCompareLabel: labelByPercentile(widthPct, '좁은 편', '넓은 편', '평균과 비슷함'),
-        curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
+        avgLength: toDisplayMm(metrics.length.valueMm),
+        avgWidth: toDisplayMm(metrics.width.valueMm),
+        avgCurve: toDisplayMm(metrics.cCurve.valueMm),
+        // 판정 막대 채움(%)과 판정 문구 — 스캔 서버의 5단계 평균 판정
+        lengthPct: metrics.length.barPercent,
+        widthPct: metrics.width.barPercent,
+        curvePct: metrics.cCurve.barPercent,
+        lengthCompareLabel: metrics.length.label,
+        widthCompareLabel: metrics.width.label,
+        curveCompareLabel: metrics.cCurve.label,
         skinToneHex,
         skinToneAnalysis: backendSkinToneAnalysis ?? (skinToneHex ? analyzeSkinTone(skinToneHex) : null),
         skinTonePalette: sortRecommendedColors(
@@ -128,23 +108,14 @@ export function buildHandAnalysisSummary(
 
 // ── 사이드바에 보여 줄 손 분석 기록 미리보기 (대표 피부색·톤·추천 컬러 6개·날짜) ──
 
-export type SkinToneKind = 'warm' | 'cool' | 'neutral'
-
 export type HandRecordPreview = {
     skinToneHex: string | null
+    // 베이스 이름 (예: 핑크 베이스)
     toneLabel: string | null
-    // 웜/쿨/뉴트럴 — 톤 이름을 각자 어울리는 글자색으로 보여 준다
-    toneKind: SkinToneKind | null
+    // 핑크/뉴트럴/옐로우 — 제목(대표 피부색 헥스값)의 바탕을 이 베이스 색으로 칠한다
+    baseKind: SkinBaseKind | null
     palette: string[]
     dateLabel: string
-}
-
-function toneKindOf(toneLabel: string | null): SkinToneKind | null {
-    if (!toneLabel) return null
-    if (toneLabel.startsWith('웜')) return 'warm'
-    if (toneLabel.startsWith('쿨')) return 'cool'
-    if (toneLabel.startsWith('뉴트럴')) return 'neutral'
-    return null
 }
 
 type HandRecordSource = {
@@ -170,10 +141,9 @@ export function formatRecordDate(raw: string | null | undefined): string {
 /** 마이페이지 손 분석 기록 줄(ScanSessionRow)과 같은 기준 — 정렬한 추천 컬러에서 고르게 6색을 뽑는다 */
 export function buildHandRecordPreview(source: HandRecordSource): HandRecordPreview {
     const skinToneHex = source.skinToneHex ?? null
-    const toneLabel =
-        (skinToneAnalysisFromMetrics(source.tone ?? null, source.warmness ?? null, source.brightness ?? null, source.saturation ?? null)
-            ?.tone.label ??
-            (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null))?.replace(/\s+/g, '') ?? null
+    const skinAnalysis =
+        skinToneAnalysisFromMetrics(source.tone ?? null, source.warmness ?? null, source.brightness ?? null, source.saturation ?? null) ??
+        (skinToneHex ? analyzeSkinTone(skinToneHex) : null)
     const colors = source.recommendedColors?.length
         ? source.recommendedColors
         : skinToneHex
@@ -181,8 +151,8 @@ export function buildHandRecordPreview(source: HandRecordSource): HandRecordPrev
             : []
     return {
         skinToneHex,
-        toneLabel,
-        toneKind: toneKindOf(toneLabel),
+        toneLabel: skinAnalysis?.tone.label ?? null,
+        baseKind: skinAnalysis?.baseKind ?? null,
         palette: pickSpreadColors(sortRecommendedColors(colors), 6),
         dateLabel: formatRecordDate(source.scannedAt),
     }

@@ -185,8 +185,9 @@
   border-radius: 999px;
 }
 
+/* 베이스 — 왼쪽 핑크 베이스(분홍) → 오른쪽 옐로우 베이스(노랑) */
 .skin-tone-slider__track--tone {
-  background: linear-gradient(90deg, #8fb4e6 0%, #f0c069 100%);
+  background: linear-gradient(90deg, #eda0bb 0%, #f0c069 100%);
 }
 
 .skin-tone-slider__track--brightness {

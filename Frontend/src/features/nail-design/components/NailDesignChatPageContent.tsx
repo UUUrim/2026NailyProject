@@ -52,7 +52,8 @@ export function NailDesignChatPageContent() {
                 recordPreviewByKey={workspace.recordPreviewByKey}
                 isCurrentRecordPanelOpen={workspace.isCurrentRecordPanelOpen}
                 onToggleAnalysisPanel={workspace.toggleCurrentRecordPanel}
-                panelRecordKey={workspace.panelRecordKey}
+                fixedScanKey={workspace.fixedScanKey}
+                viewingRecordKey={workspace.viewingRecordKey}
                 onViewRecord={workspace.viewRecord}
                 historyGroups={workspace.historyGroups}
                 isHistoryLoading={workspace.isHistoryLoading}
@@ -115,7 +116,10 @@ export function NailDesignChatPageContent() {
                         analysisSummary={panelRecord.summary}
                         dateLabel={panelRecord.preview?.dateLabel ?? ''}
                         isFixedRecord={panelRecord.isFixedRecord}
+                        // 보통은 지금 채팅에 반영 중인 기록 — 손 촬영에서 이어 온 진입에서 다른 기록 줄을 누르면 그 기록
                         isOtherRecord={panelRecord.isOtherRecord}
+                        isPrintedRecord={panelRecord.isPrintedRecord}
+                        isFixedEntry={!workspace.canSelectSession}
                         isLoading={panelRecord.isLoading}
                         loadFailed={panelRecord.loadFailed}
                         onStartChat={panelRecord.canStartChat ? workspace.startChatWithPanelRecord : undefined}
