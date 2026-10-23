@@ -1030,6 +1030,7 @@ public class NailDesignService {
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
                 : summarizeSlots(slots, handScan, !hasImage)
+                + (photoFlow ? "" : ScanFitWeighting.fitLine(fitOf(handScan)))
                 + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
                 + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
                 + buildUserOwnWordsText(session)
@@ -1075,7 +1076,6 @@ public class NailDesignService {
                 System.out.println("[NailDesignService] 사용자 문장에서 쉐입 지정 감지 → '" + wordsShape + "' 우선 적용");
             }
         }
-        shapePriority.addAll(getLiked(slots, "shape"));
         // ★ scan-auto는 쉐입을 스캔 추천으로 고정하는 흐름인데(위에서 plan.shape에 넣음), 세션에 저장된 쉐입 슬롯
         // (이전 채팅에서 고른 값, 또는 이전 생성의 플랜이 자동으로 채워 넣은 값)이 enforceAppShape에서 가장 우선이라
         // 추천이 발레리나여도 슬롯의 아몬드가 이겼다. 슬롯을 스캔 추천으로 맞춰서 프롬프트/AR 템플릿/키워드가 모두 같은 값을 보게 한다.
@@ -1088,11 +1088,12 @@ public class NailDesignService {
                 System.out.println("[Shape] scan-auto: 세션 슬롯 쉐입 " + before + " 를 스캔 추천 '" + scanRecommendedShape(handScan) + "' 로 교체");
             }
         }
-        enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
+        shapePriority.addAll(getLiked(slots, "shape"));
         System.out.println("[Shape] scanAuto=" + scanAuto + " scanId=" + request.getScanId()
                 + " 스캔추천=" + (handScan != null ? scanRecommendedShape(handScan) : null)
                 + " 슬롯=" + getLiked(slots, "shape") + " 플랜=" + (plan != null ? plan.path("shape").asText("") : null)
                 + " 우선순위=" + shapePriority);
+        enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
 
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
@@ -1397,6 +1398,12 @@ public class NailDesignService {
     private String pickDefaultMood(Map<String, SlotData> slots) {
         String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
         if ("glitter".equals(designType) || "marble".equals(designType)) return "chic";
+        // 쉐입이 주는 인상(둥글면 큐트/순수, 아몬드면 우아/러블리, 스퀘어/스틸레토면 시크 ...)과 색 톤에 맞춰 가중치로 고른다.
+        List<String> shapeLiked = getLiked(slots, "shape");
+        String shape = shapeLiked.isEmpty() ? null : shapeLiked.get(0);
+        List<String> hexes = ScanFitWeighting.hexesIn(String.join(" ", getLiked(slots, "color")));
+        String byShape = ScanFitWeighting.pickMood(shape, hexes, new Random());
+        if (byShape != null) return byShape;
         return DEFAULT_MOOD_POOL.get(new Random().nextInt(DEFAULT_MOOD_POOL.size()));
     }
 
@@ -1425,10 +1432,10 @@ public class NailDesignService {
         if (useScanColors && getLiked(slots, "color").isEmpty()) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
-                List<String> shuffled = new ArrayList<>(palette);
-                Collections.shuffle(shuffled);
-                int count = Math.min(shuffled.size(), 1 + new Random().nextInt(3)); // 1~3개
-                for (String color : shuffled.subList(0, count)) {
+                // 완전 무작위가 아니라 가중치로 뽑는다: 짧은 손톱이면 비비드한 색을 더 자주, 이미 뽑은 색과 어울리는 계열을 더 자주.
+                Random rnd = new Random();
+                int count = Math.min(palette.size(), 1 + rnd.nextInt(3)); // 1~3개
+                for (String color : ScanFitWeighting.pickWeighted(palette, fitOf(handScan), count, rnd)) {
                     addLiked(slots, "color", color);
                 }
             }
@@ -1437,6 +1444,18 @@ public class NailDesignService {
         if (getLiked(slots, "mood").isEmpty()) {
             addLiked(slots, "mood", pickDefaultMood(slots));
         }
+    }
+
+    /**
+     * 스캔에서 읽은 손 특성: 손톱 몸통(스캔 쉐입 추천과 같은 기준의 폭/길이 z값), 손톱 크기, 피부 밝기.
+     * 스캔 값이 없으면 빈 Fit.
+     */
+    private ScanFitWeighting.Fit fitOf(HandScan handScan) {
+        if (handScan == null) return ScanFitWeighting.Fit.NONE;
+        ScanFitWeighting.NailBody body = ScanFitWeighting.nailBodyFromShape(scanRecommendedShape(handScan));
+        return scanResultFileService.analysisFor(handScan)
+                .map(a -> new ScanFitWeighting.Fit(body, ScanFitWeighting.handSizeFrom(a.overallSize()), a.brightness()))
+                .orElse(new ScanFitWeighting.Fit(body, null, null));
     }
 
     private void addLiked(Map<String, SlotData> slots, String category, String value) {
@@ -1878,11 +1897,19 @@ public class NailDesignService {
         // 다른 생성 방식(summarizeSlots)과 같은 "#HEX (이름)" 형식으로 넘겨서, top-level color(= 최종 프롬프트의
         // Overall style)엔 헥스가, 손톱별 description엔 자연어 색 이름이 들어가도록 맞춘다.
         List<String> palette = scanRecommendedColors(handScan);
+        ScanFitWeighting.Fit fit = fitOf(handScan);
+        // 30색을 전부 주면 GPT가 매번 비슷한 색만 고른다. 가중치로 후보 8색을 먼저 추려서(짧은 손톱이면 비비드 우대,
+        // 서로 어울리는 계열 우대) 그 안에서 고르게 한다.
+        if (palette.size() > 8) {
+            palette = ScanFitWeighting.pickWeighted(palette, fit, 8, new Random());
+        }
         if (!palette.isEmpty()) {
-            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트 ").append(palette.size())
+            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트에서 추린 ").append(palette.size())
                     .append("색 - 이 목록 안에서만 색을 고르고, 고른 색 앞의 헥스코드를 top-level color 필드에 그대로 복사): ")
                     .append(String.join(", ", pairHexWithNames(palette))).append("\n");
         }
+        sb.append(ScanFitWeighting.fitLine(fit));
+        sb.append(ScanFitWeighting.autoHint(fit, recShape));
 
         sb.append("""
                 [스캔 정보 기반 자동 생성 - 매우 중요]

@@ -585,8 +585,10 @@ public class FingerDesignPlanService {
           rhinestone, bow charm 3d (parts); heart (motif); cheek blush or soft french tip (pattern)
         - cute / kitsch / playful: heart, star, bunny (motif); polka dot, plaid, stripe (pattern); heart
           charm, star charm, bow charm 3d, rhinestone (parts)
-        - chic / elegant / modern: french tip, line art, color block, blooming (pattern); pearl trim,
-          chain, metal stud, rhinestone (parts)
+        - elegant / modern: french tip, line art, color block (pattern); pearl trim, chain, metal stud,
+          rhinestone (parts)
+        - chic: french tip, line art, color block, blooming (pattern); pearl trim, chain, metal stud,
+          rhinestone (parts)
         - cool / edgy / dark / funky: cross, star, butterfly (motif); speckle, marble, blooming (pattern);
           chain, metal stud, star charm (parts)
         - y2k / glam: star, butterfly (motif); rhinestone, star charm, chain (parts); chrome or glitter
@@ -971,7 +973,8 @@ public class FingerDesignPlanService {
             "autumn|\\bfall\\b|winter|가을|겨울|christmas|크리스마스");
     private static final java.util.regex.Pattern CHECK_WORDS = java.util.regex.Pattern.compile("체크|\\bcheck|plaid|gingham|깅엄");
     private static final java.util.regex.Pattern BLOOMING_WORDS = java.util.regex.Pattern.compile("블루밍|blooming");
-    private static final java.util.regex.Pattern FUNKY_CHIC = java.util.regex.Pattern.compile("funky|펑키|chic|시크");
+    // "chick"(병아리), "시크릿" 같은 단어에 걸리지 않도록 단어 경계를 둔다.
+    private static final java.util.regex.Pattern FUNKY_CHIC = java.util.regex.Pattern.compile("\\bfunky\\b|펑키|\\bchic\\b|시크(?!릿)");
     private static final java.util.regex.Pattern FUNKY_WORDS = java.util.regex.Pattern.compile("funky|펑키");
     private static final List<String> EXPRESSION_DESIGNS = List.of("glitter", "magnetic", "knit", "ink");
 
@@ -1093,6 +1096,32 @@ public class FingerDesignPlanService {
         }
         if (added > 0) System.out.println("[FingerDesignPlan] 펑키/시크 무드 → 손톱 " + added + "개에 블루밍을 적용");
         else System.err.println("[FingerDesignPlan] ⚠ 펑키/시크 무드지만 블루밍을 넣을 손톱이 없습니다.");
+    }
+
+    private static final java.util.regex.Pattern BLOOMING_SENTENCE = java.util.regex.Pattern.compile(
+            "(?i)blooming (?:dots?|nail|design|row)|scallop|filled (?:ink|blooming) dots?|ink-drop dots?");
+
+    /**
+     * 블루밍은 펑키/시크 무드(또는 사용자가 블루밍을 직접 말한 경우)에서만 쓴다. 그 외 무드인데 플랜이 블루밍 패턴을 골랐으면
+     * (러블리 세트에 진한 번짐 점이 매번 들어가던 문제) 패턴과 그 설명 문장을 지운다. 사진/수정 흐름은 건드리지 않는다.
+     */
+    private void stripBloomingUnlessMood(JsonNode plan, String confirmedInput) {
+        if (!(plan instanceof ObjectNode root)) return;
+        String wanted = wantedPart(confirmedInput);
+        if (FUNKY_CHIC.matcher(wanted).find() || BLOOMING_WORDS.matcher(wanted).find()) return;
+        if (FUNKY_CHIC.matcher(root.path("mood").asText("").toLowerCase()).find()) return;
+        for (String finger : FINGERS) {
+            if (!(root.path(finger) instanceof ObjectNode f) || !arrayContains(f.path("pattern"), "blooming")) continue;
+            removeFromArray(f, "pattern", "blooming");
+            StringBuilder kept = new StringBuilder();
+            for (String sentence : f.path("description").asText("").split("(?<=[.!?])\\s+")) {
+                if (BLOOMING_SENTENCE.matcher(sentence).find()) continue;
+                if (kept.length() > 0) kept.append(' ');
+                kept.append(sentence);
+            }
+            f.put("description", kept.toString().trim());
+            System.out.println("[FingerDesignPlan] 펑키/시크가 아닌 무드 → " + finger + " 손톱의 블루밍 제거");
+        }
     }
 
     private static final java.util.regex.Pattern HAND_CHECK_OK = java.util.regex.Pattern.compile(
@@ -1326,7 +1355,9 @@ public class FingerDesignPlanService {
         if (FUNKY_CHIC.matcher(wantedPart(input)).find()) { pool.add("blooming"); pool.add("blooming"); }
         // 색 효과(글리터/자석/니트/잉크)는 세트당 하나만 채운다 - 색 표현은 두 종류까지.
         if (picked.stream().anyMatch(EXPRESSION_DESIGNS::contains)) pool.removeIf(EXPRESSION_DESIGNS::contains);
-        java.util.Collections.shuffle(pool, r);
+        // 채우는 디자인은 완전 무작위가 아니라 색 톤(비비드/파스텔/짙은 색)과 손톱 몸통 길이에 따라 어울리는 쪽에 가중치를 준다.
+        pool = ScanFitWeighting.weightedOrder(pool, ScanFitWeighting.designMultipliers(
+                ScanFitWeighting.hexesIn(wantedPart(input)), ScanFitWeighting.fitFromInput(input)), r);
 
         List<String> designs = new java.util.ArrayList<>(picked);
         for (String d : pool) {
@@ -1564,7 +1595,11 @@ public class FingerDesignPlanService {
 
     /** "(피해야 함)" 줄을 뺀, 사용자가 원한다고 말한 내용만. */
     private static String wantedPart(String confirmedInput) {
-        return confirmedInput == null ? "" : confirmedInput.toLowerCase().replaceAll("(?m)^.*피해야 함.*$", "");
+        String wanted = confirmedInput == null ? "" : confirmedInput.toLowerCase().replaceAll("(?m)^.*피해야 함.*$", "");
+        // 스캔 자동 생성 요약 끝의 안내 블록(예: "fresh·funky mood에 color block")은 사용자가 고른 값이 아니다. 거기 들어 있는
+        // funky/elegant/french tip 같은 단어가 펑키 무드·블루밍·디자인 감지에 걸리지 않게 잘라낸다.
+        int guide = wanted.indexOf("[스캔 정보 기반 자동 생성");
+        return guide >= 0 ? wanted.substring(0, guide) : wanted;
     }
 
     private static boolean wantsGlitter(String wanted) {
@@ -2241,6 +2276,8 @@ public class FingerDesignPlanService {
                 enforceHandDrawnCheck(plan, confirmedInputSummary);
                 enforceFunkyParts(plan, confirmedInputSummary);
             }
+            if (!hasImage && (previousPlanJson == null || previousPlanJson.isBlank()))
+                stripBloomingUnlessMood(plan, confirmedInputSummary);
             // 심플 키워드가 없으면 파츠/디자인을 풍성하게 - 참고 사진 기반 생성도 포함한다(수정 흐름과 원컬러 세트는 제외).
             if (!editRequest && !uniformSet) enforceRichness(plan, confirmedInputSummary);
             if (!hasImage && (previousPlanJson == null || previousPlanJson.isBlank()) && !scanAutoMode && !uniformSet) {
