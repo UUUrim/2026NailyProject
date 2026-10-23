@@ -1167,12 +1167,20 @@
 }
 
 .design-chat__option-tooltip {
+    /* 예시 사진이 3:2 가로형이라, 예전 정사각형 칸과 비슷한 크기로 보이도록 카드를 넓혔다 */
+    --design-chat-tooltip-width: 240px;
     position: fixed;
     z-index: 4000;
+    /* 앵커 가운데(--design-chat-tooltip-anchor-x)에 맞추되, 화면 가장자리 옵션에서도 카드가 뷰포트 밖으로 나가지 않게 한다 */
+    left: clamp(
+        calc(var(--design-chat-tooltip-width) / 2 + 8px),
+        var(--design-chat-tooltip-anchor-x),
+        calc(100vw - var(--design-chat-tooltip-width) / 2 - 8px)
+    );
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 200px;
+    width: var(--design-chat-tooltip-width);
     padding: 0.85rem 0.9rem 1rem;
     border-radius: 16px;
     background: #fff;
@@ -1196,11 +1204,12 @@
     }
 }
 
+/* public/images/nail-sample 예시 사진 원본(1536x1024)과 같은 3:2 비율. contain이라 비율이 다른 사진이 와도 잘리지 않는다 */
 .design-chat__option-tooltip-img {
     width: 100%;
-    aspect-ratio: 1;
+    aspect-ratio: 3 / 2;
     border-radius: 12px;
-    object-fit: cover;
+    object-fit: contain;
     margin-bottom: 0.6rem;
     box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
 }

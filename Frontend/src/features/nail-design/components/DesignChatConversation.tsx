@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactElement } from 'react'
+import { Fragment, useState, type CSSProperties, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import { DesignImageDetailModal } from '@/features/mypage/components/DesignImageDetailModal'
 import {
@@ -1150,7 +1150,12 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
                 createPortal(
                     <div
                         className="design-chat__option-tooltip"
-                        style={{ top: tooltipAnchor.top - 8, left: tooltipAnchor.left }}
+                        style={
+                            {
+                                top: tooltipAnchor.top - 8,
+                                '--design-chat-tooltip-anchor-x': `${tooltipAnchor.left}px`,
+                            } as CSSProperties
+                        }
                         role="tooltip"
                     >
                         {tooltipAnchor.info.image && !tooltipImgError ? (
