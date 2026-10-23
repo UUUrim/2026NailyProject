@@ -1953,54 +1953,54 @@ def apply_wl_correction(finger: str, width_mm: float, length_mm: float) -> dict:
 
 NAIL_SHAPES = ("round", "oval", "square", "almond", "ballerina", "stiletto")
 
-# 비율 z(넓고 짧을수록 +) -> 쉐입. 위에서부터 "z가 이 값 이상이면" 순서로 본다.
+# 손톱 너비 / 길이 -> 쉐입. 위에서부터 "이 값 이상이면" 순서로 본다. 값이 클수록 통통하고 짧은 손톱이다.
 # 넓고 짧은 손톱일수록 끝을 길게 좁히는 쉐입(길어 보이게), 좁고 긴 손톱일수록
 # 끝을 좁히지 않는 쉐입(폭이 살아 보이게)으로 가는 한 줄짜리 축이다.
-_SHAPE_BY_WL_Z = (
-    ( 1.25, "stiletto"),
-    ( 0.75, "ballerina"),
-    ( 0.25, "almond"),
-    (-0.25, "oval"),
-    (-0.75, "square"),
+# 평균/논문 기준과 비교하지 않고 이 사람 손톱의 모양만 본다.
+#
+# 임계값은 지금 스캔의 측정값 분포(스캔 38건: 너비/길이 중앙 0.70, 대부분 0.6 ~ 0.75, 통통한 손 0.85 ~ 1.07)를
+# 보고 잡았다. 지금 측정은 길이가 길게 나와서 값이 실제 손톱보다 낮게 나오므로, 측정이 고쳐지면 같이 올릴 것.
+_SHAPE_BY_WIDTH_OVER_LENGTH = (
+    (0.95, "stiletto"),
+    (0.80, "ballerina"),
+    (0.72, "almond"),
+    (0.66, "oval"),
+    (0.60, "square"),
 )
-_SHAPE_NARROWEST = "round"   # 위 구간 어디에도 안 걸리는 가장 좁고 긴 쪽 (z 정보가 없을 때의 기본값도 이것)
+_SHAPE_NARROWEST = "round"   # 위 구간 어디에도 안 걸리는 가장 좁고 긴 쪽 (측정값이 없을 때의 기본값도 이것)
 
 
 def recommend_nail_shape(wl_checks: list) -> str:
-    """Recommend a nail shape from this hand's measured width/length proportions.
+    """Recommend a nail shape from this hand's own measured width/length proportion.
 
     wl_checks: the wl_ratio_check dicts (see apply_wl_correction) for this
-    hand's fingers. Each carries wl_diff (this finger's measured W/L ratio
-    minus the Jung et al. 2015 population baseline for that specific
-    finger) and wl_std_dev (that finger's population SD). Averaging
-    wl_diff/wl_std_dev across fingers gives a single z-score for how wide
-    or narrow this hand's nail beds are relative to the population norm:
-    positive = wider/shorter than average, negative = narrower/longer than
-    average.
+    hand's fingers. Only measured_wl (this finger's width_mm / length_mm) is
+    used - no population baseline. The hand's value is the mean over its
+    fingers.
 
     The shape is chosen to correct the proportion, not to follow it: a
-    wide/short bed gets a shape that tapers and extends the free edge so
-    the nail reads longer and slimmer (stiletto > ballerina > almond), an
-    average bed gets the all-round oval, and a narrow/long bed gets a
-    shape that does not taper it any further (square, then round at the
-    narrowest). See _SHAPE_BY_WL_Z for the cut points.
+    wide/short nail (high width/length) gets a shape that tapers and extends
+    the free edge so the nail reads longer and slimmer (stiletto > ballerina >
+    almond), a middling one gets the all-round oval, and a narrow/long nail
+    gets a shape that does not taper it any further (square, then round at
+    the narrowest). See _SHAPE_BY_WIDTH_OVER_LENGTH for the cut points.
 
     Natural nail length does not gate any shape: the printed tip adds its
     own extension on top of the measured nail (see TIP_EXTENSION_DEFAULT_MM
     in nail_exact_stl.py), so a short nail can still carry a long shape.
 
     This is a heuristic, not a clinically validated recommendation -
-    thresholds were picked to match common nail-tech shape guidance, not
-    fit to outcome data (none exists yet).
+    thresholds were picked to match common nail-tech shape guidance and the
+    measured values, not fit to outcome data (none exists yet).
     """
-    zs = [c["wl_diff"] / c["wl_std_dev"]
-          for c in wl_checks if c.get("wl_std_dev")]
-    if not zs:
+    ratios = [c["measured_wl"] for c in wl_checks
+              if c.get("measured_wl") is not None]
+    if not ratios:
         return _SHAPE_NARROWEST
-    z = sum(zs) / len(zs)
+    ratio = sum(ratios) / len(ratios)
 
-    for threshold, shape in _SHAPE_BY_WL_Z:
-        if z >= threshold:
+    for threshold, shape in _SHAPE_BY_WIDTH_OVER_LENGTH:
+        if ratio >= threshold:
             return shape
     return _SHAPE_NARROWEST
 
