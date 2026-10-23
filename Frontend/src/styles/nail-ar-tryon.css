@@ -317,6 +317,104 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* 화질·색감 조절: 카메라 선택 칩 옆 버튼 + 아래로 펼쳐지는 슬라이더 패널 */
+.nail-ar-tryon__adjust {
+  position: relative;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.nail-ar-tryon__adjust-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: var(--ar-chip-h);
+  padding: 0 0.8rem 0 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(24, 18, 21, 0.46);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.nail-ar-tryon__adjust-btn:hover,
+.nail-ar-tryon__adjust-btn:focus-visible,
+.nail-ar-tryon__adjust-btn.is-open {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(222, 134, 159, 0.5);
+}
+
+.nail-ar-tryon__adjust-panel {
+  position: absolute;
+  top: calc(var(--ar-chip-h) + 6px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 230px;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(24, 18, 21, 0.62);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  color: #fff;
+}
+
+.nail-ar-tryon__adjust-row {
+  display: grid;
+  grid-template-columns: 3.4rem 1fr;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.nail-ar-tryon__adjust-label {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 600;
+}
+
+.nail-ar-tryon__adjust-row input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--mp-pink);
+}
+
+.nail-ar-tryon__adjust-select {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(24, 18, 21, 0.7);
+  color: #fff;
+  font-size: 0.72rem;
+}
+
+.nail-ar-tryon__adjust-reset {
+  align-self: flex-end;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.nail-ar-tryon__adjust-reset:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /* 개발 모드 전용: 지금 손톱을 무엇으로 찾고 있는지(분할 모델 GPU/CPU, 색 기반) 표시.
    점 색: 불러오는 중(노랑, 깜빡임) / GPU(초록) / CPU(파랑) / 실패(빨강) */
 .nail-ar-tryon__detector {
