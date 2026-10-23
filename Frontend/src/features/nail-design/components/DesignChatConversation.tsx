@@ -1159,7 +1159,10 @@ export function DesignChatConversation(props: DesignChatConversationProps) {
                         role="tooltip"
                     >
                         {tooltipAnchor.info.image && !tooltipImgError ? (
+                            // 옆 옵션으로 바로 옮기면 툴팁이 닫히지 않고 src만 바뀌는데, 그러면 브라우저가 새 사진을
+                            // 다 받을 때까지 이전 사진을 계속 그린다. 사진마다 key를 달아 <img>를 새로 만든다.
                             <img
+                                key={tooltipAnchor.info.image}
                                 src={tooltipAnchor.info.image}
                                 alt=""
                                 className="design-chat__option-tooltip-img"

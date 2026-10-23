@@ -173,6 +173,11 @@ TOP_VIEW_MIN_W_PX          = 480   # 창이 이보다 좁아지면 예전 방식
 # 손가락이 잠깐 인식 안 된 한두 측정 사이클 동안 가이드 선이 마커 기준
 # 추정 위치로 튀지 않도록 마지막 실측 guide_y를 유지하는 시간.
 GUIDE_LIVE_HOLD_SEC  = 0.5
+# 손가락이 없을 때 가이드 선을 그릴 마커 위치를 이 간격으로 다시 잡는다(_refresh_guide_marker).
+# 처음 잡은 마커(_S.marker_corners)는 서버가 켜져 있는 내내 그대로인데 카메라/받침대는
+# 조금씩 움직여서(10-22 하루 사이 마커 아래 끝이 380→401px), 손가락을 넣어 실측 guide_y로
+# 바뀌는 순간 선이 그만큼 튀었다. 화면 표시 전용이고 측정에는 쓰지 않는다.
+GUIDE_MARKER_REFRESH_SEC = 0.5
 
 # ─────────────────────────────────────────────────────────────
 app = FastAPI(title="Naily 통합 서버")
@@ -620,9 +625,13 @@ class _StreamState:
         self.top_view_rect: tuple | None = None
         # 손가락 자리 가로 중심(원본 프레임 px) — 가이드 실루엣이 놓이는 열.
         self.finger_slot_x: float = 0.0
-        # 마커를 처음 잡았을 때의 코너 — 손가락이 아직 없을 때도 프론트
-        # 가이드의 큐티클 라인 위치와 실루엣 크기(mm/px)를 계산하는 데 쓴다.
+        # 마커를 처음 잡았을 때의 코너 — 화면 창과 프론트 가이드 실루엣 크기(mm/px)를
+        # 계산하는 데 쓴다. 큐티클 라인 위치는 아래 guide_corners(최신 마커)로 계산한다.
         self.marker_corners = None
+        # 손가락이 없을 때 큐티클 라인 위치를 계산하는 최신 마커 코너와 잡은 시각 —
+        # marker_corners와 달리 계속 갱신돼서, 손가락을 넣었을 때 측정이 쓸 행과 같다.
+        self.guide_corners = None
+        self.guide_corners_t: float = 0.0
         # 실측 중인 guide_y(원본 프레임 px)와 마지막으로 확인된 시각. 측정이
         # 실제로 쓰는 행이라 있으면 마커 기준 추정보다 항상 우선한다.
         self.live_guide: tuple | None = None
@@ -935,6 +944,26 @@ def _remember_marker(frame: np.ndarray):
     _S.top_view_rect = rect   # 마지막에 — None 여부가 "마커 잡힘" 표시라서
 
 
+def _refresh_guide_marker(frame: np.ndarray):
+    """손가락이 없을 때 가이드 선을 그릴 마커 코너를 지금 프레임으로 갱신한다 (화면 표시용).
+
+    측정은 매 프레임 마커를 새로 잡아 guide_y를 계산하는데, 손가락이 없을 때의 추정은
+    처음 잡은 코너(_S.marker_corners)를 계속 써서 그 사이 카메라/받침대가 움직였으면
+    손가락을 넣는 순간 선이 실측 위치로 튀었다. 같은 계산을 지금 마커로 하면 그대로다.
+    손가락이 잡혀 실측값을 쓰는 동안은 건너뛰고, 그 밖에는 GUIDE_MARKER_REFRESH_SEC에
+    한 번만 돈다. 마커가 가려져 못 잡으면 직전 값을 그대로 둔다."""
+    now = time.time()
+    if now - _S.guide_corners_t < GUIDE_MARKER_REFRESH_SEC:
+        return
+    live = _S.live_guide
+    if live is not None and now - live[1] < GUIDE_LIVE_HOLD_SEC:
+        return
+    _S.guide_corners_t = now
+    corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+    if corners is not None:
+        _S.guide_corners = corners
+
+
 def _top_measure() -> dict | None:
     """안정(촬영 가능) 상태일 때만 손톱 너비/길이와 화면 위치 — 스트림 화면(_top_view_rect
     창) 기준 비율. widthMm/lengthMm는 지금 촬영하면 최종값이 되는 그 구간 평균이다."""
@@ -958,8 +987,10 @@ def _top_guide() -> dict | None:
 
     cuticleY는 측정이 실제로 쓰는 guide_y 행 그대로다: 손가락이 잡혀 있으면
     MeasureWorker의 실측값(EMA 포함), 아니면 같은 함수(guide_line_row)를
-    손가락 자리 열에서 마커만으로 계산한 값. 예전에 스트림에 직접
+    손가락 자리 열에서 최신 마커(_refresh_guide_marker)만으로 계산한 값 —
+    그래서 손가락을 넣든 안 넣든 선 위치가 같다. 예전에 스트림에 직접
     그리던 파란 점선과 같은 위치이고, 그리는 방식만 프론트로 옮겼다.
+    화면 창·실루엣 크기(aspect/centerX/mmToH)는 처음 잡은 마커 기준 그대로다.
     """
     corners, rect = _S.marker_corners, _S.top_view_rect
     if corners is None or rect is None:
@@ -972,8 +1003,10 @@ def _top_guide() -> dict | None:
     if live is not None and time.time() - live[1] < GUIDE_LIVE_HOLD_SEC:
         guide_y = live[0]
     else:
-        offset_px = _live_guide_offset_mm(_S.current_finger or "") / mpp
-        guide_y = _live_guide_line_row(corners, _S.finger_slot_x, offset_px)
+        now_corners = _S.guide_corners if _S.guide_corners is not None else corners
+        offset_px = (_live_guide_offset_mm(_S.current_finger or "")
+                     / _live_marker_mm_per_px(now_corners, ARUCO_SIZE_MM))
+        guide_y = _live_guide_line_row(now_corners, _S.finger_slot_x, offset_px)
 
     return {
         "aspect":   view_w / view_h,                      # 스트림 화면 가로/세로 비율
@@ -1008,6 +1041,7 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
                 # 손가락 없이도 되는 가벼운 감지라 여기서도 똑같이 시도해서
                 # 그 틈을 없앤다. 한 번 잡히면 이후로는 추가 비용이 없다.
                 _remember_marker(frame)
+                _refresh_guide_marker(frame)
                 _push_frame(_S.top_frame, _top_view(frame))
         time.sleep(0.05)
 
@@ -1121,6 +1155,8 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             # GUIDE_LIVE_HOLD_SEC 뒤 _top_guide가 마커 기준 추정으로 돌아간다.
             if result is not None and result.get("guide_y") is not None:
                 _S.live_guide = (float(result["guide_y"]), now)
+            # 손가락이 없을 때의 가이드 선도 지금 마커 위치로 — 손가락을 넣어도 선이 안 튀게
+            _refresh_guide_marker(frame)
 
             # 웹 화면에는 측정 오버레이(상태 테두리·L/W 글자·폭 표시선)를 굽지 않은
             # 깨끗한 카메라 화면만 보낸다 — 측정 중/촬영 가능 표시와 안정 상태의
