@@ -131,11 +131,13 @@ NAIL_COLORS = {
 }
 
 # Reference dimensions for per-finger size classification: mean +- SD,
-# Korean adult women, n=600 (200 each in their 20s/30s/40s), right hand,
-# digital vernier caliper. Verified 2026-08-13 against the primary source:
+# Korean adult women in their 20s (n=200 of the paper's 600: 200 each in
+# their 20s/30s/40s), right hand, digital vernier caliper. Primary source:
 # Yeo, Kim, Park & Kim (2017), "우리나라 성인 여성의 손톱 형태 측정",
-# J. Kor. Soc. Cosmetology 23(2), 269-275, Table 4 ("Total" column,
-# "middle width" row — the fold-to-fold width at the widest point of the
+# J. Kor. Soc. Cosmetology 23(2), 269-275, Table 4 ("20s" column - the
+# service's users are mostly in their 20s; it was the "Total" column, n=600,
+# until 2026-10-23, and the 20s nails are ~0.5mm smaller in both length and
+# width), "middle width" row — the fold-to-fold width at the widest point of the
 # plate, matching our width_mm definition; the paper's separate, narrower
 # "bottom width" near the cuticle is NOT used here).
 #
@@ -151,19 +153,22 @@ NAIL_COLORS = {
 #   W = width_mm above (our width definition), not the 3D study's narrower
 #       width - so a nail of average width and average R reads as exactly
 #       average here, consistent with the width baseline.
+# NOTE: c_curve_mm / c_curve_sd below were derived with the "Total" widths and
+# were NOT recomputed for the 20s widths, so a 20s-average nail reads a hair
+# above average on C-curve (the 20s widths are ~0.5mm narrower -> shallower arc).
 # c_curve_sd: Table 11 gives no SD, so it is propagated from Table 4's middle
 # width / middle curve length SDs, assuming a 0.8 correlation between the two
 # (not reported; 0.7-0.9 gives 0.24-0.60mm).
 STANDARD_NAILS = {
-    "thumb":  {"width_mm": 12.60, "width_sd": 0.89, "length_mm": 12.83, "length_sd": 0.80,
+    "thumb":  {"width_mm": 12.03, "width_sd": 0.96, "length_mm": 12.72, "length_sd": 1.15,
                "c_curve_mm": 2.85, "c_curve_sd": 0.50},
-    "index":  {"width_mm":  9.83, "width_sd": 0.87, "length_mm": 11.46, "length_sd": 0.87,
+    "index":  {"width_mm":  9.42, "width_sd": 0.83, "length_mm": 11.11, "length_sd": 0.97,
                "c_curve_mm": 2.26, "c_curve_sd": 0.38},
-    "middle": {"width_mm": 10.38, "width_sd": 0.79, "length_mm": 11.81, "length_sd": 1.04,
+    "middle": {"width_mm":  9.91, "width_sd": 0.87, "length_mm": 11.07, "length_sd": 1.04,
                "c_curve_mm": 2.43, "c_curve_sd": 0.36},
-    "ring":   {"width_mm":  9.70, "width_sd": 0.88, "length_mm": 11.49, "length_sd": 1.09,
+    "ring":   {"width_mm":  9.14, "width_sd": 0.98, "length_mm": 10.78, "length_sd": 1.05,
                "c_curve_mm": 2.35, "c_curve_sd": 0.34},
-    "pinky":  {"width_mm":  7.85, "width_sd": 0.80, "length_mm":  9.82, "length_sd": 1.06,
+    "pinky":  {"width_mm":  7.34, "width_sd": 0.96, "length_mm":  9.30, "length_sd": 1.08,
                "c_curve_mm": 1.71, "c_curve_sd": 0.36},
 }
 
