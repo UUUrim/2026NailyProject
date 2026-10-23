@@ -288,7 +288,7 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   scans: {
     subtitle: 'Hand Analysis',
     title: '손 분석 이력',
-    description: '양손 촬영을 모두 마친 손 스캔 분석 결과예요. 항목을 누르면 상세 결과를 볼 수 있어요.',
+    description: '손 스캔 분석 이력이에요. 항목을 누르면 상세 결과를 볼 수 있어요.',
   },
   designs: {
     subtitle: 'Designs',
