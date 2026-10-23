@@ -19,6 +19,8 @@ export type LikeModalTarget = {
   imageUrl: string
   mode: 'like' | 'move'
   currentFolderId?: number | null
+  /** designId가 갤러리 id인 찜(다른 로컬 DB 사용자가 공유한 디자인) */
+  community?: boolean
 }
 
 export const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {

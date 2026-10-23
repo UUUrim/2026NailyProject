@@ -86,7 +86,9 @@ export interface DesignImageResponse {
 }
 
 export interface SavedDesignResponse {
+    /** community가 true면 갤러리 id(다른 로컬 DB 사용자가 공유한 디자인을 둘러보기에서 찜한 것), 아니면 내 디자인 id */
     designId: number
+    community?: boolean
     imageUrl: string
     savedAt: string
     folder: {
@@ -112,6 +114,7 @@ export type LikeDesignOptions = {
 }
 
 export interface CommunityDesignResponse {
+    /** 갤러리 id — 로컬 디자인 id와 다르므로 상세·좋아요·찜은 /designs/community/{designId} API를 쓴다 */
     designId: number
     imageUrl: string
     createdAt: string
@@ -277,27 +280,38 @@ export async function unshareDesign(designId: number): Promise<DesignDetailRespo
     return res.data
 }
 
-/** POST /designs/{designId}/reactions — 둘러보기 좋아요 (찜과 분리) */
-export async function addDesignReaction(designId: number): Promise<DesignLikeResponse> {
-    const res = await apiClient.post<DesignLikeResponse>(`/designs/${designId}/reactions`, {})
+/** GET /designs/community/{designId} — 둘러보기 디자인 상세 (공유할 때 찍어 둔 스냅샷, 비로그인 가능) */
+export async function getCommunityDesignDetail(designId: number): Promise<DesignDetailResponse> {
+    const res = await apiClient.get<DesignDetailResponse>(`/designs/community/${designId}`)
     return res.data
 }
 
-/** DELETE /designs/{designId}/reactions — 둘러보기 좋아요 취소 */
+/** POST /designs/community/{designId}/reactions — 둘러보기 좋아요 (찜과 분리) */
+export async function addDesignReaction(designId: number): Promise<DesignLikeResponse> {
+    const res = await apiClient.post<DesignLikeResponse>(`/designs/community/${designId}/reactions`, {})
+    return res.data
+}
+
+/** DELETE /designs/community/{designId}/reactions — 둘러보기 좋아요 취소 */
 export async function removeDesignReaction(designId: number): Promise<DesignLikeResponse> {
-    const res = await apiClient.delete<DesignLikeResponse>(`/designs/${designId}/reactions`)
+    const res = await apiClient.delete<DesignLikeResponse>(`/designs/community/${designId}/reactions`)
     return res.data
 }
 
 // ─── 찜하기 ───────────────────────────────────────────────────────────────────
+// community: true면 designId가 갤러리 id다 (둘러보기 화면, 다른 로컬 DB 사용자가 공유한 디자인의 찜)
+
+const likesPath = (designId: number, community?: boolean) =>
+    community ? `/designs/community/${designId}/likes` : `/designs/${designId}/likes`
 
 /** POST /designs/{designId}/likes — 찜하기 */
 export async function likeDesign(
     designId: number,
     imageUrl: string,
     options?: LikeDesignOptions,
+    community?: boolean,
 ): Promise<SavedDesignResponse> {
-    const res = await apiClient.post<SavedDesignResponse>(`/designs/${designId}/likes`, {
+    const res = await apiClient.post<SavedDesignResponse>(likesPath(designId, community), {
         imageUrl,
         folderId: options?.folderId ?? null,
         newFolderName: options?.newFolderName ?? null,
@@ -306,8 +320,8 @@ export async function likeDesign(
 }
 
 /** DELETE /designs/{designId}/likes — 찜 취소 */
-export async function unlikeDesign(designId: number, imageUrl: string): Promise<void> {
-    await apiClient.delete(`/designs/${designId}/likes`, { imageUrl })
+export async function unlikeDesign(designId: number, imageUrl: string, community?: boolean): Promise<void> {
+    await apiClient.delete(likesPath(designId, community), { imageUrl })
 }
 
 /** PATCH /designs/{designId}/likes — 찜 저장 위치 변경 */
@@ -315,8 +329,9 @@ export async function moveLikedDesign(
     designId: number,
     imageUrl: string,
     options: LikeDesignOptions,
+    community?: boolean,
 ): Promise<SavedDesignResponse> {
-    const res = await apiClient.patch<SavedDesignResponse>(`/designs/${designId}/likes`, {
+    const res = await apiClient.patch<SavedDesignResponse>(likesPath(designId, community), {
         imageUrl,
         folderId: options.folderId ?? null,
         newFolderName: options.newFolderName ?? null,

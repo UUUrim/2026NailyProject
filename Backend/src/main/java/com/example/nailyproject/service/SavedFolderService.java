@@ -25,11 +25,14 @@ public class SavedFolderService {
 
     private final SavedFolderRepository savedFolderRepository;
     private final SavedDesignRepository savedDesignRepository;
+    private final CommunityGalleryService communityGalleryService;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
     @Transactional
     public List<SavedFolderResponseDto> getMyFolders(User user) {
+        // 찜 목록과 같은 시점에 불리므로, 원본이 삭제된 갤러리 찜을 먼저 지워 폴더 개수도 맞춘다
+        communityGalleryService.pruneDeletedSaves(user);
         ensureDefaultFolder(user);
         List<SavedFolder> folders = savedFolderRepository.findAllByUserOrderBySortOrderAscCreatedAtAsc(user);
         List<SavedDesign> allSaved = savedDesignRepository.findAllByUserIdOrderBySavedAtDesc(user.getId());

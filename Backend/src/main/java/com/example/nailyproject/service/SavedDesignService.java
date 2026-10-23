@@ -23,6 +23,7 @@ public class SavedDesignService {
     private final NailDesignRepository nailDesignRepository;
     private final SavedFolderRepository savedFolderRepository;
     private final SavedFolderService savedFolderService;
+    private final CommunityGalleryService communityGalleryService;
 
     @Transactional
     public SavedDesignResponseDto addLike(User user, Long designId, String imageUrl, Long folderId, String newFolderName) {
@@ -70,8 +71,65 @@ public class SavedDesignService {
         savedDesignRepository.delete(savedDesign);
     }
 
+    // ── 둘러보기(갤러리 DB id)로 찜하기 ──────
+    // 원본이 내 로컬 DB에 있으면 예전처럼 로컬 디자인으로 찜하고, 다른 로컬 DB에서 공유된 거면 갤러리 id로 찜한다.
+
+    @Transactional
+    public SavedDesignResponseDto addCommunityLike(User user, Long communityDesignId, String imageUrl, Long folderId, String newFolderName) {
+        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
+        Long localDesignId = communityGalleryService.findLocalDesignId(communityDesignId);
+        if (localDesignId != null) return addLike(user, localDesignId, imageUrl, folderId, newFolderName);
+
+        if (savedDesignRepository.existsByUserAndCommunityDesignIdAndImageUrl(user, communityDesignId, imageUrl)) {
+            throw new IllegalArgumentException("이미 찜한 디자인입니다.");
+        }
+
+        SavedFolder folder = resolveFolder(user, folderId, newFolderName);
+
+        SavedDesign savedDesign = SavedDesign.builder()
+                .user(user)
+                .communityDesignId(communityDesignId)
+                .imageUrl(imageUrl)
+                .savedFolder(folder)
+                .build();
+
+        return SavedDesignResponseDto.from(savedDesignRepository.save(savedDesign));
+    }
+
+    @Transactional
+    public SavedDesignResponseDto moveCommunityLike(User user, Long communityDesignId, String imageUrl, Long folderId, String newFolderName) {
+        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
+        // 원본이 삭제돼 갤러리 DB에 없어도 내 찜은 옮기거나 지울 수 있게, 갤러리 id로 찜한 것부터 찾는다
+        SavedDesign savedDesign = savedDesignRepository.findByUserAndCommunityDesignIdAndImageUrl(user, communityDesignId, imageUrl)
+                .orElse(null);
+        if (savedDesign == null) {
+            Long localDesignId = communityGalleryService.findLocalDesignId(communityDesignId);
+            if (localDesignId == null) throw new IllegalArgumentException("찜한 내역이 없습니다.");
+            return moveLike(user, localDesignId, imageUrl, folderId, newFolderName);
+        }
+
+        SavedFolder folder = resolveFolder(user, folderId, newFolderName);
+        savedDesign.updateSavedFolder(folder);
+        return SavedDesignResponseDto.from(savedDesign);
+    }
+
+    @Transactional
+    public void removeCommunityLike(User user, Long communityDesignId, String imageUrl) {
+        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
+        SavedDesign savedDesign = savedDesignRepository.findByUserAndCommunityDesignIdAndImageUrl(user, communityDesignId, imageUrl)
+                .orElse(null);
+        if (savedDesign == null) {
+            Long localDesignId = communityGalleryService.findLocalDesignId(communityDesignId);
+            if (localDesignId == null) throw new IllegalArgumentException("찜한 내역이 없습니다.");
+            removeLike(user, localDesignId, imageUrl);
+            return;
+        }
+        savedDesignRepository.delete(savedDesign);
+    }
+
     @Transactional
     public List<SavedDesignResponseDto> getSavedDesigns(User user) {
+        communityGalleryService.pruneDeletedSaves(user);
         savedFolderService.ensureDefaultFolder(user);
         List<SavedDesign> savedList = savedDesignRepository.findAllByUserIdOrderBySavedAtDesc(user.getId());
         return savedList.stream()
