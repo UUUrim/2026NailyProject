@@ -175,7 +175,10 @@ export function useMyPageData() {
 
   const handleDetailDeleted = (designId: number) => {
     queryClient.setQueryData<DesignImageResponse[]>(DESIGNS_KEY, (prev) => (prev ?? []).filter((d) => d.designId !== designId))
-    queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) => (prev ?? []).filter((f) => f.designId !== designId))
+    // 갤러리 id로 찜한 남의 디자인은 id가 겹쳐도 지우지 않는다
+    queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) =>
+        (prev ?? []).filter((f) => f.community || f.designId !== designId),
+    )
   }
 
   const likedKeySet = useMemo(
@@ -253,8 +256,13 @@ export function useMyPageData() {
     setIsLoadingPrintDetail(false)
   }
 
-  const findFavoriteFolder = (designId: number, imageUrl: string) =>
-      favorites.find((f) => f.designId === designId && f.imageUrl === imageUrl)?.folder ?? null
+  const findFavorite = (designId: number, imageUrl: string) =>
+      favorites.find((f) => f.designId === designId && f.imageUrl === imageUrl)
+
+  const findFavoriteFolder = (designId: number, imageUrl: string) => findFavorite(designId, imageUrl)?.folder ?? null
+
+  // 찜 탭에는 다른 로컬 DB 사용자가 공유한 디자인을 갤러리 id로 찜한 항목도 섞여 있어, 찜 API를 그에 맞게 고른다
+  const isCommunityFavorite = (designId: number, imageUrl: string) => Boolean(findFavorite(designId, imageUrl)?.community)
 
   const openLikeFolderModal = (designId: number, imageUrl: string) => {
     setLikeModalTarget({ designId, imageUrl, mode: 'like' })
@@ -266,6 +274,7 @@ export function useMyPageData() {
       imageUrl,
       mode: 'move',
       currentFolderId: findFavoriteFolder(designId, imageUrl)?.folderId ?? null,
+      community: isCommunityFavorite(designId, imageUrl),
     })
   }
 
@@ -274,7 +283,7 @@ export function useMyPageData() {
     const isLiked = likedKeySet.has(key)
     if (isLiked) {
       try {
-        await unlikeDesign(designId, imageUrl)
+        await unlikeDesign(designId, imageUrl, isCommunityFavorite(designId, imageUrl))
         queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) =>
             (prev ?? []).filter((f) => !(f.designId === designId && f.imageUrl === imageUrl)),
         )
@@ -292,11 +301,11 @@ export function useMyPageData() {
 
   const confirmLikeWithFolder = async (choice: { folderId?: number; newFolderName?: string }) => {
     if (!likeModalTarget) return
-    const { designId, imageUrl, mode } = likeModalTarget
+    const { designId, imageUrl, mode, community } = likeModalTarget
     const saved =
         mode === 'move'
-            ? await moveLikedDesign(designId, imageUrl, choice)
-            : await likeDesign(designId, imageUrl, choice)
+            ? await moveLikedDesign(designId, imageUrl, choice, community)
+            : await likeDesign(designId, imageUrl, choice, community)
     queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) => [
       saved,
       ...(prev ?? []).filter((f) => !(f.designId === designId && f.imageUrl === imageUrl)),

@@ -45,10 +45,11 @@ PRINT_PROFILE_FILAMENT = _ORCASLICER_RESOURCES + r"\filament\Bambu PETG Transluc
 # GUI에서는 같은 파일로도 죽지 않는 걸 보면 CLI(헤드리스) 전용 버그로 보인다.
 SUPPORT_OVERRIDES = {
     "enable_support": "1",     #서포트를 꼭 필요한 곳에만 만든다 => 슬라이서가 "꼭 필요하다"고 판단하는 기준이 꽤 엄격하다고 함
-    "support_threshold_angle": "40",        # 값이 클수록 서포트가 더 많이 생긴다 (30 -> 55: 네일팁 밑면이 서포트를 못 받던 문제)
-    "support_on_build_plate_only": "1",     # 서포트가 네일 곡면 위에 얹히지 않게
+    "support_threshold_angle": "50",        # 값이 클수록 서포트가 더 많이 생긴다 (30 -> 55: 네일팁 밑면이 서포트를 못 받던 문제)
+    "support_remove_small_overhang": "0",   # 기본값(1)은 "작은 돌출은 서포트 대상에서 뺀다": 우리 모델은 서포트가 필요한 면적이 0.55mm²로 작아서 통째로 무시될 수 있다
+    "support_on_build_plate_only": "0",     # 1이면 바닥까지 곧바로 못 내려가는 자리는 서포트를 지운다: 이 모양은 서포트 필요 자리가 전부 손톱 아래층 0.7mm 안이라 서포트가 사라졌다
     "support_top_z_distance": "0.24",       # 0.12 -> 0.24(2층): PETG는 서포트와 잘 녹아붙어서 간격을 벌려 쉽게 떼게 한다
-    "support_object_xy_distance": "0.4",    # 서포트와 출력물 옆면 사이 간격 (기본 0.35)
+    "support_object_xy_distance": "0.2",    # 서포트와 출력물 옆면 사이 간격 (기본 0.35). 0.4 -> 0.2: 큐티클 쪽 손톱 끝과 서포트가 0.7mm 떨어져 받치지 못해서 가깝게. 너무 붙으면 떼기 어렵다
     "support_interface_top_layers": "1",    # 2 -> 1: 출력물에 닿는 촘촘한 접촉층을 한 겹만 (덜 붙는다)
     "support_interface_spacing": "0.4",     # 접촉층 선 간격: 넓을수록 덜 붙는다
     "support_type": "tree(auto)",
@@ -63,6 +64,10 @@ SUPPORT_OVERRIDES = {
     "brim_type": "outer_only",
     "brim_width": "5",                      # 5 → 8 → 6 (조금 줄임)
     "brim_object_gap": "0.05",              # (예전 brim_separation은 Orca에 없는 키라 무시됐음)
+    # 실제로 바닥 판을 넓히는 건 이쪽이다: 손톱 자체의 브림(brim_type)은 G-code에 한 번도 안 나왔고, 바닥 판은 서포트 가지의 브림이 만든다.
+    # tree_support_auto_brim=1이면 가지마다 폭을 자동 계산하는데, 이 모양은 서포트가 1mm뿐이라 최소값 2mm로 나와서 판이 손톱보다 1.26배(11.2mm)밖에 안 넓다.
+    "tree_support_auto_brim": "0",
+    "tree_support_brim_width": "6",         # 서포트 브림 폭(mm). 손가락 여러 개를 한 번에 뽑을 땐 이웃 판과 겹치지 않게 간격(15mm)의 절반 이하로 둔다
     "curr_bed_type": "Textured PEI Plate",
     "initial_layer_line_width": "0.28",     # 첫 줄을 넓게 눌러 붙임
     "initial_layer_speed": ["15"],
@@ -93,7 +98,7 @@ SUPPORT_OVERRIDES = {
     "top_surface_speed": ["25"],
     "overhang_3_4_speed": ["15"],
     "overhang_4_4_speed": ["10"],
-    "z_hop_type": "1",                      # 노즐이 수직으로 올라갔다 이동하는 방식 (0.2만큼)
+    "z_hop_types": ["Normal Lift"],         # 노즐이 수직으로 올라갔다 이동하는 방식 (z_hop이 0이라 지금은 효과 없음). 예전 이름 z_hop_type은 없는 키라 무시됐다
     "z_hop": "0",                           # 0.2 -> 0: 10개 출력할 때 다른 손가락을 피하려고 뒀는데, 이제 1개만 뽑아서 필요 없다(작은 흔적/실도 줄어든다)
     "enable_overhang_speed": ["1"],
 }
@@ -108,7 +113,7 @@ FILAMENT_OVERRIDES = {
     "fan_min_speed": ["20"],                            # 40/60 -> 20/30: 팬이 약해야 PETG 층이 더 잘 붙는다
     "fan_max_speed": ["50"],
     "fan_cooling_layer_time": ["15"],
-    "slow_down_for_cooling": ["1"],
+    "slow_down_for_layer_cooling": ["1"],   # 예전 이름 slow_down_for_cooling은 없는 키라 무시됐다 (기본값도 1이라 결과는 같다)
     # 아래 둘은 공정(process)이 아니라 필라멘트 키라 여기로 옮김 (공정에 두면 무시됨)
     "slow_down_layer_time": ["8"],
     "slow_down_min_speed": ["10"],

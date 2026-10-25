@@ -37,6 +37,7 @@ import { getNailShape, type NailShapeId } from '@/shared/constants/nailShapes'
 import {
     INITIAL_PREFERENCES,
     PREFERENCE_OPTIONS,
+    PREFERENCE_OPTION_INFO,
     PREFERENCE_SECTION_LABELS,
     type NailDesignPreferences,
     type PreferenceKey,
@@ -602,6 +603,17 @@ type UseNailDesignChatPageParams = {
 // 채팅 상태를 서버에 저장하기까지 기다리는 시간 — 그 사이에 또 바뀌면 마지막 상태만 한 번 저장한다
 const SAVE_DEBOUNCE_MS = 700
 
+// 선택지 툴팁 예시 사진을 미리 받아 둔 Image 객체들. 객체를 들고 있어야 브라우저 메모리 캐시에 남아,
+// 툴팁의 <img>가 같은 주소를 쓰면 다시 받지 않고 첫 프레임부터 바로 그린다.
+const preloadedOptionImages = new Map<string, HTMLImageElement>()
+
+const preloadOptionImage = (src: string) => {
+    if (preloadedOptionImages.has(src)) return
+    const img = new Image()
+    img.src = src
+    preloadedOptionImages.set(src, img)
+}
+
 export function useNailDesignChatPage({
                                           initialSnapshot,
                                           regenerate,
@@ -767,6 +779,16 @@ export function useNailDesignChatPage({
     useEffect(() => {
         setTooltipAnchor(null)
         setPinnedTooltipKey(null)
+    }, [activeQuickReply?.id])
+
+    // 분위기/디자인 타입/모티프 단계가 열리면 그 단계의 예시 사진을 미리 받아 둔다.
+    // 호버한 뒤에야 받기 시작하면 사진(장당 1~2MB)이 뜨기까지 빈 칸이 잠깐 보인다.
+    useEffect(() => {
+        const id = activeQuickReply?.id
+        if (!id?.startsWith('pref-')) return
+        const infos = PREFERENCE_OPTION_INFO[id.slice(5) as PreferenceKey]
+        if (!infos) return
+        Object.values(infos).forEach((info) => preloadOptionImage(info.image))
     }, [activeQuickReply?.id])
 
     // 스크롤/리사이즈가 일어나면 앵커 위치가 어긋나므로 열려 있던 툴팁을 닫는다.

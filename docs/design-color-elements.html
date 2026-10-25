@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디자인·색 요소 정리</title>
+<style>
+  :root {
+    --bg: #fbf8fa; --card: #ffffff; --ink: #2a2230; --muted: #75697c; --line: #eadfe6;
+    --accent: #c0527e; --accent-soft: #f7e3ec; --good: #2f8f5b; --warn: #b9770e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17131a; --card: #211b26; --ink: #f0e8f2; --muted: #a89bb0; --line: #36293d;
+      --accent: #e27aa5; --accent-soft: #3a2230; --good: #5fcf92; --warn: #e3a845;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17131a; --card: #211b26; --ink: #f0e8f2; --muted: #a89bb0; --line: #36293d;
+    --accent: #e27aa5; --accent-soft: #3a2230; --good: #5fcf92; --warn: #e3a845;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.65 -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  h2 { font-size: 19px; margin: 34px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--accent-soft); }
+  h3 { font-size: 15px; margin: 20px 0 6px; color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; background: var(--accent-soft); }
+  .tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  .tbl table { margin: 0; min-width: 520px; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-right: 4px; }
+  .rel-mid { color: var(--good); font-weight: 600; }
+  .rel-low { color: var(--warn); font-weight: 600; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; background: var(--card); }
+  .dot { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(0,0,0,.15); }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .note { color: var(--muted); font-size: 13px; }
+  code { background: var(--accent-soft); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>디자인·색 요소 정리</h1>
+  <p class="sub">네일 디자인 생성기(플래너 프롬프트 + 이미지 프롬프트)에 지금까지 추가한 디자인·색 요소와 스캔 기반 맞춤 로직. 모든 맞춤 로직은 "가중치/힌트"이며 사용자가 직접 고른 값이 항상 우선합니다.</p>
+
+  <div class="card">
+    <b>한눈에 보기</b>
+    <ul>
+      <li><span class="tag">스캔 맞춤</span>베드 폭(넓음/보통/좁음) · 손톱 크기 · 피부 밝기 → 색과 디자인 가중치, 쉐입 → 무드</li>
+      <li><span class="tag">색 표현</span>시럽(기본) · 글리터 · 자석 · 니트 · 잉크 · 마블 외</li>
+      <li><span class="tag">패턴</span>블루밍(펑키/시크 한정) · 도트 · 체크 · 그라데이션 외</li>
+      <li><span class="tag">마감</span>글로시 젤 돔 · 펑키 무드 화려함 vs 일반 무드 현실감</li>
+    </ul>
+  </div>
+
+  <h2>1. 스캔 기반 맞춤 (이번에 추가)</h2>
+
+  <h3>1-1. 손 특성은 어떻게 읽나</h3>
+  <div class="tbl"><table>
+    <tr><th>특성</th><th>판단 기준</th><th>분류</th></tr>
+    <tr><td>베드 폭</td><td>스캔의 <b>쉐입 추천과 같은 기준</b>(손가락별 폭/길이를 모집단 기준과 비교한 z값). 새 임계값을 만들지 않고 추천 쉐입 결과를 그대로 읽음</td>
+      <td>스틸레토·발레리나 = <b>폭이 넓은 베드</b><br>아몬드·오벌 = 보통<br>스퀘어·라운드 = 좁은 편</td></tr>
+    <tr><td>손톱 크기</td><td>스캔 <code>nail_size</code></td><td>smaller = 작음, larger = 큼, 그 외 = 보통</td></tr>
+    <tr><td>피부 밝기</td><td>스캔 <code>brightness</code> (0~1)</td><td>0.55 미만 = 어두운 피부톤</td></tr>
+  </table></div>
+  <p class="note">쉐입 자체는 분석 결과 그대로 사용하고 바꾸지 않습니다. 사진 기반 생성에는 적용하지 않습니다(스캔을 쓰지 않는 규칙).</p>
+  <div class="card"><b>"짧은 손톱 전용 디자인"은 쓰지 않습니다.</b> 짧은 손톱은 쉐입 추천에서 발레리나·스틸레토 같은 긴 쉐입으로 보강되고 출력 팁도 그 길이로 만들어지므로, 생성 이미지는 이미 긴 손톱입니다. 그래서 작은 장식, 가는 프렌치, 비비드 우대 같은 짧은 손톱용 규칙은 뺐고, 길이와 무관하게 남는 <b>베드 폭</b> 규칙만 적용합니다.</div>
+
+  <h3>1-2. 색 톤 분류 (명도·채도 기준)</h3>
+  <div class="chips">
+    <div class="chip"><span class="dot" style="background:#DC5080"></span>비비드 (채도 ≥ 0.5, 명도 0.35~0.75)</div>
+    <div class="chip"><span class="dot" style="background:#F5C2D3"></span>파스텔 (명도 ≥ 0.78 또는 저채도 밝은색)</div>
+    <div class="chip"><span class="dot" style="background:#1C2848"></span>짙은 색 (명도 &lt; 0.30)</div>
+    <div class="chip"><span class="dot" style="background:#7090B4"></span>뮤트 (나머지)</div>
+  </div>
+
+  <h3>1-3. 추천 컬러 선택 가중치 (30색 → 완전 무작위 → 가중치)</h3>
+  <div class="tbl"><table>
+    <tr><th>조건</th><th>비비드</th><th>파스텔</th><th>짙은 색</th><th>신뢰도</th></tr>
+    <tr><td>큰 손톱</td><td>-</td><td>×0.8</td><td>×1.3</td><td class="rel-low">낮음</td></tr>
+    <tr><td>어두운 피부톤</td><td>×1.3</td><td>×0.6</td><td>×1.3</td><td class="rel-mid">중</td></tr>
+  </table></div>
+  <ul>
+    <li><b>조화:</b> 이미 고른 색과 같은 계열(색상 차 45° 이내)이면 ×1.6, 무채색이면 ×1.3, 정반대(150° 이상)면 ×0.5</li>
+    <li><b>일반 흐름:</b> 1~3색을 가중치로 확정</li>
+    <li><b>스캔 자동 흐름:</b> 30색 중 가중치로 8색 후보만 추려 GPT에 전달 (30색 전부 주면 매번 같은 색을 고르는 편향 방지)</li>
+  </ul>
+
+  <h3>1-4. 디자인 채우기 가중치</h3>
+  <div class="tbl"><table>
+    <tr><th>조건</th><th>올라가는 디자인</th><th>내려가는 디자인</th></tr>
+    <tr><td>비비드 색</td><td>원컬러, 컬러 프렌치</td><td>그라데이션</td></tr>
+    <tr><td>파스텔 색</td><td>그라데이션, 치크, 프렌치, 글리터</td><td>-</td></tr>
+    <tr><td>짙은 색</td><td>자석, 글리터, 마블</td><td>치크(짙은 바탕에서 탁함), 그라데이션</td></tr>
+    <tr><td>폭이 넓은 베드</td><td>그라데이션 ×1.15 (시선이 폭에서 멀어짐)</td><td>글리터 ×0.85 (반짝이는 마감이 더 넓어 보임)</td></tr>
+    <tr><td>큰 손/손톱</td><td>원컬러, 마블 ×1.2</td><td>-</td></tr>
+  </table></div>
+
+  <h3>1-5. 스캔 자동 흐름 힌트(<code>[HAND FIT]</code>)로 GPT에 전달하는 내용</h3>
+  <ul>
+    <li><b>폭이 넓은 베드:</b> 긴 쉐입으로 보강된 손톱이므로 "짧은 손톱"이 아니라 넉넉한 캔버스로 취급(긴 프렌치, 풀길이 그라데이션, 세로 아트 모두 가능). 폭만 주의: 세로/길이 방향 요소와 소프트 그라데이션 우대, 넓은 가로 띠·굵은 장식·과한 글리터는 피함. 선택 사항: 중앙 세로선, 옆면 얇은 여백(네거티브 스페이스)</li>
+    <li><b>작은 손:</b> 모든 장식을 작게, 한두 손톱에만 작은 꽃/점 포인트</li>
+    <li><b>큰 손:</b> 단순하고 깔끔한 패턴, 세밀한 장식 지양, 중간~짙은 톤이 날씬해 보임</li>
+    <li><b>어두운 피부:</b> 보석톤·비비드·깊은 색, 연한 파스텔은 시럽/글로시/쉬머로 깊이를 줌</li>
+    <li><b>색-디자인 매칭:</b> 파스텔은 소프트 그라데이션·치크·프렌치, 비비드는 원컬러·컬러 팁, 짙은 색은 자석·글리터·마블(치크 제외)</li>
+  </ul>
+
+  <h2>2. 쉐입 → 무드 (이번에 추가)</h2>
+  <p>기존엔 무드가 완전 무작위(또는 GPT 임의)였습니다. 쉐입이 주는 인상에 맞춰 가중치로 정합니다. 사용자가 무드를 고르면 건드리지 않고, 글리터/마블 선택 시 시크 규칙은 그대로입니다.</p>
+  <div class="tbl"><table>
+    <tr><th>쉐입</th><th>무드 후보 (가중치 높은 순)</th></tr>
+    <tr><td>라운드</td><td>큐트 3, 퓨어 3, 심플 2, 러블리·델리킷·모던 1</td></tr>
+    <tr><td>오벌</td><td>페미닌 3, 엘레강트·델리킷·러블리·퓨어 2, 큐트 1</td></tr>
+    <tr><td>아몬드</td><td>엘레강트·페미닌·러블리 3, 델리킷 2</td></tr>
+    <tr><td>발레리나</td><td>러블리 3, 페미닌·엘레강트 2, 시크 1</td></tr>
+    <tr><td>스퀘어</td><td>시크·모던 3, 심플 2, 엘레강트·펑키 1</td></tr>
+    <tr><td>스틸레토</td><td>시크 3, 펑키 2, 모던 1</td></tr>
+  </table></div>
+  <ul>
+    <li><b>색 톤 보정:</b> 파스텔 → 러블리/퓨어/큐트/델리킷 ↑, 짙은 색 → 시크/모던/엘레강트 ↑, 비비드 → 큐트/펑키 ↑ (최대 ×1.5)</li>
+    <li><b>스캔 자동 흐름:</b> GPT가 무드를 고르므로 "이 쉐입은 ○○ 무드로 읽힘" 힌트를 전달</li>
+  </ul>
+
+  <h3>참고: 사진 기반 생성은 거꾸로 (무드 → 쉐입)</h3>
+  <div class="tbl"><table>
+    <tr><th>이미지 분위기</th><th>쉐입</th></tr>
+    <tr><td>부드럽고 귀엽고 달콤·순수·포근</td><td>라운드 / 오벌</td></tr>
+    <tr><td>페미닌·러블리·우아·몽환·로맨틱</td><td>아몬드 / 오벌 / <b>발레리나</b></td></tr>
+    <tr><td>시크·쿨·엣지·다크·펑키·Y2K·글램</td><td><b>스틸레토 / 스퀘어</b></td></tr>
+    <tr><td>심플·모던·깔끔·프레피</td><td>스퀘어 / 라운드</td></tr>
+  </table></div>
+  <p class="note">우선순위: 사용자 문장의 쉐입("스틸레토로") &gt; 사진에 보이는 실제 손톱 모양 &gt; 이미지 분위기 &gt; 기본값 오벌. 사진 기반은 스캔 정보를 쓰지 않습니다.</p>
+
+  <h2>3. 블루밍 규칙 (오늘 수정)</h2>
+  <div class="card">
+    <ul>
+      <li><b>펑키·시크 무드이거나 사용자가 블루밍을 직접 말했을 때만</b> 사용 (러블리 세트에 진한 번짐 점이 매번 나오던 문제 수정)</li>
+      <li>프롬프트에서 엘레강트/모던 줄과 시크 줄을 분리하고, 블루밍을 펑키·시크에만 남김</li>
+      <li>무드 감지 정규식에 단어 경계 적용 (<code>chick</code>, <code>시크릿</code> 오감지 방지)</li>
+      <li>그 외 무드인데 플랜이 블루밍을 골랐으면 코드가 패턴과 관련 문장을 삭제 (사진/수정 흐름 제외)</li>
+      <li>모양: 번지는 큰 점이 손톱 윤곽(끝 곡선, 한쪽 측면)을 따라 스캘럽처럼 배치, 같은 색상 계열의 더 짙은 톤, 중앙이 가장 진하고 바깥으로 번짐</li>
+    </ul>
+  </div>
+
+  <h2>4. 지금까지의 디자인·색 표현 요소</h2>
+  <div class="tbl"><table>
+    <tr><th>요소</th><th>핵심 규칙</th></tr>
+    <tr><td>시럽 (기본)</td><td>모든 손톱의 기본 색 표현. 투명한 젤 속에 안료가 떠 있는 듯한 반투명 질감. 글리터·파우더·잉크도 시럽 위에 얹음</td></tr>
+    <tr><td>글로시 젤 돔</td><td>볼록한 젤 오버레이 광택이 잘 보이게. 글로시/매트는 세트 전체 단위로 하나만(<code>surface</code>)</td></tr>
+    <tr><td>글리터</td><td>맑은 시럽 안에 떠 있는 고운 반짝임 그대로(질감·알갱이 표현 없음). 손톱에 격자 무늬 등 다른 패턴과 합치지 않음</td></tr>
+    <tr><td>자석</td><td>자석(마그네틱) 캣아이. 스와치 라벨 "마그네틱 크롬 → 자석"</td></tr>
+    <tr><td>니트(벨벳)</td><td>컬러 안에 <b>아주 작고 짧은 섬유 조각이 빽빽하게</b> 들어간 질감 (긴 균열·직물 느낌 금지)</td></tr>
+    <tr><td>잉크</td><td>배경색 위에 올리는 "그리는 요소". 투명하고 선명한 색 젤. 잉크 드로잉(모티프를 투명 잉크 색으로 채움), 잉크 워시, 잉크 체크(깅엄)</td></tr>
+    <tr><td>도트</td><td>손톱 전체를 덮는 단독 디자인이거나 프렌치 팁 안에만. 모티프/파츠와 섞지 않음. 외곽선 없는 단색 원</td></tr>
+    <tr><td>체크</td><td>드로잉·큐트 무드와 조합하면 손그림 체크(살짝 흔들리는 선, 겹친 선). 엘레강트 + 체크는 전용 참고 이미지(흑백)를 첨부</td></tr>
+    <tr><td>리본</td><td>세트당 하나의 룩. 그린 리본은 드로잉/큐트일 때만, 아니면 3D 리본 참. 줄무늬 금지</td></tr>
+    <tr><td>블루밍</td><td>위 3번 참고 (펑키·시크 한정)</td></tr>
+    <tr><td>펑키 무드</td><td>파츠가 많고 화려하게 (절제 규칙의 예외). 그 외 무드는 현실감(살롱에서 실제로 가능한 절제)</td></tr>
+    <tr><td>모델 자유도</td><td>매 요청마다 랜덤 "창작 힌트"(LEAN_TWISTS)를 제안으로 전달 (강제 아님)</td></tr>
+    <tr><td>꽃 아트 / 소용돌이 / 마블 / 치크</td><td>꽃은 손톱 폭의 1/15 정도의 작은 손그림, 소용돌이는 한 줄로 감기는 두꺼운 나선, 마블은 색 면적 비율 규칙, 치크는 시럽에만</td></tr>
+  </table></div>
+
+  <h2>5. 적용 범위와 한계</h2>
+  <ul>
+    <li><b>적용:</b> 스캔 기반 일반 흐름, 스캔 자동 흐름. <b>제외:</b> 사진 기반, 수정(refine) 흐름</li>
+    <li>가중치 값은 조사 결과와 업계 통념을 바탕으로 한 <b>초기값</b>입니다. 한쪽으로 쏠리면 조정합니다.</li>
+    <li>베드 폭·크기·피부톤 가중치는 신뢰도 중간~낮음(미용 매거진/블로그 기반, 검증된 연구 아님)</li>
+    <li>"긴 손톱에 그라데이션이 안 어울린다"는 확인되지 않아 반영하지 않았습니다.</li>
+    <li>실제 GPT 생성 결과는 아직 확인 전입니다. 백엔드 재시작 필요.</li>
+  </ul>
+
+  <h2>6. 참고 자료</h2>
+  <ul class="note">
+    <li>Essie, OPI, Kester Black, Sally Beauty, Healthline — 쉐입·손톱 몸통 조언</li>
+    <li>Allure Korea, unpa — 짧은 손톱 디자인, 쉐입별 특징</li>
+    <li>The Everygirl, Zoe Report, Paint Box — 네거티브 스페이스, 길어 보이는 디자인</li>
+    <li>Makeup.com, Stylerave — 쉐입이 주는 인상, 피부 언더톤별 색</li>
+  </ul>
+</div>
+</body>
+</html>

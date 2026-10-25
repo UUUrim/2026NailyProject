@@ -6,8 +6,6 @@ import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.response.DesignImageResponseDto;
 import com.example.nailyproject.dto.response.DesignDetailResponseDto;
-import com.example.nailyproject.dto.response.DesignLikeResponseDto;
-import com.example.nailyproject.dto.response.CommunityDesignResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -15,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.transaction.Transactional;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
@@ -51,6 +50,9 @@ public class NailDesignService {
     private final FinishReferenceService finishReferenceService;
     private final ScanResultFileService scanResultFileService;
     private final KeywordTranslationService keywordTranslationService;
+    // '둘러보기' 공유 갤러리 DB (각자 로컬 DB를 써도 공유 디자인은 여기 모인다)
+    private final CommunityDesignStore communityDesignStore;
+    private final LocalOriginService localOriginService;
     // 색상
 //    private final JsonColorMapper jsonColorMapper;
 
@@ -117,7 +119,9 @@ public class NailDesignService {
                              GptClientService gptClientService,
                              FinishReferenceService finishReferenceService,
                              ScanResultFileService scanResultFileService,
-                             KeywordTranslationService keywordTranslationService) {
+                             KeywordTranslationService keywordTranslationService,
+                             CommunityDesignStore communityDesignStore,
+                             LocalOriginService localOriginService) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -137,6 +141,8 @@ public class NailDesignService {
         this.finishReferenceService = finishReferenceService;
         this.scanResultFileService = scanResultFileService;
         this.keywordTranslationService = keywordTranslationService;
+        this.communityDesignStore = communityDesignStore;
+        this.localOriginService = localOriginService;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -322,6 +328,7 @@ public class NailDesignService {
             design.updateNailTipCropsJson(objectMapper.writeValueAsString(urls));
             nailDesignRepository.save(design);
             System.out.println("[NailTipCrops] designId=" + design.getId() + " 크롭이 없어 새로 만들어 저장했습니다 (로컬 누끼).");
+            refreshCommunitySnapshot(design);
         } catch (Exception e) {
             System.err.println("[NailTipCrops] designId=" + design.getId() + " 크롭 보강 실패: " + e.getMessage());
         }
@@ -594,6 +601,7 @@ public class NailDesignService {
                                 d.updateSwatchesJson(objectMapper.writeValueAsString(swatchUrlMap));
                                 nailDesignRepository.save(d);
                                 System.out.println("[Swatch] " + swatchUrlMap.size() + "개 스와치 저장 완료: " + swatchUrlMap.keySet());
+                                refreshCommunitySnapshot(d);
                             } catch (Exception e) {
                                 System.err.println("[Swatch] DB 저장 실패: " + e.getMessage());
                             }
@@ -777,78 +785,7 @@ public class NailDesignService {
         }
     }
 
-    /**
-     * 커뮤니티 갤러리 GET /designs/community
-     */
-    public List<CommunityDesignResponseDto> getCommunityGallery(User user) {
-        List<NailDesign> designs = nailDesignRepository.findTop60BySharedTrueOrderBySharedAtDesc();
-
-        List<Long> designIds = designs.stream().map(NailDesign::getId).toList();
-        Map<Long, Long> likeCountByDesignId = new HashMap<>();
-        if (!designIds.isEmpty()) {
-            for (Object[] row : designLikeRepository.countLikesByDesignIds(designIds)) {
-                likeCountByDesignId.put((Long) row[0], (Long) row[1]);
-            }
-        }
-
-        Set<Long> myLikedDesignIds = user != null
-                ? new HashSet<>(designLikeRepository.findDesignIdsByUserId(user.getId()))
-                : Set.of();
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
-        List<CommunityDesignResponseDto> resultList = new ArrayList<>();
-
-        for (NailDesign design : designs) {
-            if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) continue;
-
-            LocalDateTime displayAt = design.getSharedAt() != null ? design.getSharedAt() : design.getGeneratedAt();
-            String formattedDate = displayAt != null ? displayAt.format(formatter) : "";
-            long likeCount = likeCountByDesignId.getOrDefault(design.getId(), 0L);
-
-            resultList.add(CommunityDesignResponseDto.builder()
-                    .designId(design.getId())
-                    .imageUrl(design.getImageUrls().get(0))
-                    .createdAt(formattedDate)
-                    .likeCount(likeCount)
-                    .likedByMe(myLikedDesignIds.contains(design.getId()))
-                    .details(buildDetails(design))
-                    .build());
-        }
-
-        resultList.sort(Comparator
-                .comparingLong(CommunityDesignResponseDto::getLikeCount).reversed()
-                .thenComparing(CommunityDesignResponseDto::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())));
-
-        return resultList;
-    }
-
-    @Transactional
-    public DesignLikeResponseDto addDesignLike(User user, Long designId) {
-        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
-        NailDesign design = nailDesignRepository.findById(designId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
-        if (!design.isShared()) throw new IllegalArgumentException("공유된 디자인만 좋아요할 수 있습니다.");
-        if (!designLikeRepository.existsByUserAndNailDesign(user, design)) {
-            designLikeRepository.save(DesignLike.builder().user(user).nailDesign(design).build());
-        }
-        return DesignLikeResponseDto.builder()
-                .designId(designId)
-                .likeCount(designLikeRepository.countByNailDesign(design))
-                .liked(true).build();
-    }
-
-    @Transactional
-    public DesignLikeResponseDto removeDesignLike(User user, Long designId) {
-        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
-        NailDesign design = nailDesignRepository.findById(designId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
-        designLikeRepository.findByUserAndNailDesign(user, design)
-                .ifPresent(designLikeRepository::delete);
-        return DesignLikeResponseDto.builder()
-                .designId(designId)
-                .likeCount(designLikeRepository.countByNailDesign(design))
-                .liked(false).build();
-    }
+    // 둘러보기 목록·상세·좋아요는 갤러리 DB를 읽는 CommunityGalleryService가 맡는다 (다른 로컬 DB 사용자의 공유도 보이게)
 
     public DesignDetailResponseDto getDesignDetail(User user, Long designId) {
         NailDesign design = nailDesignRepository.findById(designId)
@@ -924,7 +861,15 @@ public class NailDesignService {
         if (design.getImageUrls() == null || design.getImageUrls().isEmpty())
             throw new IllegalArgumentException("이미지가 없는 디자인은 공유할 수 없습니다.");
         design.share();
-        return getDesignDetail(user, designId);
+        // 상세 조회가 손톱팁 크롭을 채워 주므로, 그 뒤에 스냅샷을 만들어 갤러리 DB에 올린다.
+        // 두 DB를 한 트랜잭션으로 묶을 수 없어서, 갤러리 DB에 못 쓰면 예외로 로컬 공유도 되돌린다.
+        DesignDetailResponseDto detail = getDesignDetail(user, designId);
+        try {
+            communityDesignStore.upsertShared(buildCommunitySnapshot(design), design.getSharedAt());
+        } catch (DataAccessException e) {
+            throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 공유하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+        }
+        return detail;
     }
 
     @Transactional
@@ -933,6 +878,11 @@ public class NailDesignService {
         NailDesign design = nailDesignRepository.findByIdAndUserId(designId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("본인의 디자인만 공유 해제할 수 있습니다."));
         design.unshare();
+        try {
+            communityDesignStore.markUnshared(localOriginService.getOriginId(), designId);
+        } catch (DataAccessException e) {
+            throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 공유를 해제하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+        }
         return getDesignDetail(user, designId);
     }
 
@@ -943,12 +893,59 @@ public class NailDesignService {
         if (!design.getUser().getId().equals(user.getId()))
             throw new IllegalArgumentException("본인의 디자인만 삭제할 수 있습니다.");
 
+        // 갤러리 DB에서 먼저 지운다. 공유 중인데 못 지우면 S3 이미지만 사라져 둘러보기에 깨진 이미지가 남으므로 삭제를 막는다.
+        // 공유 해제된 디자인의 남은 행(남들의 찜·좋아요 보존용)은 못 지워도 진행하고, 다음 서버 시작 때 CommunityGallerySync가 정리한다.
+        try {
+            communityDesignStore.deleteByOrigin(localOriginService.getOriginId(), designId);
+        } catch (DataAccessException e) {
+            if (design.isShared()) {
+                throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+            }
+            System.err.println("[CommunityGallery] designId=" + designId + " 갤러리 DB 정리 실패 (다음 서버 시작 때 정리): " + e.getMessage());
+        }
+
         savedDesignRepository.deleteAllByNailDesign(design);
         designLikeRepository.deleteAllByNailDesign(design);
         if (design.getImageUrls() != null) {
             for (String imageUrl : design.getImageUrls()) s3Service.deleteFile(imageUrl);
         }
         nailDesignRepository.delete(design);
+    }
+
+    /**
+     * 갤러리 DB에 올릴 공유 스냅샷. 다른 로컬 DB의 백엔드는 이 디자인 행을 읽을 수 없으므로
+     * 둘러보기 상세 모달과 AR에 필요한 값을 여기서 다 담는다. (서버 시작 때 예전 공유분을 올리는 CommunityGallerySync도 쓴다)
+     */
+    public CommunityDesignStore.Snapshot buildCommunitySnapshot(NailDesign design) {
+        return new CommunityDesignStore.Snapshot(
+                localOriginService.getOriginId(),
+                design.getId(),
+                design.getUser().getId(),
+                design.getImageUrls() != null ? List.copyOf(design.getImageUrls()) : List.of(),
+                writeDetailsJson(design),
+                extractShape(design),
+                extractNailTipCropUrls(design),
+                design.getGeneratedAt());
+    }
+
+    /** 공유 뒤에 늦게 채워지는 스와치·손톱팁 크롭을 갤러리 DB 스냅샷에도 반영한다 (실패해도 원래 작업은 그대로 진행) */
+    private void refreshCommunitySnapshot(NailDesign design) {
+        if (!design.isShared()) return;
+        try {
+            communityDesignStore.updateDetails(localOriginService.getOriginId(), design.getId(),
+                    writeDetailsJson(design), extractShape(design), extractNailTipCropUrls(design));
+        } catch (Exception e) {
+            System.err.println("[CommunityGallery] designId=" + design.getId() + " 갤러리 스냅샷 갱신 실패: " + e.getMessage());
+        }
+    }
+
+    private String writeDetailsJson(NailDesign design) {
+        try {
+            return objectMapper.writeValueAsString(buildDetails(design));
+        } catch (JsonProcessingException e) {
+            System.err.println("[CommunityGallery] designId=" + design.getId() + " details 직렬화 실패: " + e.getMessage());
+            return null;
+        }
     }
 
 
@@ -1030,6 +1027,7 @@ public class NailDesignService {
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
                 : summarizeSlots(slots, handScan, !hasImage)
+                + (photoFlow ? "" : ScanFitWeighting.fitLine(fitOf(handScan)))
                 + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
                 + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
                 + buildUserOwnWordsText(session)
@@ -1075,7 +1073,6 @@ public class NailDesignService {
                 System.out.println("[NailDesignService] 사용자 문장에서 쉐입 지정 감지 → '" + wordsShape + "' 우선 적용");
             }
         }
-        shapePriority.addAll(getLiked(slots, "shape"));
         // ★ scan-auto는 쉐입을 스캔 추천으로 고정하는 흐름인데(위에서 plan.shape에 넣음), 세션에 저장된 쉐입 슬롯
         // (이전 채팅에서 고른 값, 또는 이전 생성의 플랜이 자동으로 채워 넣은 값)이 enforceAppShape에서 가장 우선이라
         // 추천이 발레리나여도 슬롯의 아몬드가 이겼다. 슬롯을 스캔 추천으로 맞춰서 프롬프트/AR 템플릿/키워드가 모두 같은 값을 보게 한다.
@@ -1088,11 +1085,12 @@ public class NailDesignService {
                 System.out.println("[Shape] scan-auto: 세션 슬롯 쉐입 " + before + " 를 스캔 추천 '" + scanRecommendedShape(handScan) + "' 로 교체");
             }
         }
-        enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
+        shapePriority.addAll(getLiked(slots, "shape"));
         System.out.println("[Shape] scanAuto=" + scanAuto + " scanId=" + request.getScanId()
                 + " 스캔추천=" + (handScan != null ? scanRecommendedShape(handScan) : null)
                 + " 슬롯=" + getLiked(slots, "shape") + " 플랜=" + (plan != null ? plan.path("shape").asText("") : null)
                 + " 우선순위=" + shapePriority);
+        enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
 
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
@@ -1257,10 +1255,10 @@ public class NailDesignService {
         }
 
         // ★ textures: confirm 후엔 swatchMap 키 사용, 그 전엔 프롬프트 키워드 폴백
-        String fullPrompt = buildFullPromptForSwatch(nailDesign);
+        // (프롬프트는 폴백할 때만 읽는다 — 스와치 저장 스레드처럼 세션을 읽을 수 없는 곳에서도 부를 수 있게)
         LinkedHashSet<String> textures = !swatchMap.isEmpty()
                 ? new LinkedHashSet<>(swatchMap.keySet())
-                : extractTexturesFromPrompt(fullPrompt);
+                : extractTexturesFromPrompt(buildFullPromptForSwatch(nailDesign));
 
         return DesignGenerateResponseDto.Details.builder()
                 .colorPalette(colorPalette)
@@ -1397,6 +1395,12 @@ public class NailDesignService {
     private String pickDefaultMood(Map<String, SlotData> slots) {
         String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
         if ("glitter".equals(designType) || "marble".equals(designType)) return "chic";
+        // 쉐입이 주는 인상(둥글면 큐트/순수, 아몬드면 우아/러블리, 스퀘어/스틸레토면 시크 ...)과 색 톤에 맞춰 가중치로 고른다.
+        List<String> shapeLiked = getLiked(slots, "shape");
+        String shape = shapeLiked.isEmpty() ? null : shapeLiked.get(0);
+        List<String> hexes = ScanFitWeighting.hexesIn(String.join(" ", getLiked(slots, "color")));
+        String byShape = ScanFitWeighting.pickMood(shape, hexes, new Random());
+        if (byShape != null) return byShape;
         return DEFAULT_MOOD_POOL.get(new Random().nextInt(DEFAULT_MOOD_POOL.size()));
     }
 
@@ -1425,10 +1429,10 @@ public class NailDesignService {
         if (useScanColors && getLiked(slots, "color").isEmpty()) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
-                List<String> shuffled = new ArrayList<>(palette);
-                Collections.shuffle(shuffled);
-                int count = Math.min(shuffled.size(), 1 + new Random().nextInt(3)); // 1~3개
-                for (String color : shuffled.subList(0, count)) {
+                // 완전 무작위가 아니라 가중치로 뽑는다: 짧은 손톱이면 비비드한 색을 더 자주, 이미 뽑은 색과 어울리는 계열을 더 자주.
+                Random rnd = new Random();
+                int count = Math.min(palette.size(), 1 + rnd.nextInt(3)); // 1~3개
+                for (String color : ScanFitWeighting.pickWeighted(palette, fitOf(handScan), count, rnd)) {
                     addLiked(slots, "color", color);
                 }
             }
@@ -1437,6 +1441,18 @@ public class NailDesignService {
         if (getLiked(slots, "mood").isEmpty()) {
             addLiked(slots, "mood", pickDefaultMood(slots));
         }
+    }
+
+    /**
+     * 스캔에서 읽은 손 특성: 손톱 몸통(스캔 쉐입 추천과 같은 기준의 폭/길이 z값), 손톱 크기, 피부 밝기.
+     * 스캔 값이 없으면 빈 Fit.
+     */
+    private ScanFitWeighting.Fit fitOf(HandScan handScan) {
+        if (handScan == null) return ScanFitWeighting.Fit.NONE;
+        ScanFitWeighting.NailBody body = ScanFitWeighting.nailBodyFromShape(scanRecommendedShape(handScan));
+        return scanResultFileService.analysisFor(handScan)
+                .map(a -> new ScanFitWeighting.Fit(body, ScanFitWeighting.handSizeFrom(a.overallSize()), a.brightness()))
+                .orElse(new ScanFitWeighting.Fit(body, null, null));
     }
 
     private void addLiked(Map<String, SlotData> slots, String category, String value) {
@@ -1878,11 +1894,19 @@ public class NailDesignService {
         // 다른 생성 방식(summarizeSlots)과 같은 "#HEX (이름)" 형식으로 넘겨서, top-level color(= 최종 프롬프트의
         // Overall style)엔 헥스가, 손톱별 description엔 자연어 색 이름이 들어가도록 맞춘다.
         List<String> palette = scanRecommendedColors(handScan);
+        ScanFitWeighting.Fit fit = fitOf(handScan);
+        // 30색을 전부 주면 GPT가 매번 비슷한 색만 고른다. 가중치로 후보 8색을 먼저 추려서(짧은 손톱이면 비비드 우대,
+        // 서로 어울리는 계열 우대) 그 안에서 고르게 한다.
+        if (palette.size() > 8) {
+            palette = ScanFitWeighting.pickWeighted(palette, fit, 8, new Random());
+        }
         if (!palette.isEmpty()) {
-            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트 ").append(palette.size())
+            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트에서 추린 ").append(palette.size())
                     .append("색 - 이 목록 안에서만 색을 고르고, 고른 색 앞의 헥스코드를 top-level color 필드에 그대로 복사): ")
                     .append(String.join(", ", pairHexWithNames(palette))).append("\n");
         }
+        sb.append(ScanFitWeighting.fitLine(fit));
+        sb.append(ScanFitWeighting.autoHint(fit, recShape));
 
         sb.append("""
                 [스캔 정보 기반 자동 생성 - 매우 중요]

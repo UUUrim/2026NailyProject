@@ -37,4 +37,7 @@ public interface DesignLikeRepository extends JpaRepository<DesignLike, Long> {
     List<Long> findDesignIdsByUserId(@Param("userId") Long userId);
 
     void deleteAllByNailDesign(NailDesign nailDesign);
+
+    // 갤러리 DB가 생기기 전에 로컬에 쌓인 좋아요를 옮길 때 쓴다 (CommunityGallerySync)
+    List<DesignLike> findAllByNailDesign(NailDesign nailDesign);
 }
