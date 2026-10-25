@@ -192,13 +192,18 @@ public class PrintOrderService {
 
         try {
             // 오른손은 출력하지 않으므로 rightSession/rightShapes를 보내지 않는다 (printer 서버가 생략을 허용한다)
-            Map<String, Object> requestBody = Map.of(
+            Map<String, Object> requestBody = new HashMap<>(Map.of(
                     "userid", userid,
                     "leftSession", String.valueOf(order.getLeftScanId()),
                     "leftShapes", shapes,
                     "callbackUrl", callbackUrl,
                     "printCallbackUrl", printCallbackUrl
-            );
+            ));
+            // STL은 연장 길이별 폴더에 만들어지므로, 이 주문이 신청한 길이의 폴더를 읽도록 알려 준다
+            // (null = 길이 기록 전 예전 주문 → 쉐입 기본 길이로 만든 폴더)
+            if (order.getTipExtensionMm() != null) {
+                requestBody.put("tipExtensionMm", order.getTipExtensionMm());
+            }
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);

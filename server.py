@@ -98,7 +98,7 @@ for _p in [_PRINTER_DIR, _SCAN_DIR, _THIS_DIR]:
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_SCAN_DIR, ".env"))
 
-from merge_fingers   import merge_both_hands                      # printer/
+from merge_fingers   import merge_both_hands, stl_subdir           # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
@@ -365,13 +365,14 @@ def _stop_printer_quietly():
         print(f"[Cancel] stop_print 실패(다음 폴링에서 재시도): {e}")
 
 def _run_merge_both_hands(userid, left_session, right_session,
-                           left_shapes, right_shapes, callback_url, print_callback_url=None):
+                           left_shapes, right_shapes, callback_url, print_callback_url=None,
+                           tip_extension_mm=None):
     try:
         # 주문마다 폴더를 따로 쓴다: 같은 스캔으로 다시 신청해도 앞 주문의 병합 파일을 덮어쓰지 않는다
         order_id   = _order_id_from_callback(callback_url)
         pair       = f"{left_session}_{right_session}" if right_session else str(left_session)
         result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes,
-                                  order_id=order_id)
+                                  order_id=order_id, tip_extension_mm=tip_extension_mm)
         s3_key     = f"print/{userid}/{pair}/both/order_{order_id}/both_hands_merged.3mf"
         merged_url = _upload_3mf(result["path"], s3_key)
         requests.post(callback_url, json={
@@ -1871,7 +1872,10 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
     tip_extension_mm이 None이면 nail_exact_stl.py가 쉐입별 기본값(TIP_EXTENSION_DEFAULT_MM)을 쓴다."""
     try:
         results_root = os.path.join(BASE, "results", userid, session, hand)
-        stl_dir      = os.path.join(results_root, "stl")
+        # 연장 길이마다 폴더를 따로 쓴다 - 같은 스캔으로 다른 길이를 신청해도 다른 주문의 STL을 덮어쓰지 않는다
+        # (병합은 주문의 연장 길이로 같은 폴더를 찾아 읽는다: printer/merge_fingers.py stl_subdir)
+        stl_sub      = stl_subdir(tip_extension_mm)
+        stl_dir      = os.path.join(results_root, "stl", stl_sub)
         os.makedirs(stl_dir, exist_ok=True)
         rel_prefix   = f"results/{userid}/{session}/{hand}"   # 콜백에 담을 로컬 상대 경로의 앞부분
 
@@ -1919,7 +1923,7 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
         # stlUrl 자리에는 로컬 상대 경로를 보낸다(Spring은 이 값을 읽는 화면이 없다).
         fingers_data = [
             {"finger": finger.upper(),
-             "stlUrl": f"{rel_prefix}/stl/nail_{finger}_{shape}.stl"}
+             "stlUrl": f"{rel_prefix}/stl/{stl_sub}/nail_{finger}_{shape}.stl"}
             for finger in FINGER_ORDER if finger in succeeded
         ]
 
@@ -1957,6 +1961,8 @@ class MergeBothHandsRequest(BaseModel):
     rightSession: str | None = None
     leftShapes: dict[str, str]; rightShapes: dict[str, str] = {}
     callbackUrl: str; printCallbackUrl: str | None = None
+    # 주문의 연장 길이(mm). 그 길이로 만든 STL 폴더를 읽는다. 없으면(예전 주문) 쉐입 기본 길이 폴더.
+    tipExtensionMm: float | None = None
 
 class MergeBothMeasurementsRequest(BaseModel):
     userid: str; leftSession: str; rightSession: str; callbackUrl: str
@@ -2387,7 +2393,7 @@ def merge_both(request: MergeBothHandsRequest):
         target=_run_merge_both_hands,
         args=(request.userid, request.leftSession, request.rightSession,
               request.leftShapes, request.rightShapes,
-              request.callbackUrl, request.printCallbackUrl),
+              request.callbackUrl, request.printCallbackUrl, request.tipExtensionMm),
         daemon=True,
     ).start()
     return {"status": "started", "message": "병합이 시작되었습니다."}
