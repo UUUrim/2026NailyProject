@@ -267,6 +267,14 @@ STRIP_RIGHT_MM       = 26.0   # 띠 오른쪽 경계를 못 찾았을 때: 왼�
 STRIP_RIGHT_SEARCH_MM = (18.0, 34.0)   # 오른쪽 경계(어두운 띠 → 밝은 종이)를 찾는 구간
 STRIP_RIGHT_JUMP_L   = 25     # 이 이상 밝아지면 오른쪽 경계. LED 조명 사진은 +24~27mm 에서 L 36 → 89 로 뛴다
 STRIP_RIGHT_MARGIN_MM = 0.5   # 오른쪽 경계보다 이만큼만 더 오른쪽까지 인정(옆 손가락이 못 들어오게)
+# 띠는 고정물이라 폭(약 24~25mm)과 마커에서의 거리가 사진마다 같다. 엄지처럼 손바닥 그림자가 띠 옆에 붙으면
+# 그림자가 "어두운 띠"로 잡혀 한쪽 경계가 3~5mm 번지고(mm/px 로 ~40px), 그만큼 손바닥이 후보에 들어온다.
+# 폭이 어긋났으면 마커 기준 예상 위치에 더 가까운 경계만 믿고 반대쪽을 폭만큼 떨어뜨린다.
+STRIP_WIDTH_MM       = 24.8   # 어두운 띠의 실제 폭 (마진 제외)
+STRIP_WIDTH_TOL_MM   = 1.5    # 이 안이면 두 경계 모두 그대로 쓴다
+STRIP_LEFT_FROM_MARKER_MM  = 45.3   # 마커 오른쪽 끝 → 띠 왼쪽 경계
+STRIP_RIGHT_FROM_MARKER_MM = 70.1   # 마커 오른쪽 끝 → 띠 오른쪽 경계
+STRIP_TRUST_TOL_MM   = 2.5    # 예상 위치에서 이만큼 안에 있는 경계만 "믿을 수 있는" 경계로 본다
 
 
 def find_finger_strip(image: np.ndarray, aruco_corners: np.ndarray, mpp: float):
@@ -292,18 +300,39 @@ def find_finger_strip(image: np.ndarray, aruco_corners: np.ndarray, mpp: float):
     lookback = max(5, int(1.5 / mpp))
     for x in range(max(start, lookback + 1), W - 1):
         if dark[x] and not dark[x - 1] and med[x - lookback] > STRIP_PAPER_L:
-            x0 = max(0, x - int(STRIP_LEFT_MARGIN_MM / mpp))
             # 오른쪽 경계: 띠(어두움) 다음에 종이(밝음)가 갑자기 나오는 곳. 옛 조명 사진처럼 오른쪽이
             # 그늘이라 계속 어두우면 못 찾으므로 고정 폭으로 대신한다.
-            x1 = x + int(STRIP_RIGHT_MM / mpp)
+            right = x + int(STRIP_RIGHT_MM / mpp) - int(STRIP_RIGHT_MARGIN_MM / mpp)
             a, b = (int(v / mpp) for v in STRIP_RIGHT_SEARCH_MM)
             step = max(3, int(1.0 / mpp))
             for xr in range(x + a, min(W - step, x + b)):
                 if med[xr + step] - med[xr - step] >= STRIP_RIGHT_JUMP_L and med[xr - step] < STRIP_DARK_L:
-                    x1 = xr + int(STRIP_RIGHT_MARGIN_MM / mpp)
+                    right = xr
                     break
+            left, right = _check_strip_width(x, right, aruco_corners[:, 0].max(), mpp)
+            x0 = max(0, left - int(STRIP_LEFT_MARGIN_MM / mpp))
+            x1 = right + int(STRIP_RIGHT_MARGIN_MM / mpp)
             return x0, min(W, x1)
     return None
+
+
+def _check_strip_width(xl: int, xr: int, marker_right: float, mpp: float):
+    """검출된 띠 경계 (왼쪽 xl, 오른쪽 xr)의 폭이 실제 띠 폭과 맞는지 보고, 어긋났으면 고쳐서 돌려준다.
+
+    폭이 허용 범위면 그대로. 아니면 마커 오른쪽 끝에서 예상 거리(STRIP_*_FROM_MARKER_MM)에 더 가까운
+    경계를 믿고 반대 경계를 띠 폭만큼 옮긴다. 두 경계 모두 예상에서 멀면(띠를 옮긴 새 세팅) 손대지 않는다.
+    """
+    width_mm = (xr - xl) * mpp
+    if abs(width_mm - STRIP_WIDTH_MM) <= STRIP_WIDTH_TOL_MM:
+        return xl, xr
+    dev_l = abs((xl - marker_right) * mpp - STRIP_LEFT_FROM_MARKER_MM)
+    dev_r = abs((xr - marker_right) * mpp - STRIP_RIGHT_FROM_MARKER_MM)
+    width_px = int(STRIP_WIDTH_MM / mpp)
+    if dev_r <= dev_l and dev_r <= STRIP_TRUST_TOL_MM:
+        return xr - width_px, xr
+    if dev_l < dev_r and dev_l <= STRIP_TRUST_TOL_MM:
+        return xl, xl + width_px
+    return xl, xr
 
 
 # ─────────────────────────────────────────────────────────────
@@ -352,6 +381,12 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None,
                                   for i in range(4)]))
             mpp = MARKER_SIZE_MM / max(side, 1e-6)
         corridor = find_finger_strip(image, aruco_corners, mpp)
+    if aruco_corners is not None and corridor is None:
+        # 이 박스는 항상 검정 띠가 있다. 못 찾았는데 예전 방식으로 고르면 옆 손가락을 재게 된다.
+        raise RuntimeError(
+            "Black finger strip not found.\n"
+            "  → Check the marker is visible and the black strip is in place, with no shadow/hand covering its edges."
+        )
     if corridor is not None:
         skin[:, :corridor[0]] = 0
         skin[:, corridor[1]:] = 0
