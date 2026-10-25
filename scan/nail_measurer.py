@@ -94,7 +94,7 @@ except ImportError:
 # tag, and seam outright. Top-view photos don't go through this crop; the
 # same box-interior framing issue doesn't apply there.
 CCURVE_TOP_CROP_FRAC    = 0.38
-CCURVE_BOTTOM_CROP_FRAC = 0.35
+CCURVE_BOTTOM_CROP_FRAC = 0.31   # 0.35 였을 때 손가락이 프레임 아래쪽에 놓인 세션(245/246)은 손톱 아랫부분이 잘렸다. 받침대 윗면은 프레임 69% 쯤
 CCURVE_LEFT_CROP_FRAC   = 0.25
 CCURVE_RIGHT_CROP_FRAC  = 0.30
 
@@ -212,6 +212,7 @@ LATERAL_WEAK_SEARCH = False      # 한쪽이 아예 안 읽혔을 때(거울 복
 LATERAL_UNSTABLE_INLIERS = 20   # 한쪽 접힘선이 이보다 적은 점으로 읽혔으면 불안정한 쪽으로 본다
 LATERAL_MIN_OUTER_A = 4.0       # 접힘선 후보 바깥쪽(0.3~1.0mm)의 a* 하한. 윤곽(바깥이 종이)은 -4~+1, 정상 접힘선은 7 이상
 LATERAL_WEAK_MIN_B_STEP = 1.5   # 약한 후보의 (바깥 b* - 안쪽 b*) 하한. 진짜 접힘선 +2~4, 손톱 안쪽 결 0 이하
+OFF_NAIL_SUPPORT_FRAC = 0.6     # 재읽기에서 한쪽 접힘선이 손톱 구간에서 반대쪽의 이 비율보다 짧게만 읽히면 손톱 밖 주름으로 본다(0.35 였을 때 247 검지: 38% 로 빠져나갔다)
 LATERAL_SLANT_MAX = 0.5          # 접힘선 기울기(dx/dy) 상한. 0.5 = 세로에서 약 26도. 손톱 옆 접힘선은 거의 세로다
 LATERAL_SLANT_OTHER = 0.35      # 한쪽만 기울었다고 보려면 반대쪽은 이 값보다 세로에 가까워야 한다
 
@@ -1373,9 +1374,9 @@ def _detect_lateral_edges_impl(image: np.ndarray, finger_mask: np.ndarray,
         _off_nail = True
     if strict and lf is not None and rf is not None:
         _ol, _or = _nail_overlap(lf), _nail_overlap(rf)
-        if _or >= _min_span and _ol < max(_min_span, 0.35 * _or):
+        if _or >= _min_span and _ol < max(_min_span, OFF_NAIL_SUPPORT_FRAC * _or):
             lf, _off_nail = None, True
-        elif _ol >= _min_span and _or < max(_min_span, 0.35 * _ol):
+        elif _ol >= _min_span and _or < max(_min_span, OFF_NAIL_SUPPORT_FRAC * _ol):
             rf, _off_nail = None, True
     if (lf is None) != (rf is None):
         good, sgn = (rf, +1) if lf is None else (lf, -1)
