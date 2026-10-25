@@ -60,13 +60,20 @@ C_RATIO_MAX = 0.46
 # 사이드 사진 검증(side_photo_check) 기준
 SIDE_PHOTO_MAX_H_FRAC = 0.80   # 손가락 덩어리 높이 / 크롭 높이 (정상 0.40~0.78, 서 있는 손가락 0.86)
 SIDE_PHOTO_MIN_TOP    = 0.12   # 덩어리 위끝 / 크롭 높이 (정상 0.15~0.47, 서 있는 손가락 0.05)
+# 아래 세 기준은 측정 영역(고정 크롭) 안에 손가락 끝이 제대로 들어와 있는지 본다. 손가락이 크롭 아래로 내려가 잘렸거나
+# (스캔 224/225: 높이 0.16~0.25, 위끝 0.75~0.84) 손가락 없이 손/손목 살색만 잡힌 사진(233 엄지: 높이 0.17, 위끝 0.83,
+# 넓이 0.05)이 예전 검증을 그대로 통과했다. 정상 사진은 높이 0.32~0.66, 위끝 0.29~0.68, 넓이 0.11~0.39.
+SIDE_PHOTO_MIN_H_FRAC = 0.30   # 덩어리 높이 / 크롭 높이 하한
+SIDE_PHOTO_MAX_TOP    = 0.72   # 덩어리 위끝 / 크롭 높이 상한 (이보다 아래면 손가락 끝이 크롭 밖으로 잘림)
+SIDE_PHOTO_MIN_AREA   = 0.08   # 덩어리 넓이 / 크롭 넓이 하한
 
 
 def side_photo_check(img: np.ndarray, top=0.38, bottom=0.35, left=0.25, right=0.30):
     """사이드 사진에 C-curve 를 잴 만한 손가락 끝이 있는가. (ok, 이유) 를 돌려준다.
 
     손가락이 구멍에 안 들어와 있거나(스캔 217/211 소지: 구멍 너머로 머리카락만 보임) 세로로 서 있으면 측정 영역에서
-    손가락 크기의 덩어리가 없거나 이상한 모양으로 잡힌다. 촬영 직후 이걸 검사해서 다시 찍게 한다.
+    손가락 크기의 덩어리가 없거나 이상한 모양으로 잡힌다. 손가락이 측정 영역 아래로 잘렸거나 손만 잡힌 경우도 같이
+    거른다. 촬영 직후 이걸 검사해서 다시 찍게 한다. 이유 문자열에는 측정한 값을 넣어 로그만 보고 원인을 알 수 있게 한다.
     """
     sm = cv2.resize(img, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
     H, W = sm.shape[:2]
@@ -80,6 +87,15 @@ def side_photo_check(img: np.ndarray, top=0.38, bottom=0.35, left=0.25, right=0.
         return False, f"finger blob too tall ({bh / h:.2f} of the crop) - finger is upright/tilted"
     if by / h < SIDE_PHOTO_MIN_TOP:
         return False, f"finger blob reaches the top of the crop ({by / h:.2f})"
+    if bh / h < SIDE_PHOTO_MIN_H_FRAC:
+        return False, (f"finger blob too short ({bh / h:.2f} of the crop, need {SIDE_PHOTO_MIN_H_FRAC}) "
+                       f"- no fingertip in the measurement area")
+    if by / h > SIDE_PHOTO_MAX_TOP:
+        return False, (f"finger blob starts too low ({by / h:.2f} of the crop, max {SIDE_PHOTO_MAX_TOP}) "
+                       f"- fingertip is cut off at the bottom of the measurement area")
+    area = float(np.count_nonzero(m)) / float(m.shape[0] * m.shape[1])
+    if area < SIDE_PHOTO_MIN_AREA:
+        return False, f"finger blob too small ({area:.2f} of the crop, need {SIDE_PHOTO_MIN_AREA})"
     return True, "ok"
 
 
