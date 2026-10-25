@@ -524,8 +524,8 @@ export function useDesignChatWorkspace() {
     // ── 분석 결과 상세 패널: 지금 채팅에 반영 중인 기록 ──────────────────────────────────────────────
     // 사이드바의 '분석 결과 상세 보기'(접힌 줄에서는 손 아이콘)로 열고 닫는다 — 채팅 이력의 기록 줄은 그 기록의 채팅을 연다.
     // 다른 기록의 채팅을 열면 지금 채팅의 기록이 바뀌므로, 열려 있던 패널도 그 기록으로 바뀐다.
-    // 단, 손 촬영에서 이어 온 진입에서 이번 촬영이 아닌 기록 줄을 누르면 그 기록을 패널에 띄워 보기만 한다(viewRecord —
-    // 지금 채팅의 기록은 그대로). null = 지금 채팅의 기록을 따라간다
+    // 손 촬영에서 이어 온 진입에서 이번 촬영이 아닌 기록의 채팅을 보기만 할 때는 지금 채팅의 기록이 그대로라 패널도 이번 촬영 기록 그대로다.
+    // panelScanKey = 패널에 따로 띄운 다른 기록 (지금은 따로 띄우는 곳이 없다), null = 지금 채팅의 기록을 따라간다
     const [panelScanKey, setPanelScanKey] = useState<string | null>(null)
     const panelRecordKey = panelScanKey ?? selectedScanKey ?? null
     const isPanelOtherRecord = panelScanKey !== null && panelScanKey !== selectedScanKey
@@ -574,17 +574,6 @@ export function useDesignChatWorkspace() {
         setIsAnalysisPanelOpen(true)
     }
 
-    /** 손 촬영에서 이어 온 진입의 다른 기록 줄 — 그 기록의 분석 결과 상세를 연다 (이미 그 기록을 띄워 두었으면 닫는다) */
-    const viewRecord = (scanKey: string) => {
-        setIsMobileSidebarOpen(false)
-        if (isAnalysisPanelOpen && panelRecordKey === scanKey) {
-            closeAnalysisPanel()
-            return
-        }
-        setPanelScanKey(scanKey)
-        setIsAnalysisPanelOpen(true)
-    }
-
     /** 패널의 '이 기록으로 새 채팅' — 패널이 채팅을 덮는 화면에서는 새 채팅이 보이도록 패널을 닫는다 */
     const startChatWithPanelRecord = () => {
         if (!panelScanKey || !startChatWithRecord(panelScanKey)) return
@@ -618,13 +607,10 @@ export function useDesignChatWorkspace() {
         isAnalysisPanelOpen,
         // 패널에 지금 채팅의 기록을 띄워 두었는지 (사이드바 위 버튼이 '분석 결과 상세 닫기'가 된다)
         isCurrentRecordPanelOpen: isAnalysisPanelOpen && !isPanelOtherRecord,
-        // 손 촬영에서 이어 온 진입 — 이번 촬영 기록(이 기록이 아닌 기록 줄은 누르면 패널에 띄워 보기만 한다)
+        // 손 촬영에서 이어 온 진입 — 이번 촬영 기록(이 기록이 아닌 기록 줄은 누르면 그 기록의 채팅을 보기만 한다)
         fixedScanKey,
-        // 기록 줄을 눌러 패널에 띄워 보고 있는 기록 — 채팅 이력에서 그 기록 줄을 강조한다
-        viewingRecordKey: isAnalysisPanelOpen ? panelScanKey : null,
         panelRecord,
         toggleCurrentRecordPanel,
-        viewRecord,
         closeAnalysisPanel,
         startChatWithPanelRecord,
         isSidebarCollapsed,

@@ -53,8 +53,6 @@ export function NailDesignChatPageContent() {
                 isCurrentRecordPanelOpen={workspace.isCurrentRecordPanelOpen}
                 onToggleAnalysisPanel={workspace.toggleCurrentRecordPanel}
                 fixedScanKey={workspace.fixedScanKey}
-                viewingRecordKey={workspace.viewingRecordKey}
-                onViewRecord={workspace.viewRecord}
                 historyGroups={workspace.historyGroups}
                 isHistoryLoading={workspace.isHistoryLoading}
                 activeSessionId={workspace.activeSessionId}
