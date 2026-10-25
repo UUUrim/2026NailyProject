@@ -212,6 +212,8 @@ LATERAL_WEAK_SEARCH = False      # 한쪽이 아예 안 읽혔을 때(거울 복
 LATERAL_UNSTABLE_INLIERS = 20   # 한쪽 접힘선이 이보다 적은 점으로 읽혔으면 불안정한 쪽으로 본다
 LATERAL_MIN_OUTER_A = 4.0       # 접힘선 후보 바깥쪽(0.3~1.0mm)의 a* 하한. 윤곽(바깥이 종이)은 -4~+1, 정상 접힘선은 7 이상
 LATERAL_WEAK_MIN_B_STEP = 1.5   # 약한 후보의 (바깥 b* - 안쪽 b*) 하한. 진짜 접힘선 +2~4, 손톱 안쪽 결 0 이하
+LATERAL_SLANT_MAX = 0.5          # 접힘선 기울기(dx/dy) 상한. 0.5 = 세로에서 약 26도. 손톱 옆 접힘선은 거의 세로다
+LATERAL_SLANT_OTHER = 0.35      # 한쪽만 기울었다고 보려면 반대쪽은 이 값보다 세로에 가까워야 한다
 
 # 가이드선 기준 큐티클 후보 허용 오차(mm). 사용자는 화면의 가이드선에 큐티클을 맞춰서 찍으므로
 # 실제 큐티클은 선에서 1mm 안팎에 있다(가이드 촬영 10장). 허용 오차가 3mm면 손톱 안쪽의
@@ -1192,7 +1194,8 @@ class _LateralEdges(dict):
 
 def _detect_lateral_edges_impl(image: np.ndarray, finger_mask: np.ndarray,
                                axis_hint: int, fy: int, cuticle_y: int,
-                               nail_half: float, mpp: float, strict: bool = False) -> dict:
+                               nail_half: float, mpp: float, strict: bool = False,
+                               drop_side: str = None) -> dict:
     """
     True per-row LEFT/RIGHT nail-fold edges.
 
@@ -1361,6 +1364,13 @@ def _detect_lateral_edges_impl(image: np.ndarray, finger_mask: np.ndarray,
         return min(f[2], cuticle_y) - max(f[1], fy)
 
     _off_nail = False
+    if strict and drop_side and lf is not None and rf is not None:
+        # 호출한 쪽이 한쪽 선만 비스듬해서(_slanted_side) 손가락 옆면 주름으로 본 경우: 그 선을 버리고 한쪽 처리로 보낸다.
+        if drop_side == "L":
+            lf = None
+        else:
+            rf = None
+        _off_nail = True
     if strict and lf is not None and rf is not None:
         _ol, _or = _nail_overlap(lf), _nail_overlap(rf)
         if _or >= _min_span and _ol < max(_min_span, 0.35 * _or):
@@ -1512,22 +1522,52 @@ def _fold_on_outline(image: np.ndarray, edges: dict, mpp: float) -> bool:
     return any(v and float(np.median(v)) < LATERAL_MIN_OUTER_A for v in (left, right))
 
 
+def _slanted_side(edges: dict):
+    """한쪽 접힘선만 세로에서 크게 벗어났으면 그쪽("L"/"R"), 아니면 None.
+
+    손톱 옆 접힘선은 손톱 축과 거의 평행한 세로선이다. 한쪽이 약 26도 이상 비스듬하고 반대쪽은 거의 세로면, 비스듬한 쪽은
+    손톱이 아니라 손가락 옆면 주름이다(도경 검지 240: 왼쪽 선이 손톱 밖에서 비스듬히 올라와 폭 9.7mm 가 11.8mm 로 나왔다).
+    88장 중 7장이 이 조건이었고 전부 왼쪽이 기울어 있었으며, 그 사진들의 폭은 같은 손가락의 다른 촬영보다 1~2.5mm 컸다.
+    """
+    if len(edges) < 8:
+        return None
+    ys = np.array(sorted(edges), float)
+    sl = float(np.polyfit(ys, [edges[int(y)][0] for y in ys], 1)[0])
+    sr = float(np.polyfit(ys, [edges[int(y)][1] for y in ys], 1)[0])
+    if abs(sl) > LATERAL_SLANT_MAX and abs(sr) < LATERAL_SLANT_OTHER:
+        return "L"
+    if abs(sr) > LATERAL_SLANT_MAX and abs(sl) < LATERAL_SLANT_OTHER:
+        return "R"
+    return None
+
+
 def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
                          axis_hint: int, fy: int, cuticle_y: int,
                          nail_half: float, mpp: float,
                          final: bool = False, retry_empty: bool = False) -> dict:
     """True per-row nail-fold edges ({row: (left_x, right_x)}), {} when not detectable.
 
-    먼저 기존 방식으로 읽는다. final=True(큐티클이 확정된 최종 호출)이고 읽힌 접힘선이 손가락 윤곽에 놓였으면
-    (_fold_on_outline) 윤곽 거름·손톱 구간 지지 검사·거울 복사 근처 재탐색을 켠 방식(strict)으로 다시 읽는다. 아무것도 못
-    읽었어도 retry_empty=True(임시 접힘선이 윤곽에 걸렸던 경우)면 strict 로 한 번 더 읽는다. 윤곽이 접힘선으로 잡히면 손톱
-    폭이 2~3mm 커진다(도경 검지 9.7mm 가 12.7mm, 엄지 13mm 가 15.5mm). 정상으로 읽힌 사진과 임시(큐티클 가정) 호출은
-    결과가 달라지지 않는다 - 접힘선 로직 전체를 바꾸면 큐티클 추정까지 흔들려 좌우 손의 같은 손가락 길이가 어긋났다.
+    먼저 기존 방식으로 읽는다. final=True(큐티클이 확정된 최종 호출)이고 읽힌 접힘선이 손가락 윤곽에 놓였거나(_fold_on_outline)
+    한쪽만 비스듬하면(_slanted_side) 윤곽 거름·손톱 구간 지지 검사·거울 복사 근처 재탐색을 켠 방식(strict)으로 다시 읽는다.
+    아무것도 못 읽었어도 retry_empty=True(임시 접힘선이 윤곽에 걸렸던 경우)면 strict 로 한 번 더 읽는다. 윤곽이나 옆면 주름이
+    접힘선으로 잡히면 손톱 폭이 2~3mm 커진다(도경 검지 9.7mm 가 12.7mm, 엄지 13mm 가 15.5mm). 정상으로 읽힌 사진과
+    임시(큐티클 가정) 호출은 결과가 달라지지 않는다 - 접힘선 로직 전체를 바꾸면 큐티클 추정까지 흔들려 좌우 손의 같은 손가락
+    길이가 어긋났다.
     """
     args = (image, finger_mask, axis_hint, fy, cuticle_y, nail_half, mpp)
     out = _detect_lateral_edges_impl(*args)
-    if final and ((out and _fold_on_outline(image, out, mpp)) or (not out and retry_empty)):
-        print("  [Lateral] fold edge on the finger outline (or none read) - re-reading with outline rejection")
+    if not final:
+        return out
+    if out and _fold_on_outline(image, out, mpp):
+        print("  [Lateral] fold edge on the finger outline - re-reading with outline rejection")
+        return _detect_lateral_edges_impl(*args, strict=True)
+    side = _slanted_side(out) if out else None
+    if side:
+        print(f"  [Lateral] {'left' if side == 'L' else 'right'} fold line is slanted (finger-side crease) - re-reading near the mirrored position")
+        redo = _detect_lateral_edges_impl(*args, strict=True, drop_side=side)
+        return redo if redo else out
+    if not out and retry_empty:
+        print("  [Lateral] no fold read after an outline fold in the provisional pass - re-reading with outline rejection")
         return _detect_lateral_edges_impl(*args, strict=True)
     return out
 
