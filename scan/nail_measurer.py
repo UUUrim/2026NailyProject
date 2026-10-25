@@ -671,7 +671,8 @@ FREE_EDGE_REAL_MM     = 1.0    # 윗선 밖으로 이만큼 이상 나와야 진
 MIXED_BG_DARK_L       = 90     # 양옆 배경이 섞인 박스에서 손끝 위 배경 샘플로 쓰는 어두운 픽셀 상한(L)
 
 
-def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dict:
+def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int,
+                     finger_mask: np.ndarray = None) -> dict:
     """
     Find the white free edge of the nail (the milky band at the nail's distal
     end) and return the row where it STARTS — the real end of the nail.
@@ -732,8 +733,65 @@ def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dic
             break
 
     if len(tops) < WHITE_TIP_MIN_COLS * len(cols):
-        return none
+        pale = _pale_band_by_profile(L, chroma, fy, mpp, cx, fw, finger_mask)
+        return {"tip_y": pale, "thickness_mm": 0.0} if pale is not None else none
     return {"tip_y": int(np.percentile(tops, 20)), "thickness_mm": 0.0}
+
+
+# 짧은 손톱: 흰 띠가 아니라 "옅은 띠"(채도 6~10, 밝기 190+)가 윤곽 끝에서 0.5~2mm 안쪽에 있다. 열 하나하나는
+# 노이즈가 커서 위 검출기(채도 8 이하 + 5행 연속)가 놓치므로, 중앙 열을 묶음으로 나눠 중앙값 프로파일에서
+# "끝 살(채도 높음) → 옅은 띠(채도가 끝 살의 65% 이하로 급감, 밝음)" 전환을 찾는다.
+PALE_PAD_MIN_CHROMA  = 13.0    # 윤곽 끝 살이 분홍이라고 보는 채도 하한
+PALE_DROP_RATIO      = 0.65    # 띠 채도 / 끝 살 채도 상한
+PALE_MIN_L           = 170
+PALE_START_MM        = 0.3     # 윤곽 윗선 아래 이만큼부터 찾는다(윤곽 번짐 제외)
+PALE_END_MM          = 4.0     # 띠가 이보다 깊이 시작하면 손톱 앞 살이 아니라 다른 구조
+PALE_HOLD_MM         = 0.4     # 전환 후 이만큼은 계속 옅어야 한다
+PALE_GROUPS          = 5
+PALE_MIN_AGREE       = 3       # 묶음 중 이 수 이상이 같은 줄(PALE_AGREE_MM 이내)을 가리켜야 인정
+PALE_AGREE_MM        = 0.5
+
+
+def _pale_band_by_profile(L: np.ndarray, chroma: np.ndarray, fy: int, mpp: float, cx: int, fw: int,
+                          finger_mask: np.ndarray = None):
+    """손톱 끝 옅은 띠가 시작되는 줄을 돌려준다. 없으면 None.
+
+    묶음 범위는 손끝에서 2mm 아래 줄의 실제 손가락 폭 기준이다(bbox 폭은 손가락 전체 폭이라 엄지·새끼처럼
+    손끝이 둥글고 좁으면 묶음이 배경까지 나간다).
+    """
+    H, W = L.shape
+    half = int(fw * 0.25)
+    if finger_mask is not None:
+        cols = np.where(finger_mask[min(H - 1, fy + int(2.0 / mpp))] > 0)[0]
+        if len(cols) > 10:
+            cx, half = int((cols[0] + cols[-1]) // 2), int((cols[-1] - cols[0]) * 0.25)
+    xs = np.linspace(max(0, cx - half), min(W - 1, cx + half), PALE_GROUPS + 1).astype(int)
+    r0 = fy + int(PALE_START_MM / mpp)
+    r1 = min(H - 1, fy + int(PALE_END_MM / mpp))
+    pad_lo, pad_hi = fy + max(1, int(0.15 / mpp)), fy + max(2, int(0.7 / mpp))
+    hold = max(2, int(PALE_HOLD_MM / mpp))
+    starts = []
+    for g in range(PALE_GROUPS):
+        if xs[g + 1] - xs[g] < 3:
+            continue
+        c = np.median(chroma[:, xs[g]:xs[g + 1]], axis=1)
+        l = np.median(L[:, xs[g]:xs[g + 1]], axis=1)
+        pad = float(c[pad_lo:pad_hi + 1].max())
+        if pad < PALE_PAD_MIN_CHROMA:
+            continue
+        limit = pad * PALE_DROP_RATIO
+        for r in range(r0, r1 - hold):
+            if c[r] <= limit and l[r] >= PALE_MIN_L and (c[r:r + hold] <= pad * 0.8).all() and (l[r:r + hold] >= PALE_MIN_L).all():
+                starts.append(r)
+                break
+    if len(starts) < PALE_MIN_AGREE:
+        return None
+    starts.sort()
+    tol = int(PALE_AGREE_MM / mpp)
+    for i in range(len(starts) - PALE_MIN_AGREE + 1):
+        if starts[i + PALE_MIN_AGREE - 1] - starts[i] <= tol:
+            return int(np.median(starts[i:i + PALE_MIN_AGREE]))
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1550,7 +1608,7 @@ def _measure_top(image: np.ndarray, mpp: float,
     if tip_y >= fy or (fy - tip_y) * mpp < FREE_EDGE_REAL_MM:
         _top_cols = np.where(finger_mask[min(fy + 2, H - 1)] > 0)[0]
         _cx = int((_top_cols[0] + _top_cols[-1]) // 2) if len(_top_cols) else fx + fw // 2
-        wt = detect_white_tip(image, bbox, mpp, _cx)
+        wt = detect_white_tip(image, bbox, mpp, _cx, finger_mask)
         if wt["tip_y"] is not None and wt["tip_y"] > fy:
             white_tip_y = wt["tip_y"]
             print(f"  [White tip] nail ends {(white_tip_y - fy) * mpp:.1f}mm inside "
