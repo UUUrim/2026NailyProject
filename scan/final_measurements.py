@@ -29,7 +29,7 @@ from typing import Optional
 import numpy as np
 
 from nail_measurer import (merge_hand_measurements, classify_size_totals,
-                           recommend_nail_shape)
+                           recommend_nail_shape, pooled_hand_curve_k)
 from skin_color import recommend_nail_colors, lab_to_rgb_hex, display_skin_lab
 
 FINGER_ORDER   = ["thumb", "index", "middle", "ring", "pinky"]
@@ -126,9 +126,9 @@ def _fingers_view(by_finger: dict) -> list:
     return out
 
 
-def _hand_block(session: str, payloads: dict) -> dict:
-    """한 손의 상세 블록 (nails/by_finger/mesh_params + 화면용 fingers)."""
-    block = merge_hand_measurements(payloads)
+def _hand_block(session: str, payloads: dict, hand_curve_k=None) -> dict:
+    """한 손의 상세 블록 (nails/by_finger/mesh_params + 화면용 fingers). hand_curve_k: 두 손을 합쳐 구한 곡률 계수."""
+    block = merge_hand_measurements(payloads, hand_curve_k)
     block["session"]        = session
     block["missingFingers"] = [f for f in FINGER_ORDER if f not in payloads]
     block["fingers"]        = _fingers_view(block["by_finger"])
@@ -203,8 +203,10 @@ def _skin_and_colors(all_nails: list) -> tuple:
 
 def build_final_payload(userid: str, left_session: str, left_payloads: dict,
                         right_session: str, right_payloads: dict) -> dict:
-    left_block  = _hand_block(left_session,  left_payloads)
-    right_block = _hand_block(right_session, right_payloads)
+    # 곡률은 두 손 손가락을 모아 하나의 계수를 구해 양손에 같이 쓴다 (nail_measurer.pooled_hand_curve_k)
+    curve_k = pooled_hand_curve_k(left_payloads, right_payloads)
+    left_block  = _hand_block(left_session,  left_payloads,  curve_k)
+    right_block = _hand_block(right_session, right_payloads, curve_k)
 
     all_nails = left_block["nails"] + right_block["nails"]
     summary   = classify_size_totals(all_nails)
