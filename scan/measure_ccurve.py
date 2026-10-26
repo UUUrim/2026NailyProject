@@ -472,6 +472,68 @@ def _neighbor_trim_range(xs: np.ndarray, ys: np.ndarray):
     return lo, hi
 
 
+EDGE_PCHORD = 46.0          # 정답 라벨의 현 길이 중앙값(px/mm). 맞출 포물선의 구간 길이 = 탑뷰 폭 x 이 값
+EDGE_SPAN = 0.9
+
+
+def _edge_gradient_map(img: np.ndarray) -> np.ndarray:
+    """손톱 끝 선(연한 손톱 -> 붉은 살)에서 크게 나오는 신호: a* 와 채도의 '위에서 아래로 증가' 기울기."""
+    b = cv2.GaussianBlur(img, (0, 0), 3.0)
+    lab = cv2.cvtColor(b, cv2.COLOR_BGR2Lab).astype(np.float32)
+    hsv = cv2.cvtColor(b, cv2.COLOR_BGR2HSV).astype(np.float32)
+
+    def gy(a):
+        g = np.zeros_like(a)
+        g[1:-1] = (a[2:] - a[:-2]) / 2.0
+        return np.clip(g, 0, None)
+    ga, gs = gy(lab[:, :, 1]), gy(hsv[:, :, 1])
+    return ga / (np.percentile(ga, 99) + 1e-6) + gs / (np.percentile(gs, 99) + 1e-6)
+
+
+def edge_parabola_ratio(img: np.ndarray, fmask: np.ndarray, width_mm: float):
+    """손톱 끝 선을 따라가는 포물선을 찾아 호 높이/현 비율을 돌려준다. (ratio, score) 또는 None.
+
+    사람이 사진에서 손톱 호로 찍은 정답 73개를 보니(scan/ccurve_labels.json) 그 호는 a*/채도가 위에서 아래로 가장 급하게 오르는
+    선을 따라가고, 기존 밴드 윗선은 손가락 끝의 둥근 윗선이라 정답과 거의 무관했다(상관 0.23). 손가락 한 개만 보면 이 값도
+    흔들리지만(정답 상관 0.55) 한 손 손가락들을 평균하면 사람 간 평평함 차이를 잡는다(세션 평균 상관 0.76,
+    final_measurements.hand_curve_factor 에서 쓴다). 포물선 y = y0 + A x^2 + B x 의 위치와 곡률을 이 신호의 평균이 가장 큰
+    쪽으로 찾고, 비율 = A * 현 / 4 (현 = 폭 x EDGE_PCHORD px/mm) 로 돌려준다.
+    """
+    fm = fmask > 0
+    if width_mm is None or width_mm <= 0 or not fm.any():
+        return None
+    G = _edge_gradient_map(img)
+    H, W = G.shape
+    cols = np.where(fm.any(axis=0))[0]
+    x0f, x1f = int(cols.min()), int(cols.max())
+    fw = x1f - x0f
+    if fw < 50:
+        return None
+    top = np.array([np.argmax(fm[:, x]) if fm[:, x].any() else 0 for x in range(W)])
+    c = width_mm * EDGE_PCHORD
+    half = EDGE_SPAN * c / 2
+    xs_off = np.linspace(-half, half, 41)
+    best_sc, best_A = -1.0, None
+    for xa in np.linspace(x0f + 0.25 * fw, x1f - 0.25 * fw, 24):
+        xs = xa + xs_off
+        xi = np.clip(xs.astype(int), 0, W - 1)
+        tp = top[xi]
+        for dy in np.linspace(0.04 * fw, 0.30 * fw, 27):
+            y0 = top[int(xa)] + dy
+            for A in np.linspace(2e-4, 5e-3, 24):
+                for B in (-0.25, -0.12, 0.0, 0.12, 0.25):
+                    yi = (y0 + A * xs_off ** 2 + B * xs_off).astype(int)
+                    ok = (yi >= 0) & (yi < H) & (yi > tp + int(0.03 * fw))
+                    if ok.sum() < 30:
+                        continue
+                    sc = float(G[yi[ok], xi[ok]].mean() * ok.mean())
+                    if sc > best_sc:
+                        best_sc, best_A = sc, A
+    if best_A is None:
+        return None
+    return best_A * c / 4.0, best_sc
+
+
 def _compute_tilt_angle(mask: np.ndarray) -> float:
     """Angle (degrees) the finger is rolled from upright in this end-on
     crop; positive = tilted right, negative = left.
@@ -531,8 +593,13 @@ def measure_ccurve(image_path: str, width_mm: float,
                    bottom_crop_frac: float = 0.0,
                    left_crop_frac: float = 0.0,
                    right_crop_frac: float = 0.0,
-                   gates: bool = True) -> dict:
-    """gates=False 는 실험용: 값이 비정상이어도 예외 대신 결과를 돌려주고 결과의 "gate_reason" 에 이유를 넣는다."""
+                   gates: bool = True,
+                   edge_out: dict = None) -> dict:
+    """gates=False 는 실험용: 값이 비정상이어도 예외 대신 결과를 돌려주고 결과의 "gate_reason" 에 이유를 넣는다.
+
+    edge_out 에 dict 를 주면 손가락 마스크가 정해진 직후 edge_parabola_ratio 를 계산해 edge_out["edge_ratio"] 에 넣는다 - 곡률
+    측정이 거부돼(예외) 값이 안 나와도 이 값은 남는다.
+    """
 
     img = cv2.imread(image_path)
     if img is None:
@@ -677,6 +744,14 @@ def measure_ccurve(image_path: str, width_mm: float,
         B = lab[:, :, 2].astype(np.float32) - 128
         fx, fy, fw, fh = cv2.boundingRect(fmask)
         print(f"  [Tilt] new bbox x={fx} y={fy} w={fw} h={fh}")
+
+    if edge_out is not None:
+        try:
+            _er = edge_parabola_ratio(img, fmask, width_mm)
+            if _er is not None:
+                edge_out["edge_ratio"], edge_out["edge_score"] = _er
+        except Exception as _e:
+            print(f"  [Edge] 손톱 끝 선 맞춤 실패: {_e}")
 
     # ── 3. Nail vs pulp: Otsu on a* inside the finger ────────
     # 임계값은 손가락 마스크 전체가 아니라 정점 주변 핵심 영역(위쪽 OTSU_CORE_ROWS_FRAC, 가운데 좌우

@@ -48,6 +48,7 @@ import json
 import math
 import os
 import sys
+from typing import Optional
 from collections import Counter
 
 # Console prints in this file use non-ASCII characters (arrows, em-dashes).
@@ -2661,9 +2662,10 @@ def measure_finger(top_path: str, finger: str,
             # 사이드 사진은 한 장의 곡률이 사진마다 크게 흔들려서(같은 엄지가 3.96 / 3.31mm 등) 여러 장을 찍어 중앙값을 쓴다.
             # 첫 장은 ccurve_path, 나머지는 같은 이름 뒤에 _2, _3 이 붙은 파일(예: thumb_side_2.jpg). 장마다 따로 재서
             # 실패한 장은 빼고, 성공한 장들의 중앙값을 최종 곡률로 한다. 전부 실패하면 아래 except 의 평균값 대체.
-            _ccs, _last_err = [], None
+            _ccs, _last_err, _edge_ratios = [], None, []
             for _i, _pth in enumerate([ccurve_path] + _extra_side_paths(ccurve_path)):
                 _dbg = debug_path if _i == 0 else os.path.join(output_dir, f"{finger}_ccurve_debug_{_i + 1}.jpg")
+                _eo = {}
                 try:
                     _ccs.append(_endOn_ccurve(_pth,
                                               width_mm=data["width_mm"],
@@ -2672,10 +2674,17 @@ def measure_finger(top_path: str, finger: str,
                                               top_crop_frac=CCURVE_TOP_CROP_FRAC,
                                               bottom_crop_frac=CCURVE_BOTTOM_CROP_FRAC,
                                               left_crop_frac=CCURVE_LEFT_CROP_FRAC,
-                                              right_crop_frac=CCURVE_RIGHT_CROP_FRAC))
+                                              right_crop_frac=CCURVE_RIGHT_CROP_FRAC,
+                                              edge_out=_eo))
                 except Exception as e:
                     _last_err = e
                     print(f"  [C-curve] 사이드 사진 {_i + 1}번 측정 실패 ({e}) - 이 사진은 중앙값에서 뺀다")
+                if "edge_ratio" in _eo:
+                    _edge_ratios.append(float(_eo["edge_ratio"]))
+            # 손톱 끝 선 맞춤 값은 곡률 측정이 거부돼도 남는다. 한 손 손가락들을 합쳐 쓴다(final_measurements.hand_curve_factor).
+            if _edge_ratios:
+                data["c_curve_edge_ratio"] = round(float(np.median(_edge_ratios)), 4)
+                print(f"  [Edge] 손톱 끝 선 곡률비 {data['c_curve_edge_ratio']}  (사진 {len(_edge_ratios)}장)")
             try:
                 if not _ccs:
                     raise _last_err if _last_err is not None else RuntimeError("no side photo measured")
@@ -2947,7 +2956,79 @@ def build_merged_payload(results: list, aruco_size_mm: float) -> dict:
     return payload
 
 
-def merge_hand_measurements(per_finger_payloads: dict) -> dict:
+# ── 손 단위 곡률 계수 ──────────────────────────────────────────────────────
+# 사진 한 장에서 읽은 곡률은 사용자가 사진에서 찍은 정답 호(scan/ccurve_labels.json 73개)와 거의 무관했다(상관 0.23, 오차는 "항상
+# 평균으로 답하기"보다 컸다). 반면 손톱 끝 선에 포물선을 맞춘 값(measure_ccurve.edge_parabola_ratio)은 손가락 하나로는 흔들려도
+# 한 손 손가락들을 평균하면 사람 간 평평함 차이를 잡는다(정답의 손 단위 계수와 상관 0.76, 같은 손을 두 번 찍어도 거의 같음).
+# 그래서 곡률 = 손가락별 표준 형태(STANDARD_NAILS 곡률/너비) x 이 손의 계수 x 그 손가락 너비 로 정한다.
+# 계수식은 정답이 있는 14개 세션으로 적합: k = 4.33 x (손가락 평균 곡률비) + 0.234, 정답 계수 범위 0.47~1.30.
+# 쌍 단위로 빼고 평가했을 때 정답 대비 오차(h/W)가 표준값 고정 0.075 -> 0.057, 지금 측정 0.109.
+USE_HAND_CURVE_FACTOR   = True
+HAND_CURVE_SLOPE        = 4.33
+HAND_CURVE_INTERCEPT    = 0.234
+HAND_CURVE_SHRINK       = 0.7      # 1 쪽(표준)으로 30% 당긴다 - 적합에 쓴 사람 수가 적어서
+HAND_CURVE_K_RANGE      = (0.55, 1.35)
+HAND_CURVE_MIN_FINGERS  = 3
+HAND_CURVE_EDGE_CAP     = 0.30     # 손가락 하나의 곡률비가 이보다 크면 이 값으로 자른다(정답 세션 95% 가 0.32 이하, 264 중지 0.51 같은 이상값이 손 평균을 흔들었다)
+
+
+def hand_curve_factor(nails: list):
+    """한 손 손가락들의 c_curve_edge_ratio 평균으로 손 단위 곡률 계수 k 를 구한다. 손가락이 모자라면 None."""
+    vals = []
+    for n in nails:
+        v = n.get("c_curve_edge_ratio")
+        if v is None:
+            continue
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(v) or math.isinf(v):
+            continue
+        vals.append(min(max(v, 0.0), HAND_CURVE_EDGE_CAP))
+    if len(vals) < HAND_CURVE_MIN_FINGERS:
+        return None
+    k = HAND_CURVE_SLOPE * (sum(vals) / len(vals)) + HAND_CURVE_INTERCEPT
+    k = 1.0 + HAND_CURVE_SHRINK * (k - 1.0)
+    return min(max(k, HAND_CURVE_K_RANGE[0]), HAND_CURVE_K_RANGE[1])
+
+
+def pooled_hand_curve_k(*payload_groups) -> Optional[float]:
+    """여러 손(왼손·오른손)의 손가락 payload 들을 모아 하나의 곡률 계수를 구한다. 두 손이 같은 계수를 쓰면 손마다 따로
+    흔들리지 않고 표본도 두 배가 된다(정답 14개 세션: 같은 손 두 번 촬영의 계수 차이 0, 교차검증 오차 0.0609 -> 0.0568)."""
+    nails = []
+    for group in payload_groups:
+        for payload in (group or {}).values():
+            nails.extend((payload.get("nails") or [])[:1])
+    return hand_curve_factor(nails)
+
+
+def apply_hand_curve_factor(nails: list, k: Optional[float] = None) -> None:
+    """손가락 dict 들의 c_curve_mm / arc_radius_mm 을 손 단위 계수 기준 값으로 바꾼다(측정 원본은 c_curve_measured_mm 로 보존).
+    k 를 주면(두 손을 합쳐 구한 값) 그 값을 쓰고, 없으면 이 손 손가락들로 구한다."""
+    if not USE_HAND_CURVE_FACTOR or not nails:
+        return
+    if k is None:
+        k = hand_curve_factor(nails)
+    source = "hand_edge_factor" if k is not None else "standard"
+    if k is None:
+        k = 1.0
+    for n in nails:
+        std = STANDARD_NAILS.get(n.get("finger"))
+        w = n.get("width_mm")
+        if std is None or not w:
+            continue
+        if "c_curve_measured_mm" not in n:
+            n["c_curve_measured_mm"] = n.get("c_curve_mm")
+            n["c_curve_measured_source"] = n.get("c_curve_source")
+        h = round(std["c_curve_mm"] / std["width_mm"] * k * float(w), 2)
+        n["c_curve_mm"] = h
+        n["arc_radius_mm"] = round(float(w) ** 2 / (8 * h) + h / 2, 2) if h > 0 else None
+        n["c_curve_source"] = source
+        n["hand_curve_factor"] = round(k, 3)
+
+
+def merge_hand_measurements(per_finger_payloads: dict, hand_curve_k: Optional[float] = None) -> dict:
     """
     Combine several build_merged_payload() outputs - one per finger,
     each produced by a separate nail_measurer.py subprocess (server.py
@@ -2968,6 +3049,7 @@ def merge_hand_measurements(per_finger_payloads: dict) -> dict:
         if finger_nails:
             nails.append(finger_nails[0])
     nails.sort(key=lambda n: FID.get(n["finger"], 9))
+    apply_hand_curve_factor(nails, hand_curve_k)
 
     votes = []
     for n in nails:
