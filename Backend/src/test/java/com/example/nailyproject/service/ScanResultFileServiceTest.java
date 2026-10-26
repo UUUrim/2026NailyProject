@@ -93,12 +93,36 @@ class ScanResultFileServiceTest {
         ScanAnalysis left = service.analysis(USER, 10).orElseThrow();
         ScanAnalysis right = service.analysis(USER, 11).orElseThrow();
 
-        // 컬러/피부/쉐입은 양손 공통, 손가락과 평균 치수는 손마다 다르다
+        // 컬러/피부/쉐입은 양손 공통, 손가락은 손마다 다르다
         assertEquals(left.recommendedColors(), right.recommendedColors());
         assertEquals(left.skinToneHex(), right.skinToneHex());
         assertNotEquals(left.fingers().get(0).measurementsJson(), right.fingers().get(0).measurementsJson());
         JsonNode expectedRight = mapper.readTree(sampleJson).path("right").path("fingers").get(0).path("measurements");
         assertEquals(expectedRight, mapper.readTree(right.fingers().get(0).measurementsJson()));
+    }
+
+    @Test
+    void 평균_치수와_평균_판정은_손별_요약이_아니라_상단_양손_요약에서_읽는다() throws Exception {
+        JsonNode root = mapper.readTree(sampleJson);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("summary")).put("c_curve_size", "smaller");
+        putFinal("10_11", mapper.writeValueAsString(root), 1_000_000L);
+
+        // 샘플의 손별 요약은 11.97/10.58 · 11.85/10.48 · average, 상단 요약은 11.91/10.53 · much_larger/larger
+        for (long scanId : new long[]{10, 11}) {
+            ScanAnalysis a = service.analysis(USER, scanId).orElseThrow();
+            assertEquals(11.91, a.avgLengthMm());
+            assertEquals(10.53, a.avgWidthMm());
+            assertEquals(2.2, a.avgCurveMm());
+            assertEquals("much_larger", a.lengthSize());
+            assertEquals("larger", a.widthSize());
+            assertEquals("smaller", a.curveSize());
+        }
+    }
+
+    @Test
+    void 곡률_판정이_없는_파일이면_곡률_판정은_null이다() throws IOException {
+        putFinal("10_11", sampleJson, 1_000_000L);   // 샘플은 c_curve_size가 생기기 전에 만들어진 파일
+        assertNull(service.analysis(USER, 10).orElseThrow().curveSize());
     }
 
     @Test
@@ -116,6 +140,19 @@ class ScanResultFileServiceTest {
     void 손톱_끝_값이_없던_예전_파일이면_null이다() throws IOException {
         putFinal("10_11", sampleJson, 1_000_000L);   // 샘플은 free edge 측정 전에 만들어진 파일
         assertNull(service.analysis(USER, 10).orElseThrow().avgFreeEdgeMm());
+        assertNull(service.sessions(USER).get(0).avgFreeEdgeMm());
+    }
+
+    @Test
+    void 기록_목록의_손톱_끝_평균은_손별_요약이_아니라_상단_양손_요약에서_읽는다() throws Exception {
+        // 실제 파일(177_178)의 값 - 손별 평균을 다시 평균 내면 0.195지만 상단 요약은 0.19다
+        JsonNode root = mapper.readTree(sampleJson);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("summary")).put("avg_free_edge_mm", 0.19);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("left").path("summary")).put("avg_free_edge_mm", 0.16);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) root.path("right").path("summary")).put("avg_free_edge_mm", 0.23);
+        putFinal("10_11", mapper.writeValueAsString(root), 1_000_000L);
+
+        assertEquals(0.19, service.sessions(USER).get(0).avgFreeEdgeMm());
     }
 
     @Test

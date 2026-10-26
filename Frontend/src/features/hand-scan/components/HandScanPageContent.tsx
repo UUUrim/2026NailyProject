@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { AppShell } from '@/shared/layout/AppShell'
 import { PageHero } from '@/shared/layout/PageHero'
 import { CameraSetupPreview } from '@/features/hand-scan/components/CameraSetupPreview'
+import { TopViewStream } from '@/features/hand-scan/components/TopViewStream'
 import { TopViewFingerGuide } from '@/features/hand-scan/components/TopViewFingerGuide'
 import { TopViewNailMeasure } from '@/features/hand-scan/components/TopViewNailMeasure'
 import { FeedScanState } from '@/features/hand-scan/components/FeedScanState'
@@ -10,6 +11,7 @@ import { ScanProgressDots } from '@/features/hand-scan/components/ScanProgressDo
 import { CAPTURE_COPY, getCaptureStatus, toGuidePhase } from '@/features/hand-scan/utils/captureStatus'
 import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { PillButton } from '@/shared/components/PillButton'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
 import { analyzeSkinTone, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { formatMetricCurve } from '@/shared/utils/scanDetail'
@@ -88,13 +90,10 @@ export function HandScanPageContent() {
             </header>
 
             <div className="hand-scan-fs__feeds">
-              {/* 탑뷰: 스캔 서버 MJPEG 스트림 + 손가락/큐티클 가이드(프론트에서 그림) */}
+              {/* 탑뷰: 스캔 서버 MJPEG 스트림 + 손가락/큐티클 가이드(프론트에서 그림).
+                  지지대가 가이드 가운데에 오도록 영상은 화면에서만 확대·이동한다 (TopViewStream) */}
               <div className="hand-scan-fs__feed">
-                <img
-                    src={`${SCAN_SERVER_URL}/stream/top`}
-                    className="hand-scan-fs__video"
-                    alt="탑뷰 스캔 피드"
-                />
+                <TopViewStream src={`${SCAN_SERVER_URL}/stream/top`} guide={topGuide} />
                 <TopViewFingerGuide
                     guide={topGuide}
                     finger={currentFinger}
@@ -202,10 +201,9 @@ export function HandScanPageContent() {
     const session = latestCompletedSession
     const dateLabel = formatScanDateLabel(session.scannedAt)
     const skinHex = session.skinToneHex
-    const toneLabel = (
-      skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
-      (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
-    )?.replace(/\s+/g, '') ?? '미분석'
+    const skinAnalysis =
+      skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation) ??
+      (skinHex ? analyzeSkinTone(skinHex) : null)
     const shapeLabel = session.recommendedShape
         ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
@@ -250,7 +248,13 @@ export function HandScanPageContent() {
                   />
                   <span className="hand-scan-rescan-gate__record-body">
                     <strong className="hand-scan-rescan-gate__record-date">{dateLabel}</strong>
-                    <span className="hand-scan-rescan-gate__record-season">{toneLabel}</span>
+                    <span className="hand-scan-rescan-gate__record-season">
+                      {skinAnalysis ? (
+                        <SkinBaseTag kind={skinAnalysis.baseKind}>{skinAnalysis.tone.label}</SkinBaseTag>
+                      ) : (
+                        '미분석'
+                      )}
+                    </span>
                     <span className="hand-scan-rescan-gate__record-metrics">{metricsLine}</span>
                     <span className="hand-scan-rescan-gate__record-shape">
                       추천 쉐입: {shapeLabel ?? '미정'}

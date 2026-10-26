@@ -73,7 +73,9 @@ public class PrintOrder {
         WAITING_IN_QUEUE, //출력 대기 (큐 용)
         PRINTING,   // 슬라이싱+프린터 업로드까지 끝나서 실제 출력 중
         COMPLETED,
-        FAILED
+        FAILED,
+        CANCELING,  // 취소 요청됨 - 출력 중이던 주문의 정지 명령을 보냈고 프린터가 멈추기를 기다리는 중
+        CANCELED    // 사용자가 취소 (대기 중이던 주문을 빼거나, 출력 중이던 프린터가 멈춘 경우)
     }
 
     public void updateStatus(PrintStatus status) {

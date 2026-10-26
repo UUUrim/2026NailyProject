@@ -14,6 +14,21 @@ import { preloadNailSegmenter } from '@/features/mypage/utils/nailSegmenter'
 import { prepareNailDesignAsset, type NailDesignAsset } from '@/features/mypage/utils/nailDesignAsset'
 import { isKnownNailShape, loadShapeTemplate } from '@/features/mypage/utils/nailMeshAsset'
 import { NailArScene } from '@/features/mypage/utils/nailArScene'
+import {
+  SHARPEN_FILTER_ID,
+  applyCameraControl,
+  applyResolution,
+  buildCanvasFilter,
+  currentResolutionKey,
+  defaultFilterValues,
+  readCameraControls,
+  readResolutionOptions,
+  resetCameraControl,
+  sharpenKernel,
+  type CameraAdjustKey,
+  type CameraControl,
+  type ResolutionOption,
+} from '@/features/mypage/utils/cameraAdjust'
 import { CameraFeedSelect } from '@/features/hand-scan/components/CameraFeedSelect'
 import '@/styles/mypage.css'
 import '@/styles/hand-scan.css'
@@ -34,8 +49,8 @@ const DETECTOR_LABELS: Record<NailDetector, string> = {
 
 function buildVideoConstraints(deviceId: string): MediaTrackConstraints {
   return deviceId === DEFAULT_CAMERA_DEVICE_ID
-    ? { facingMode: { ideal: 'user' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-    : { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    ? { facingMode: { ideal: 'user' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+    : { deviceId: { exact: deviceId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
 }
 
 type NailArTryOnModalProps = {
@@ -85,6 +100,9 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
   const fitterRef = useRef<NailFitter | null>(null)
   // 이 모달이 직접 페이지 전체화면을 켰을 때만, 끌 때/닫힐 때 다시 꺼 준다.
   const ownsDocumentFullscreenRef = useRef(false)
+  // 화면 보정(canvas 필터) 값 - 그리기 루프가 매 프레임 읽으므로 ref로 둔다.
+  const filterValuesRef = useRef<Partial<Record<CameraAdjustKey, number>>>({})
+  const canvasFilterRef = useRef('none')
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('AR 미리보기를 준비하고 있어요...')
@@ -93,6 +111,53 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
   const [selectedDeviceId, setSelectedDeviceId] = useState(DEFAULT_CAMERA_DEVICE_ID)
   const [detector, setDetector] = useState<NailDetector | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [controls, setControls] = useState<CameraControl[]>([])
+  const [adjustValues, setAdjustValues] = useState<Partial<Record<CameraAdjustKey, number>>>({})
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const [resolutions, setResolutions] = useState<ResolutionOption[]>([])
+  const [resolutionKey, setResolutionKey] = useState('')
+
+  const handleResolutionChange = async (key: string) => {
+    const track = streamRef.current?.getVideoTracks()[0]
+    const option = resolutions.find((o) => `${o.width}x${o.height}` === key)
+    if (!track || !option) return
+    await applyResolution(track, option)
+    // 카메라가 요청을 그대로 못 들어줄 수 있으니, 실제로 잡힌 해상도를 다시 읽어 표시한다.
+    setResolutionKey(currentResolutionKey(track, resolutions))
+  }
+
+  // 새 스트림이 붙을 때마다 그 카메라가 지원하는 조절 항목을 다시 읽고, 값은 처음으로 돌린다.
+  const syncCameraControls = (stream: MediaStream) => {
+    const track = stream.getVideoTracks()[0] ?? null
+    const resolutionOptions = readResolutionOptions(track)
+    setResolutions(resolutionOptions)
+    setResolutionKey(currentResolutionKey(track, resolutionOptions))
+    const next = readCameraControls(track)
+    filterValuesRef.current = defaultFilterValues(next)
+    canvasFilterRef.current = buildCanvasFilter(filterValuesRef.current)
+    setControls(next)
+    setAdjustValues(Object.fromEntries(next.map((c) => [c.key, c.defaultValue])))
+  }
+
+  const handleAdjust = (control: CameraControl, value: number) => {
+    setAdjustValues((prev) => ({ ...prev, [control.key]: value }))
+    if (control.source === 'filter') {
+      filterValuesRef.current = { ...filterValuesRef.current, [control.key]: value }
+      canvasFilterRef.current = buildCanvasFilter(filterValuesRef.current)
+      return
+    }
+    const track = streamRef.current?.getVideoTracks()[0]
+    if (track) void applyCameraControl(track, control, value)
+  }
+
+  const handleAdjustReset = () => {
+    const track = streamRef.current?.getVideoTracks()[0]
+    filterValuesRef.current = defaultFilterValues(controls)
+    canvasFilterRef.current = buildCanvasFilter(filterValuesRef.current)
+    setAdjustValues(Object.fromEntries(controls.map((c) => [c.key, c.defaultValue])))
+    if (!track) return
+    for (const control of controls) void resetCameraControl(track, control)
+  }
 
   const toggleFullscreen = () => {
     if (isFullscreen) {
@@ -136,6 +201,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
       streamRef.current = nextStream
       video.srcObject = nextStream
       await video.play()
+      syncCameraControls(nextStream)
       setSelectedDeviceId(deviceId)
       setMessage('손등이 카메라를 향하게 손을 비춰 네일 디자인을 확인해 보세요.')
     } catch (error) {
@@ -204,6 +270,7 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
         await video.play()
 
         if (cancelled) return
+        syncCameraControls(stream)
 
         // 카메라 라벨은 getUserMedia로 권한을 얻은 뒤에야 채워지므로, 스트림이 실제로
         // 붙은 지금 시점에 열거해야 드롭다운에 "카메라 1" 대신 실제 기기명이 나온다.
@@ -297,6 +364,8 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
       ctx.save()
       ctx.translate(width, 0)
       ctx.scale(-1, 1)
+      // 화면 보정은 영상에만 건다 - 아래 손톱 오버레이는 보정 없이 그려 디자인 색이 그대로 보이게.
+      ctx.filter = canvasFilterRef.current
       ctx.drawImage(video, 0, 0, width, height)
       ctx.restore()
 
@@ -453,6 +522,16 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
             </div>
           )}
 
+          {/* 선명도 화면 보정용 SVG 필터 - canvas 필터가 url(#id)로 가져다 쓴다 */}
+          <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true" focusable="false">
+            <filter id={SHARPEN_FILTER_ID} colorInterpolationFilters="sRGB">
+              <feConvolveMatrix
+                order="3"
+                kernelMatrix={sharpenKernel(adjustValues.sharpness ?? 0)}
+                preserveAlpha="true"
+              />
+            </filter>
+          </svg>
           <video ref={videoRef} className="nail-ar-tryon__video" playsInline muted autoPlay />
           <canvas
             ref={canvasRef}
@@ -472,6 +551,67 @@ export function NailArTryOnModal({ imageUrl, shape, nailTipCropUrls, onClose }: 
                 devices={videoDevices}
                 onChange={(deviceId) => void handleCameraChange(deviceId)}
               />
+              {(controls.length > 0 || resolutions.length > 0) && (
+                <div className="nail-ar-tryon__adjust">
+                  <button
+                    type="button"
+                    className={`nail-ar-tryon__adjust-btn${adjustOpen ? ' is-open' : ''}`}
+                    aria-expanded={adjustOpen}
+                    aria-label="화질·색감 조절"
+                    title="화질·색감 조절"
+                    onClick={() => setAdjustOpen((prev) => !prev)}
+                  >
+                    <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true">
+                      <path
+                        d="M3 6h8M15 6h2M3 14h2M9 14h8"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="13" cy="6" r="2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                      <circle cx="7" cy="14" r="2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+                    </svg>
+                    화질·색감
+                  </button>
+                  {adjustOpen && (
+                    <div className="nail-ar-tryon__adjust-panel" role="group" aria-label="화질·색감 조절">
+                      {resolutions.length > 0 && (
+                        <label className="nail-ar-tryon__adjust-row">
+                          <span className="nail-ar-tryon__adjust-label">해상도</span>
+                          <select
+                            className="nail-ar-tryon__adjust-select"
+                            value={resolutionKey}
+                            onChange={(event) => void handleResolutionChange(event.target.value)}
+                          >
+                            {resolutions.map((option) => (
+                              <option key={option.label} value={`${option.width}x${option.height}`}>
+                                {option.label} ({option.width}×{option.height})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      {controls.map((control) => (
+                        <label key={control.key} className="nail-ar-tryon__adjust-row">
+                          <span className="nail-ar-tryon__adjust-label">{control.label}</span>
+                          <input
+                            type="range"
+                            min={control.min}
+                            max={control.max}
+                            step={control.step}
+                            value={adjustValues[control.key] ?? control.defaultValue}
+                            onChange={(event) => handleAdjust(control, Number(event.target.value))}
+                          />
+                        </label>
+                      ))}
+                      <button type="button" className="nail-ar-tryon__adjust-reset" onClick={handleAdjustReset}>
+                        초기화
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
               {import.meta.env.DEV && detector && (
                 <div className={`nail-ar-tryon__detector is-${detector}`} title={DETECTOR_LABELS[detector]}>
                   <span className="nail-ar-tryon__detector-dot" aria-hidden="true" />

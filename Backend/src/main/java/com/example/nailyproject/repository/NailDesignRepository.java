@@ -3,7 +3,10 @@ package com.example.nailyproject.repository;
 
 import com.example.nailyproject.entity.NailDesign;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -21,6 +24,10 @@ public interface NailDesignRepository extends JpaRepository<NailDesign, Long> {
     // 삭제 등 소유권 검증이 필요한 단건 조회
     java.util.Optional<NailDesign> findByIdAndUserId(Long id, Long userId);
 
-    // '둘러보기' 커뮤니티 갤러리용
-    List<NailDesign> findTop60BySharedTrueOrderBySharedAtDesc();
+    // 서버 시작 때 로컬 공유 상태를 갤러리 DB와 맞추는 데 쓴다 (CommunityGallerySync)
+    @Query("select d.id from NailDesign d where d.shared = true")
+    List<Long> findSharedIds();
+
+    @Query("select d.id from NailDesign d where d.id in :ids")
+    List<Long> findExistingIds(@Param("ids") Collection<Long> ids);
 }

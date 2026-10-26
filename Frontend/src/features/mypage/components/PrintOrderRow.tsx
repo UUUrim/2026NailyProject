@@ -1,7 +1,14 @@
 import { memo } from 'react'
 import { type PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/api'
 import { SHAPE_PREVIEW_IMAGES } from '@/shared/constants/designPreferences'
-import { PRINT_STATUS_LABEL, getDisplayPrintStatus, Icon, formatDateTimeFull, formatTipExtension } from '@/features/mypage/shared'
+import {
+    FINISHED_PRINT_STATUSES,
+    PRINT_STATUS_LABEL,
+    getDisplayPrintStatus,
+    Icon,
+    formatDateTimeFull,
+    formatTipExtension,
+} from '@/features/mypage/shared'
 import { RowActionMenu } from '@/features/mypage/components/RowActionMenu'
 
 type PrintOrderRowProps = {
@@ -12,7 +19,7 @@ type PrintOrderRowProps = {
     onOpenDetail: (order: NailTipPrintOrder) => void | Promise<void>
     onSelectActivity: (id: string) => void
     onHoverActivity: (id: string | null) => void
-    // 출력 내역 탭 목록에서만 넘긴다 — 출력 중인 주문을 뺀 나머지에 ⋮ 메뉴(출력 내역 삭제하기)를 단다
+    // 출력 내역 탭 목록에서만 넘긴다 — 끝난 주문(완료/실패/취소)에만 ⋮ 메뉴(출력 내역 삭제하기)를 단다
     onDelete?: (order: NailTipPrintOrder) => void
 }
 
@@ -71,11 +78,11 @@ export const PrintOrderRow = memo(function PrintOrderRow({
     if (!onDelete) return row
 
     // 카드 버튼 안에 버튼을 넣을 수 없어서 카드 오른쪽 끝(상태·날짜 옆)에 ⋮ 메뉴를 겹쳐 둔다.
-    // 출력 중인 주문은 지울 수 없어 메뉴가 없지만, 상태·날짜가 다른 카드와 같은 자리에 오도록 그 자리는 비워 둔다.
+    // 진행 중인 주문은 지울 수 없어(먼저 취소해야 한다) 메뉴가 없지만, 상태·날짜가 다른 카드와 같은 자리에 오도록 그 자리는 비워 둔다.
     return (
         <div className="mypage-x__row-shell mypage-x__row-shell--print">
             {row}
-            {order.status !== 'PRINTING' && (
+            {FINISHED_PRINT_STATUSES.has(order.status) && (
                 <RowActionMenu
                     orientation="vertical"
                     triggerLabel={`${order.shapeLabelKo} 네일 팁 출력 내역 메뉴`}

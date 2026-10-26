@@ -19,6 +19,8 @@ export type HostedChat = {
     // 이력에서 연 채팅·뒤로가기로 돌아온 채팅의 스냅샷 (새 채팅이면 null)
     snapshot: ConversationSnapshot | null
     regenerate: RegenerateNavState | null
+    // 보기만 하는 채팅 — 손 촬영에서 이어 온 진입에서 연 다른 분석 기록의 채팅 (입력·전송을 막는다)
+    readOnly?: boolean
 }
 
 // 채팅 화면이 지금 보여 주는 채팅과 그 채팅에 넘길 값 (채팅 화면이 렌더될 때마다 새로 알려 준다)
@@ -29,6 +31,8 @@ export type ForegroundChat = {
     isContextReady: boolean
     userName: string
     canSelectSession: boolean
+    // 고를 수 있는 손 분석 기록 수 (새 채팅 인사말에 쓴다)
+    recordCount: number
     analysis: ConversationAnalysis
     onSessionReady: (sessionId: number) => void
     onStartNewChat: () => void

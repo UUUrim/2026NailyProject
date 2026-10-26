@@ -31,6 +31,14 @@ public class ScanResultResponseDto {
     private Double saturation;
     private String overallSize;
 
+    // 양손 10손가락 평균 치수(mm)와 평균 판정 - 최종 measurements.json 상단 summary 값 (왼손/오른손 응답이 같은 값)
+    private Double avgLengthMm;
+    private Double avgWidthMm;
+    private Double avgCurve;
+    private String lengthSize; // much_smaller / smaller / average / larger / much_larger
+    private String widthSize;
+    private String curveSize;  // 곡률을 판정할 손가락이 없으면 null
+
     // 손가락별 결과
     private List<FingerResultDto> fingers;
 

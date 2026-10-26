@@ -120,13 +120,15 @@ CORNER_ROUND_DEFAULT_MM = {"square": 1.5, "ballerina": 1.3}
 # Ballerina only: short local ease-in radius (--shoulder-round) where the
 # straight body meets the taper's start — just enough to avoid a visible
 # kink there; the taper itself stays a literal straight line past it.
-SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5}
+SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5, "almond": 4.0}
 
 # 폭 보정(fit margin): 측정한 평평한 폭을 C-curve로 구부리면 실제 손가락을
 # 감싸는 현(chord) 폭이 측정값보다 작아져서, 프린트한 손톱이 실제보다 작게
 # 나옴.  이를 보정하기 위해 STL 생성 전에 측정 폭에 이 값을 더한다.
 # (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
-WIDTH_FIT_MARGIN_MM = 0.5
+# 2026-10-23: 0.5 -> -0.1.  출력물이 실제 손톱보다 넓게 나와서(측정 폭 + 0.5), 생성 폭이
+# 이전보다 정확히 0.6mm 줄도록(측정 폭 - 0.1) 바꿨다.  예전 값으로 되돌리려면 0.5.
+WIDTH_FIT_MARGIN_MM = -0.1
 
 # 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
 # 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → 팁 끝(C*TIP_DOME_FRAC)
@@ -135,6 +137,8 @@ WIDTH_FIT_MARGIN_MM = 0.5
 DOME_CREST_START = 0.22
 # 돔 최고 높이 배율(측정/하한 C에 곱함).  1.0이면 C 그대로, 낮출수록 천장이 낮아짐.
 # 1.0 = 사이드뷰로 잰 C-curve 를 그대로 반영한다(2026-10-20: 이전 0.60 에서 변경 - 사용자 STL 생성 기본값).
+# (돔 높이 C는 폭이 바뀌어도 스캔의 곡률 반지름이 유지되도록 generate_stl()이 arc_radius_mm으로 다시 계산한다.
+#  그래서 폭을 줄여도 이 배율은 1.0 그대로 둔다.)
 DOME_HEIGHT_SCALE = 1.0
 # 큐티클 끝에서 남아 있는 돔 높이 비율(0이면 납작하게 시작).  큐티클 라인도 돔 단면을
 # 따라 둥글게 올라가도록 0이 아닌 값에서 시작한다.
@@ -156,6 +160,28 @@ GRID_COLS_DEFAULT = 100
 # 양 끝으로 갈수록 이 값까지 부드럽게 얇아져 바닥 평면으로 스무스하게 떨어진다.
 # 0.2 미만은 프린트가 어려움.  --exact 모드에는 적용하지 않음.
 END_MIN_THICKNESS_MM = 0.2
+# 팁(자유단) 쪽 최소 두께(mm), 납작한 끝이 아닌 쉐입만(2026-10-25).  외벽 2줄(선폭 0.26)이 들어가려면 약 0.5mm가 필요한데, 그보다 얇으면
+# 슬라이서가 그 행 전체를 한 번에 얇은 벽 한 줄로 바꿔서 그 높이에 이음매가 보이고 윗부분이 거칠게 나온다(아몬드 +9mm 출력).
+# 큐티클 쪽 끝 두께(CUTICLE_END_THICKNESS_MM)와는 따로 둔다.
+FREE_EDGE_MIN_THICKNESS_MM = 0.5
+# 가장자리를 둥글게 깎을 때 맨 가장자리에 남기는 최소 두께(mm), 납작한 끝이 아닌 쉐입만(2026-10-25).  0이면 위·아래 면이 한 점에서 맞붙어
+# (칼날) 메시가 깨진다.  너무 크면 가장자리에 수직 벽(단차)이 보이므로 눈에 안 띄는 0.06(층 높이 0.08보다 작음)으로 둔다.
+EDGE_MIN_THICKNESS_MM = 0.06
+
+# 납작한 끝(square, ballerina)의 끝 두께(mm).  끝 가장자리를 둥글게 깎을 때(--edge-round) 칼날처럼 두께가
+# 0까지 내려가지 않고, 이 값 근처에서 멈추게 한다(2026-10-23: 끝이 너무 얇고 면이 거칠어 보여서 추가).
+# 몸통 쪽은 그대로, 끝으로 갈수록 END_MIN_THICKNESS_MM 대신 이 값까지만 얇아진다.
+FLAT_TIP_END_THICKNESS_MM = 0.4
+# 큐티클 곡선 끝(가장 아래)의 두께(mm).  큐티클 쪽은 얇게 이어지는 게 자연스러워 보여서 0.2(= END_MIN_THICKNESS_MM,
+# 즉 추가 보강 없음)로 둔다.  0.4로 올렸다가 되돌렸다(2026-10-23).  END_MIN_THICKNESS_MM보다 크게 주면 그만큼 끝이
+# 두꺼워지고, 작은 값은 무시된다(0.2 미만은 0.2mm 노즐로 출력하기 어렵다).  모든 쉐입에 적용.
+CUTICLE_END_THICKNESS_MM = 0.2
+# 껍질 두께를 위아래(z)가 아니라 "면에 수직"으로 유지할 때 허용하는 최대 배율(= 1/cos(경사)).  돔 가장자리는 경사가 56~59도라서
+# 위아래로 같은 두께를 더하면 실제 두께가 반 정도(0.26~0.3mm)로 얇은 쐐기 모양이 되어, 슬라이서가 그 끝을 깔끔하게
+# 출력하지 못하고 옆면이 거칠고 안으로 수축한다(2026-10-23).  2.0 = 경사 60도까지 보정.  1.0이면 예전처럼 위아래 두께.
+NORMAL_THICKNESS_MAX_BOOST = 2.0
+# 끝 가장자리를 깎은 뒤에도 남기는 최소 두께(mm).  FLAT_TIP_END_THICKNESS_MM보다 작아야 둥글림이 보인다.
+FLAT_TIP_EDGE_FLOOR_MM = 0.3
 
 # 폭 방향 C-curve 하한(mm).  측정값/폴백이 이보다 작으면 이 값으로 올린다.
 # 0이면 하한 없음.  --exact 모드에는 적용하지 않음.
@@ -166,6 +192,16 @@ MIN_C_CURVE_DEFAULT_MM = 2.0
 # almond's curve); tuned between the two so the point stays clearly pointed
 # but isn't a razor-straight wedge.
 STILETTO_TAPER_N = 1.2
+
+# 아몬드 윤곽(2026-10-25).  예전엔 테이퍼 길이가 폭(W*0.85)으로만 정해져서, 연장이 길어지면 늘어난 길이가 전부 평행한 옆면이 되고
+# 끝에서만 둥글어 보였다.  이제 테이퍼 길이가 전체 길이(큐티클 아치 포함)의 일정 비율이라 연장이 길어도 옆면이 계속 휘는 아몬드 모양이다.
+# 곡선은 스틸레토와 같은 superellipse + 어깨 블렌드.  N: 1 = 직선 쐐기, 2 = 타원(뭉툭), 1.6 = 가늘지만 둥근 끝.
+ALMOND_TAPER_N = 1.6
+# 테이퍼 길이 / 전체 길이.  클수록 옆면이 큐티클 쪽부터 좁아진다(0.6이면 자연 손톱 끝 위치에서 폭이 약 92%, 0.5면 약 98%).
+ALMOND_TAPER_LEN_FRAC = 0.60
+# 아몬드 끝을 반지름 이 값(mm)의 원으로 둥글린다(2026-10-25).  superellipse는 끝이 수학적으로 뾰족한 점이라 너무 뾰족해 보였다.
+# 클수록 끝이 뭉툭해진다(1.0 = 아주 조금, 1.5 = 예전 타원 끝에 가까움).  0이면 둥글리지 않음.  전체 길이는 그대로 유지된다.
+ALMOND_TIP_ROUND_MM = 1.0
 
 
 # ─────────────────────────────────────────────────────────────
@@ -236,7 +272,7 @@ def _stiletto_half_width(t, W, n=STILETTO_TAPER_N):
     return W / 2.0 * (1.0 - t ** n) ** (1.0 / n)
 
 
-def _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, r):
+def _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, r, n=STILETTO_TAPER_N):
     """
     Cubic-Hermite blend of stiletto's right-boundary x(y) across the corner
     where the straight body (dx/dy=0) meets the start of the superellipse
@@ -255,10 +291,9 @@ def _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, r):
     y_lo, y_hi = y_side_top - r, y_side_top + r
     t_hi = (y_hi - y_side_top) / tip_h if tip_h > 0 else 1.0
     t_hi = min(max(t_hi, 1e-6), 1.0 - 1e-6)
-    half_w_hi = _stiletto_half_width(t_hi, W)
+    half_w_hi = _stiletto_half_width(t_hi, W, n)
     x_hi = W / 2.0 + half_w_hi
     x_lo = W
-    n = STILETTO_TAPER_N
     # d(half_w)/dt at t_hi, times dt/dy = 1/tip_h (chain rule).
     dhalf_dt = -(W / 2.0) * t_hi ** (n - 1.0) * (1.0 - t_hi ** n) ** (1.0 / n - 1.0)
     taper_slope = dhalf_dt / tip_h if tip_h > 0 else 0.0
@@ -270,6 +305,55 @@ def _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, r):
     H11 = u ** 3 - u ** 2
     x_right = x_lo * H00 + x_hi * H01 + h * taper_slope * H11   # H10 term drops: slope_lo=0
     return W - x_right, x_right
+
+
+def _almond_tip_cap(W, y_side_top, tip_h, L_total, r, n=ALMOND_TAPER_N):
+    """
+    Round the pointed almond tip with a circle of radius r.  Cutting the tip off
+    and capping it would make the nail shorter, so the pointed outline is first
+    stretched by `stretch` mm; then its rounded apex lands exactly on L_total
+    (the length must stay measured + extension).  The circle is the largest one
+    that still fits inside the outline, so it touches the curve smoothly.
+    Returns (stretch, y_tangent, y_centre), or None if it cannot be fitted.
+    """
+    a = W / 2.0
+
+    def solve(stretch):
+        th = tip_h + stretch
+        y = y_side_top + np.linspace(0.0, 1.0, 6001) * (th + r)
+        t = np.clip((y - y_side_top) / th, 0.0, 1.0)
+        f = a * np.clip(1.0 - t ** n, 0.0, None) ** (1.0 / n)
+
+        def fits(yc):
+            m = np.abs(y - yc) <= r
+            d = np.sqrt(np.clip(r * r - (y[m] - yc) ** 2, 0.0, None))
+            return bool(np.all(f[m] >= d - 1e-9))
+
+        lo, hi = y_side_top, y_side_top + th
+        for _ in range(60):
+            mid = (lo + hi) / 2.0
+            if fits(mid):
+                lo = mid
+            else:
+                hi = mid
+        return lo, y, f
+
+    if r <= 0.0 or r >= a or tip_h <= 2.0 * r:
+        return None
+    s_lo, s_hi = 0.0, 12.0
+    if solve(s_hi)[0] + r < L_total:
+        return None
+    for _ in range(60):
+        s_mid = (s_lo + s_hi) / 2.0
+        if solve(s_mid)[0] + r < L_total:
+            s_lo = s_mid
+        else:
+            s_hi = s_mid
+    stretch = (s_lo + s_hi) / 2.0
+    yc, y, f = solve(stretch)
+    d = np.sqrt(np.clip(r * r - (y - yc) ** 2, 0.0, None))
+    m = (np.abs(y - yc) <= r) & (y >= yc)     # 위로 좁아지는 윤곽에서는 원이 중심보다 위쪽에서 윤곽에 닿는다
+    return stretch, float(y[m][np.argmin((f - d)[m])]), float(yc)
 
 
 def _cuticle_corner_blend(y_val, W, cuticle_depth, r):
@@ -311,7 +395,7 @@ def _cuticle_corner_blend(y_val, W, cuticle_depth, r):
 
 
 def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
-             taper_mm=0.0, cuticle_r=0.0, shoulder_r=0.0):
+             taper_mm=0.0, cuticle_r=0.0, shoulder_r=0.0, tip_cap=None):
     """
     Return (x_left, x_right) for the nail footprint at height y_val.
 
@@ -338,7 +422,9 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
             # corner rounding. t=0 at the start of this region (full W),
             # t=1 at the tip (W - taper_mm).
             t = min((y_val - y_side_top) / tip_h, 1.0) if tip_h > 0 else 1.0
-            half_reduction = (taper_mm / 2.0) * t
+            # smoothstep: 좁아지기 시작하는 곳(t=0)에서 옆면이 꺾이지 않고 곧은 옆면에 접선으로 이어진다
+            # (선형이면 몸통과 만나는 곳에서 기울기가 갑자기 생겨 각이 져 보였다).
+            half_reduction = (taper_mm / 2.0) * (t * t * (3.0 - 2.0 * t))
             xl0, xr0 = half_reduction, float(W) - half_reduction
             if tip_r > 0 and y_val >= (L_total - tip_r):
                 d_y   = y_val - (L_total - tip_r)          # 0→tip_r
@@ -356,10 +442,14 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
             half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
 
         elif shape == "almond":
-            # Single smooth ellipse — same formula as round/oval.
-            # The taller TIP_HEIGHT_FACTOR (0.85 vs oval's 0.65) gives the
-            # characteristic almond silhouette: more tapered sides, rounded tip.
-            half_w = W / 2 * float(np.sqrt(max(1.0 - t * t, 0.0)))
+            # 스틸레토와 같은 superellipse(ALMOND_TAPER_N) + 어깨 블렌드: 윤곽이 몸통에서 끝까지 끊김 없이 좁아진다.
+            if shoulder_r > 0 and y_val < (y_side_top + shoulder_r):
+                return _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r, ALMOND_TAPER_N)
+            if tip_cap is not None and y_val >= tip_cap[0]:
+                # 끝 둥글리기: 원에 접하는 곳부터 끝까지는 반지름 tip_cap[2]인 원 (ALMOND_TIP_ROUND_MM)
+                half_w = float(np.sqrt(max(tip_cap[2] ** 2 - (y_val - tip_cap[1]) ** 2, 0.0)))
+            else:
+                half_w = _stiletto_half_width(t, W, ALMOND_TAPER_N)
 
         elif shape == "stiletto":
             # Superellipse taper: w(t) = W/2 · (1 − t^n)^(1/n).
@@ -412,6 +502,8 @@ def x_extent(y_val, W, L_total, tip_h, cuticle_depth, shape="round", tip_r=0.0,
         if shape == "stiletto" and shoulder_r > 0 and y_val >= (y_side_top - shoulder_r):
             # Lower half of the shoulder ease-in (see _stiletto_shoulder_blend).
             return _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r)
+        if shape == "almond" and shoulder_r > 0 and y_val >= (y_side_top - shoulder_r):
+            return _stiletto_shoulder_blend(y_val, W, tip_h, y_side_top, shoulder_r, ALMOND_TAPER_N)
         return 0.0, float(W)
 
     elif y_val >= -cuticle_depth:
@@ -456,7 +548,7 @@ def generate_stl(params, output_path):
     arc_r     = float(params["arc_radius_mm"])
     THICK     = float(params.get("thickness_mm", 0.6))
     EXACT     = bool(params.get("exact"))
-    CUT_DEPTH = float(params.get("cuticle_depth_mm", 1.9))
+    CUT_DEPTH = float(params.get("cuticle_depth_mm", 2.2))   # 2026-10-25: 1.9 -> 2.2 (큐티클 곡선을 조금 더 깊고 완만하게; 전체 길이는 그대로)
     # Extra dome height (mm) at the cuticle end, blending to 0 at the free
     # edge — makes the inner cavity rounder where the finger flesh is rounder.
     # Forced to 0 in exact mode (validation replica must stay true).
@@ -476,7 +568,7 @@ def generate_stl(params, output_path):
         L_ext = 0.0
     else:
         # 폭 보정: C-curve로 구부리면 현(chord) 폭이 줄어 실제보다 작게
-        # 프린트되므로, 측정 폭에 fit margin(+WIDTH_FIT_MARGIN_MM)을 더한다.
+        # 프린트되므로, 측정 폭에 fit margin(WIDTH_FIT_MARGIN_MM, 음수면 줄임)을 더한다.
         _fit = params.get("fit_margin_mm")
         W     = float(params["width_mm"]) + (WIDTH_FIT_MARGIN_MM if _fit is None else float(_fit))
         # Length: use the MEASURED length (Sobel tip→cuticle).  The old code
@@ -485,20 +577,29 @@ def generate_stl(params, output_path):
         # made prints ~4 mm too short.  corrected_length_mm is now only a
         # fallback when no measured length exists.
         # Measured length already spans cuticle line to tip, i.e. it covers
-        # the straight body PLUS the cuticle arch dip. Deliberately NOT
-        # subtracting CUT_DEPTH here (unlike --exact mode): the arch is drawn
-        # on top of the full measured length as extra room, so the printed
-        # nail's natural-nail total (arch + body, before tip extension) ends
-        # up CUT_DEPTH longer than the measured value. Compared side-by-side
-        # in OpenSCAD against the subtracted version and confirmed preferred.
+        # the straight body PLUS the cuticle arch dip, so CUT_DEPTH is
+        # subtracted here exactly like --exact mode: the arch (y = -CUT_DEPTH..0)
+        # sits inside the measured length and the whole STL ends up
+        # measured length + tip extension long (what the print page shows).
+        # It used to be left unsubtracted (arch drawn as extra room on top of
+        # the measured length), which made every print CUT_DEPTH longer than
+        # "measured + extension".
         L     = max(float(params.get("length_mm")
-                      or params.get("corrected_length_mm") or 0.0), 1.0)
+                      or params.get("corrected_length_mm") or 0.0) - CUT_DEPTH, 1.0)
         # Shape-specific default extensions (see TIP_EXTENSION_DEFAULT_MM);
         # all other shapes default to 3 mm.  An explicit --tip-extension
         # value always wins (passed as a non-None entry in params).
         _ext_default = TIP_EXTENSION_DEFAULT_MM.get(_shape_tmp, 3.0)
         L_ext = float(params.get("tip_extension_mm") or _ext_default)
     x_cen     = W / 2.0
+
+    # 곡률(반지름)을 스캔 값 그대로 유지한다: 돔 단면은 "가장자리 z=0, 가운데 높이=C"인 원호라서,
+    # 폭 W가 측정 폭과 다르면(WIDTH_FIT_MARGIN_MM) 측정 C를 그대로 쓰면 반지름이 달라진다.
+    # 그래서 스캔의 곡률 반지름(arc_radius_mm)이 이 폭에서 만드는 높이(sagitta)로 C를 다시 계산한다.
+    #   C = R - sqrt(R^2 - (W/2)^2)   (R <= W/2 이면 반원이라 C = R)
+    # 아래 최소 곡률 보정(MIN_C)은 그대로 적용된다.  --exact 모드에는 적용하지 않는다.
+    if not EXACT and arc_r > 0.0:
+        C = float(arc_r - np.sqrt(max(arc_r ** 2 - (W / 2.0) ** 2, 0.0))) if arc_r > W / 2.0 else float(arc_r)
 
     # Width-direction curvature floor: a too-shallow measured C-curve (or the
     # 1.0 mm fallback) prints nearly flat, so raise it to the minimum and
@@ -564,8 +665,23 @@ def generate_stl(params, output_path):
         # Capped at L_ext so y_side_top = L_total-tip_h never dips below L.
         tip_h = min(L_ext, max(CORNER_R, W * TIP_HEIGHT_FACTOR.get(shape, 0.45)))
         CORNER_R = min(CORNER_R, tip_h)
+    elif shape == "almond":
+        # 테이퍼 길이를 폭이 아니라 전체 길이에 맞춘다(ALMOND_TAPER_LEN_FRAC).  폭 기준 값(W*0.85)보다 짧아지지는 않는다.
+        # 어깨 블렌드는 큐티클 코너 블렌드(CUTICLE_R) 위에서 시작하게 해서 둘이 겹치지 않는다.
+        tip_h = min(max(W * TIP_HEIGHT_FACTOR["almond"], ALMOND_TAPER_LEN_FRAC * (L_total + CUT_DEPTH)), L_total - 1.0)
+        SHOULDER_R = min(SHOULDER_R, tip_h * 0.4, max(L_total - tip_h - CUTICLE_R, 0.0))
     else:
         tip_h = W * TIP_HEIGHT_FACTOR.get(shape, 0.50)
+
+    # 아몬드 끝 둥글리기(ALMOND_TIP_ROUND_MM).  윤곽을 stretch만큼 늘려서 계산하므로 x_extent에는 늘린 값을 넘기고,
+    # 실제 끝(행의 마지막 y)은 그대로 L_total이다.
+    TIP_CAP, X_LTOT, X_TIPH = None, L_total, tip_h
+    if shape == "almond" and ALMOND_TIP_ROUND_MM > 0.0:
+        _r_cap = min(ALMOND_TIP_ROUND_MM, W * 0.35)
+        _cap = _almond_tip_cap(W, L_total - tip_h, tip_h, L_total, _r_cap)
+        if _cap is not None:
+            TIP_CAP = (_cap[1], _cap[2], _r_cap)
+            X_LTOT, X_TIPH = L_total + _cap[0], tip_h + _cap[0]
 
     # ── Build structured grid ─────────────────────────────────
     nx = int(params.get("grid_cols") or GRID_COLS_DEFAULT)   # columns across width (--grid-cols)
@@ -580,15 +696,24 @@ def generate_stl(params, output_path):
         -CUT_DEPTH * np.cos(t_arch * np.pi / 2.0),
         np.linspace(0.0, L_total, n_body),
     ])
+    if shape in FLAT_TIP_SHAPES and EDGE_R > 0:
+        # 끝 가장자리 둥글림(EDGE_R)은 행 간격(약 0.3mm)보다 좁은 구간에서 크게 변해서, 행이 듬성하면
+        # 둥근 면이 계단처럼 각져 보인다.  그 구간에만 행을 촘촘하게 추가한다.
+        _tip_rows = (L_total - EDGE_R) + EDGE_R * np.sin(np.linspace(0.0, 1.0, 24) * np.pi / 2.0)
+        ys = np.unique(np.concatenate([ys, np.clip(_tip_rows, 0.0, L_total)]).round(6))
+    if shape not in FLAT_TIP_SHAPES:
+        # 뾰족한 팁은 폭이 끝까지 남은 거리의 제곱근처럼 줄어서, 행이 듬성하면 마지막 행 하나에 폭이 2~3mm 남아 뭉툭한 끝이 된다.
+        # 끝쪽 행을 촘촘하게 추가한다.
+        ys = np.unique(np.concatenate([ys, np.clip(L_total - 2.0 * np.linspace(0.0, 1.0, 16) ** 2, 0.0, L_total)]).round(6))
     ny = len(ys)
 
     # grid_x[i, j], grid_y[i, j] = XY position of grid point (i, j)
     grid_x = np.zeros((ny, nx))
     grid_y = np.zeros((ny, nx))
     for i, y in enumerate(ys):
-        xl, xr = x_extent(y, W, L_total, tip_h, CUT_DEPTH, shape,
+        xl, xr = x_extent(y, W, X_LTOT, X_TIPH, CUT_DEPTH, shape,
                           tip_r=CORNER_R, taper_mm=TAPER_MM, cuticle_r=CUTICLE_R,
-                          shoulder_r=SHOULDER_R)
+                          shoulder_r=SHOULDER_R, tip_cap=TIP_CAP)
         grid_x[i] = xl + np.linspace(0, 1, nx) * (xr - xl)
         grid_y[i] = y
 
@@ -659,8 +784,17 @@ def generate_stl(params, output_path):
                           * np.pi / 2.0)
             fade = up * (TIP_DOME_FRAC + (1.0 - TIP_DOME_FRAC) * tail)
             t_min = min(END_MIN_THICKNESS_MM, THICK)
+            # 팁 쪽은 t_free(FREE_EDGE_MIN_THICKNESS_MM)까지만 얇아진다.  납작한 끝은 예전 그대로 t_min.
+            t_free = t_min if shape in FLAT_TIP_SHAPES else min(max(FREE_EDGE_MIN_THICKNESS_MM, t_min), THICK)
             ru = np.clip(raw, 0.0, 1.0)
-            return fade, t_min + (THICK - t_min) * ru * tail
+            # 큐티클 끝 두께를 CUTICLE_END_THICKNESS_MM까지 올린다 (ru=0인 큐티클 끝에서 최대, 정점에서 0)
+            t_cut = min(max(CUTICLE_END_THICKNESS_MM, t_min), THICK)
+            thick = (1.0 - tail) * t_free + tail * (ru * THICK + (1.0 - ru) * t_cut)
+            if shape in FLAT_TIP_SHAPES:
+                # 납작한 끝은 끝 두께를 FLAT_TIP_END_THICKNESS_MM까지만 줄인다 (큐티클 쪽은 그대로)
+                t_tip = min(max(FLAT_TIP_END_THICKNESS_MM, t_min), THICK)
+                thick = thick + (t_tip - t_min) * (1.0 - tail) * ru
+            return fade, thick
 
         # Gaussian-smooth both profiles along the length on a fine uniform
         # grid (rows are unevenly spaced) over a domain extended past both
@@ -675,6 +809,11 @@ def generate_stl(params, output_path):
             yc = yy[int(4 * sig): len(yy) - int(4 * sig)]
             f_fine = np.convolve(f_fine, k, mode="valid")
             t_fine = np.convolve(t_fine, k, mode="valid")
+            # 평활화는 정점(최대 1.0)을 깎아서 실제 돔 높이가 스캔 곡률보다 낮아진다(약 10%).
+            # 최대값이 다시 1.0이 되도록 되돌려, 정점의 곡률이 스캔 값과 같게 한다.
+            _fpk = float(f_fine.max())
+            if _fpk > 1e-6:
+                f_fine = f_fine / _fpk
         else:
             yc = yy
         fade      = np.interp(ys, yc, f_fine)
@@ -707,7 +846,15 @@ def generate_stl(params, output_path):
             z_bot  = C_row[:, None] * np.maximum(1.0 - np.abs(u) ** DOME_SHAPE_POWER, 0.0)
     if EXACT or C < 0.05 or CUT_CURVE > 1e-6:
         thick_row = np.full(ny, THICK)
-    z_top = z_bot + thick_row[:, None]             # (ny, nx)  shell
+        _boost = np.ones((ny, nx))
+    else:
+        # 두께를 면에 수직으로 유지: 위아래 두께 = 수직 두께 / cos(경사) = 수직 두께 * sqrt(1 + (dz/dx)^2).
+        # 가운데는 경사가 0이라 그대로이고, 경사가 큰 옆 가장자리일수록 위아래로 더 두꺼워져서 가장자리에서도
+        # 선 두 줄이 들어갈 두께가 남는다.  안쪽 곡면(곡률 반지름)은 전혀 바뀌지 않는다.
+        _dzdx  = np.gradient(z_bot, axis=1) / np.maximum(np.gradient(grid_x, axis=1), 1e-9)
+        _boost = np.minimum(np.sqrt(1.0 + _dzdx ** 2), max(NORMAL_THICKNESS_MAX_BOOST, 1.0))
+    thick_2d = thick_row[:, None] * _boost            # (ny, nx)
+    z_top = z_bot + thick_2d                       # (ny, nx)  shell
 
     # ── Top perimeter edge rounding ───────────────────────────
     # Applies a fillet where the top surface meets the side walls / tip
@@ -754,7 +901,8 @@ def generate_stl(params, output_path):
             ease  = np.clip(grid_y / ease_dist, 0.0, 1.0)
             ease  = ease * ease * (3.0 - 2.0 * ease)      # smoothstep
             dz_lat = np.where(grid_y >= 0.0, dz_lat * ease, 0.0)
-            z_top  = np.maximum(z_top - dz_lat, z_bot)
+            # 맨 가장자리에서도 두께가 0은 되지 않게 한다(0이면 칼날이 되어 메시가 깨진다).  남기는 값은 눈에 안 띄게 작다.
+            z_top  = np.maximum(z_top - dz_lat, z_bot + np.minimum(thick_2d, EDGE_MIN_THICKNESS_MM))
         else:
             # Square/ballerina: full-width tip-edge fillet across the entire
             # front face. This gives the "bent A4 paper, edges smoothed" look:
@@ -777,14 +925,16 @@ def generate_stl(params, output_path):
                 0.0
             )
             # At each point take whichever fillet is deeper
-            z_top = np.maximum(z_top - np.maximum(dz_tip, dz_corner), z_bot)
+            # 둥글게 깎아도 끝 가장자리가 칼날(두께 0)이 되지 않게 최소 두께를 남긴다
+            _floor = z_bot + np.minimum(thick_2d, FLAT_TIP_EDGE_FLOOR_MM)
+            z_top = np.maximum(z_top - np.maximum(dz_tip, dz_corner), np.minimum(_floor, z_top))
 
         # Tip fillet — pointed shapes only (almond, stiletto):
         # domes the apex so it tapers smoothly rather than ending as a ridge.
         if shape not in ("round", "oval") and shape not in FLAT_TIP_SHAPES:
             d_tip  = np.maximum(L_total - grid_y, 0.0)  # (ny, nx)
             dz_tip = np.where(d_tip < r_h, _ellipse_dz(d_tip), 0.0)
-            z_top  = np.maximum(z_top - dz_tip, z_bot)
+            z_top  = np.maximum(z_top - dz_tip, z_bot + np.minimum(thick_2d, EDGE_MIN_THICKNESS_MM))
 
     # ── 3-D point arrays ──────────────────────────────────────
     top3d = np.stack([grid_x, grid_y, z_top], axis=2)  # (ny, nx, 3)
@@ -900,9 +1050,9 @@ def main():
                    help="Extra mm beyond nail tip (default: 7mm for almond, "
                         "8mm for stiletto, 12mm for ballerina, 3mm for all "
                         "other shapes)")
-    p.add_argument("--cuticle-depth",  type=float, default=1.9,
+    p.add_argument("--cuticle-depth",  type=float, default=2.2,
                    help="Depth of cuticle arch below cuticle line in mm "
-                        "(default 1.9 — increase for deeper arch; also "
+                        "(default 2.2 — increase for deeper arch; also "
                         "sets the ceiling for --cuticle-round)")
     p.add_argument("--cuticle-curve",  type=float, default=0.0,
                    help="Extra inner-dome height in mm at the cuticle end, "
@@ -910,11 +1060,11 @@ def main():
                         "(default 0 — OFF, uses the plain measured C-curve; "
                         "set >0 to re-enable the cuticle-side rounding). "
                         "Ignored in --exact mode")
-    p.add_argument("--cuticle-round",  type=float, default=1.4,
+    p.add_argument("--cuticle-round",  type=float, default=2.0,
                    help="Plan-view (XY) blend radius (mm) for the corner "
                         "where the straight body meets the top of the "
                         "cuticle arch — applies to EVERY shape (default "
-                        "1.4; 0 = sharp corner, matching the arch's raw "
+                        "2.0; 0 = sharp corner, matching the arch's raw "
                         "tangent exactly). Capped at ~90%% of "
                         "--cuticle-depth — raise that too for more room")
     p.add_argument("--min-c-curve",    type=float,

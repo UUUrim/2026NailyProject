@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   deleteDesign,
+  getCommunityDesignDetail,
   getDesignChatHistory,
   getDesignDetail,
   likeDesign,
@@ -43,6 +44,8 @@ export type DesignImageDetailInput = {
   createdAt?: string
   liked: boolean
   folder?: FolderRef | null
+  /** designId가 갤러리 id인 찜 — 다른 로컬 DB 사용자가 공유한 디자인이라 상세·찜은 갤러리 API로, 채팅 이력은 없다 */
+  community?: boolean
 }
 
 type Props = {
@@ -102,6 +105,7 @@ type LikeModalTarget = {
   imageUrl: string
   mode: 'like' | 'move'
   currentFolderId?: number | null
+  community?: boolean
 }
 
 /**
@@ -128,6 +132,7 @@ export function DesignImageDetailModal({
   const [viewImageUrl, setViewImageUrl] = useState('')
   const [viewLiked, setViewLiked] = useState(false)
   const [viewFolder, setViewFolder] = useState<FolderRef | null>(null)
+  const [viewCommunity, setViewCommunity] = useState(false)
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined)
   const [owner, setOwner] = useState<boolean | undefined>(undefined)
@@ -194,6 +199,7 @@ export function DesignImageDetailModal({
       setViewImageUrl('')
       setViewLiked(false)
       setViewFolder(null)
+      setViewCommunity(false)
       setChatDesignId(null)
       setCreatedAt(undefined)
       setOwner(undefined)
@@ -208,6 +214,7 @@ export function DesignImageDetailModal({
     setViewImageUrl(image.imageUrl)
     setViewLiked(image.liked)
     setViewFolder(image.folder ?? null)
+    setViewCommunity(Boolean(image.community))
     setChatDesignId(image.designId)
     setCreatedAt(image.createdAt)
     setOwner(undefined)
@@ -220,7 +227,7 @@ export function DesignImageDetailModal({
     if (image.designId == null) return
     let cancelled = false
     setDetailLoading(true)
-    void getDesignDetail(image.designId)
+    void (image.community ? getCommunityDesignDetail(image.designId) : getDesignDetail(image.designId))
       .then((detail) => {
         if (cancelled) return
         setShared(detail.shared)
@@ -305,6 +312,7 @@ export function DesignImageDetailModal({
       imageUrl: viewImageUrl,
       mode: 'move',
       currentFolderId: viewFolder?.folderId ?? null,
+      community: viewCommunity,
     })
   }
 
@@ -313,7 +321,7 @@ export function DesignImageDetailModal({
     if (viewLiked) {
       setIsBusy(true)
       try {
-        await unlikeDesign(viewDesignId, viewImageUrl)
+        await unlikeDesign(viewDesignId, viewImageUrl, viewCommunity)
         setViewLiked(false)
         setViewFolder(null)
         onLikeChange?.(viewDesignId, viewImageUrl, null)
@@ -324,13 +332,16 @@ export function DesignImageDetailModal({
       }
       return
     }
-    setLikeModalTarget({ designId: viewDesignId, imageUrl: viewImageUrl, mode: 'like' })
+    setLikeModalTarget({ designId: viewDesignId, imageUrl: viewImageUrl, mode: 'like', community: viewCommunity })
   }
 
   const confirmLikeWithFolder = async (choice: { folderId?: number; newFolderName?: string }) => {
     if (!likeModalTarget) return
-    const { designId, imageUrl, mode } = likeModalTarget
-    const saved = mode === 'move' ? await moveLikedDesign(designId, imageUrl, choice) : await likeDesign(designId, imageUrl, choice)
+    const { designId, imageUrl, mode, community } = likeModalTarget
+    const saved =
+      mode === 'move'
+        ? await moveLikedDesign(designId, imageUrl, choice, community)
+        : await likeDesign(designId, imageUrl, choice, community)
     if (designId === viewDesignId && imageUrl === viewImageUrl) {
       setViewLiked(true)
       setViewFolder(saved.folder)
@@ -368,7 +379,8 @@ export function DesignImageDetailModal({
     }
   }
 
-  const canManage = owner ?? false
+  // 갤러리 id로 연 남의 디자인은 공유·삭제를 로컬 디자인 API로 보낼 수 없다
+  const canManage = (owner ?? false) && !viewCommunity
   const folderLabel = viewFolder?.name ?? '기본'
   const hasActions =
     (viewDesignId != null && (showChatHistoryToggle || showDelete || showShare)) || showDownload || showAr
@@ -475,7 +487,7 @@ export function DesignImageDetailModal({
                 <span>이미지 삭제</span>
               </button>
             )}
-            {showChatHistoryToggle && viewDesignId != null && (
+            {showChatHistoryToggle && viewDesignId != null && !viewCommunity && (
               <button type="button" className="mypage-x__modal-action--ghost" onClick={() => setShowChatHistory(true)}>
                 {ModalActionIcons.chat}
                 <span>채팅 이력 보기</span>

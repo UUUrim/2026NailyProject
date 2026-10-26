@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { deletePrintOrder, getMyPrintOrders, type PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/api'
+import {
+  deletePrintOrder,
+  getMyPrintOrders,
+  reprintPrintOrder,
+  type PrintOrderResponse as NailTipPrintOrder,
+} from '@/entities/print/api'
 import {
   getMyDesigns,
   getLikedDesigns,
@@ -49,9 +54,11 @@ export function useMyPageData() {
       const prints = query.state.data ?? []
       const hasActive = prints.some(p =>
           p.status === 'PRINTING' ||
+          p.status === 'QUEUED' || // STL 생성이 끝나 병합이 시작되면 MERGING으로 바뀐다
           p.status === 'MERGING' ||
           p.status === 'MERGED' ||
-          p.status === 'WAITING_IN_QUEUE'
+          p.status === 'WAITING_IN_QUEUE' ||
+          p.status === 'CANCELING' // 프린터가 멈추면 CANCELED로 바뀐다
       )
       return hasActive ? 5000 : false
     }
@@ -168,7 +175,10 @@ export function useMyPageData() {
 
   const handleDetailDeleted = (designId: number) => {
     queryClient.setQueryData<DesignImageResponse[]>(DESIGNS_KEY, (prev) => (prev ?? []).filter((d) => d.designId !== designId))
-    queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) => (prev ?? []).filter((f) => f.designId !== designId))
+    // 갤러리 id로 찜한 남의 디자인은 id가 겹쳐도 지우지 않는다
+    queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) =>
+        (prev ?? []).filter((f) => f.community || f.designId !== designId),
+    )
   }
 
   const likedKeySet = useMemo(
@@ -189,12 +199,18 @@ export function useMyPageData() {
   const closeScanDetail = () => setScanDetailSession(null)
 
   // ── 네일팁 출력 상세 모달 ──────
-  const [printDetailOrder, setPrintDetailOrder] = useState<NailTipPrintOrder | null>(null)
+  const [openedPrintOrder, setOpenedPrintOrder] = useState<NailTipPrintOrder | null>(null)
+  // 목록은 진행 중인 주문이 있으면 5초마다 새로 받아 오므로, 열려 있는 상세도 목록의 최신 값을 따라간다.
+  // (취소/완료 같은 상태 변화가 모달에 바로 반영된다. 목록에서 사라진 주문이면 열 때의 값을 그대로 보여 준다.)
+  const printDetailOrder = openedPrintOrder
+      ? (prints.find((p) => p.id === openedPrintOrder.id) ?? openedPrintOrder)
+      : null
   const [printDetailScan, setPrintDetailScan] = useState<ScanDetail | null>(null)
   const [isLoadingPrintDetail, setIsLoadingPrintDetail] = useState(false)
 
   const openPrintDetail = async (order: NailTipPrintOrder) => {
-    setPrintDetailOrder(order)
+    setReprintError(null)
+    setOpenedPrintOrder(order)
     setPrintDetailScan(null)
     if (!order.leftScanId && !order.rightScanId) {
       setIsLoadingPrintDetail(false)
@@ -212,14 +228,41 @@ export function useMyPageData() {
     }
   }
 
+  // ── 같은 설정으로 재출력 (상세 모달의 "이 설정으로 재출력" 버튼) ──────
+  const [isReprinting, setIsReprinting] = useState(false)
+  const [reprintError, setReprintError] = useState<string | null>(null)
+
+  const reprintOrder = async (order: NailTipPrintOrder) => {
+    if (isReprinting) return
+    setIsReprinting(true)
+    setReprintError(null)
+    try {
+      const created = await reprintPrintOrder(order)
+      // 새 주문을 목록 맨 앞에 넣고 상세 화면을 새 주문으로 바꾼다. 서버 상태와도 맞춘다(그러면 진행 상태 갱신도 시작된다).
+      queryClient.setQueryData<NailTipPrintOrder[]>(PRINTS_KEY, (prev) => [created, ...(prev ?? [])])
+      void queryClient.invalidateQueries({ queryKey: PRINTS_KEY })
+      setOpenedPrintOrder(created)
+    } catch (e) {
+      setReprintError(e instanceof ApiError ? e.message : '재출력을 신청하지 못했어요. 잠시 후 다시 시도해 주세요.')
+    } finally {
+      setIsReprinting(false)
+    }
+  }
+
   const closePrintDetail = () => {
-    setPrintDetailOrder(null)
+    setReprintError(null)
+    setOpenedPrintOrder(null)
     setPrintDetailScan(null)
     setIsLoadingPrintDetail(false)
   }
 
-  const findFavoriteFolder = (designId: number, imageUrl: string) =>
-      favorites.find((f) => f.designId === designId && f.imageUrl === imageUrl)?.folder ?? null
+  const findFavorite = (designId: number, imageUrl: string) =>
+      favorites.find((f) => f.designId === designId && f.imageUrl === imageUrl)
+
+  const findFavoriteFolder = (designId: number, imageUrl: string) => findFavorite(designId, imageUrl)?.folder ?? null
+
+  // 찜 탭에는 다른 로컬 DB 사용자가 공유한 디자인을 갤러리 id로 찜한 항목도 섞여 있어, 찜 API를 그에 맞게 고른다
+  const isCommunityFavorite = (designId: number, imageUrl: string) => Boolean(findFavorite(designId, imageUrl)?.community)
 
   const openLikeFolderModal = (designId: number, imageUrl: string) => {
     setLikeModalTarget({ designId, imageUrl, mode: 'like' })
@@ -231,6 +274,7 @@ export function useMyPageData() {
       imageUrl,
       mode: 'move',
       currentFolderId: findFavoriteFolder(designId, imageUrl)?.folderId ?? null,
+      community: isCommunityFavorite(designId, imageUrl),
     })
   }
 
@@ -239,7 +283,7 @@ export function useMyPageData() {
     const isLiked = likedKeySet.has(key)
     if (isLiked) {
       try {
-        await unlikeDesign(designId, imageUrl)
+        await unlikeDesign(designId, imageUrl, isCommunityFavorite(designId, imageUrl))
         queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) =>
             (prev ?? []).filter((f) => !(f.designId === designId && f.imageUrl === imageUrl)),
         )
@@ -257,11 +301,11 @@ export function useMyPageData() {
 
   const confirmLikeWithFolder = async (choice: { folderId?: number; newFolderName?: string }) => {
     if (!likeModalTarget) return
-    const { designId, imageUrl, mode } = likeModalTarget
+    const { designId, imageUrl, mode, community } = likeModalTarget
     const saved =
         mode === 'move'
-            ? await moveLikedDesign(designId, imageUrl, choice)
-            : await likeDesign(designId, imageUrl, choice)
+            ? await moveLikedDesign(designId, imageUrl, choice, community)
+            : await likeDesign(designId, imageUrl, choice, community)
     queryClient.setQueryData<SavedDesignResponse[]>(FAVORITES_KEY, (prev) => [
       saved,
       ...(prev ?? []).filter((f) => !(f.designId === designId && f.imageUrl === imageUrl)),
@@ -372,6 +416,14 @@ export function useMyPageData() {
     }
   }
 
+  // 취소/일시정지/재개 요청이 성공하면 서버가 돌려준 주문으로 목록을 바로 바꾸고, 서버 상태와 맞추려고 다시 받아 온다
+  const applyPrintOrderUpdate = (updated: NailTipPrintOrder) => {
+    queryClient.setQueryData<NailTipPrintOrder[]>(PRINTS_KEY, (prev) =>
+        prev?.map((p) => (p.id === updated.id ? updated : p)),
+    )
+    void queryClient.invalidateQueries({ queryKey: PRINTS_KEY })
+  }
+
   const confirmDeletePrint = async () => {
     if (!printToDelete || isDeletingRecord) return
     const { id } = printToDelete
@@ -433,6 +485,10 @@ export function useMyPageData() {
     isLoadingPrintDetail,
     openPrintDetail,
     closePrintDetail,
+    applyPrintOrderUpdate,
+    reprintOrder,
+    isReprinting,
+    reprintError,
     findFavoriteFolder,
     openLikeFolderModal,
     openMoveFolderModal,

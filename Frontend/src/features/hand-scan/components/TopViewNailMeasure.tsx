@@ -1,8 +1,8 @@
 import { useBoxSize } from '@/features/hand-scan/hooks/useBoxSize'
-import { coverMap, type TopViewGuide, type TopViewMeasure } from '@/features/hand-scan/utils/topViewGuide'
+import { topViewDisplayMap, type TopViewGuide, type TopViewMeasure } from '@/features/hand-scan/utils/topViewGuide'
 
 type TopViewNailMeasureProps = {
-  /** 스트림 화면 비율(aspect)을 쓰려고 받는다 */
+  /** 스트림 화면 비율·배율 — 영상과 같은 표시 좌표(topViewDisplayMap)로 그리려고 받는다 */
   guide: TopViewGuide | null
   /** 안정(촬영 가능)일 때만 값이 있다 — 없으면 아무것도 그리지 않는다 */
   measure: TopViewMeasure | null
@@ -25,7 +25,8 @@ export function TopViewNailMeasure({ guide, measure }: TopViewNailMeasureProps) 
 
   let content = null
   if (canDraw) {
-    const map = coverMap(box.w, box.h, guide.aspect)
+    // 확대·이동된 영상 속 손톱 위에 그대로 겹치도록 영상과 같은 좌표 변환 — 숫자(mm)는 서버 값 그대로
+    const map = topViewDisplayMap(box.w, box.h, guide)
     const cx = map.x(measure.tipX)
     const tipY = map.y(measure.tipY)
     const cutY = map.y(measure.cuticleY)

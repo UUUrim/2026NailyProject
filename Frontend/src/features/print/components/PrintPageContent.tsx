@@ -4,6 +4,7 @@ import { PageHero } from '@/shared/layout/PageHero'
 import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { PillButton } from '@/shared/components/PillButton'
 import { Pagination } from '@/shared/components/Pagination'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
 import { getDefaultTipExtensionMm, getNailShape, NAIL_SHAPES } from '@/shared/constants/nailShapes'
 import { formatMetricCurve } from '@/shared/utils/scanDetail'
@@ -115,10 +116,9 @@ export function PrintPageContent() {
                         {pagedSessions.map((session) => {
                             const isSelected = session.key === selectedKey
                             const skinHex = session.skinToneHex
-                            const toneLabel = (
-                                skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
-                                (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
-                            )?.replace(/\s+/g, '') ?? '미분석'
+                            const skinAnalysis =
+                                skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation) ??
+                                (skinHex ? analyzeSkinTone(skinHex) : null)
                             const shapeLabel = session.recommendedShape
                                 ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
                                 : null
@@ -147,7 +147,13 @@ export function PrintPageContent() {
                         <strong className="print-session-card__date">
                           {formatScanDateLabel(session.scannedAt)}
                         </strong>
-                        <span className="print-session-card__season">{toneLabel}</span>
+                        <span className="print-session-card__season">
+                          {skinAnalysis ? (
+                            <SkinBaseTag kind={skinAnalysis.baseKind}>{skinAnalysis.tone.label}</SkinBaseTag>
+                          ) : (
+                            '미분석'
+                          )}
+                        </span>
                         <span className="print-session-card__metrics">{metricsLine}</span>
                         <span className="print-session-card__shape">추천 쉐입: {shapeLabel ?? '미정'}</span>
                       </span>

@@ -36,6 +36,11 @@ public class DesignGenerateResponseDto {
     // assistantMessage가 null이면 같이 null.
     private List<String> assistantOptions;
 
+    // assistantMessage와 함께 내려가는 값. 사용자가 수정 대신 "방금 디자인으로 확정할래"처럼 지금 디자인을
+    // 그대로 쓰겠다고 했으면 true — 프론트는 선택지 맨 위에 "방금 디자인으로 확정할게요"를 띄운다.
+    // assistantMessage가 null이면 같이 null.
+    private Boolean confirmSuggested;
+
     // 스캔 정보 기반 자동 생성(mode=scan-auto)일 때만 채워진다. 그 외에는 null.
     // 결과 화면 "내 손 분석 정보를 반영했어요"에서 추천 팔레트 중 어떤 색이 쓰였는지,
     // 어떤 무드/디자인 타입이 반영됐는지 보여주는 데 사용한다.

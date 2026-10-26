@@ -72,6 +72,8 @@ export interface DesignGenerateResponse {
     /** 수정 요청이 아니라서 이미지를 바꾸지 않았을 때 서버가 주는 안내 메시지 (있으면 새 이미지가 아님) */
     assistantMessage?: string | null
     assistantOptions?: string[] | null
+    /** 수정 대신 "방금 디자인으로 확정할래"처럼 지금 디자인을 그대로 쓰겠다고 했을 때 true — 확정 선택지를 맨 위에 띄운다 */
+    confirmSuggested?: boolean | null
     /** 사진 기반 생성일 때 올린 참고 사진의 S3 URL — 채팅 화면의 사진 미리보기를 이 주소로 바꿔 저장한다 */
     referenceImageUrl?: string | null
 }
@@ -86,7 +88,9 @@ export interface DesignImageResponse {
 }
 
 export interface SavedDesignResponse {
+    /** community가 true면 갤러리 id(다른 로컬 DB 사용자가 공유한 디자인을 둘러보기에서 찜한 것), 아니면 내 디자인 id */
     designId: number
+    community?: boolean
     imageUrl: string
     savedAt: string
     folder: {
@@ -112,6 +116,7 @@ export type LikeDesignOptions = {
 }
 
 export interface CommunityDesignResponse {
+    /** 갤러리 id — 로컬 디자인 id와 다르므로 상세·좋아요·찜은 /designs/community/{designId} API를 쓴다 */
     designId: number
     imageUrl: string
     createdAt: string
@@ -277,27 +282,38 @@ export async function unshareDesign(designId: number): Promise<DesignDetailRespo
     return res.data
 }
 
-/** POST /designs/{designId}/reactions — 둘러보기 좋아요 (찜과 분리) */
-export async function addDesignReaction(designId: number): Promise<DesignLikeResponse> {
-    const res = await apiClient.post<DesignLikeResponse>(`/designs/${designId}/reactions`, {})
+/** GET /designs/community/{designId} — 둘러보기 디자인 상세 (공유할 때 찍어 둔 스냅샷, 비로그인 가능) */
+export async function getCommunityDesignDetail(designId: number): Promise<DesignDetailResponse> {
+    const res = await apiClient.get<DesignDetailResponse>(`/designs/community/${designId}`)
     return res.data
 }
 
-/** DELETE /designs/{designId}/reactions — 둘러보기 좋아요 취소 */
+/** POST /designs/community/{designId}/reactions — 둘러보기 좋아요 (찜과 분리) */
+export async function addDesignReaction(designId: number): Promise<DesignLikeResponse> {
+    const res = await apiClient.post<DesignLikeResponse>(`/designs/community/${designId}/reactions`, {})
+    return res.data
+}
+
+/** DELETE /designs/community/{designId}/reactions — 둘러보기 좋아요 취소 */
 export async function removeDesignReaction(designId: number): Promise<DesignLikeResponse> {
-    const res = await apiClient.delete<DesignLikeResponse>(`/designs/${designId}/reactions`)
+    const res = await apiClient.delete<DesignLikeResponse>(`/designs/community/${designId}/reactions`)
     return res.data
 }
 
 // ─── 찜하기 ───────────────────────────────────────────────────────────────────
+// community: true면 designId가 갤러리 id다 (둘러보기 화면, 다른 로컬 DB 사용자가 공유한 디자인의 찜)
+
+const likesPath = (designId: number, community?: boolean) =>
+    community ? `/designs/community/${designId}/likes` : `/designs/${designId}/likes`
 
 /** POST /designs/{designId}/likes — 찜하기 */
 export async function likeDesign(
     designId: number,
     imageUrl: string,
     options?: LikeDesignOptions,
+    community?: boolean,
 ): Promise<SavedDesignResponse> {
-    const res = await apiClient.post<SavedDesignResponse>(`/designs/${designId}/likes`, {
+    const res = await apiClient.post<SavedDesignResponse>(likesPath(designId, community), {
         imageUrl,
         folderId: options?.folderId ?? null,
         newFolderName: options?.newFolderName ?? null,
@@ -306,8 +322,8 @@ export async function likeDesign(
 }
 
 /** DELETE /designs/{designId}/likes — 찜 취소 */
-export async function unlikeDesign(designId: number, imageUrl: string): Promise<void> {
-    await apiClient.delete(`/designs/${designId}/likes`, { imageUrl })
+export async function unlikeDesign(designId: number, imageUrl: string, community?: boolean): Promise<void> {
+    await apiClient.delete(likesPath(designId, community), { imageUrl })
 }
 
 /** PATCH /designs/{designId}/likes — 찜 저장 위치 변경 */
@@ -315,8 +331,9 @@ export async function moveLikedDesign(
     designId: number,
     imageUrl: string,
     options: LikeDesignOptions,
+    community?: boolean,
 ): Promise<SavedDesignResponse> {
-    const res = await apiClient.patch<SavedDesignResponse>(`/designs/${designId}/likes`, {
+    const res = await apiClient.patch<SavedDesignResponse>(likesPath(designId, community), {
         imageUrl,
         folderId: options.folderId ?? null,
         newFolderName: options.newFolderName ?? null,

@@ -12,11 +12,11 @@ function MetricCard({
                         hint,
                     }: {
     title: string
-    metric: { value: number; unit: string; percentile: number; comparisonLabel: string }
+    metric: { value: number; unit: string; barPercent: number; comparisonLabel: string }
     hint: string
 }) {
-    // percentile은 이미 3~97로 clamp되지만, 막대·"상위 %" 표기가 절대 범위를 벗어나지 않도록 한 번 더 방어한다.
-    const barPercent = Math.round(Math.min(100, Math.max(0, metric.percentile)))
+    // 막대는 스캔 서버의 5단계 평균 판정 위치(10/30/50/70/90%)만큼 채운다.
+    const barPercent = Math.round(Math.min(100, Math.max(0, metric.barPercent)))
     return (
         <article className="scan-metric-card">
             <h3>{title}</h3>
@@ -255,11 +255,11 @@ export function HandScanResultPageContent() {
                                 </div>
                                 <div className="skin-tone-card__body">
                                     <SkinToneSlider
-                                        label="톤"
+                                        label="베이스"
                                         valueLabel={skinToneAnalysis.tone.label}
                                         percent={skinToneAnalysis.tone.percent}
-                                        minLabel="쿨"
-                                        maxLabel="웜"
+                                        minLabel="분홍기"
+                                        maxLabel="노란기"
                                         trackClass="skin-tone-slider__track--tone"
                                     />
                                     <SkinToneSlider

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>무드·디자인 힌트 전체 정리</title>
+<style>
+  :root {
+    --bg: #fbf8fa; --card: #ffffff; --ink: #2a2230; --muted: #75697c; --line: #eadfe6;
+    --accent: #c0527e; --accent-soft: #f7e3ec; --good: #2f8f5b; --warn: #b9770e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17131a; --card: #211b26; --ink: #f0e8f2; --muted: #a89bb0; --line: #36293d;
+      --accent: #e27aa5; --accent-soft: #3a2230; --good: #5fcf92; --warn: #e3a845;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17131a; --card: #211b26; --ink: #f0e8f2; --muted: #a89bb0; --line: #36293d;
+    --accent: #e27aa5; --accent-soft: #3a2230; --good: #5fcf92; --warn: #e3a845;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.65 -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 28px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  h2 { font-size: 19px; margin: 36px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--accent-soft); }
+  h3 { font-size: 15px; margin: 20px 0 6px; color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 10px 0; }
+  .tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); margin: 8px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; background: var(--accent-soft); }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-right: 4px; }
+  .code { background: var(--accent-soft); border-radius: 6px; padding: 0 6px; font-size: 13px; }
+  .ok { color: var(--good); font-weight: 600; }
+  .no { color: var(--muted); }
+  .rel-mid { color: var(--good); font-weight: 600; }
+  .rel-low { color: var(--warn); font-weight: 600; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  .chip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; background: var(--card); font-size: 13.5px; }
+  .dot { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(0,0,0,.15); flex: none; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .note { color: var(--muted); font-size: 13px; }
+  .pill-list span { display: inline-block; border: 1px solid var(--line); background: var(--card); border-radius: 99px; padding: 1px 10px; margin: 2px 3px 2px 0; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>무드·디자인 힌트 전체 정리</h1>
+  <p class="sub">현재 코드에 반영되어 있는 무드, 디자인, 색 힌트를 한곳에 모았습니다. "코드"는 Java가 직접 적용하는 가중치/강제, "프롬프트"는 GPT에게 주는 지침입니다. 모든 항목에서 사용자가 직접 고른 값이 우선합니다.</p>
+
+  <h2>0. 어느 흐름에 무엇이 적용되나</h2>
+  <div class="tbl"><table>
+    <tr><th>힌트</th><th>일반(옵션 선택)</th><th>스캔 자동</th><th>사진 기반</th><th>수정(refine)</th></tr>
+    <tr><td>무드별 보조 요소(프롬프트)</td><td class="ok">O</td><td class="ok">O</td><td class="no">사진에 보이는 것만</td><td class="no">-</td></tr>
+    <tr><td>쉐입 → 무드(코드)</td><td class="ok">O (무드 미선택 시)</td><td class="ok">힌트로 전달</td><td class="no">-</td><td class="no">-</td></tr>
+    <tr><td>무드 → 쉐입(프롬프트)</td><td class="no">-</td><td class="no">-</td><td class="ok">O</td><td class="no">-</td></tr>
+    <tr><td>스캔 색·디자인 가중치(코드)</td><td class="ok">O</td><td class="ok">O</td><td class="no">- (스캔 미사용)</td><td class="no">-</td></tr>
+    <tr><td>세 가지 디자인 번갈아 배치(코드+프롬프트)</td><td class="ok">O</td><td class="ok">O</td><td class="no">-</td><td class="no">-</td></tr>
+    <tr><td>무작위 힌트 [VARIATION LEAN]</td><td class="ok">O</td><td class="ok">O</td><td class="no">풍성함 힌트만</td><td class="no">-</td></tr>
+    <tr><td>코드 안전장치(블루밍/도트/체크/리본/펑키 파츠)</td><td class="ok">O</td><td class="ok">일부</td><td class="no">-</td><td class="no">-</td></tr>
+  </table></div>
+
+  <h2>1. 무드별 보조 요소 (프롬프트)</h2>
+  <p>사용자가 한두 요소만 말해도 다섯 손톱이 그것만으로 채워지지 않게, 무드에 어울리는 보조 요소를 더하라는 규칙입니다.</p>
+  <div class="tbl"><table>
+    <tr><th>무드</th><th>패턴</th><th>모티프</th><th>파츠 / 마감</th></tr>
+    <tr><td>러블리·페미닌·스위트·로맨틱</td><td>레이스, 치크, 소프트 프렌치</td><td>하트</td><td>하트 참, 진주 비즈·트림, 큐빅, 3D 리본 참</td></tr>
+    <tr><td>큐트·키치·플레이풀</td><td>도트, 체크, 스트라이프</td><td>하트, 별, 토끼</td><td>하트·별 참, 3D 리본 참, 큐빅</td></tr>
+    <tr><td>엘레강트·모던</td><td>프렌치, 라인 아트, 컬러 블록</td><td>-</td><td>진주 트림, 체인, 메탈 스터드, 큐빅</td></tr>
+    <tr><td>시크</td><td>프렌치, 라인 아트, 컬러 블록, <b>블루밍</b></td><td>-</td><td>진주 트림, 체인, 메탈 스터드, 큐빅</td></tr>
+    <tr><td>쿨·엣지·다크·펑키</td><td>스펙클, 마블, <b>블루밍</b></td><td>십자가, 별, 나비</td><td>체인, 메탈 스터드, 별 참</td></tr>
+    <tr><td>Y2K·글램</td><td>-</td><td>별, 나비</td><td>큐빅, 별 참, 체인 / 크롬·글리터</td></tr>
+    <tr><td>내추럴·미니멀·빈티지</td><td>수채화, 그라데이션, 라인 아트</td><td>작은 진주 비즈, 잎</td><td>-</td></tr>
+  </table></div>
+  <ul>
+    <li>분배: 메인 요소가 있는 손톱이 히어로, 두 번째 손톱은 사용자의 다른 요소, 나머지(최대 1개 제외)는 무드 목록의 다른 보조 요소·파츠. 보조 요소 중 하나 이상은 모티프(하트·별·나비)여야 함</li>
+    <li>사용자가 모티프·파츠를 "없음"으로 골랐거나 심플을 요청하면 이 규칙은 건너뜀</li>
+    <li><b>블루밍은 시크/펑키에만</b> 나오도록 분리·제한 (엘레강트·모던 줄에서 제거)</li>
+  </ul>
+
+  <h2>2. 쉐입 ↔ 무드</h2>
+  <h3>2-1. 쉐입 → 무드 (스캔 흐름, 코드)</h3>
+  <p>무드를 사용자가 고르지 않았을 때, 스캔이 추천한 쉐입의 인상에 맞춰 가중치로 뽑습니다. 숫자가 클수록 자주 나옵니다.</p>
+  <div class="tbl"><table>
+    <tr><th>쉐입</th><th>무드 후보 (가중치)</th></tr>
+    <tr><td>라운드</td><td>큐트 3, 퓨어 3, 심플 2, 러블리 1, 델리킷 1, 모던 1</td></tr>
+    <tr><td>오벌</td><td>페미닌 3, 엘레강트 2, 델리킷 2, 러블리 2, 퓨어 2, 큐트 1</td></tr>
+    <tr><td>아몬드</td><td>엘레강트 3, 페미닌 3, 러블리 3, 델리킷 2</td></tr>
+    <tr><td>발레리나</td><td>러블리 3, 페미닌 2, 엘레강트 2, 시크 1</td></tr>
+    <tr><td>스퀘어</td><td>시크 3, 모던 3, 심플 2, 엘레강트 1, 펑키 1</td></tr>
+    <tr><td>스틸레토</td><td>시크 3, 펑키 2, 모던 1</td></tr>
+  </table></div>
+  <ul>
+    <li>색 톤 보정(최대 ×1.5): 파스텔 → 러블리·퓨어·큐트·델리킷↑ / 짙은 색 → 시크·모던·엘레강트↑ / 비비드 → 큐트·펑키↑</li>
+    <li>글리터·마블 디자인을 골랐으면 기존대로 시크. 쉐입을 모르면 기존 무작위 풀(시크, 엘레강트, 큐트, 러블리, 델리킷, 모던, 퓨어, 페미닌, 심플)</li>
+    <li>스캔 자동 흐름은 GPT가 무드를 정하므로 "이 쉐입은 ○○ 무드로 읽힌다" 상위 4개를 힌트로 전달</li>
+  </ul>
+
+  <h3>2-2. 무드 → 쉐입 (사진 기반, 프롬프트)</h3>
+  <div class="tbl"><table>
+    <tr><th>이미지 분위기</th><th>쉐입</th></tr>
+    <tr><td>소프트·귀엽고 달콤·순수·포근</td><td>라운드 / 오벌</td></tr>
+    <tr><td>페미닌·러블리·우아·몽환·로맨틱</td><td>아몬드 / 오벌 / 발레리나</td></tr>
+    <tr><td>시크·쿨·엣지·다크·펑키·Y2K·글램</td><td>스틸레토 / 스퀘어</td></tr>
+    <tr><td>심플·모던·깔끔·프레피</td><td>스퀘어 / 라운드</td></tr>
+  </table></div>
+  <p class="note">우선순위: 사용자 문장의 쉐입 &gt; 사진에 보이는 실제 손톱 모양 &gt; 이미지 분위기 &gt; 기본값 오벌. 사진 기반은 스캔 정보를 쓰지 않음.</p>
+
+  <h2>3. 무드·조건별 특수 규칙</h2>
+  <div class="tbl"><table>
+    <tr><th>조건</th><th>규칙</th><th>적용</th></tr>
+    <tr><td>펑키 무드</td><td>[FUNKY MOOD] 절제 규칙의 예외: 파츠를 많이(큐빅·진주·체인·스터드·3D 참을 거의 모든 손톱에, 손톱당 3~4개 가능, 조용한 손톱 최대 1개), 참은 중간 크기(손톱의 1/3까지), 비비드·크롬·글리터·호일 환영. 파츠가 4개 미만 손톱이면 코드가 파츠를 추가</td><td>프롬프트 + 코드</td></tr>
+    <tr><td>펑키/시크 무드</td><td>블루밍 필수(없으면 코드가 최대 2개 손톱에 추가). 디자인 채우기 풀에도 블루밍 가산</td><td>코드</td></tr>
+    <tr><td>그 외 무드</td><td>블루밍이 나오면 코드가 패턴과 설명 문장을 삭제 (사용자가 직접 말한 경우 제외)</td><td>코드</td></tr>
+    <tr><td>일반 무드(펑키 제외)</td><td>[REAL SALON REALISM] 살롱 현실감: 참·진주·모티프는 작게(손톱의 1/4 이하, 중심에서 벗어나게), 색은 은은하게(깊은 색은 팔레트가 요구할 때), 드로잉은 가는 선</td><td>프롬프트 + 이미지 프롬프트</td></tr>
+    <tr><td>드로잉 선택</td><td>잉크 일러스트: 모티프를 투명 잉크 색으로 채움(검은 외곽선 없음), 최소 2개 손톱, 모티프는 손톱의 절반 크기</td><td>프롬프트 + 코드</td></tr>
+    <tr><td>드로잉/큐트 + 체크</td><td>손그림 체크: 반투명 색 띠 + 살짝 흔들리는 손그림 선</td><td>프롬프트 + 코드</td></tr>
+    <tr><td>엘레강트 + 체크</td><td>우아한 체크 참고 이미지(흑백)를 이미지 모델에 첨부</td><td>이미지 프롬프트</td></tr>
+    <tr><td>도트 요청</td><td>두 손톱: 손톱 전체를 덮는 도트 1개 + 프렌치 팁 안에만 도트 1개. 외곽선 없는 단색 원</td><td>프롬프트 + 코드</td></tr>
+    <tr><td>가을/겨울</td><td>디자인 채우기 풀에 니트(벨벳) 가산</td><td>코드</td></tr>
+    <tr><td>사진 기반</td><td>무드는 이미지 분위기에서 정함(캐릭터가 귀엽다고 큐트로 가지 않음). 하트·별·도트·체크 같은 무드 보조 요소는 사진에 보일 때만</td><td>프롬프트</td></tr>
+    <tr><td>매트 세트</td><td>솔리드와 니트만. 글리터·파우더·치크·자석·잉크 제외</td><td>코드 + 프롬프트</td></tr>
+  </table></div>
+
+  <h2>4. 세트 구성 (세 가지 디자인이 번갈아)</h2>
+  <ul>
+    <li>세트는 기본적으로 <b>정확히 3가지 디자인</b>이 번갈아 나옴: 두 디자인이 각 2개, 하나가 1개 (A B A C B 또는 A B C A B)</li>
+    <li>"디자인" = 색 효과(글리터·자석·파우더·니트·잉크) 또는 베이스 패턴(그라데이션·마블·프렌치·치크·블루밍…) 또는 원컬러</li>
+    <li>사용자가 고른 디자인은 항상 포함되지만 한 디자인은 최대 2개 손톱, 5개 전체 금지. 이웃 손톱에 같은 디자인 금지. 같은 디자인이라도 작은 장식·방향이 달라야 함</li>
+    <li>색 효과는 시럽 외에 세트당 최대 1종. 베이스 디자인은 세트당 최대 3종, 손톱당 1개</li>
+    <li>모자란 디자인을 채우는 기본 풀: 원컬러 5, 그라데이션 5, 글리터 2, 마블·프렌치·치크·파우더 각 1 (가을/겨울은 니트 +2, 펑키/시크는 블루밍 +2). 이 풀에 <b>색 톤·손 특성 가중치</b>를 곱해서 뽑음(5번)</li>
+    <li>시럽이 기본: 모든 손톱의 색 표현이 시럽(반투명). 글리터·파우더·잉크는 시럽 위에 올림. 솔리드는 사용자가 요청할 때만</li>
+    <li>풍성함: 심플 키워드가 없으면 손톱 중 최대 1개만 조용하게, 나머지는 눈에 보이는 장식(모티프·파츠·패턴) 하나 이상</li>
+  </ul>
+
+  <h2>5. 스캔 맞춤 가중치 (코드)</h2>
+  <h3>5-1. 손 특성 읽는 방법</h3>
+  <div class="tbl"><table>
+    <tr><th>특성</th><th>판단 기준</th><th>분류</th></tr>
+    <tr><td>베드 폭</td><td>스캔 쉐입 추천 결과(폭/길이 z값 기준)를 그대로 사용</td><td>스틸레토·발레리나 = <b>폭이 넓은 베드</b> / 아몬드·오벌 = 보통 / 스퀘어·라운드 = 좁은 편</td></tr>
+    <tr><td>손톱 크기</td><td>스캔 <span class="code">nail_size</span></td><td>smaller = 작음, larger = 큼, 그 외 = 보통</td></tr>
+    <tr><td>피부 밝기</td><td>스캔 <span class="code">brightness</span></td><td>0.55 미만 = 어두운 피부</td></tr>
+  </table></div>
+  <p class="note">"짧은 손톱 전용 디자인"은 쓰지 않습니다. 짧은 손톱은 긴 쉐입(발레리나·스틸레토)으로 보강되고 팁도 그 길이로 만들어져서 생성 이미지는 이미 긴 손톱이기 때문입니다. 길이와 무관한 베드 폭 규칙만 적용합니다.</p>
+
+  <h3>5-2. 색 톤 분류</h3>
+  <div class="chips">
+    <div class="chip"><span class="dot" style="background:#DC5080"></span>비비드 (채도 ≥ 0.5, 명도 0.35~0.75)</div>
+    <div class="chip"><span class="dot" style="background:#F5C2D3"></span>파스텔 (명도 ≥ 0.78 또는 저채도 밝은색)</div>
+    <div class="chip"><span class="dot" style="background:#1C2848"></span>짙은 색 (명도 &lt; 0.30)</div>
+    <div class="chip"><span class="dot" style="background:#7090B4"></span>뮤트 (나머지)</div>
+  </div>
+
+  <h3>5-3. 추천 컬러 선택 가중치 (30색에서 가중치로 선택)</h3>
+  <div class="tbl"><table>
+    <tr><th>조건</th><th>비비드</th><th>파스텔</th><th>짙은 색</th><th>신뢰도</th></tr>
+    <tr><td>큰 손톱</td><td>-</td><td>×0.8</td><td>×1.3</td><td class="rel-low">낮음</td></tr>
+    <tr><td>어두운 피부톤</td><td>×1.3</td><td>×0.6</td><td>×1.3</td><td class="rel-mid">중</td></tr>
+  </table></div>
+  <ul>
+    <li>조화: 이미 고른 색과 같은 계열(색상 차 45° 이내) ×1.6, 무채색 ×1.3, 정반대(150° 이상) ×0.5</li>
+    <li>일반 흐름: 1~3색 확정. 스캔 자동 흐름: 30색 중 가중치로 8색 후보만 GPT에 전달</li>
+  </ul>
+
+  <h3>5-4. 디자인 채우기 가중치</h3>
+  <div class="tbl"><table>
+    <tr><th>조건</th><th>올라가는 디자인</th><th>내려가는 디자인</th></tr>
+    <tr><td>비비드 색</td><td>원컬러, 컬러 프렌치</td><td>그라데이션</td></tr>
+    <tr><td>파스텔 색</td><td>그라데이션, 치크, 프렌치, 글리터</td><td>-</td></tr>
+    <tr><td>짙은 색</td><td>자석, 글리터, 마블</td><td>치크(탁해짐), 그라데이션</td></tr>
+    <tr><td>폭이 넓은 베드</td><td>그라데이션 ×1.15 (시선이 폭에서 멀어짐)</td><td>글리터 ×0.85 (더 넓어 보임)</td></tr>
+    <tr><td>큰 손/손톱</td><td>원컬러, 마블 ×1.2</td><td>-</td></tr>
+  </table></div>
+
+  <h3>5-5. 스캔 자동 흐름에 넣는 [HAND FIT] 힌트 (프롬프트)</h3>
+  <ul>
+    <li><b>폭이 넓은 베드:</b> 긴 쉐입으로 보강된 손톱이므로 넉넉한 캔버스로 취급(긴 프렌치·풀길이 그라데이션·세로 아트 가능). 세로/길이 방향 요소와 소프트 그라데이션 우대, 넓은 가로 띠·굵은 장식·과한 글리터는 피함. 선택: 중앙 세로선, 옆면 얇은 여백</li>
+    <li><b>작은 손:</b> 장식을 모두 작게(작은 참, 한두 손톱에 작은 꽃·점), 큰 파츠 지양</li>
+    <li><b>큰 손:</b> 단순하고 깔끔한 패턴(원컬러·마블·깔끔한 선), 세밀한 장식 지양, 중간~짙은 톤이 날씬해 보임</li>
+    <li><b>어두운 피부:</b> 보석톤·비비드·깊은 색 우대, 연한 파스텔은 시럽/글로시/쉬머 깊이를 줌</li>
+    <li><b>색-디자인 매칭:</b> 파스텔 → 소프트 그라데이션·치크·프렌치 / 비비드 → 원컬러·컬러 팁 / 짙은 색 → 자석·글리터·마블(치크 제외)</li>
+    <li><b>쉐입 → 무드 힌트:</b> 위 2-1 표의 상위 4개</li>
+  </ul>
+
+  <h2>6. 무작위 변주 힌트 [VARIATION LEAN] (요청마다 랜덤으로 제안, 강제 아님)</h2>
+  <h3>참 모양</h3>
+  <div class="pill-list"><span>작은 폴리시드 실버 메탈 참</span><span>작은 아이보리 불투명 레진 참</span><span>투명 클리어 레진 3D 참</span><span>글로시 캔디·진주빛 아크릴 참</span><span>묵직한 조각 크롬 실버 참</span><span>무광 블랙 에나멜 참</span></div>
+  <h3>장식 위치</h3>
+  <div class="pill-list"><span>큐티클 근처</span><span>팁 모서리</span><span>한쪽 측면</span><span>대각선 일렬</span><span>작게 흩뿌림</span><span>프리 엣지를 따라</span></div>
+  <h3>표현 방식</h3>
+  <div class="pill-list"><span>도톰한 글로시 젤(입체)</span><span>번지는 수채화(평면)</span></div>
+  <h3>창작 트위스트 12종 (2개를 랜덤 제안)</h3>
+  <ul>
+    <li>평소와 다른 손가락을 가장 화려하게, 이웃은 아주 조용하게</li>
+    <li>중앙이 아니라 한쪽 벽/프리엣지에 붙인 비대칭 배치</li>
+    <li>네거티브 스페이스: 한쪽 모서리에 아트를 모으고 나머지는 비움</li>
+    <li>부분·역방향 프렌치(코너, 사이드, 얇은 더블 프렌치)</li>
+    <li>그라데이션을 대각선이나 팁에서 시작</li>
+    <li>한 손톱을 두 컬러 블록(반반)으로 분할</li>
+    <li>히어로 손톱의 작은 요소를 다른 손톱에 다른 크기로 반복</li>
+    <li>세트에 마감 두 가지 섞기(시럽 사이에 크롬 포인트 한 손톱)</li>
+    <li>팔레트 색 하나를 한 번만 쓰는 의외의 손톱</li>
+    <li>한 손톱에 작은 혼합 파츠 클러스터, 두 손톱은 단색</li>
+    <li>중심에서 벗어난·기울어진·가장자리에 잘린 모티프</li>
+    <li>한 손톱은 위쪽 절반에, 다른 손톱은 아래쪽 절반에만 아트</li>
+  </ul>
+  <h3>리본 룩 12종 (세트당 1종, 모든 리본 손톱에 동일하게)</h3>
+  <div class="pill-list"><span>도톰한 불투명 3D 보우</span><span>캔디 레진 3D 보우</span><span>유리 같은 투명 3D 젤 보우</span><span>저부조 엠보 리본</span><span>라인 아트 보우 윤곽</span><span>실버 메탈 보우 참(체인·펜던트)</span><span>앤티크 실버/블랙 에나멜 보우</span><span>얇은 실버/골드 미니 보우 반복</span><span>리본 레이싱(교차 띠 + 진주)</span><span>리본 띠 프렌치</span><span>새틴 같은 글로시 보우</span><span>글리터 채운 투명 젤 보우</span></div>
+  <p class="note">그린(라인 아트) 리본은 드로잉/큐트일 때만 허용, 아니면 코드가 3D 리본 참으로 변환. 리본 색 후보 14종(톤온톤 핑크, 더스티 모브, 소프트 화이트, 아이보리, 클리어, 실버, 샴페인 골드, 파우더 블루, 라벤더, 체리 레드, 초콜릿 브라운, 블랙, 세이지 그린, 버터 옐로).</p>
+  <h3>보조 요소 후보 13종</h3>
+  <div class="pill-list"><span>하트 모티프</span><span>하트 참</span><span>별 참</span><span>진주 트림</span><span>진주 비즈</span><span>큐빅 클러스터</span><span>3D 리본 참</span><span>나비 모티프</span><span>별 모티프</span><span>꽃 모티프</span><span>토끼 모티프</span><span>체인</span><span>메탈 스터드</span></div>
+  <p class="note">히어로 손톱(엄지~새끼 중 랜덤)도 매번 랜덤 제안. 시즌 트렌드 힌트(사진 기반 제외)도 [VARIATION LEAN] 앞에 함께 붙습니다.</p>
+
+  <h2>7. 색 표현·질감 규칙</h2>
+  <div class="tbl"><table>
+    <tr><th>요소</th><th>핵심 규칙</th></tr>
+    <tr><td>시럽 (기본)</td><td>모든 손톱의 기본. 안료가 투명 젤 안에 떠 있는 반투명 질감, 큰 부드러운 거울 하이라이트</td></tr>
+    <tr><td>글로시 젤 돔</td><td>볼록한 젤 오버레이 광택이 선명하게. 글로시/매트는 세트 전체 단위</td></tr>
+    <tr><td>글리터</td><td>맑은 시럽 속에 떠 있는 고운 반짝임(질감·알갱이 표현 없음). 다른 강한 효과와 합치지 않음</td></tr>
+    <tr><td>자석</td><td>마그네틱 캣아이 (스와치 라벨 "자석")</td></tr>
+    <tr><td>니트(벨벳)</td><td>아주 작고 짧은 섬유 조각이 빽빽하게 든 질감 (긴 균열·직물 느낌 금지)</td></tr>
+    <tr><td>잉크</td><td>배경색 위의 "그리는 요소". 투명하고 선명한 색 젤. 잉크 드로잉 / 워시 / 체크(깅엄)</td></tr>
+    <tr><td>블루밍</td><td>큰 점이 손톱 윤곽을 따라 스캘럽처럼 배치, 같은 색상의 더 짙은 톤, 중앙이 가장 진하고 바깥으로 번짐. 시크/펑키 한정</td></tr>
+    <tr><td>도트</td><td>손톱 전체를 덮는 단독 디자인이거나 프렌치 팁 안에만. 외곽선 없음</td></tr>
+    <tr><td>치크</td><td>시럽 손톱에만. 글리터·자석·솔리드와 조합 금지</td></tr>
+    <tr><td>꽃 / 소용돌이 / 마블</td><td>꽃은 손톱 폭의 1/15 정도의 작은 손그림, 소용돌이는 한 줄로 감기는 두꺼운 나선, 마블은 색 면적 비율 규칙</td></tr>
+    <tr><td>리본</td><td>세트당 룩 하나, 줄무늬 금지</td></tr>
+  </table></div>
+
+  <h2>8. 코드 안전장치 (GPT가 규칙을 어길 때 보정)</h2>
+  <ul>
+    <li><span class="code">enforceCombinationRules</span> / <span class="code">ensureSyrupDefault</span> / <span class="code">limitColorExpressions</span> — 조합 규칙, 시럽 기본, 색 효과 세트당 1종</li>
+    <li><span class="code">enforceNoDrawnRibbon</span> — 드로잉/큐트가 아니면 그린 리본을 3D 리본 참으로</li>
+    <li><span class="code">enforceInkForDrawing</span> — 드로잉이면 잉크 손톱 보장</li>
+    <li><span class="code">enforceDotRules</span> / <span class="code">enforceHandDrawnCheck</span> — 도트, 손그림 체크</li>
+    <li><span class="code">enforceBloomingForMood</span> / <span class="code">stripBloomingUnlessMood</span> — 블루밍은 시크/펑키에서만 추가, 그 외엔 제거</li>
+    <li><span class="code">enforceFunkyParts</span> — 펑키면 파츠 보강</li>
+    <li><span class="code">enforceRichness</span> — 심플이 아니면 장식 풍성하게</li>
+    <li><span class="code">stripReferenceWording</span> — 설명에서 "reference" 같은 표현 제거</li>
+    <li><span class="code">wantedPart</span> — 스캔 자동 안내 블록 안의 예시 단어(funky 등)를 무드/디자인 감지에서 제외</li>
+  </ul>
+
+  <h2>9. 한계</h2>
+  <ul>
+    <li>가중치 값은 조사 결과와 업계 통념에 기반한 <b>초기값</b>입니다. 한쪽으로 쏠리면 조정합니다.</li>
+    <li>베드 폭·크기·피부톤 규칙은 신뢰도 중간~낮음 (미용 매거진/블로그 기반, 검증된 연구 아님)</li>
+    <li>"긴 손톱에 그라데이션이 안 어울린다"는 확인되지 않아 반영하지 않았습니다.</li>
+    <li>실제 GPT 생성 결과는 재시작 후 확인이 필요합니다.</li>
+  </ul>
+</div>
+</body>
+</html>

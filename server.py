@@ -36,6 +36,9 @@ Usage:
     GET  /print/status        — 프린터 현재 상태/진행률 (Spring Boot 폴링용)
     POST /print/merge-both    — 양손 로컬 STL 병합 → 양손 3MF를 S3에 업로드 → 콜백
     POST /print/start         — 슬라이싱 + 프린터 출력 시작
+    POST /print/pause         — 지금 출력 중인 주문 일시정지   {"orderId": ...}
+    POST /print/resume        — 일시정지된 주문 재개           {"orderId": ...}
+    POST /print/cancel        — 출력 중이면 프린터를 멈추고, 대기 중이면 큐에서 뺀다 {"orderId": ...}
 """
 
 import asyncio
@@ -95,7 +98,7 @@ for _p in [_PRINTER_DIR, _SCAN_DIR, _THIS_DIR]:
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_SCAN_DIR, ".env"))
 
-from merge_fingers   import merge_both_hands                      # printer/
+from merge_fingers   import merge_both_hands, stl_subdir           # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
@@ -176,6 +179,11 @@ TOP_VIEW_MIN_W_PX          = 480   # 창이 이보다 좁아지면 예전 방식
 # 손가락이 잠깐 인식 안 된 한두 측정 사이클 동안 가이드 선이 마커 기준
 # 추정 위치로 튀지 않도록 마지막 실측 guide_y를 유지하는 시간.
 GUIDE_LIVE_HOLD_SEC  = 0.5
+# 손가락이 없을 때 가이드 선을 그릴 마커 위치를 이 간격으로 다시 잡는다(_refresh_guide_marker).
+# 처음 잡은 마커(_S.marker_corners)는 서버가 켜져 있는 내내 그대로인데 카메라/받침대는
+# 조금씩 움직여서(10-22 하루 사이 마커 아래 끝이 380→401px), 손가락을 넣어 실측 guide_y로
+# 바뀌는 순간 선이 그만큼 튀었다. 화면 표시 전용이고 측정에는 쓰지 않는다.
+GUIDE_MARKER_REFRESH_SEC = 0.5
 
 # 사이드뷰(폰) 사진은 버튼을 누른 뒤 폰이 요청을 받아(폴링) 촬영 설정을 다시 하고 고화질 촬영을 마칠 때까지 1.5~3.5초가
 # 걸려서, 그 사이 손가락이 빠지면 손가락 없는 사진이나 서 있는 손가락 사진이 찍혔다(스캔 217/218 소지). 그래서 탑뷰가
@@ -315,6 +323,11 @@ def _slice_and_print_local(local_3mf: str, output_dir: str, callback_url: str):
     """
     try:
         order_id = _order_id_from_callback(callback_url)
+        # 병합하는 사이 사용자가 취소했으면(preCancel) 큐에 넣지 않는다
+        if order_id in _CANCEL_REQUESTED:
+            _CANCEL_REQUESTED.discard(order_id)
+            _post_canceled(callback_url)
+            return
         order_dir = os.path.join(output_dir, f"order_{order_id}")
         os.makedirs(order_dir, exist_ok=True)
         job_3mf = os.path.join(order_dir, "input_for_slicing.3mf")
@@ -332,17 +345,51 @@ def _order_id_from_callback(callback_url: str) -> str:
     m = re.search(r"/prints/(\d+)/", callback_url or "")
     return m.group(1) if m else time.strftime("t%Y%m%d_%H%M%S")
 
-def _run_merge_both_hands(userid, left_session, right_session,
-                           left_shapes, right_shapes, callback_url, print_callback_url=None):
+
+# ── 출력 제어 (일시정지 / 재개 / 취소) ────────────────────────
+# 사용자가 취소를 요청한 주문 ID(문자열). 출력 중인 작업은 폴링이 이 값을 보고 프린터를 멈춘 뒤
+# 취소 콜백을 보내고, 대기 중인 작업은 큐 워커가 꺼낼 때 건너뛴다.
+_CANCEL_REQUESTED: set = set()
+
+
+def _cancel_requested(callback_url: str) -> bool:
+    return _order_id_from_callback(callback_url) in _CANCEL_REQUESTED
+
+
+def _post_canceled(callback_url: str):
+    """사용자가 취소한 주문을 백엔드에 알린다. success=False로 보내는 이유: 백엔드는 success=True이면서
+    모르는 status가 오면 PRINTING으로 처리하기 때문이다. 취소는 status=CANCELED로 구분한다."""
     try:
-        result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes)
-        s3_key     = f"print/{userid}/{left_session}_{right_session}/both/both_hands_merged.3mf"
+        requests.post(callback_url, json={
+            "success": False, "status": "CANCELED", "message": "사용자가 출력을 취소했습니다."}, timeout=15)
+    except Exception as e:
+        print(f"[Cancel] 취소 콜백 전송 실패: {e}")
+
+
+def _stop_printer_quietly():
+    """프린터에 정지 명령을 보낸다. 실패해도 예외를 올리지 않는다(폴링이 다음 주기에 다시 보낸다)."""
+    try:
+        _get_printer().stop_print()
+    except Exception as e:
+        print(f"[Cancel] stop_print 실패(다음 폴링에서 재시도): {e}")
+
+def _run_merge_both_hands(userid, left_session, right_session,
+                           left_shapes, right_shapes, callback_url, print_callback_url=None,
+                           tip_extension_mm=None):
+    try:
+        # 주문마다 폴더를 따로 쓴다: 같은 스캔으로 다시 신청해도 앞 주문의 병합 파일을 덮어쓰지 않는다
+        order_id   = _order_id_from_callback(callback_url)
+        pair       = f"{left_session}_{right_session}" if right_session else str(left_session)
+        result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes,
+                                  order_id=order_id, tip_extension_mm=tip_extension_mm)
+        s3_key     = f"print/{userid}/{pair}/both/order_{order_id}/both_hands_merged.3mf"
         merged_url = _upload_3mf(result["path"], s3_key)
         requests.post(callback_url, json={
             "success": True, "mergedModelUrl": merged_url,
             "missingLeft": result["missingLeft"], "missingRight": result["missingRight"]})
         if print_callback_url:
-            _slice_and_print_local(result["path"], os.path.dirname(result["path"]), print_callback_url)
+            # _slice_and_print_local이 .../both/order_{id}/ 폴더를 만들므로, 병합 폴더(order_{id})의 부모를 넘긴다
+            _slice_and_print_local(result["path"], os.path.dirname(os.path.dirname(result["path"])), print_callback_url)
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
@@ -365,6 +412,10 @@ def _run_slice_and_print(merged_model_url, output_dir, callback_url, local_3mf=N
         if local_3mf is None:
             local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
             _download_3mf_from_url(merged_model_url, local_3mf)
+        # 다운로드하는 사이 취소됐으면 슬라이싱/업로드를 시작하지 않는다
+        if _cancel_requested(callback_url):
+            _post_canceled(callback_url)
+            return
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
 
         # 출력 시작 콜백
@@ -395,6 +446,7 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
     last_percentage = 0
     has_started = already_started  # 서버 재시작 후 이어서 폴링할 땐 이미 출력 중이던 작업
     ACTIVE_GCODE = ("PREPARE", "RUNNING", "PAUSE")
+    last_logged = None  # 진행률/상태가 바뀔 때만 로그를 남긴다
 
     def _fail(msg):
         requests.post(callback_url, json={"success": False, "message": msg})
@@ -407,12 +459,29 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
             gcode = str(status.get("gcodeState", "")).upper()
             pct = status.get("percentage")
             pct = pct if isinstance(pct, (int, float)) else 0
-            last_percentage = max(last_percentage, pct)
-            print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+            snapshot = (stage, gcode, pct)
+            if snapshot != last_logged:
+                print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+                last_logged = snapshot
 
             stage_active = bool(stage) and "IDLE" not in stage and "UNKNOWN" not in stage
-            if gcode in ACTIVE_GCODE or stage_active:
+            if not has_started and (gcode in ACTIVE_GCODE or stage_active):
                 has_started = True
+                # 직전 출력이 끝난 뒤에도 프린터는 진행률 100%를 들고 있다. 그 값이 이번 출력의
+                # 진행률로 섞이면, 중간에 취소돼도 "95% 이상"으로 보여 완료로 오판한다.
+                last_percentage = 0
+
+            # 사용자가 취소를 요청한 주문: 프린터를 멈추고, 멈춘 것이 확인되면 취소로 알린다.
+            # 출력이 막 시작되는 순간에는 stop 명령이 먹지 않을 수 있어서, 멈출 때까지 폴링마다 다시 보낸다.
+            if _cancel_requested(callback_url) and not (has_started and gcode == "FINISH"):
+                _stop_printer_quietly()
+                if has_started and gcode in ("FAILED", "IDLE") and not stage_active:
+                    _post_canceled(callback_url)
+                    return
+                if not has_started and time.time() - start >= startup_grace_sec:
+                    _post_canceled(callback_url)   # 출력이 시작되지 않은 채 취소됨
+                    return
+                continue
 
             if not has_started:
                 # 아직 예열/업로드 처리 중이거나 시작 명령이 먹지 않은 상태
@@ -421,6 +490,10 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
                           f"프린터 상태를 확인해 주세요. (단계={stage}, gcode={gcode})")
                     return
                 continue
+
+            # 진행률은 이번 출력이 시작된 뒤 RUNNING일 때만 반영한다 (PREPARE 등에서는 이전 값이 남아 있을 수 있다)
+            if gcode == "RUNNING":
+                last_percentage = max(last_percentage, pct)
 
             if gcode == "FINISH":
                 requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
@@ -564,6 +637,17 @@ def _print_queue_worker():
     while True:
         job = _print_job_queue.get()
         callback_url = job["callbackUrl"]
+        order_id = _order_id_from_callback(callback_url)
+        # 대기 중에 취소된 작업은 쿨다운도 기다리지 않고 건너뛴다. (취소 콜백은 취소 요청 때 이미 보냈다)
+        # resume 작업은 프린터가 실제로 출력 중인 작업이라 건너뛰지 않고, 폴링이 프린터를 멈춘다.
+        if not job.get("resume") and order_id in _CANCEL_REQUESTED:
+            with _print_queue_lock:
+                if job in _pending_jobs:
+                    _pending_jobs.remove(job)
+                _save_print_queue_state()
+            _CANCEL_REQUESTED.discard(order_id)
+            _print_job_queue.task_done()
+            continue
         # 대기 목록(_pending_jobs)에 남겨 둔 채로 기다린다: 서버가 재시작돼도 복구된다.
         # (재시작 후 상태 확인만 이어가는 resume 작업은 새 출력이 아니라서 기다리지 않는다)
         if not job.get("resume"):
@@ -571,8 +655,19 @@ def _print_queue_worker():
         with _print_queue_lock:
             if job in _pending_jobs:
                 _pending_jobs.remove(job)
-            _current_job = job
-            _save_print_queue_state()
+            # 쿨다운을 기다리는 사이 취소 요청이 들어왔는지 잠금 안에서 다시 확인한다
+            # (취소 요청도 같은 잠금 안에서 처리해서, 어느 한쪽만 보는 일이 없다)
+            if not job.get("resume") and order_id in _CANCEL_REQUESTED:
+                _CANCEL_REQUESTED.discard(order_id)
+                _save_print_queue_state()
+                skip = True
+            else:
+                _current_job = job
+                _save_print_queue_state()
+                skip = False
+        if skip:
+            _print_job_queue.task_done()
+            continue
         try:
             print(f"[PrintQueue] 출력 시작 (대기 {_print_job_queue.qsize()}개 남음)")
             if job.get("resume"):
@@ -589,6 +684,7 @@ def _print_queue_worker():
                 pass
         finally:
             _last_job_finished_at = time.time()
+            _CANCEL_REQUESTED.discard(order_id)   # 이 주문의 취소 요청은 여기서 끝
             with _print_queue_lock:
                 _current_job = None
                 _save_print_queue_state()
@@ -635,9 +731,13 @@ class _StreamState:
         self.top_view_rect: tuple | None = None
         # 손가락 자리 가로 중심(원본 프레임 px) — 가이드 실루엣이 놓이는 열.
         self.finger_slot_x: float = 0.0
-        # 마커를 처음 잡았을 때의 코너 — 손가락이 아직 없을 때도 프론트
-        # 가이드의 큐티클 라인 위치와 실루엣 크기(mm/px)를 계산하는 데 쓴다.
+        # 마커를 처음 잡았을 때의 코너 — 화면 창과 프론트 가이드 실루엣 크기(mm/px)를
+        # 계산하는 데 쓴다. 큐티클 라인 위치는 아래 guide_corners(최신 마커)로 계산한다.
         self.marker_corners = None
+        # 손가락이 없을 때 큐티클 라인 위치를 계산하는 최신 마커 코너와 잡은 시각 —
+        # marker_corners와 달리 계속 갱신돼서, 손가락을 넣었을 때 측정이 쓸 행과 같다.
+        self.guide_corners = None
+        self.guide_corners_t: float = 0.0
         # 실측 중인 guide_y(원본 프레임 px)와 마지막으로 확인된 시각. 측정이
         # 실제로 쓰는 행이라 있으면 마커 기준 추정보다 항상 우선한다.
         self.live_guide: tuple | None = None
@@ -1115,6 +1215,26 @@ def _remember_marker(frame: np.ndarray):
     _S.top_view_rect = rect   # 마지막에 — None 여부가 "마커 잡힘" 표시라서
 
 
+def _refresh_guide_marker(frame: np.ndarray):
+    """손가락이 없을 때 가이드 선을 그릴 마커 코너를 지금 프레임으로 갱신한다 (화면 표시용).
+
+    측정은 매 프레임 마커를 새로 잡아 guide_y를 계산하는데, 손가락이 없을 때의 추정은
+    처음 잡은 코너(_S.marker_corners)를 계속 써서 그 사이 카메라/받침대가 움직였으면
+    손가락을 넣는 순간 선이 실측 위치로 튀었다. 같은 계산을 지금 마커로 하면 그대로다.
+    손가락이 잡혀 실측값을 쓰는 동안은 건너뛰고, 그 밖에는 GUIDE_MARKER_REFRESH_SEC에
+    한 번만 돈다. 마커가 가려져 못 잡으면 직전 값을 그대로 둔다."""
+    now = time.time()
+    if now - _S.guide_corners_t < GUIDE_MARKER_REFRESH_SEC:
+        return
+    live = _S.live_guide
+    if live is not None and now - live[1] < GUIDE_LIVE_HOLD_SEC:
+        return
+    _S.guide_corners_t = now
+    corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+    if corners is not None:
+        _S.guide_corners = corners
+
+
 def _top_measure() -> dict | None:
     """안정(촬영 가능) 상태일 때만 손톱 너비/길이와 화면 위치 — 스트림 화면(_top_view_rect
     창) 기준 비율. widthMm/lengthMm는 지금 촬영하면 최종값이 되는 그 구간 평균이다."""
@@ -1138,8 +1258,10 @@ def _top_guide() -> dict | None:
 
     cuticleY는 측정이 실제로 쓰는 guide_y 행 그대로다: 손가락이 잡혀 있으면
     MeasureWorker의 실측값(EMA 포함), 아니면 같은 함수(guide_line_row)를
-    손가락 자리 열에서 마커만으로 계산한 값. 예전에 스트림에 직접
+    손가락 자리 열에서 최신 마커(_refresh_guide_marker)만으로 계산한 값 —
+    그래서 손가락을 넣든 안 넣든 선 위치가 같다. 예전에 스트림에 직접
     그리던 파란 점선과 같은 위치이고, 그리는 방식만 프론트로 옮겼다.
+    화면 창·실루엣 크기(aspect/centerX/mmToH)는 처음 잡은 마커 기준 그대로다.
     """
     corners, rect = _S.marker_corners, _S.top_view_rect
     if corners is None or rect is None:
@@ -1152,8 +1274,10 @@ def _top_guide() -> dict | None:
     if live is not None and time.time() - live[1] < GUIDE_LIVE_HOLD_SEC:
         guide_y = live[0]
     else:
-        offset_px = _live_guide_offset_mm(_S.current_finger or "") / mpp
-        guide_y = _live_guide_line_row(corners, _S.finger_slot_x, offset_px)
+        now_corners = _S.guide_corners if _S.guide_corners is not None else corners
+        offset_px = (_live_guide_offset_mm(_S.current_finger or "")
+                     / _live_marker_mm_per_px(now_corners, ARUCO_SIZE_MM))
+        guide_y = _live_guide_line_row(now_corners, _S.finger_slot_x, offset_px)
 
     return {
         "aspect":   view_w / view_h,                      # 스트림 화면 가로/세로 비율
@@ -1188,6 +1312,7 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
                 # 손가락 없이도 되는 가벼운 감지라 여기서도 똑같이 시도해서
                 # 그 틈을 없앤다. 한 번 잡히면 이후로는 추가 비용이 없다.
                 _remember_marker(frame)
+                _refresh_guide_marker(frame)
                 _push_frame(_S.top_frame, _top_view(frame))
         time.sleep(0.05)
 
@@ -1304,6 +1429,8 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             # GUIDE_LIVE_HOLD_SEC 뒤 _top_guide가 마커 기준 추정으로 돌아간다.
             if result is not None and result.get("guide_y") is not None:
                 _S.live_guide = (float(result["guide_y"]), now)
+            # 손가락이 없을 때의 가이드 선도 지금 마커 위치로 — 손가락을 넣어도 선이 안 튀게
+            _refresh_guide_marker(frame)
 
             # 웹 화면에는 측정 오버레이(상태 테두리·L/W 글자·폭 표시선)를 굽지 않은
             # 깨끗한 카메라 화면만 보낸다 — 측정 중/촬영 가능 표시와 안정 상태의
@@ -1827,7 +1954,10 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
     tip_extension_mm이 None이면 nail_exact_stl.py가 쉐입별 기본값(TIP_EXTENSION_DEFAULT_MM)을 쓴다."""
     try:
         results_root = os.path.join(BASE, "results", userid, session, hand)
-        stl_dir      = os.path.join(results_root, "stl")
+        # 연장 길이마다 폴더를 따로 쓴다 - 같은 스캔으로 다른 길이를 신청해도 다른 주문의 STL을 덮어쓰지 않는다
+        # (병합은 주문의 연장 길이로 같은 폴더를 찾아 읽는다: printer/merge_fingers.py stl_subdir)
+        stl_sub      = stl_subdir(tip_extension_mm)
+        stl_dir      = os.path.join(results_root, "stl", stl_sub)
         os.makedirs(stl_dir, exist_ok=True)
         rel_prefix   = f"results/{userid}/{session}/{hand}"   # 콜백에 담을 로컬 상대 경로의 앞부분
 
@@ -1875,7 +2005,7 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
         # stlUrl 자리에는 로컬 상대 경로를 보낸다(Spring은 이 값을 읽는 화면이 없다).
         fingers_data = [
             {"finger": finger.upper(),
-             "stlUrl": f"{rel_prefix}/stl/nail_{finger}_{shape}.stl"}
+             "stlUrl": f"{rel_prefix}/stl/{stl_sub}/nail_{finger}_{shape}.stl"}
             for finger in FINGER_ORDER if finger in succeeded
         ]
 
@@ -1908,15 +2038,26 @@ class StlRequest(BaseModel):
     tip_extension_mm: float | None = None
 
 class MergeBothHandsRequest(BaseModel):
-    userid: str; leftSession: str; rightSession: str
-    leftShapes: dict[str, str]; rightShapes: dict[str, str]
+    userid: str; leftSession: str
+    # 한 손가락만 출력할 땐 오른손 정보를 생략한다 (leftShapes에 {"index": "round"}처럼 출력할 손가락만 넣는다)
+    rightSession: str | None = None
+    leftShapes: dict[str, str]; rightShapes: dict[str, str] = {}
     callbackUrl: str; printCallbackUrl: str | None = None
+    # 주문의 연장 길이(mm). 그 길이로 만든 STL 폴더를 읽는다. 없으면(예전 주문) 쉐입 기본 길이 폴더.
+    tipExtensionMm: float | None = None
 
 class MergeBothMeasurementsRequest(BaseModel):
     userid: str; leftSession: str; rightSession: str; callbackUrl: str
 
 class StartPrintRequest(BaseModel):
     mergedModelUrl: str; outputDir: str; callbackUrl: str
+
+class PrintControlRequest(BaseModel):
+    # 조작할 출력 주문 ID. 현재 출력 중이거나(일시정지/재개/취소) 대기 중인(취소) 주문만 조작할 수 있다.
+    # Spring이 숫자로 보내도 받도록 int도 허용한다 (pydantic v2는 숫자를 문자열로 자동 변환하지 않는다).
+    orderId: str | int
+    # 취소 전용: 아직 큐에 없는 주문(병합 중)도 "이 주문은 취소됨"으로 표시해 둔다. 병합이 끝나면 큐에 넣지 않는다.
+    preCancel: bool = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2298,12 +2439,30 @@ def test_side_capture():
 
 # ── 프린터 ───────────────────────────────────────────────────
 
+def _current_order_id():
+    with _print_queue_lock:
+        return _order_id_from_callback(_current_job["callbackUrl"]) if _current_job else None
+
+
+def _find_print_job_locked(order_id: str):
+    """주문 ID로 작업을 찾는다 (호출하는 쪽이 _print_queue_lock을 잡고 있어야 한다).
+    반환: ("current" | "queued" | None, job). 재시작 후 이어서 감시 중인 resume 작업은 이미 프린터가
+    출력 중인 작업이라 대기가 아니라 current로 본다."""
+    if _current_job and _order_id_from_callback(_current_job["callbackUrl"]) == order_id:
+        return "current", _current_job
+    for j in _pending_jobs:
+        if _order_id_from_callback(j["callbackUrl"]) == order_id:
+            return ("current" if j.get("resume") else "queued"), j
+    return None, None
+
+
 @app.get("/print/status")
 def print_status():
     try:
         return {
             "success": True,
             "queueSize": _print_job_queue.qsize(),  # ← 추가
+            "currentOrderId": _current_order_id(),  # 지금 출력(또는 준비) 중인 주문 ID, 없으면 None
             **_fetch_printer_status()
         }
     except Exception as e:
@@ -2316,10 +2475,10 @@ def merge_both(request: MergeBothHandsRequest):
         target=_run_merge_both_hands,
         args=(request.userid, request.leftSession, request.rightSession,
               request.leftShapes, request.rightShapes,
-              request.callbackUrl, request.printCallbackUrl),
+              request.callbackUrl, request.printCallbackUrl, request.tipExtensionMm),
         daemon=True,
     ).start()
-    return {"status": "started", "message": "양손 병합이 시작되었습니다."}
+    return {"status": "started", "message": "병합이 시작되었습니다."}
 
 
 @app.post("/print/start")
@@ -2333,6 +2492,76 @@ def start_print(request: StartPrintRequest):
         "queuePosition": _print_job_queue.qsize(),
         "message": f"출력 대기열에 추가되었습니다. (앞에 {waiting}개 대기 중)"
     }
+
+@app.post("/print/pause")
+def pause_print(request: PrintControlRequest):
+    """지금 출력 중인 주문을 일시정지한다. 응답은 항상 200이고 성공 여부는 success로 구분한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, _ = _find_print_job_locked(order_id)
+    if kind != "current":
+        return {"success": False, "message": "지금 출력 중인 주문이 아닙니다."}
+    try:
+        printer = _get_printer()
+        gcode = str(printer.get_state()).upper()
+        if gcode == "PAUSE":
+            return {"success": True, "message": "이미 일시정지 상태입니다."}
+        if gcode != "RUNNING":
+            return {"success": False, "message": f"출력 중일 때만 일시정지할 수 있습니다. (현재 상태: {gcode})"}
+        ok = printer.pause_print()
+    except Exception as e:
+        return {"success": False, "message": f"프린터에 명령을 보내지 못했습니다: {e}"}
+    return {"success": bool(ok), "message": "일시정지를 요청했습니다." if ok else "일시정지 명령이 거부됐습니다."}
+
+
+@app.post("/print/resume")
+def resume_print(request: PrintControlRequest):
+    """일시정지된 주문을 다시 출력한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, _ = _find_print_job_locked(order_id)
+    if kind != "current":
+        return {"success": False, "message": "지금 출력 중인 주문이 아닙니다."}
+    try:
+        printer = _get_printer()
+        gcode = str(printer.get_state()).upper()
+        if gcode == "RUNNING":
+            return {"success": True, "message": "이미 출력 중입니다."}
+        if gcode != "PAUSE":
+            return {"success": False, "message": f"일시정지 상태일 때만 재개할 수 있습니다. (현재 상태: {gcode})"}
+        ok = printer.resume_print()
+    except Exception as e:
+        return {"success": False, "message": f"프린터에 명령을 보내지 못했습니다: {e}"}
+    return {"success": bool(ok), "message": "재개를 요청했습니다." if ok else "재개 명령이 거부됐습니다."}
+
+
+@app.post("/print/cancel")
+def cancel_print(request: PrintControlRequest):
+    """주문을 취소한다.
+      - 대기 중(queued): 큐에서 빼고 바로 취소 콜백을 보낸다.
+      - 출력 중(current): 프린터에 정지 명령을 보낸다. 프린터가 멈춘 것이 확인되면 폴링이 취소 콜백을 보낸다.
+    찾기, 취소 표시, 큐에서 빼기를 한 번의 잠금 안에서 처리해서 큐 워커와 엇갈리지 않게 한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, job = _find_print_job_locked(order_id)
+        if kind is None:
+            if request.preCancel:
+                # 병합 중이라 아직 큐에 없다 - 병합이 끝나는 시점에 _slice_and_print_local이 이 표시를 보고 건너뛴다
+                _CANCEL_REQUESTED.add(order_id)
+                return {"success": True, "kind": "pending", "message": "병합 중인 주문을 취소했습니다."}
+            return {"success": False, "message": "대기 중이거나 출력 중인 주문이 아닙니다."}
+        _CANCEL_REQUESTED.add(order_id)
+        if kind == "queued":
+            if job in _pending_jobs:
+                _pending_jobs.remove(job)
+            _save_print_queue_state()
+    if kind == "queued":
+        _post_canceled(job["callbackUrl"])
+        return {"success": True, "kind": "queued", "message": "대기 중인 주문을 취소했습니다."}
+    _stop_printer_quietly()
+    return {"success": True, "kind": "current",
+            "message": "출력 취소를 요청했습니다. 프린터가 멈추면 취소로 반영됩니다."}
+
 
 # ── 카메라 인덱스 설정 (웹 UI에서 카메라 선택용) ─────────────
 @app.get("/camera/config")

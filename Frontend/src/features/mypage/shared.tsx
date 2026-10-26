@@ -4,7 +4,13 @@ import type { PrintOrderResponse as NailTipPrintOrder } from '@/entities/print/a
 import type { DesignImageResponse, SavedDesignResponse } from '@/entities/design/api'
 import type { ScanResultResponse } from '@/entities/scan/api'
 import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
-import { FALLBACK_C_CURVE_MM, FALLBACK_LENGTH_MM, FALLBACK_WIDTH_MM, NAIL_BASELINE } from '@/shared/utils/nailMetrics'
+import {
+  FALLBACK_C_CURVE_MM,
+  FALLBACK_LENGTH_MM,
+  FALLBACK_WIDTH_MM,
+  nailSummaryComment,
+  nailSummaryMetrics,
+} from '@/shared/utils/nailMetrics'
 
 export type SectionId = 'dashboard' | 'profile' | 'timeline' | 'scans' | 'prints' | 'designs' | 'favorites'
 
@@ -13,6 +19,8 @@ export type LikeModalTarget = {
   imageUrl: string
   mode: 'like' | 'move'
   currentFolderId?: number | null
+  /** designId가 갤러리 id인 찜(다른 로컬 DB 사용자가 공유한 디자인) */
+  community?: boolean
 }
 
 export const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
@@ -23,6 +31,45 @@ export const PRINT_STATUS_LABEL: Record<NailTipPrintOrder['status'], string> = {
   PRINTING: '출력 중',
   COMPLETED: '완료',
   FAILED: '실패',
+  CANCELING: '취소 중',
+  CANCELED: '취소됨',
+}
+
+// 끝난 주문 — 출력 내역 삭제는 이 상태에서만 할 수 있다 (진행 중인 주문은 먼저 취소해야 한다)
+export const FINISHED_PRINT_STATUSES: ReadonlySet<NailTipPrintOrder['status']> = new Set([
+  'COMPLETED',
+  'FAILED',
+  'CANCELED',
+])
+
+// 아직 프린터가 출력하기 전이라 "출력 취소"만 할 수 있는 상태 (일시정지/재개는 PRINTING에서만)
+export const CANCEL_ONLY_PRINT_STATUSES: ReadonlySet<NailTipPrintOrder['status']> = new Set([
+  'QUEUED',
+  'MERGING',
+  'MERGED',
+  'WAITING_IN_QUEUE',
+])
+
+// 실패 사유 원문(서버/프린터 예외 문구)을 사용자용 안내로 바꾼다. 원문은 "자세히 보기"로만 보여준다.
+export function describePrintFailure(reason: string): string {
+  if (/10060|10061|timed? ?out|timeout|connect|connection|upload|mqtt|ftp|응답|연결/i.test(reason)) {
+    return '프린터와 연결하지 못했어요. 프린터 전원과 네트워크를 확인해주세요.'
+  }
+  if (/slic|슬라이|-101|4294967195|gcode/i.test(reason)) {
+    return '출력 준비 중 슬라이싱 문제가 생겼어요.'
+  }
+  return '예기치 못한 오류가 발생했어요.'
+}
+
+// 취소/일시정지/재개 요청이 실패했을 때 보여줄 안내. 우리가 쓴 짧은 한글 문구는 그대로 쓰고,
+// 서버/프린터 예외 원문(영어, HTML, 긴 문장 등)은 안내 문구로 바꿔 detail(자세히 보기)로만 보여준다.
+export function describeActionError(raw: string): { message: string; detail?: string } {
+  if (/프린터 서버에 연결|10060|10061|timed? ?out|timeout|connect|connection|응답|연결/i.test(raw)) {
+    return { message: '프린터와 연결하지 못했어요. 프린터 전원과 네트워크를 확인해주세요.', detail: raw }
+  }
+  const looksLikeOurMessage = raw.length <= 60 && /[가-힣]/.test(raw) && !/[<>]|exception|error|http/i.test(raw)
+  if (looksLikeOurMessage) return { message: raw }
+  return { message: '예기치 못한 오류가 발생했어요.', detail: raw }
 }
 
 // 화면에 보여줄 상태. 병합이 끝났어도(MERGED) 앞에 출력 중/대기 중인 주문이 있으면
@@ -42,6 +89,8 @@ export const PRINT_STATUS_HINT: Record<NailTipPrintOrder['status'], string> = {
   PRINTING: '네일 팁을 출력하고 있어요.',
   COMPLETED: '네일 팁 출력이 완료되었어요.',
   FAILED: '출력 중 문제가 발생했어요.',
+  CANCELING: '출력을 멈추고 있어요. 프린터가 멈추면 취소가 끝나요.',
+  CANCELED: '출력이 취소되었어요.',
 }
 
 // 출력 신청 시 설정한 팁 연장 길이 표시 — 길이를 기록하기 전에 신청된 예전 주문(null)은
@@ -88,6 +137,10 @@ export type ScanDetail = {
   avgLength: number
   avgWidth: number
   avgCurve: number
+  // 판정 막대 채움(%) — 스캔 서버의 5단계 평균 판정
+  lengthPct: number
+  widthPct: number
+  curvePct: number
   fingers: FingerStat[]
   comment: string
 }
@@ -138,15 +191,12 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
     })),
   ]
 
-  const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
-  const avgLength = Number(avg(fingers.map((f) => f.lengthMm)).toFixed(1))
-  const avgWidth = Number(avg(fingers.map((f) => f.widthMm)).toFixed(1))
-  const avgCurve = Number(avg(fingers.map((f) => f.cCurve)).toFixed(1))
-
-  const isLong = avgLength >= 12.5
-  const isNarrow = avgWidth <= 10
-  // avgCurve는 C-curve sagitta 깊이(mm). 기준 평균(mm)보다 얕으면 "완만한 편".
-  const isLowCurve = avgCurve <= NAIL_BASELINE.cCurve.mean
+  // 열 손가락 평균 길이·너비·곡률과 평균 판정은 스캔 서버 통합 measurements.json 상단 summary 값을 그대로 쓴다
+  // (읽지 못하면 여성 평균 수치와 average)
+  const metrics = nailSummaryMetrics(left, right)
+  const avgLength = Number(metrics.length.valueMm.toFixed(1))
+  const avgWidth = Number(metrics.width.valueMm.toFixed(1))
+  const avgCurve = Number(metrics.cCurve.valueMm.toFixed(1))
 
   return {
     scannedAt: left?.scannedAt ?? right?.scannedAt ?? '',
@@ -157,8 +207,11 @@ export function buildScanDetail(left: ScanResultResponse | null, right: ScanResu
     avgLength,
     avgWidth,
     avgCurve,
+    lengthPct: metrics.length.barPercent,
+    widthPct: metrics.width.barPercent,
+    curvePct: metrics.cCurve.barPercent,
     fingers,
-    comment: `평균보다 손톱이 ${isLong ? '긴' : '짧은'} 편이고, ${isNarrow ? '좁은' : '넓은'} 편이에요. 곡률(C-curve)은 ${isLowCurve ? '완만한' : '뚜렷한'} 편입니다.`,
+    comment: nailSummaryComment(metrics),
   }
 }
 
@@ -278,7 +331,7 @@ export const SECTION_META: Record<SectionId, { subtitle: string; title: string; 
   scans: {
     subtitle: 'Hand Analysis',
     title: '손 분석 이력',
-    description: '양손 촬영을 모두 마친 손 스캔 분석 결과예요. 항목을 누르면 상세 결과를 볼 수 있어요.',
+    description: '손 스캔 분석 이력이에요. 항목을 누르면 상세 결과를 볼 수 있어요.',
   },
   designs: {
     subtitle: 'Designs',
