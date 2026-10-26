@@ -558,7 +558,7 @@ _current_job: dict | None = None  # 지금 처리 중인 작업
 
 # 앞 출력이 끝나고 다음 출력을 시작하기까지 두는 간격(초). 베드 정리/교체 시간을 주기 위한 것.
 # 환경변수 PRINT_COOLDOWN_SEC로 바꿀 수 있고, 0이면 바로 시작한다.
-PRINT_COOLDOWN_SEC = int(os.environ.get("PRINT_COOLDOWN_SEC", "120"))
+PRINT_COOLDOWN_SEC = int(os.environ.get("PRINT_COOLDOWN_SEC", "30"))
 _last_job_finished_at: float = 0.0  # 마지막 작업이 끝난 시각(time.time())
 
 
