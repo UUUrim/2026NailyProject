@@ -94,7 +94,7 @@ except ImportError:
 # tag, and seam outright. Top-view photos don't go through this crop; the
 # same box-interior framing issue doesn't apply there.
 CCURVE_TOP_CROP_FRAC    = 0.38
-CCURVE_BOTTOM_CROP_FRAC = 0.35
+CCURVE_BOTTOM_CROP_FRAC = 0.31   # 0.35 였을 때 손가락이 프레임 아래쪽에 놓인 세션(245/246)은 손톱 아랫부분이 잘렸다. 받침대 윗면은 프레임 69% 쯤
 CCURVE_LEFT_CROP_FRAC   = 0.25
 CCURVE_RIGHT_CROP_FRAC  = 0.30
 
@@ -216,6 +216,11 @@ LATERAL_THR = 2.5
 LATERAL_THR_WEAK = 1.0
 LATERAL_WEAK_SEARCH = False      # 한쪽이 아예 안 읽혔을 때(거울 복사 대신) 약한 접힘선 재탐색을 쓸지. 사용자 손에서는 거울 복사가 더 정확했다. 불안정한 쪽(점 20개 미만)일 때는 항상 재탐색
 LATERAL_UNSTABLE_INLIERS = 20   # 한쪽 접힘선이 이보다 적은 점으로 읽혔으면 불안정한 쪽으로 본다
+LATERAL_MIN_OUTER_A = 4.0       # 접힘선 후보 바깥쪽(0.3~1.0mm)의 a* 하한. 윤곽(바깥이 종이)은 -4~+1, 정상 접힘선은 7 이상
+LATERAL_WEAK_MIN_B_STEP = 1.5   # 약한 후보의 (바깥 b* - 안쪽 b*) 하한. 진짜 접힘선 +2~4, 손톱 안쪽 결 0 이하
+OFF_NAIL_SUPPORT_FRAC = 0.6     # 재읽기에서 한쪽 접힘선이 손톱 구간에서 반대쪽의 이 비율보다 짧게만 읽히면 손톱 밖 주름으로 본다(0.35 였을 때 247 검지: 38% 로 빠져나갔다)
+LATERAL_SLANT_MAX = 0.5          # 접힘선 기울기(dx/dy) 상한. 0.5 = 세로에서 약 26도. 손톱 옆 접힘선은 거의 세로다
+LATERAL_SLANT_OTHER = 0.35      # 한쪽만 기울었다고 보려면 반대쪽은 이 값보다 세로에 가까워야 한다
 
 # 가이드선 기준 큐티클 후보 허용 오차(mm). 사용자는 화면의 가이드선에 큐티클을 맞춰서 찍으므로
 # 실제 큐티클은 선에서 1mm 안팎에 있다(가이드 촬영 10장). 허용 오차가 3mm면 손톱 안쪽의
@@ -273,6 +278,14 @@ STRIP_RIGHT_MM       = 26.0   # 띠 오른쪽 경계를 못 찾았을 때: 왼�
 STRIP_RIGHT_SEARCH_MM = (18.0, 34.0)   # 오른쪽 경계(어두운 띠 → 밝은 종이)를 찾는 구간
 STRIP_RIGHT_JUMP_L   = 25     # 이 이상 밝아지면 오른쪽 경계. LED 조명 사진은 +24~27mm 에서 L 36 → 89 로 뛴다
 STRIP_RIGHT_MARGIN_MM = 0.5   # 오른쪽 경계보다 이만큼만 더 오른쪽까지 인정(옆 손가락이 못 들어오게)
+# 띠는 고정물이라 폭(약 24~25mm)과 마커에서의 거리가 사진마다 같다. 엄지처럼 손바닥 그림자가 띠 옆에 붙으면
+# 그림자가 "어두운 띠"로 잡혀 한쪽 경계가 3~5mm 번지고(mm/px 로 ~40px), 그만큼 손바닥이 후보에 들어온다.
+# 폭이 어긋났으면 마커 기준 예상 위치에 더 가까운 경계만 믿고 반대쪽을 폭만큼 떨어뜨린다.
+STRIP_WIDTH_MM       = 24.8   # 어두운 띠의 실제 폭 (마진 제외)
+STRIP_WIDTH_TOL_MM   = 1.5    # 이 안이면 두 경계 모두 그대로 쓴다
+STRIP_LEFT_FROM_MARKER_MM  = 45.3   # 마커 오른쪽 끝 → 띠 왼쪽 경계
+STRIP_RIGHT_FROM_MARKER_MM = 70.1   # 마커 오른쪽 끝 → 띠 오른쪽 경계
+STRIP_TRUST_TOL_MM   = 2.5    # 예상 위치에서 이만큼 안에 있는 경계만 "믿을 수 있는" 경계로 본다
 
 
 def find_finger_strip(image: np.ndarray, aruco_corners: np.ndarray, mpp: float):
@@ -298,18 +311,39 @@ def find_finger_strip(image: np.ndarray, aruco_corners: np.ndarray, mpp: float):
     lookback = max(5, int(1.5 / mpp))
     for x in range(max(start, lookback + 1), W - 1):
         if dark[x] and not dark[x - 1] and med[x - lookback] > STRIP_PAPER_L:
-            x0 = max(0, x - int(STRIP_LEFT_MARGIN_MM / mpp))
             # 오른쪽 경계: 띠(어두움) 다음에 종이(밝음)가 갑자기 나오는 곳. 옛 조명 사진처럼 오른쪽이
             # 그늘이라 계속 어두우면 못 찾으므로 고정 폭으로 대신한다.
-            x1 = x + int(STRIP_RIGHT_MM / mpp)
+            right = x + int(STRIP_RIGHT_MM / mpp) - int(STRIP_RIGHT_MARGIN_MM / mpp)
             a, b = (int(v / mpp) for v in STRIP_RIGHT_SEARCH_MM)
             step = max(3, int(1.0 / mpp))
             for xr in range(x + a, min(W - step, x + b)):
                 if med[xr + step] - med[xr - step] >= STRIP_RIGHT_JUMP_L and med[xr - step] < STRIP_DARK_L:
-                    x1 = xr + int(STRIP_RIGHT_MARGIN_MM / mpp)
+                    right = xr
                     break
+            left, right = _check_strip_width(x, right, aruco_corners[:, 0].max(), mpp)
+            x0 = max(0, left - int(STRIP_LEFT_MARGIN_MM / mpp))
+            x1 = right + int(STRIP_RIGHT_MARGIN_MM / mpp)
             return x0, min(W, x1)
     return None
+
+
+def _check_strip_width(xl: int, xr: int, marker_right: float, mpp: float):
+    """검출된 띠 경계 (왼쪽 xl, 오른쪽 xr)의 폭이 실제 띠 폭과 맞는지 보고, 어긋났으면 고쳐서 돌려준다.
+
+    폭이 허용 범위면 그대로. 아니면 마커 오른쪽 끝에서 예상 거리(STRIP_*_FROM_MARKER_MM)에 더 가까운
+    경계를 믿고 반대 경계를 띠 폭만큼 옮긴다. 두 경계 모두 예상에서 멀면(띠를 옮긴 새 세팅) 손대지 않는다.
+    """
+    width_mm = (xr - xl) * mpp
+    if abs(width_mm - STRIP_WIDTH_MM) <= STRIP_WIDTH_TOL_MM:
+        return xl, xr
+    dev_l = abs((xl - marker_right) * mpp - STRIP_LEFT_FROM_MARKER_MM)
+    dev_r = abs((xr - marker_right) * mpp - STRIP_RIGHT_FROM_MARKER_MM)
+    width_px = int(STRIP_WIDTH_MM / mpp)
+    if dev_r <= dev_l and dev_r <= STRIP_TRUST_TOL_MM:
+        return xr - width_px, xr
+    if dev_l < dev_r and dev_l <= STRIP_TRUST_TOL_MM:
+        return xl, xl + width_px
+    return xl, xr
 
 
 # ─────────────────────────────────────────────────────────────
@@ -358,6 +392,12 @@ def segment_finger(image: np.ndarray, aruco_corners: np.ndarray = None,
                                   for i in range(4)]))
             mpp = MARKER_SIZE_MM / max(side, 1e-6)
         corridor = find_finger_strip(image, aruco_corners, mpp)
+    if aruco_corners is not None and corridor is None:
+        # 이 박스는 항상 검정 띠가 있다. 못 찾았는데 예전 방식으로 고르면 옆 손가락을 재게 된다.
+        raise RuntimeError(
+            "Black finger strip not found.\n"
+            "  → Check the marker is visible and the black strip is in place, with no shadow/hand covering its edges."
+        )
     if corridor is not None:
         skin[:, :corridor[0]] = 0
         skin[:, corridor[1]:] = 0
@@ -642,7 +682,8 @@ FREE_EDGE_REAL_MM     = 1.0    # 윗선 밖으로 이만큼 이상 나와야 진
 MIXED_BG_DARK_L       = 90     # 양옆 배경이 섞인 박스에서 손끝 위 배경 샘플로 쓰는 어두운 픽셀 상한(L)
 
 
-def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dict:
+def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int,
+                     finger_mask: np.ndarray = None) -> dict:
     """
     Find the white free edge of the nail (the milky band at the nail's distal
     end) and return the row where it STARTS — the real end of the nail.
@@ -703,8 +744,65 @@ def detect_white_tip(image: np.ndarray, bbox: tuple, mpp: float, cx: int) -> dic
             break
 
     if len(tops) < WHITE_TIP_MIN_COLS * len(cols):
-        return none
+        pale = _pale_band_by_profile(L, chroma, fy, mpp, cx, fw, finger_mask)
+        return {"tip_y": pale, "thickness_mm": 0.0} if pale is not None else none
     return {"tip_y": int(np.percentile(tops, 20)), "thickness_mm": 0.0}
+
+
+# 짧은 손톱: 흰 띠가 아니라 "옅은 띠"(채도 6~10, 밝기 190+)가 윤곽 끝에서 0.5~2mm 안쪽에 있다. 열 하나하나는
+# 노이즈가 커서 위 검출기(채도 8 이하 + 5행 연속)가 놓치므로, 중앙 열을 묶음으로 나눠 중앙값 프로파일에서
+# "끝 살(채도 높음) → 옅은 띠(채도가 끝 살의 65% 이하로 급감, 밝음)" 전환을 찾는다.
+PALE_PAD_MIN_CHROMA  = 13.0    # 윤곽 끝 살이 분홍이라고 보는 채도 하한
+PALE_DROP_RATIO      = 0.65    # 띠 채도 / 끝 살 채도 상한
+PALE_MIN_L           = 170
+PALE_START_MM        = 0.3     # 윤곽 윗선 아래 이만큼부터 찾는다(윤곽 번짐 제외)
+PALE_END_MM          = 4.0     # 띠가 이보다 깊이 시작하면 손톱 앞 살이 아니라 다른 구조
+PALE_HOLD_MM         = 0.4     # 전환 후 이만큼은 계속 옅어야 한다
+PALE_GROUPS          = 5
+PALE_MIN_AGREE       = 3       # 묶음 중 이 수 이상이 같은 줄(PALE_AGREE_MM 이내)을 가리켜야 인정
+PALE_AGREE_MM        = 0.5
+
+
+def _pale_band_by_profile(L: np.ndarray, chroma: np.ndarray, fy: int, mpp: float, cx: int, fw: int,
+                          finger_mask: np.ndarray = None):
+    """손톱 끝 옅은 띠가 시작되는 줄을 돌려준다. 없으면 None.
+
+    묶음 범위는 손끝에서 2mm 아래 줄의 실제 손가락 폭 기준이다(bbox 폭은 손가락 전체 폭이라 엄지·새끼처럼
+    손끝이 둥글고 좁으면 묶음이 배경까지 나간다).
+    """
+    H, W = L.shape
+    half = int(fw * 0.25)
+    if finger_mask is not None:
+        cols = np.where(finger_mask[min(H - 1, fy + int(2.0 / mpp))] > 0)[0]
+        if len(cols) > 10:
+            cx, half = int((cols[0] + cols[-1]) // 2), int((cols[-1] - cols[0]) * 0.25)
+    xs = np.linspace(max(0, cx - half), min(W - 1, cx + half), PALE_GROUPS + 1).astype(int)
+    r0 = fy + int(PALE_START_MM / mpp)
+    r1 = min(H - 1, fy + int(PALE_END_MM / mpp))
+    pad_lo, pad_hi = fy + max(1, int(0.15 / mpp)), fy + max(2, int(0.7 / mpp))
+    hold = max(2, int(PALE_HOLD_MM / mpp))
+    starts = []
+    for g in range(PALE_GROUPS):
+        if xs[g + 1] - xs[g] < 3:
+            continue
+        c = np.median(chroma[:, xs[g]:xs[g + 1]], axis=1)
+        l = np.median(L[:, xs[g]:xs[g + 1]], axis=1)
+        pad = float(c[pad_lo:pad_hi + 1].max())
+        if pad < PALE_PAD_MIN_CHROMA:
+            continue
+        limit = pad * PALE_DROP_RATIO
+        for r in range(r0, r1 - hold):
+            if c[r] <= limit and l[r] >= PALE_MIN_L and (c[r:r + hold] <= pad * 0.8).all() and (l[r:r + hold] >= PALE_MIN_L).all():
+                starts.append(r)
+                break
+    if len(starts) < PALE_MIN_AGREE:
+        return None
+    starts.sort()
+    tol = int(PALE_AGREE_MM / mpp)
+    for i in range(len(starts) - PALE_MIN_AGREE + 1):
+        if starts[i + PALE_MIN_AGREE - 1] - starts[i] <= tol:
+            return int(np.median(starts[i:i + PALE_MIN_AGREE]))
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1101,9 +1199,10 @@ class _LateralEdges(dict):
     mirrored = False
 
 
-def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
-                         axis_hint: int, fy: int, cuticle_y: int,
-                         nail_half: float, mpp: float) -> dict:
+def _detect_lateral_edges_impl(image: np.ndarray, finger_mask: np.ndarray,
+                               axis_hint: int, fy: int, cuticle_y: int,
+                               nail_half: float, mpp: float, strict: bool = False,
+                               drop_side: str = None) -> dict:
     """
     True per-row LEFT/RIGHT nail-fold edges.
 
@@ -1166,10 +1265,16 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
     d_min = max(2, int(nail_half * 0.30))
     d_max = max(d_min + 4, int(nail_half * 1.60))
     out_lo, out_hi = max(2, int(0.15 / mpp)), max(6, int(0.5 / mpp))
+    out_a_lo, out_a_hi = max(2, int(0.3 / mpp)), max(5, int(1.0 / mpp))
+    # 약한 접힘선 후보를 가르는 색 검사용: 진짜 접힘선은 바깥 피부가 안쪽 손톱판보다 노랗다(b* 가 높다). 손톱 안쪽
+    # 결/주름은 양쪽이 같은 손톱판이라 차이가 없다. 세로로 흐려서 행마다 흔들리지 않게 한다.
+    Bs = cv2.GaussianBlur(lab[:, :, 2], (1, 15), 0)
+    b_lo, b_hi = max(2, int(0.3 / mpp)), max(8, int(1.8 / mpp))
 
-    def scan_row(r, sgn, cx, lo, hi, thr=None):
+    def scan_row(r, sgn, cx, lo, hi, thr=None, outermost=False):
         row = resp[r]
         best, best_v = None, (LATERAL_THR if thr is None else thr)
+        weak = strict and thr is not None and thr < LATERAL_THR
         for d in range(lo, hi):
             i = int(cx) + sgn * d
             if i < 2 or i >= W - 2:
@@ -1178,13 +1283,31 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
                 continue
             if not (row[i] >= row[i - 1] and row[i] >= row[i + 1]):
                 continue
+            # 손가락 윤곽 자체가 접힘선으로 잡히는 것을 막는다. 아래의 "바깥으로 피부가 이어지는가"는 마스크로 보는데,
+            # 마스크 경계가 2~3px 부드러워서 윤곽 바로 안쪽 능선이 통과한다(손가락이 흰 종이와 검정 띠 경계에 붙은 도경
+            # 검지·엄지: 윤곽이 왼쪽 접힘선으로 읽혀 손톱 폭이 9.6mm 가 12.7mm 로 나왔다). 그래서 실제 색으로 한 번 더
+            # 본다: 접힘선 바깥 0.3~1.0mm 의 a* 평균이 피부색(정상 접힘선 145개는 모두 7 이상)이어야 하고, 바깥이 흰
+            # 종이면 -4~+1 이다.
+            o0, o1 = ((i + out_a_lo, i + out_a_hi) if sgn > 0 else (i - out_a_hi, i - out_a_lo))
+            o0, o1 = max(0, o0), min(W, o1)
+            if strict and (o1 <= o0 or float(A[r, o0:o1].mean()) - 128.0 < LATERAL_MIN_OUTER_A):
+                continue
             # Reject the finger silhouette: skin must continue OUTWARD.
             o0, o1 = ((i + out_lo, i + out_hi) if sgn > 0
                       else (i - out_hi, i - out_lo))
             o0, o1 = max(0, o0), min(W, o1)
             if o1 <= o0 or skin[r, o0:o1].mean() < 0.75:
                 continue
-            best, best_v = i, row[i]
+            if weak:
+                ob0, ob1 = ((i + b_lo, i + b_hi) if sgn > 0 else (i - b_hi, i - b_lo))
+                ib0, ib1 = ((i - b_hi, i - b_lo) if sgn > 0 else (i + b_lo, i + b_hi))
+                ob0, ob1, ib0, ib1 = max(0, ob0), min(W, ob1), max(0, ib0), min(W, ib1)
+                if ob1 <= ob0 or ib1 <= ib0 or \
+                        float(Bs[r, ob0:ob1].mean() - Bs[r, ib0:ib1].mean()) < LATERAL_WEAK_MIN_B_STEP:
+                    continue
+            best = i
+            if not outermost:             # 가장 센 후보 대신 가장 바깥(d 가 가장 큰) 후보를 쓴다
+                best_v = row[i]
         return best
 
     # Scan BEYOND the detected cuticle: the fold runs on past it, and the extra
@@ -1239,24 +1362,72 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
             _backup, lf = ("L", lf), None
         elif rf[3] < LATERAL_UNSTABLE_INLIERS <= 40 <= lf[3]:
             _backup, rf = ("R", rf), None
+    # 한쪽 접힘선이 손톱 구간(윗선~큐티클)에서 거의 안 읽히고 큐티클 아래 손가락 옆면에서만 읽힌 경우: 그 선은 손톱
+    # 접힘선이 아니라 손가락 옆면 주름이다(도경 검지: 손톱 밑 499~570행의 선이 폭 12.7mm 를 만들었다). 손톱 구간에서
+    # 읽힌 길이가 1.5mm 미만이거나 반대쪽의 35% 미만이면 없는 쪽으로 보고 아래의 한쪽 처리로 보낸다.
+    _min_span = max(5, int(1.5 / mpp))
+
+    def _nail_overlap(f):
+        return min(f[2], cuticle_y) - max(f[1], fy)
+
+    _off_nail = False
+    if strict and drop_side and lf is not None and rf is not None:
+        # 호출한 쪽이 한쪽 선만 비스듬해서(_slanted_side) 손가락 옆면 주름으로 본 경우: 그 선을 버리고 한쪽 처리로 보낸다.
+        if drop_side == "L":
+            lf = None
+        else:
+            rf = None
+        _off_nail = True
+    if strict and lf is not None and rf is not None:
+        _ol, _or = _nail_overlap(lf), _nail_overlap(rf)
+        if _or >= _min_span and _ol < max(_min_span, OFF_NAIL_SUPPORT_FRAC * _or):
+            lf, _off_nail = None, True
+        elif _ol >= _min_span and _or < max(_min_span, OFF_NAIL_SUPPORT_FRAC * _ol):
+            rf, _off_nail = None, True
     if (lf is None) != (rf is None):
         good, sgn = (rf, +1) if lf is None else (lf, -1)
         gcoef, gy0, gy1 = good[0], good[1], good[2]
+        if _off_nail:
+            gy0, gy1 = max(gy0, fy), min(gy1, cuticle_y)
+
+        # 반대쪽을 손가락 중심에 대해 거울 복사한 위치(아래에서 실제로 쓸 수도 있다). 약한 접힘선 재탐색의 사전 위치로도 쓴다.
+        mirrored = []
+        for r in range(int(gy0), int(gy1) + 1):
+            xs = np.nonzero(finger_mask[r])[0]
+            if len(xs) < 2:
+                continue
+            axis = (int(xs.min()) + int(xs.max())) / 2.0
+            mirrored.append((2.0 * axis - np.polyval(gcoef, r), r))
+        made = _fit_edge_robust(mirrored)
 
         # 거울 복사 전에, 읽힌 접힘선 반대쪽에서 약한 접힘선을 낮은 임계값으로 다시 찾는다. 불빛이 있는 쪽 접힘선은
-        # 그림자가 없어서 약하게만 나타난다(임계값 2.5 미만). 읽힌 쪽과 비슷한 거리(0.7~1.5배)의 창 안에서만
-        # 찾고, 행마다 이어지는 선(25행 이상)일 때만 인정한다. 이렇게 찾으면 거울 복사의 가정(손톱이 손가락
-        # 한가운데 있다)이 필요 없다 - 손톱이 한쪽으로 치우친 손에서는 그 가정이 폭을 틀리게 한다.
+        # 그림자가 없어서 약하게만 나타난다(임계값 2.5 미만). 행마다 이어지는 선(25행 이상)일 때만 인정한다. 이렇게 찾으면
+        # 거울 복사의 가정(손톱이 손가락 한가운데 있다)이 필요 없다 - 손톱이 한쪽으로 치우친 손에서는 그 가정이 폭을 틀리게 한다.
+        # 창은 읽힌 쪽과 비슷한 거리(0.7~1.9배)로 넓게 잡는데, 불안정한 쪽/손톱 밖 선을 다시 찾을 때는 거울 복사 위치
+        # 주변 +-1.5mm 로 좁힌다 - 넓은 창은 손톱 안쪽 결(7.8mm 로 과소)이나 손가락 옆면 주름(12.7mm 로 과대)을 잡았다.
         d_good = float(np.median([abs(np.polyval(gcoef, r) - axis0)
                                   for r in range(int(gy0), int(gy1) + 1)]))
         wlo, whi = max(2, int(d_good * 0.7)), max(4, int(d_good * 1.9))
+        near_mirror = strict and made is not None and (_off_nail or _backup is not None)
+        win = int(1.5 / mpp)
         weak_pts = []
         for r in range(int(gy0), int(gy1) + 1):
-            i = scan_row(r, -sgn, axis0, wlo, whi, thr=LATERAL_THR_WEAK)
+            if near_mirror:
+                dm = abs(np.polyval(made[0], r) - axis0)
+                lo_r, hi_r = max(2, int(dm - win)), max(4, int(dm + win))
+            else:
+                lo_r, hi_r = wlo, whi
+            # 거울 복사 위치 근처 좁은 창에서는 가장 바깥 후보가 진짜 접힘선이다(안쪽 후보는 손톱판 안의 결).
+            i = scan_row(r, -sgn, axis0, lo_r, hi_r, thr=LATERAL_THR_WEAK, outermost=near_mirror)
             if i is not None:
                 weak_pts.append((i, r))
         weak = _fit_edge_robust(weak_pts, min_pts=25)
-        if (LATERAL_WEAK_SEARCH or _backup is not None) and weak is not None and weak[3] >= 25:
+        if _dbg:
+            print(f"  [dbg] weak search rows {int(gy0)}-{int(gy1)} "
+                  f"{'near mirror +-' + str(win) + 'px' if near_mirror else f'window {wlo}-{whi}px'} "
+                  f"(d_good={d_good:.0f}) pts={len(weak_pts)} "
+                  f"median x={np.median([p[0] for p in weak_pts]) if weak_pts else None} off_nail={_off_nail}")
+        if (LATERAL_WEAK_SEARCH or _backup is not None or _off_nail) and weak is not None and weak[3] >= 25:
             _weak_side = "L" if lf is None else "R"
             if lf is None:
                 lf = weak
@@ -1265,23 +1436,16 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
             print(f"  [Lateral] weak opposite fold found ({weak[3]} inliers, thr {LATERAL_THR_WEAK}) "
                   f"- no mirroring")
             good = None
-        elif _backup is not None:
-            # 재탐색 실패: 처음 읽은 불안정한 선을 복원한다(거울 복사보다 실제로 읽은 값을 우선).
+        elif _backup is not None and (not strict or _nail_overlap(_backup[1]) >= _min_span):
+            # 재탐색 실패: 처음 읽은 불안정한 선을 복원한다(거울 복사보다 실제로 읽은 값을 우선). 단 그 선이 손톱
+            # 구간에서 거의 읽히지 않은 것이면(손톱 밖 주름) 복원하지 않고 거울 복사를 쓴다.
             if _backup[0] == "L":
                 lf = _backup[1]
             else:
                 rf = _backup[1]
             good = None
 
-        mirrored = []
-        for r in (range(int(gy0), int(gy1) + 1) if good is not None else ()):
-            xs = np.nonzero(finger_mask[r])[0]
-            if len(xs) < 2:
-                continue
-            axis = (int(xs.min()) + int(xs.max())) / 2.0
-            mirrored.append((2.0 * axis - np.polyval(gcoef, r), r))
-        made = _fit_edge_robust(mirrored)
-        if made is not None:
+        if good is not None and made is not None:
             if lf is None:
                 lf = made
             else:
@@ -1344,6 +1508,74 @@ def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
           f"rows {y0}-{y1}, width {np.median([e[1]-e[0] for e in edges.values()])*mpp:.2f}mm")
     out = _LateralEdges(edges)
     out.mirrored = _was_mirrored
+    return out
+
+
+def _fold_on_outline(image: np.ndarray, edges: dict, mpp: float) -> bool:
+    """읽힌 접힘선 중 하나가 손가락 윤곽(바깥이 흰 종이)에 놓였는가. 접힘선 바깥 0.3~1.0mm 의 a* 중앙값이 피부색이
+    아니면(LATERAL_MIN_OUTER_A 미만) 윤곽이다. 정상 접힘선 145개는 모두 7 이상, 윤곽은 -4~+1 이었다."""
+    if not edges:
+        return False
+    A = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)[:, :, 1].astype(np.float32) - 128.0
+    lo, hi = max(2, int(0.3 / mpp)), max(5, int(1.0 / mpp))
+    W = A.shape[1]
+    left, right = [], []
+    for r, (lx, rx) in edges.items():
+        lx, rx = int(lx), int(rx)
+        if lx - hi >= 0:
+            left.append(float(A[r, lx - hi:lx - lo].mean()))
+        if rx + hi < W:
+            right.append(float(A[r, rx + lo:rx + hi].mean()))
+    return any(v and float(np.median(v)) < LATERAL_MIN_OUTER_A for v in (left, right))
+
+
+def _slanted_side(edges: dict):
+    """한쪽 접힘선만 세로에서 크게 벗어났으면 그쪽("L"/"R"), 아니면 None.
+
+    손톱 옆 접힘선은 손톱 축과 거의 평행한 세로선이다. 한쪽이 약 26도 이상 비스듬하고 반대쪽은 거의 세로면, 비스듬한 쪽은
+    손톱이 아니라 손가락 옆면 주름이다(도경 검지 240: 왼쪽 선이 손톱 밖에서 비스듬히 올라와 폭 9.7mm 가 11.8mm 로 나왔다).
+    88장 중 7장이 이 조건이었고 전부 왼쪽이 기울어 있었으며, 그 사진들의 폭은 같은 손가락의 다른 촬영보다 1~2.5mm 컸다.
+    """
+    if len(edges) < 8:
+        return None
+    ys = np.array(sorted(edges), float)
+    sl = float(np.polyfit(ys, [edges[int(y)][0] for y in ys], 1)[0])
+    sr = float(np.polyfit(ys, [edges[int(y)][1] for y in ys], 1)[0])
+    if abs(sl) > LATERAL_SLANT_MAX and abs(sr) < LATERAL_SLANT_OTHER:
+        return "L"
+    if abs(sr) > LATERAL_SLANT_MAX and abs(sl) < LATERAL_SLANT_OTHER:
+        return "R"
+    return None
+
+
+def detect_lateral_edges(image: np.ndarray, finger_mask: np.ndarray,
+                         axis_hint: int, fy: int, cuticle_y: int,
+                         nail_half: float, mpp: float,
+                         final: bool = False, retry_empty: bool = False) -> dict:
+    """True per-row nail-fold edges ({row: (left_x, right_x)}), {} when not detectable.
+
+    먼저 기존 방식으로 읽는다. final=True(큐티클이 확정된 최종 호출)이고 읽힌 접힘선이 손가락 윤곽에 놓였거나(_fold_on_outline)
+    한쪽만 비스듬하면(_slanted_side) 윤곽 거름·손톱 구간 지지 검사·거울 복사 근처 재탐색을 켠 방식(strict)으로 다시 읽는다.
+    아무것도 못 읽었어도 retry_empty=True(임시 접힘선이 윤곽에 걸렸던 경우)면 strict 로 한 번 더 읽는다. 윤곽이나 옆면 주름이
+    접힘선으로 잡히면 손톱 폭이 2~3mm 커진다(도경 검지 9.7mm 가 12.7mm, 엄지 13mm 가 15.5mm). 정상으로 읽힌 사진과
+    임시(큐티클 가정) 호출은 결과가 달라지지 않는다 - 접힘선 로직 전체를 바꾸면 큐티클 추정까지 흔들려 좌우 손의 같은 손가락
+    길이가 어긋났다.
+    """
+    args = (image, finger_mask, axis_hint, fy, cuticle_y, nail_half, mpp)
+    out = _detect_lateral_edges_impl(*args)
+    if not final:
+        return out
+    if out and _fold_on_outline(image, out, mpp):
+        print("  [Lateral] fold edge on the finger outline - re-reading with outline rejection")
+        return _detect_lateral_edges_impl(*args, strict=True)
+    side = _slanted_side(out) if out else None
+    if side:
+        print(f"  [Lateral] {'left' if side == 'L' else 'right'} fold line is slanted (finger-side crease) - re-reading near the mirrored position")
+        redo = _detect_lateral_edges_impl(*args, strict=True, drop_side=side)
+        return redo if redo else out
+    if not out and retry_empty:
+        print("  [Lateral] no fold read after an outline fold in the provisional pass - re-reading with outline rejection")
+        return _detect_lateral_edges_impl(*args, strict=True)
     return out
 
 
@@ -1521,7 +1753,7 @@ def _measure_top(image: np.ndarray, mpp: float,
     if tip_y >= fy or (fy - tip_y) * mpp < FREE_EDGE_REAL_MM:
         _top_cols = np.where(finger_mask[min(fy + 2, H - 1)] > 0)[0]
         _cx = int((_top_cols[0] + _top_cols[-1]) // 2) if len(_top_cols) else fx + fw // 2
-        wt = detect_white_tip(image, bbox, mpp, _cx)
+        wt = detect_white_tip(image, bbox, mpp, _cx, finger_mask)
         if wt["tip_y"] is not None and wt["tip_y"] > fy:
             white_tip_y = wt["tip_y"]
             print(f"  [White tip] nail ends {(white_tip_y - fy) * mpp:.1f}mm inside "
@@ -1941,8 +2173,9 @@ def _measure_top(image: np.ndarray, mpp: float,
     # Returns {} when the fold is not detectable, in which case the body keeps
     # the constant-width fallback below.
     _axis = int(np.median(list(nail_centers.values()))) if nail_centers else tip_x
+    _pre_on_outline = bool(_lat_pre) and _fold_on_outline(image, _lat_pre, mpp)
     lateral = detect_lateral_edges(
-        image, _lat_mask, _axis, fy, cuticle_y, nail_half, mpp)
+        image, _lat_mask, _axis, fy, cuticle_y, nail_half, mpp, final=True, retry_empty=_pre_on_outline)
     # 큐티클 위치와 축이 확정된 뒤의 재검출이 접힘선을 못 읽을 때가 있다(한쪽 접힘선이 약해서 축이 20px 움직이면 읽히다
     # 말다 한다). 그러면 아래에서 실루엣 폭 x 0.95 로 떨어지는데, 손가락이 손톱보다 훨씬 두꺼운 손은 이 값이 접힘선 폭보다
     # 30% 크다(스캔 221/222 중지 같은 사진이 접힘선 9.2mm 로도 12.0mm 로도 나와 라이브 게이지가 12.0 에서 "안정"이 됐다).
