@@ -628,11 +628,8 @@ type DesignChatSidebarProps = {
     // 분석 결과 상세 패널을 열어 두었는지 — 위쪽 버튼이 '분석 결과 상세 닫기'가 된다
     isCurrentRecordPanelOpen: boolean
     onToggleAnalysisPanel: () => void
-    // 손 촬영에서 이어 온 진입의 이번 촬영 기록 (단독 진입이면 null) — 이 진입에서는 다른 기록 줄을 누르면 패널에 띄워 보기만 한다
+    // 손 촬영에서 이어 온 진입의 이번 촬영 기록 (단독 진입이면 null) — 이 진입에서는 다른 기록 줄을 누르면 그 기록의 채팅을 보기만 한다
     fixedScanKey: string | null
-    // 기록 줄을 눌러 패널에 띄워 보고 있는 기록 (없으면 null) — 그 기록 줄을 강조한다
-    viewingRecordKey: string | null
-    onViewRecord: (scanKey: string) => void
     // 채팅 이력
     historyGroups: ChatHistoryGroup[]
     isHistoryLoading: boolean
@@ -671,8 +668,6 @@ export function DesignChatSidebar({
     isCurrentRecordPanelOpen,
     onToggleAnalysisPanel,
     fixedScanKey,
-    viewingRecordKey,
-    onViewRecord,
     historyGroups,
     isHistoryLoading,
     activeSessionId,
@@ -795,9 +790,8 @@ export function DesignChatSidebar({
     // 다른 기록의 줄을 누르면 그 기록의 채팅 목록을 펼치고 가장 최근에 한 채팅을 연다 (채팅이 없으면 그 기록으로 새 채팅 — + 와 같다).
     // 그러면 지금 채팅의 기록이 바뀌어 사이드바 위 손 분석 카드도 그 기록으로 바뀐다. 지금 채팅에 반영 중인 기록의 줄은 접힌 채팅 목록을 펼친다.
     // 기록 줄은 채팅 목록을 펼치기만 하고, 접는 건 화살표 버튼으로만 한다.
-    // (분석 결과 상세 패널은 기록 줄이 아니라 위쪽 '분석 결과 상세 보기'로 연다 — 단, 손 촬영에서 이어 온 진입에서
-    //  이번 촬영이 아닌 기록 줄을 누르면 지금 채팅의 기록은 그대로 두고 그 기록을 패널에 띄우며, 그 기록의 최근 채팅을
-    //  보기 전용으로 연다(다시 누르면 패널만 닫는다))
+    // (분석 결과 상세 패널은 기록 줄이 아니라 위쪽 '분석 결과 상세 보기'로만 연다 — 손 촬영에서 이어 온 진입에서
+    //  이번 촬영이 아닌 기록 줄을 누르면 지금 채팅의 기록은 그대로 두고 그 기록의 최근 채팅을 보기 전용으로 연다)
     // 지금 채팅에 반영 중인 기록은 피부색 동그라미에 깜빡이는 핑크 고리를 두른다.
     const renderHistoryGroup = (group: ChatHistoryGroup) => {
         const hasChats = group.chats.length > 0
@@ -806,20 +800,16 @@ export function DesignChatSidebar({
         const isHinted = recordHintId > 0 && group.canStartChat && groupScanKey !== currentScanKey
         const isCurrent = !!groupScanKey && groupScanKey === currentScanKey
         const isViewOnlyRecord = !canSelectSession && !!groupScanKey && groupScanKey !== fixedScanKey
-        const isViewing = !!groupScanKey && groupScanKey === viewingRecordKey
         const foldLabel = isGroupCollapsed ? '채팅 목록 펼치기' : '채팅 목록 접기'
-        // 손 촬영에서 이어 온 진입의 다른 기록 — 결과 상세를 패널에 띄우고 그 기록의 가장 최근 채팅을 보기 전용으로 연다
-        // (지금 채팅의 기록은 이번 촬영 기록 그대로). 열 때 그 기록의 채팅 목록도 펼치고(접는 건 화살표로만), 다시 누르면 패널만 닫는다
+        // 손 촬영에서 이어 온 진입의 다른 기록 — 그 기록의 가장 최근 채팅을 보기 전용으로 연다 (지금 채팅의 기록은 이번 촬영 기록 그대로).
+        // 열 때 그 기록의 채팅 목록도 펼친다 (접는 건 화살표로만)
         const viewOnlyAction =
-            isViewOnlyRecord && groupScanKey
+            isViewOnlyRecord && hasChats
                 ? {
-                    label: isViewing ? '분석 결과 상세 닫기' : '이 분석 기록의 결과 상세와 최근 채팅 보기',
+                    label: '이 분석 기록의 최근 채팅 보기',
                     run: () => {
-                        if (!isViewing) {
-                            if (isGroupCollapsed) toggleGroup(group.key, false)
-                            if (hasChats) onOpenChat(group.chats[0])
-                        }
-                        onViewRecord(groupScanKey)
+                        if (isGroupCollapsed) toggleGroup(group.key, false)
+                        onOpenChat(group.chats[0])
                     },
                 }
                 : null
@@ -843,18 +833,13 @@ export function DesignChatSidebar({
                         : null)
         return (
             <div key={group.key} className={`dcw-history__group${isGroupCollapsed ? ' is-collapsed' : ''}`}>
-                <div
-                    className={`dcw-history__group-head${isHinted ? ' is-hinted' : ''}${isCurrent ? ' is-current' : ''}${
-                        isViewing ? ' is-viewing' : ''
-                    }`}
-                >
+                <div className={`dcw-history__group-head${isHinted ? ' is-hinted' : ''}${isCurrent ? ' is-current' : ''}`}>
                     {group.preview && groupScanKey ? (
                         <button
                             type="button"
                             className="dcw-history__group-main"
                             onClick={recordAction?.run}
                             disabled={!recordAction}
-                            aria-pressed={isViewOnlyRecord ? isViewing : undefined}
                             aria-expanded={isCurrent && hasChats && !isViewOnlyRecord ? !isGroupCollapsed : undefined}
                             aria-label={`${group.preview.dateLabel} 손 분석 기록${isCurrent ? ' (지금 채팅에 반영 중)' : ''}${
                                 recordAction ? ` — ${recordAction.label}` : ''

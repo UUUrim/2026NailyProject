@@ -1253,8 +1253,8 @@
   left: 50%;
   top: 50%;
   z-index: -1;
-  /* 글 영역 너비의 1.2배(좁은 화면)에서 1.7배(넓은 화면) 사이 */
-  width: clamp(120%, 40vw, 170%);
+  /* 글 영역 너비의 1.45배(좁은 화면)에서 2.05배(넓은 화면) 사이 — 바꾸면 home.ts의 FEATURED_SLOTS도 다시 잰다 */
+  width: clamp(145%, 48vw, 205%);
   aspect-ratio: 1;
   border-radius: 50%;
   background: radial-gradient(

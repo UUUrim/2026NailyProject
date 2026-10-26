@@ -647,12 +647,6 @@
     background: var(--dcw-hover);
 }
 
-/* 기록 줄을 눌러 분석 결과 상세 패널에 띄워 보고 있는 기록 (손 촬영에서 이어 온 진입의 다른 기록) */
-.dcw-history__group-head.is-viewing {
-    background: var(--dcw-selected);
-    box-shadow: var(--dcw-selected-shadow);
-}
-
 /* 지금 채팅에 반영 중인 기록 — 피부색 동그라미에 고리를 두르고 깜빡인다
    (고리 색은 사이드바의 핑크(#de869f)를 조금 진하게 해서 눈에 잘 띄게) */
 .dcw-history__group-head.is-current .dcw-record__swatch {
