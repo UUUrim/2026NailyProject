@@ -32,7 +32,7 @@ LABELS = os.path.join(os.path.dirname(__file__), "ccurve_labels.json")
 PORT = 8765
 
 # 손가락이 항상 아치 구멍 근처에 오므로 그 부분만 잘라서 보여준다 (원본 픽셀 기준).
-CROP = (1100, 1650, 2050, 2300)   # x0, y0, x1, y1
+CROP = (850, 1950, 2350, 2820)   # x0, y0, x1, y1. 세션 240~259 에서 손가락 끝은 y 2200~2760 에 놓였다(예전 영역 1650~2300 은 손가락이 잘린다)
 
 _lock = threading.Lock()
 
