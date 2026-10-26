@@ -7,7 +7,7 @@ measurements.json 하나로 만든다.
 손 단위 중간 파일/분석 없이, 손가락 파일만 쌓아 두었다가 두 손이 모두
 측정되면 그때 한 번에 계산한다:
   - 치수/크기 판정 (양손 10개 합계 기준, nail_measurer.classify_size_totals)
-  - 10손가락 피부 LAB 평균 → skinToneHex / tone(색상각 기준) / hue / brightness / saturation
+  - 10손가락 피부 LAB 평균 → skinToneHex / tone(노란기 점수 b - 0.5a 기준) / warmScore / warmness / hue / brightness / saturation
   - 추천 컬러 30개 (skin_color.recommend_nail_colors)
   - 추천 쉐입 (nail_measurer.recommend_nail_shape)
 
@@ -26,9 +26,12 @@ import os
 from datetime import datetime
 from typing import Optional
 
+import numpy as np
+
 from nail_measurer import (merge_hand_measurements, classify_size_totals,
                            recommend_nail_shape)
-from skin_color import recommend_nail_colors, lab_to_rgb_hex
+from skin_color import (recommend_nail_colors, lab_to_rgb_hex, display_skin_lab,
+                        brightness_ui, saturation_ui, base_tone)
 
 FINGER_ORDER   = ["thumb", "index", "middle", "ring", "pinky"]
 FINGER_FILE    = "nail_measurements.json"
@@ -133,15 +136,18 @@ def _hand_block(session: str, payloads: dict) -> dict:
     return block
 
 
+SKIN_OUTLIER_MAD = 3.5
+SKIN_OUTLIER_MIN_SPREAD = {"skin_L": 2.0, "skin_a": 1.5, "skin_b": 1.5}   # 손가락 값이 아주 촘촘해도 이 폭 안쪽은 정상으로 본다
 SKIN_MIN_L, SKIN_MAX_L, SKIN_MIN_A = 45.0, 92.0, 8.0   # L이 이 범위 밖(바닥처럼 어둡거나 하얗게 날아감)이거나 붉은기(a*)가 이보다 적으면 피부가 아니다
 
 
 def _skin_and_colors(all_nails: list) -> tuple:
     """(skin dict | None, 추천 컬러 hex 리스트) - 유효한 피부 LAB이 있는 손가락 평균.
 
-    톤은 평균 Lab의 색상각(skin_color.tone_from_hue)으로 판정하고, skin["warmness"]에는 그 색상각(도)을
-    넣는다 (화면의 웜/쿨 슬라이더가 이 값을 쓴다). 각 손가락의 피부값은 nail_measurer가 마커 흰색으로
-    화이트밸런스를 맞춘 사진에서 잰 값이며, 보정이 적용된 손가락 수를 whiteBalancedFingers에 남긴다.
+    톤은 평균 Lab의 노란기 점수 b - 0.5a(skin_color.tone_from_score)로 판정하고, skin["warmScore"]에 그 점수를,
+    skin["warmness"]에는 점수를 예전 색상각(도) 척도로 환산한 값(프론트 슬라이더용)을, skin["hue"]에는 실제 색상각을
+    넣는다 (화면의 웜/쿨 슬라이더가 warmness를 쓴다). 각 손가락의 피부값은 nail_measurer가 흰 종이(안 되면 마커 흰색)로
+    화이트밸런스를 맞춘 고정 노출 피부 사진에서 잰 값이며, 보정이 적용된 손가락 수를 whiteBalancedFingers에 남긴다.
     """
     metrics = [n for n in all_nails
                if all(_num(n.get(k)) is not None for k in ("skin_L", "skin_a", "skin_b", "skin_saturation"))]
@@ -154,6 +160,22 @@ def _skin_and_colors(all_nails: list) -> tuple:
                if SKIN_MIN_L <= float(n["skin_L"]) <= SKIN_MAX_L and float(n["skin_a"]) >= SKIN_MIN_A]
     if not metrics:
         return None, []
+    # 화이트밸런스 보정이 적용된 손가락이 충분히(5개 이상) 있으면 그것만 쓴다. 보정된 값과 안 된 값을 평균 내면
+    # 안 된 손가락이 색을 크게 흔든다 (보정이 빠진 손가락은 색 쏠림이 그대로 남아 있다).
+    balanced = [n for n in metrics if (n.get("skin_wb") or {}).get("applied")]
+    if len(balanced) >= 5:
+        metrics = balanced
+    # 손가락 하나만 다른 손가락들과 크게 어긋나면(하이라이트/그림자/자세 문제) 평균에서 뺀다.
+    # 손가락 10개의 중앙값에서 L/a/b 중 하나라도 SKIN_OUTLIER_MAD배(최소 폭 SKIN_OUTLIER_MIN_SPREAD) 넘게 벗어난 손가락.
+    # 7개 이상 남을 때만 뺀다 (손가락이 적으면 어느 쪽이 맞는지 알 수 없다).
+    if len(metrics) >= 8:
+        vals = {k: np.array([float(n[k]) for n in metrics]) for k in ("skin_L", "skin_a", "skin_b")}
+        keep = np.ones(len(metrics), bool)
+        for k, floor in SKIN_OUTLIER_MIN_SPREAD.items():
+            med = np.median(vals[k]); spread = max(1.4826 * np.median(np.abs(vals[k] - med)), floor)
+            keep &= np.abs(vals[k] - med) <= SKIN_OUTLIER_MAD * spread
+        if keep.sum() >= 7:
+            metrics = [n for n, ok in zip(metrics, keep) if ok]
 
     def avg(key):
         return sum(float(n[key]) for n in metrics) / len(metrics)
@@ -161,15 +183,24 @@ def _skin_and_colors(all_nails: list) -> tuple:
     L, a, b = avg("skin_L"), avg("skin_a"), avg("skin_b")
     saturation = avg("skin_saturation")
 
-    result = recommend_nail_colors(L, a, b)
+    # 화면에 보여 줄 피부색 칩은 새 박스 전용 보정(skin_color.display_skin_lab)을 거친다. 쿨/웜 판정은 측정값 그대로다.
+    # 명도/채도 슬라이더 값은 칩 보정과 별개로, 프론트 라벨 기준(명도 0.55/0.65, 채도 0.30/0.50)에 사람들이 갈리도록
+    # 정답이 있는 3명으로 맞춘 눈금(skin_color.brightness_ui / saturation_ui)으로 환산한다. 칩용 보정(+11)을 명도에
+    # 섞으면 거의 모두 "밝은 편"이 되고, 백엔드 어두운 피부 판정(0.55 미만)도 의미가 없어진다.
+    L_disp, a_disp, b_disp = display_skin_lab(L, a, b)
+    result = recommend_nail_colors(L_disp, a, b)
     summary = result["skin_summary"]
     skin = {
-        "skinToneHex": lab_to_rgb_hex(L, a, b),
+        "skinToneHex": lab_to_rgb_hex(L_disp, a_disp, b_disp),
         "tone":        summary["tone"],
-        "hue":         summary["skin_hue"],
-        "warmness":    summary["warmness"],
-        "brightness":  round(L / 100.0, 3),
-        "saturation":  round(saturation, 3),
+        "hue":         summary["skin_hue"],          # 실제 Lab 색상각(도) - 참고용, 판정에는 쓰지 않는다
+        "warmScore":   summary["warm_score"],        # 판정에 쓰는 노란기 점수 b - 0.5a
+        "warmness":    summary["warmness"],          # 화면 슬라이더용: warmScore를 예전 색상각 척도로 환산한 값
+        "brightness":  round(brightness_ui(L), 3),   # 화면 명도 슬라이더용 눈금 (측정 L은 아래 "L")
+        "saturation":  round(saturation_ui(a, b), 3),  # 화면 채도 슬라이더용 눈금 (붉은기 중심, 측정 a/b는 아래)
+        "chroma":      round(saturation * 40.0, 2),  # 측정 채도(a,b 크기) 손가락 평균 - 참고용
+        "baseTone":      base_tone(summary["tone"])[0],   # pink / neutral / yellow
+        "baseToneLabel": base_tone(summary["tone"])[1],   # 핑크베이스 / 뉴트럴 / 옐로베이스
         "L":           round(L, 2),
         "a":           round(a, 2),
         "b":           round(b, 2),

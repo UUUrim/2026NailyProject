@@ -4,6 +4,8 @@ import { analyzeSkinTone, generateSkinTonePalette, pickSpreadColors, skinToneAna
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { type ScanSession } from '@/shared/utils/scanDetail'
 import { formatMetricCurve, formatDateTimeFull } from '@/features/mypage/shared'
+import { RowActionMenu } from '@/features/mypage/components/RowActionMenu'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 
 type ScanSessionRowProps = {
     session: ScanSession
@@ -13,6 +15,8 @@ type ScanSessionRowProps = {
     onOpenDetail: (session: ScanSession) => void
     onSelectActivity: (id: string) => void
     onHoverActivity: (id: string | null) => void
+    // 손 분석 기록 탭 목록에서만 넘긴다 — 지울 수 있는 기록(채팅 이력도, 그 기록으로 만든 디자인도 없는 기록)에 ⋯ 메뉴를 단다
+    onDelete?: (session: ScanSession) => void
 }
 
 export const ScanSessionRow = memo(function ScanSessionRow({
@@ -23,6 +27,7 @@ export const ScanSessionRow = memo(function ScanSessionRow({
     onOpenDetail,
     onSelectActivity,
     onHoverActivity,
+    onDelete,
 }: ScanSessionRowProps) {
     const activityId = activityIdProp ?? `scan-${session.key}`
     const timeLabel = formatDateTimeFull(session.scannedAt)
@@ -31,10 +36,9 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
         : null
     const skinHex = session.skinToneHex
-    const toneLabel = (
-        skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
-        (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
-    )?.replace(/\s+/g, '') ?? '미분석'
+    const skinAnalysis =
+        skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation) ??
+        (skinHex ? analyzeSkinTone(skinHex) : null)
     // 화면 표시용으로 정렬한 추천 컬러(sortRecommendedColors: 비슷한 색끼리 잇는 TSP 경로)에서
     // 균등 간격으로 6색만 뽑아 미리보기로 쓴다 — 경로 전체에서 고르게 뽑으니 짧은 스와치에도 서로
     // 다른 색과 밝기가 골고루 섞여 보이고, 미리보기도 같은 순서를 따른다.
@@ -50,7 +54,7 @@ export const ScanSessionRow = memo(function ScanSessionRow({
         `곡률 ${formatMetricCurve(session.avgCurve)}`,
     ].join(' · ')
 
-    return (
+    const row = (
         <button
             key={session.key}
             type="button"
@@ -70,7 +74,14 @@ export const ScanSessionRow = memo(function ScanSessionRow({
                 aria-hidden="true"
             />
             <div className="mypage-x__scan-info">
-                <p className="mypage-x__scan-season">{toneLabel}</p>
+                {/* 제목 — 베이스 이름, 바탕은 핑크/뉴트럴/옐로우 베이스 색 */}
+                <p className="mypage-x__scan-season">
+                    {skinAnalysis ? (
+                        <SkinBaseTag kind={skinAnalysis.baseKind}>{skinAnalysis.tone.label}</SkinBaseTag>
+                    ) : (
+                        '미분석'
+                    )}
+                </p>
                 <p className="mypage-x__scan-metrics">{metricsLine}</p>
                 <p className="mypage-x__scan-shape-line">추천 쉐입: {shapeLabel ?? '미정'}</p>
                 {palettePreview.length > 0 && (
@@ -83,5 +94,20 @@ export const ScanSessionRow = memo(function ScanSessionRow({
             </div>
             {timeLabel && <span className="mypage-x__scan-date-end">{timeLabel}</span>}
         </button>
+    )
+
+    if (!onDelete || !session.deletable) return row
+
+    // 카드 버튼 안에 버튼을 넣을 수 없어서 카드 위에 겹쳐 둔다 (오른쪽 아래, 날짜 아래 빈자리)
+    return (
+        <div className="mypage-x__row-shell mypage-x__row-shell--scan">
+            {row}
+            <RowActionMenu
+                orientation="horizontal"
+                triggerLabel={`${timeLabel || '이'} 손 분석 기록 메뉴`}
+                deleteLabel="분석 기록 삭제하기"
+                onDelete={() => onDelete(session)}
+            />
+        </div>
     )
 })

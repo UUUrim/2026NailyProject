@@ -11,6 +11,10 @@ import { Icon } from '../shared'
 // 전체 타일 수는 이 값 + 1(새 폴더 만들기)이 된다.
 const FOLDERS_PER_PAGE = 7
 
+// 폴더 하나를 열었을 때 한 페이지에 보여줄 찜 이미지 수 — 4열 x 5행
+// (전체 찜 이미지 목록은 섹션 기본값 4열 x 4행 = 16개)
+const FOLDER_IMAGES_PAGE_SIZE = 20
+
 export function FavoritesTab() {
   const {
     profile,
@@ -90,7 +94,7 @@ export function FavoritesTab() {
               : sortedFavorites
 
           if (selectedFolder) {
-            const { slice, totalPages } = paginate(folderImages, 'favorites')
+            const { slice, totalPages } = paginate(folderImages, 'favorites', FOLDER_IMAGES_PAGE_SIZE)
             return (
                 <div className="mypage-x__fav-block">
                   <FavBlockToolbar
@@ -105,6 +109,7 @@ export function FavoritesTab() {
                   />
                   <ImageGrid
                       items={slice}
+                      gridClassName="mypage-x__grid--cols-4"
                       isFavoriteView
                       empty={{
                         title: '이 폴더에 찜한 이미지가 없어요',
@@ -254,6 +259,7 @@ export function FavoritesTab() {
                         <>
                           <ImageGrid
                               items={slice}
+                              gridClassName="mypage-x__grid--cols-4"
                               isFavoriteView
                               empty={{
                                 title: '찜한 디자인이 없어요',

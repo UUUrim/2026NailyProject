@@ -10,10 +10,12 @@ import {
   getDesignSwatches,
   getLikedDesigns,
   type DesignExtractedDetails,
+  type KeywordColor,
   type SavedDesignResponse,
 } from '@/entities/design/api'
 import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
+import type { SkinLevel } from '@/shared/utils/skinTone'
 
 const SAMPLE_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 312">
@@ -38,6 +40,7 @@ const SAMPLE_DETAILS: DesignExtractedDetails = {
 export type GenerationContext = {
   source: string
   keywords: string[]
+  colors?: KeywordColor[] // 컬러 키워드 — 색 스와치 + 색 이름 칩
   referenceImageUrl: string | null
   handSummary: {
     toneLabel: string
@@ -46,12 +49,15 @@ export type GenerationContext = {
     avgWidth: number
     avgCurve: number
     skinToneHex?: string | null
+    skinBrightnessLevel?: SkinLevel | null
+    skinSaturationLevel?: SkinLevel | null
     shapeImage?: string | null
     recommendedColors?: string[]
     usedColors?: string[]
     reflectedMood?: string | null
     reflectedDesignType?: string | null
     reflectedMotif?: string | null
+    reflectedSeason?: string | null
   } | null
   revisionKeywords: string[]
 }
@@ -59,6 +65,10 @@ export type GenerationContext = {
 const SAMPLE_CONTEXT: GenerationContext = {
   source: 'preference',
   keywords: ['우아', '그라데이션', '봄', '플로럴', '아몬드'],
+  colors: [
+    { hex: '#FDE2EA', name: '페일 핑크' },
+    { hex: '#A98BFF', name: '라이트 라벤더' },
+  ],
   referenceImageUrl: null,
   handSummary: null,
   revisionKeywords: [],
@@ -114,6 +124,9 @@ export function useNailDesignResultPage() {
   const [shareBusy, setShareBusy] = useState(false)
   const [shape, setShape] = useState<string | null>(null)
   const [nailTipCropUrls, setNailTipCropUrls] = useState<string[] | null>(null)
+  // 쉐입·손톱팁(AR 미리보기에 쓰는 상세 조회 결과)을 받아 온 디자인 - 지금 디자인과 다르면 아직 받는 중
+  const [detailLoadedFor, setDetailLoadedFor] = useState<number | null>(null)
+  const detailLoading = hasRealResult && designId != null && detailLoadedFor !== designId
   // 이 디자인이 만들어진 채팅 세션 ID — "디자인 다시 생성하기"에서 같은 세션으로 이어서
   // 수정할 수 있도록 넘겨준다. 세션 정보 없는 옛 디자인이면 null.
   const [sessionId, setSessionId] = useState<number | null>(null)
@@ -201,6 +214,9 @@ export function useNailDesignResultPage() {
             setSessionId(detail.sessionId ?? null)
           })
           .catch(() => {})
+          .finally(() => {
+            if (!cancelled) setDetailLoadedFor(designId)
+          })
 
       // getDesignDetail 응답엔 찜 여부가 안 들어있어서(공유 여부만 있음), 이미 찜한 디자인을
       // 다시 들어와서 볼 때 하트/폴더명이 항상 초기 상태(false/null)로 보이는 문제가 있었다.
@@ -293,6 +309,7 @@ export function useNailDesignResultPage() {
     shareBusy,
     shape,
     nailTipCropUrls,
+    detailLoading,
     detailsWithSwatches,
     handleToggleShare,
     handleToggleLike,

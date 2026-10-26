@@ -8,17 +8,22 @@ import com.example.nailyproject.dto.response.ScanResultResponseDto;
 import com.example.nailyproject.dto.response.ScanStartResponseDto;
 import com.example.nailyproject.entity.HandScan;
 import com.example.nailyproject.entity.User;
+import com.example.nailyproject.repository.DesignSessionRepository;
 import com.example.nailyproject.repository.HandScanRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @Transactional
@@ -26,6 +31,7 @@ import java.util.Map;
 public class ScanService {
 
     private final HandScanRepository handScanRepository;
+    private final DesignSessionRepository designSessionRepository;
     private final WebClient.Builder webClientBuilder;
     private final PrintOrderService printOrderService;
     private final ScanResultFileService scanResultFileService;
@@ -139,6 +145,47 @@ public class ScanService {
         hands.forEach(HandScan::confirmResult);
     }
 
+    /**
+     * 손 분석 기록 삭제 DELETE /users/me/scan-sessions/{key}
+     * 채팅 이력이 없고 그 기록으로 만든 디자인도 남아 있지 않은 기록만 지울 수 있다 (사이드바에서 지운 채팅이라도 그 채팅으로
+     * 만든 디자인이 마이페이지에 남아 있으면 못 지운다). 두 손 DB 행에 지움 표시만 하고
+     * (기록 목록에서 빠진다) 측정 파일과 행은 남긴다 - 이 스캔으로 신청한 출력 주문이 scanId로 계속 참조한다.
+     */
+    public void deleteScanSession(User user, long leftScanId, long rightScanId) {
+        boolean listed = scanResultFileService.sessions(user.getId()).stream()
+                .anyMatch(s -> s.leftScanId() == leftScanId && s.rightScanId() == rightScanId);
+        List<HandScan> hands = new ArrayList<>();
+        handScanRepository.findByIdAndUserId(leftScanId, user.getId()).ifPresent(hands::add);
+        handScanRepository.findByIdAndUserId(rightScanId, user.getId()).ifPresent(hands::add);
+        if (!listed || hands.isEmpty() || !hands.stream().allMatch(HandScan::isResultConfirmed)
+                || hands.stream().anyMatch(HandScan::isHistoryDeleted)) {
+            throw new IllegalArgumentException("해당 손 분석 기록을 찾을 수 없습니다.");
+        }
+        if (scanUsage(user).isUsed(leftScanId, rightScanId)) {
+            throw new IllegalStateException("채팅 이력이 있거나 이 기록으로 만든 디자인이 남아 있어 삭제할 수 없습니다.");
+        }
+        hands.forEach(HandScan::deleteHistory);
+    }
+
+    /** 이 사용자의 채팅 이력에 있거나 남은 디자인을 만든 손 분석 기록 (기록 목록의 삭제 가능 여부를 한 번에 판별한다) */
+    @Transactional(readOnly = true)
+    public ScanUsage scanUsage(User user) {
+        Set<String> keys = new HashSet<>(designSessionRepository.findChatScanKeys(user.getId()));
+        keys.addAll(designSessionRepository.findDesignScanKeys(user.getId()));
+        return new ScanUsage(keys, new HashSet<>(designSessionRepository.findDesignScanIds(user.getId())));
+    }
+
+    /**
+     * @param scanKeys 채팅 이력에 있거나, 남은 디자인을 만든 채팅(사이드바에서 지운 채팅 포함)에 반영한 기록 키 ("{왼손scanId}-{오른손scanId}")
+     * @param scanIds  남은 디자인을 만들 때 쓴 손 스캔 id
+     */
+    public record ScanUsage(Set<String> scanKeys, Set<Long> scanIds) {
+        public boolean isUsed(long leftScanId, long rightScanId) {
+            return scanKeys.contains(leftScanId + "-" + rightScanId)
+                    || scanIds.contains(leftScanId) || scanIds.contains(rightScanId);
+        }
+    }
+
     /** 이 스캔과, 짝 손이 있으면 그 스캔까지 (본인 것만) */
     private List<HandScan> withPairedScan(User user, Long scanId) {
         HandScan handScan = handScanRepository.findByIdAndUserId(scanId, user.getId())
@@ -230,7 +277,19 @@ public class ScanService {
 
         // 3. 이 손의 STL 생성이 방금 끝났으니, 이 scanId를 기다리고 있던 출력 주문이 있으면
         //    (양손 다 필요한 주문이면 나머지 손도 끝났는지 확인 후) 병합을 시작한다.
-        printOrderService.tryStartMergeForScan(scanId);
+        //    tryStartMergeForScan은 새 트랜잭션(REQUIRES_NEW)으로 DB를 읽으므로, 위의 COMPLETED가
+        //    커밋된 뒤에 불러야 방금 끝난 손의 상태가 보인다. 커밋 전에 부르면 항상 "아직 안 끝남"으로
+        //    판단해서 주문이 QUEUED에 영원히 남는다.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    printOrderService.tryStartMergeForScan(scanId);
+                }
+            });
+        } else {
+            printOrderService.tryStartMergeForScan(scanId);
+        }
     }
 
     /**
@@ -270,6 +329,12 @@ public class ScanService {
                         .brightness(a.brightness())
                         .saturation(a.saturation())
                         .overallSize(a.overallSize())
+                        .avgLengthMm(a.avgLengthMm())
+                        .avgWidthMm(a.avgWidthMm())
+                        .avgCurve(a.avgCurveMm())
+                        .lengthSize(a.lengthSize())
+                        .widthSize(a.widthSize())
+                        .curveSize(a.curveSize())
                         .fingers(a.fingers().stream()
                                 .map(f -> ScanResultResponseDto.FingerResultDto.builder()
                                         .finger(f.finger())

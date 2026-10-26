@@ -11,8 +11,8 @@ const STEPS = [
   },
   {
     number: '02',
-    title: '3D 프린터 제작',
-    description: '분석된 손톱 형태에 맞춘 나만의 네일팁을 출력해요.',
+    title: '네일 팁 출력',
+    description: '분석된 손톱 형태에 맞춘 나만의 네일 팁을 3D 프린터로 출력해요.',
     accent: '#f3eeff',
   },
   {
@@ -37,7 +37,7 @@ export function ProcessGuidePage() {
       <section className="process-v2__hero">
         <p className="process-v2__eyebrow">Your Custom Nail Journey</p>
         <h1>
-          나만의 네일팁,
+          나만의 네일 팁,
           <br />
           이렇게 만들어져요
         </h1>

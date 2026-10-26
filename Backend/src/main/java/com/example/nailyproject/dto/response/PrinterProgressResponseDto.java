@@ -14,4 +14,6 @@ public class PrinterProgressResponseDto {
     private Double bedTemp;
     private String message;          // 실패 시 원인 메시지
     private Integer queueSize;
+    private String gcodeState;       // IDLE / PREPARE / RUNNING / PAUSE / FINISH / FAILED / UNKNOWN - PAUSE면 일시정지 중
+    private Long currentOrderId;     // 지금 출력(또는 출력 준비) 중인 주문 ID, 없으면 null
 }

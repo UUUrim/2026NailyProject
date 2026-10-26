@@ -8,7 +8,7 @@ import { Icon, buildCalendarCells, formatNavDate, formatTimeHms, todayKey, type 
 
 const eventKindMeta: Record<TimelineEventKind, { label: string; icon: keyof typeof Icon }> = {
   scan: { label: '손 촬영 · 분석', icon: 'hand' },
-  print: { label: '네일팁 출력', icon: 'print' },
+  print: { label: '네일 팁 출력', icon: 'print' },
   design: { label: '디자인 생성', icon: 'design' },
 }
 
@@ -299,10 +299,10 @@ export function TimelineTab() {
 
                   <div className="mypage-x__timeline-block mypage-x__timeline-block--print">
                     <p className="mypage-x__timeline-block-title">
-                      {Icon.print} 네일팁 출력 <span>{timelinePrintsOldest.length}건</span>
+                      {Icon.print} 네일 팁 출력 <span>{timelinePrintsOldest.length}건</span>
                     </p>
                     {timelinePrintsOldest.length === 0 ? (
-                        <p className="mypage-x__day-section-empty">이날의 네일팁 출력 기록이 없어요.</p>
+                        <p className="mypage-x__day-section-empty">이날의 네일 팁 출력 기록이 없어요.</p>
                     ) : (
                         <div className="mypage-x__print-list">
                           {timelinePrintsOldest.map((order) => (

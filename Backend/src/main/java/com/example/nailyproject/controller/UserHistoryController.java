@@ -11,9 +11,13 @@ import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.HandScanRepository;
 import com.example.nailyproject.service.PrintOrderService;
 import com.example.nailyproject.service.ScanResultFileService;
+import com.example.nailyproject.service.ScanService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,6 +42,7 @@ public class UserHistoryController {
     private final HandScanRepository handScanRepository;
     private final PrintOrderService printOrderService;
     private final ScanResultFileService scanResultFileService;
+    private final ScanService scanService;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm:ss");
 
@@ -51,6 +56,7 @@ public class UserHistoryController {
         List<HandScan> scans = handScanRepository.findAllByUserOrderByScannedAtDesc(user);
 
         List<ScanHistoryItemDto> data = scans.stream()
+                .filter(scan -> !scan.isHistoryDeleted())
                 .map(scan -> {
                     // 분석 값은 로컬 양손 최종 measurements.json에서 온다 (파일이 아직 없으면 비어 있음).
                     ScanResultFileService.ScanAnalysis a = scanResultFileService.analysisFor(scan).orElse(null);
@@ -86,15 +92,18 @@ public class UserHistoryController {
      * 양손 최종 measurements.json 하나가 한 줄이다. 마이페이지/출력/디자인 채팅이 공통으로 쓴다.
      * (손 한쪽씩의 DB 기록을 시각으로 짝지어 만들지 않는다)
      * 분석 결과 화면에 결과가 뜬 뒤 확정된 스캔만 나온다 - 촬영/분석 도중 나간 스캔은 파일이 있어도 빠진다.
+     * 사용자가 삭제한 기록도 빠진다.
      */
     @GetMapping("/scan-sessions")
     public ResponseEntity<ApiResponse<List<ScanSessionDto>>> getMyScanSessions(
             @AuthenticationPrincipal User user) {
 
+        ScanService.ScanUsage usage = scanService.scanUsage(user);
         List<ScanSessionDto> data = new ArrayList<>();
         for (ScanResultFileService.SessionSummary s : scanResultFileService.sessions(user.getId())) {
             List<HandScan> hands = handScans(user, s.leftScanId(), s.rightScanId());
             if (!hands.stream().allMatch(HandScan::isResultConfirmed)) continue;
+            if (hands.stream().anyMatch(HandScan::isHistoryDeleted)) continue;
             data.add(ScanSessionDto.builder()
                     .key(s.leftScanId() + "-" + s.rightScanId())
                     .leftScanId(s.leftScanId())
@@ -113,10 +122,30 @@ public class UserHistoryController {
                     .avgWidthMm(s.avgWidthMm())
                     .avgCurve(s.avgCurveMm())
                     .avgFreeEdgeMm(s.avgFreeEdgeMm())
+                    .deletable(!hands.isEmpty() && !usage.isUsed(s.leftScanId(), s.rightScanId()))
                     .build());
         }
 
         return ResponseEntity.ok(ApiResponse.success(200, "손 분석 기록 조회 성공.", data));
+    }
+
+    /**
+     * 손 분석 기록 삭제 DELETE /users/me/scan-sessions/{key}
+     * key는 ScanSessionDto.key("{왼손scanId}-{오른손scanId}") 그대로다.
+     * 채팅 이력이 없고 그 기록으로 만든 디자인도 남아 있지 않은 기록(ScanSessionDto.deletable)만 지울 수 있다.
+     */
+    @DeleteMapping("/scan-sessions/{key}")
+    public ResponseEntity<ApiResponse<Void>> deleteScanSession(
+            @AuthenticationPrincipal User user,
+            @PathVariable String key) {
+
+        if (!key.matches("\\d{1,18}-\\d{1,18}")) {
+            throw new IllegalArgumentException("해당 손 분석 기록을 찾을 수 없습니다.");
+        }
+        String[] ids = key.split("-");
+        scanService.deleteScanSession(user, Long.parseLong(ids[0]), Long.parseLong(ids[1]));
+
+        return ResponseEntity.ok(ApiResponse.success(200, "손 분석 기록이 삭제되었습니다.", null));
     }
 
     private static final List<HandScan.ScanStatus> STATUS_ORDER = List.of(
@@ -174,6 +203,20 @@ public class UserHistoryController {
     }
 
     /**
+     * 출력 내역 삭제 DELETE /users/me/prints/{orderId}
+     * 출력 중인 주문만 빼고 지울 수 있다 (내역에서만 빠지고, 진행 중인 출력이 취소되지는 않는다).
+     */
+    @DeleteMapping("/prints/{orderId}")
+    public ResponseEntity<ApiResponse<Void>> deletePrintOrder(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        printOrderService.deletePrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "출력 내역이 삭제되었습니다.", null));
+    }
+
+    /**
      * 병합 결과(MERGED 상태) 확인 후 "진짜 출력하기" POST /users/me/prints/{orderId}/confirm
      * 슬라이싱 + 프린터 업로드/출력 시작을 트리거한다.
      */
@@ -190,6 +233,42 @@ public class UserHistoryController {
     }
 
     /**
+     * 출력 취소 POST /users/me/prints/{orderId}/cancel
+     * 대기/병합 중이던 주문은 바로 CANCELED가 되고, 출력 중인 주문은 프린터를 멈춘 뒤 CANCELED가 된다.
+     */
+    @PostMapping("/prints/{orderId}/cancel")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> cancelPrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.cancelPrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "출력 취소를 요청했습니다.", data));
+    }
+
+    /** 출력 일시정지 POST /users/me/prints/{orderId}/pause */
+    @PostMapping("/prints/{orderId}/pause")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> pausePrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.pausePrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "일시정지를 요청했습니다.", data));
+    }
+
+    /** 일시정지 재개 POST /users/me/prints/{orderId}/resume */
+    @PostMapping("/prints/{orderId}/resume")
+    public ResponseEntity<ApiResponse<PrintOrderResponseDto>> resumePrint(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long orderId) {
+
+        PrintOrderResponseDto data = printOrderService.resumePrintOrder(user, orderId);
+
+        return ResponseEntity.ok(ApiResponse.success(200, "재개를 요청했습니다.", data));
+    }
+
+    /**
      * 프린터 실시간 진행 상황 조회 GET /users/me/prints/progress
      * printer/server.py의 /print/status를 백엔드가 대신 호출해서 전달한다.
      * 프론트는 출력 중일 때 몇 초 간격으로 이걸 폴링해서 진행률/온도를 보여준다.
@@ -203,5 +282,21 @@ public class UserHistoryController {
         return ResponseEntity.ok(
                 ApiResponse.success(200, "프린터 진행 상황 조회 성공.", data)
         );
+    }
+
+    //404 - 없는(또는 남의) 기록
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotFound(IllegalArgumentException e) {
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail(404, e.getMessage()));
+    }
+
+    //400 - 지금 상태로는 할 수 없는 요청 (예: 진행 중인 출력 삭제)
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException e) {
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail(400, e.getMessage()));
     }
 }

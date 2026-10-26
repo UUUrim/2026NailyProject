@@ -99,9 +99,14 @@
   height: 16px;
 }
 
-.design-result-v2__ar-chip:hover {
+.design-result-v2__ar-chip:hover:not(:disabled) {
   color: #de869f;
   transform: translateY(-1px);
+}
+
+.design-result-v2__ar-chip:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .design-result-v2__detail-block {
@@ -158,7 +163,7 @@
 
 /* 결과 화면 오른쪽 박스 크기 고정 (마이페이지 상세모달 등 다른 곳의 같은 패널은 그대로) —
    팔레트 박스는 내용과 무관하게(basis 0) 남는 높이를 전부 갖고, 질감 박스는 스와치 한 줄
-   (썸네일 + 두 줄 라벨) 높이로 고정한다. */
+   (썸네일 + 한 줄 라벨) 높이로 고정한다. */
 .design-result-v2__body .design-result-v2__detail-block--palette {
   flex: 1 1 0;
   min-height: 7.5rem;
@@ -166,7 +171,7 @@
 
 .design-result-v2__body .design-result-v2__detail-block--texture {
   flex: 0 0 auto;
-  height: 8.6rem;
+  height: 7.5rem;
 }
 
 /* 스와치가 한 줄에 다 안 들어가면 줄바꿈(박스가 커짐) 대신 가로 스크롤.
@@ -179,8 +184,15 @@
   scrollbar-width: thin;
 }
 
+/* 라벨은 줄바꿈 없이 한 줄 — 칸 폭(3.4rem)보다 긴 라벨("기본 젤컬러")은 그만큼 칸을 넓힌다 */
 .design-result-v2__body .design-result-v2__texture-item {
   flex-shrink: 0;
+  width: auto;
+  min-width: 3.4rem;
+}
+
+.design-result-v2__body .design-result-v2__texture-label {
+  white-space: nowrap;
 }
 
 .design-result-v2__palette-strip {
@@ -423,13 +435,6 @@
   letter-spacing: -0.02em;
 }
 
-.design-result-v2__origin-desc {
-  margin: 0 0 0.85rem;
-  font-size: 0.84rem;
-  color: #7a6570;
-  line-height: 1.55;
-}
-
 .design-result-v2__origin-hand {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -501,13 +506,62 @@
   flex: 0 0 auto;
 }
 
-/* scan-auto: 피부톤/추천쉐입은 2열, 추천 컬러 반영 박스는 한 줄 전체 */
+/* scan-auto: 왼쪽(피부 톤 위 · 추천 쉐입 아래)과 오른쪽(반영된 추천 컬러)을 가로 2:3으로 나눈다.
+   두 칸은 같은 행 높이로 늘어나고(stretch), 왼쪽 두 카드가 그 높이를 나눠 가진다 */
 .design-result-v2__origin-hand--scan-auto {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
 }
 
-.design-result-v2__origin-stat--palette {
+.design-result-v2__origin-hand-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+/* 추천 컬러가 없으면 왼쪽 묶음이 한 줄 전체 */
+.design-result-v2__origin-hand-side.is-full {
   grid-column: 1 / -1;
+}
+
+.design-result-v2__origin-hand-side > .design-result-v2__origin-stat {
+  flex: 1 1 auto;
+}
+
+/* 카드가 늘어난 높이 안에서 미리보기 + 값 줄을 세로 가운데에 둔다 */
+.design-result-v2__origin-hand-side .design-result-v2__origin-stat-media-row {
+  flex: 1 1 auto;
+}
+
+/* 왼쪽 두 카드 높이가 오른쪽 추천 컬러(3행) 카드와 비슷하도록 대표 피부색·쉐입 미리보기를 조금 키운다 */
+.design-result-v2__origin-hand-side .design-result-v2__origin-stat-swatch,
+.design-result-v2__origin-hand-side .design-result-v2__origin-stat-shape {
+  width: 3.5rem;
+  height: 3.5rem;
+}
+
+/* 피부 톤 카드: 대표 피부색 옆에 "핑크 베이스 · 고명도 · 중채도"를 한 줄로 (마이페이지 칩 문구, 알약 없이 가운뎃점으로 구분) */
+.design-result-v2__origin-tone-terms > span {
+  white-space: nowrap;
+}
+
+.design-result-v2__origin-tone-terms > span + span::before {
+  content: '·';
+  margin-right: 0.4rem;
+  color: #d3b9c3;
+}
+
+/* 추천 쉐입: 한글명 옆 영문명 (손 분석 결과 화면 쉐입 카드와 같은 표기) */
+.design-result-v2__origin-stat-value--shape {
+  align-items: baseline;
+  column-gap: 0.45rem;
+}
+
+.design-result-v2__origin-stat-en {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #b3899a;
+  letter-spacing: 0.08em;
 }
 
 .design-result-v2__origin-photo {
@@ -581,12 +635,26 @@
   font-weight: 700;
 }
 
+/* 컬러 키워드: 동그란 색 스와치 + 색 이름 */
+.design-result-v2__keyword-chip--color {
+  gap: 0.4rem;
+  padding-left: 0.4rem;
+}
+
+.design-result-v2__keyword-swatch {
+  flex: 0 0 auto;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
 /* scan-auto 결과: 추천 컬러 전체 + 반영된 색 체크 표시.
-   웹은 한 줄(색 수만큼 열, 30색이면 30열) — 모바일은 아래 미디어쿼리에서 6열 그리드(30색 → 5행) */
+   10열 그리드(30색 → 3행 × 10열)에 sortRecommendedColors 순서 그대로 row-major로 채우고, 칸은 정사각형 */
 .design-result-v2__origin-palette {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 2.5rem);
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 0.35rem;
   margin: 0.15rem 0 0;
   padding: 0;
@@ -680,18 +748,6 @@
 
   .design-result-v2__origin-hand {
     grid-template-columns: 1fr;
-  }
-
-  /* 반영된 추천 컬러: 6열 그리드(30색 → 6×5). sortRecommendedColors 순서(비슷한 색끼리 잇는 TSP 경로, 연한 → 진한)
-     그대로 row-major로 채운다 */
-  .design-result-v2__origin-palette {
-    grid-auto-flow: row;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 0.45rem;
-  }
-
-  .design-result-v2__origin-swatch {
-    border-radius: 8px;
   }
 
   .design-result-v2__origin-photo-row {

@@ -1,11 +1,9 @@
 package com.example.nailyproject.controller;
 
 import com.example.nailyproject.dto.response.ApiResponse;
-import com.example.nailyproject.dto.response.DesignLikeResponseDto;
 import com.example.nailyproject.dto.response.SavedDesignResponseDto;
 import com.example.nailyproject.dto.response.SavedFolderResponseDto;
 import com.example.nailyproject.entity.User;
-import com.example.nailyproject.service.NailDesignService;
 import com.example.nailyproject.service.SavedDesignService;
 import com.example.nailyproject.service.SavedFolderService;
 import lombok.Getter;
@@ -22,7 +20,6 @@ public class SavedDesignController {
 
     private final SavedDesignService savedDesignService;
     private final SavedFolderService savedFolderService;
-    private final NailDesignService nailDesignService;
 
     @Getter
     public static class LikeRequest {
@@ -57,24 +54,7 @@ public class SavedDesignController {
         return ResponseEntity.ok(ApiResponse.success(200, "개별 이미지 찜하기 성공.", data));
     }
 
-    /** 둘러보기 좋아요 (찜 /likes 와 완전 분리) */
-    @PostMapping("/designs/{designId}/reactions")
-    public ResponseEntity<ApiResponse<DesignLikeResponseDto>> addDesignReaction(
-            @AuthenticationPrincipal User user,
-            @PathVariable Long designId) {
-
-        DesignLikeResponseDto data = nailDesignService.addDesignLike(user, designId);
-        return ResponseEntity.ok(ApiResponse.success(200, "좋아요를 반영했습니다.", data));
-    }
-
-    @DeleteMapping("/designs/{designId}/reactions")
-    public ResponseEntity<ApiResponse<DesignLikeResponseDto>> removeDesignReaction(
-            @AuthenticationPrincipal User user,
-            @PathVariable Long designId) {
-
-        DesignLikeResponseDto data = nailDesignService.removeDesignLike(user, designId);
-        return ResponseEntity.ok(ApiResponse.success(200, "좋아요를 취소했습니다.", data));
-    }
+    // 둘러보기 좋아요(/designs/community/{id}/reactions)는 갤러리 DB id를 쓰므로 CommunityController로 옮겼다
 
     @DeleteMapping("/designs/{designId}/likes")
     public ResponseEntity<ApiResponse<Void>> removeLike(

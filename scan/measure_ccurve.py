@@ -31,6 +31,7 @@ Algorithm (v2 — adaptive, no hard-coded colour thresholds)
 import argparse, json, os, sys
 import cv2
 import numpy as np
+from scipy.ndimage import median_filter
 
 # Run as a subprocess on Windows, stdout's default encoding is the system
 # codepage (cp949 on Korean Windows) regardless of what the parent captures
@@ -50,6 +51,62 @@ for _stream in (sys.stdout, sys.stderr):
 # then shears the nail arc into a slanted line. The C-curve is a perpendicular-to-chord quantity
 # anyway, so a roll does not need undoing.
 TILT_CORRECTION = False
+
+# C-curve 높이 / 손톱 폭 의 허용 범위. "물리적으로 불가능한 값"만 거르려는 넓은 범위다: 스캔 211·212·217·218 의 측정은
+# 0.15~0.44 에 있었고(212 엄지 0.159, 218 검지 0.146), 서 있는 손가락은 0.79 였다. 하한을 너무 올리면 정상 측정을 거부한다.
+SCALE_MM_PER_PX_MAX = 0.024    # 이보다 큰 배율 = 호의 양끝이 잘려 현이 짧게 잡힌 사진 (정상 0.0127~0.022)
+C_RATIO_MIN = 0.14
+# 상한 0.46 은 반원(0.5)보다 낮아서 곡률이 큰 손톱의 일관된 측정값을 버렸다(승희 약지: 두 번 모두 4.36 / 4.29 로 거의 같았는데
+# h/W 0.49·0.47 이라 평균 2.35 로 대체됐다). 호의 높이는 폭의 절반(반원)을 넘기 어렵고, 서 있는 손가락은 0.79 였으므로
+# 반원보다 조금 위까지만 허용한다.
+C_RATIO_MAX = 0.52
+
+# 사이드 사진 검증(side_photo_check) 기준
+SIDE_PHOTO_MAX_H_FRAC = 0.72   # 손가락 덩어리 높이 / 크롭 높이 (정상 최대 0.67, 서 있는 손가락 0.75; 크롭 아래를 0.31 로 바꾼 뒤 값)
+SIDE_PHOTO_MIN_TOP    = 0.12   # 덩어리 위끝 / 크롭 높이 (정상 0.13~0.75, 서 있는 손가락 0.04)
+# 아래 기준은 측정 영역 안에 손가락 끝이 들어와 있는지 본다. 손가락 없이 손/손목 살색만 잡힌 사진(233 엄지: 높이 0.15, 넓이 0.04)을
+# 거른다. 손가락이 프레임 아래쪽에 놓인 세션(224/225, 245/246)의 정상 사진은 높이 0.25~0.38, 위끝 0.62~0.75, 넓이 0.10 이상이다.
+# 처음에 높이 하한을 0.30 으로 두었더니 245/246 의 정상 사진이 거의 전부(손가락 끝이 온전히 보이는데도) 거부돼서 곡률이 탑뷰 밝기
+# 추정으로 떨어졌다 - 손가락 위치는 세션마다 프레임 안에서 프레임 높이의 5% 정도 달라진다.
+SIDE_PHOTO_MIN_H_FRAC = 0.20   # 덩어리 높이 / 크롭 높이 하한
+SIDE_PHOTO_MAX_TOP    = 0.82   # 덩어리 위끝 / 크롭 높이 상한
+SIDE_PHOTO_MIN_AREA   = 0.05   # 덩어리 넓이 / 크롭 넓이 하한 (정상 최소 0.06, 233 엄지 0.04)
+
+
+def side_photo_check(img: np.ndarray, top=0.38, bottom=0.31, left=0.25, right=0.30):
+    """사이드 사진에 C-curve 를 잴 만한 손가락 끝이 있는가. (ok, 이유) 를 돌려준다.
+
+    손가락이 구멍에 안 들어와 있거나(스캔 217/211 소지: 구멍 너머로 머리카락만 보임) 세로로 서 있으면 측정 영역에서
+    손가락 크기의 덩어리가 없거나 이상한 모양으로 잡힌다. 손가락이 측정 영역 아래로 잘렸거나 손만 잡힌 경우도 같이
+    거른다. 촬영 직후 이걸 검사해서 다시 찍게 한다. 이유 문자열에는 측정한 값을 넣어 로그만 보고 원인을 알 수 있게 한다.
+    """
+    sm = cv2.resize(img, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
+    H, W = sm.shape[:2]
+    c = sm[int(H * top):H - int(H * bottom), int(W * left):W - int(W * right)]
+    m = _finger_mask_color(c)
+    if m is None:
+        return False, "no finger found in the measurement area"
+    bx, by, bw, bh = cv2.boundingRect((m > 0).astype(np.uint8))
+    h = m.shape[0]
+    if bh / h > SIDE_PHOTO_MAX_H_FRAC:
+        return False, f"finger blob too tall ({bh / h:.2f} of the crop) - finger is upright/tilted"
+    if by / h < SIDE_PHOTO_MIN_TOP:
+        return False, f"finger blob reaches the top of the crop ({by / h:.2f})"
+    if bh / h < SIDE_PHOTO_MIN_H_FRAC:
+        return False, (f"finger blob too short ({bh / h:.2f} of the crop, need {SIDE_PHOTO_MIN_H_FRAC}) "
+                       f"- no fingertip in the measurement area")
+    if by / h > SIDE_PHOTO_MAX_TOP:
+        return False, (f"finger blob starts too low ({by / h:.2f} of the crop, max {SIDE_PHOTO_MAX_TOP}) "
+                       f"- fingertip is cut off at the bottom of the measurement area")
+    area = float(np.count_nonzero(m)) / float(m.shape[0] * m.shape[1])
+    if area < SIDE_PHOTO_MIN_AREA:
+        return False, f"finger blob too small ({area:.2f} of the crop, need {SIDE_PHOTO_MIN_AREA})"
+    return True, "ok"
+
+
+# Otsu(손톱 vs 손가락 살) 임계값을 구하는 핵심 영역: 크롭 폭 기준, 정점 아래로 이 비율의 행까지 / 정점 좌우 이 비율까지.
+OTSU_CORE_ROWS_FRAC = 0.40
+OTSU_CORE_HALF_FRAC = 0.25
 
 
 def _adaptive_bg_split(B: np.ndarray, border: np.ndarray):
@@ -120,7 +177,7 @@ def _finger_mask_color(img: np.ndarray, min_frac: float = 0.01, open_frac: float
     return ((lbl == i) * 255).astype(np.uint8)
 
 
-def side_edge_blur_px(img: np.ndarray, top=0.38, bottom=0.35, left=0.25, right=0.30):
+def side_edge_blur_px(img: np.ndarray, top=0.38, bottom=0.31, left=0.25, right=0.30):
     """How soft the fingertip edge is in a side photo: the median 10%-90% rise distance (px, at the
     photo's own resolution) of the brightness step across the finger's upper silhouette, where it
     borders the dark box wall.
@@ -355,6 +412,66 @@ def _fit_parabola_robust(xs: np.ndarray, ys: np.ndarray, iters: int = 8):
     return A, B, C, x0, y0, keep
 
 
+SAGITTA_SMOOTH_FRAC = 0.06     # 윗경계 중앙값 필터 폭 / 현 길이
+NEIGHBOR_RISE_FRAC = 0.12       # 골짜기 뒤 윗경계가 이만큼(밴드 폭 대비) 다시 솟으면 옆 손가락으로 보고 자른다
+
+
+def _direct_sagitta_px(xs: np.ndarray, ys: np.ndarray,
+                       x_L: float, y_L: float, x_R: float, y_R: float, chord_px: float):
+    """윗경계에서 호의 높이(sagitta)를 직접 잰다: 현(양끝 점을 이은 선)에서 윗경계 꼭대기까지의 수직 거리(px).
+
+    예전에는 윗경계에 포물선을 맞추고 sagitta = A * (현/2)^2 로 외삽했는데, 계수 A 가 밴드 모양의 작은 차이(울퉁불퉁한
+    경계, 한쪽으로 치우친 꼭대기, 어느 열이 이상치로 빠졌는지)에 크게 흔들려서 같은 손가락을 두 번 찍으면 곡률이 25~70% 달랐다
+    (도경 중지 A 9.3 vs 15.3, 242/243). 직접 거리는 같은 정의(꼭대기-현 높이)를 모델 없이 읽어서 같은 데이터에서 재촬영 차이가
+    평균 23% → 11% 로 줄었고, 값의 평균 수준은 기존과 거의 같다(승희 약지 4.19/4.14 vs 4.36/4.29). 중앙값 필터는 열 하나의
+    튐을 지운다. 못 구하면 None (호출한 쪽이 포물선 값을 쓴다).
+    """
+    if abs(x_R - x_L) < 5 or len(xs) < 10:
+        return None
+    o = np.argsort(xs)
+    x, y = np.asarray(xs, float)[o], np.asarray(ys, float)[o]
+    k = max(3, int(SAGITTA_SMOOTH_FRAC * chord_px) | 1)
+    ysm = median_filter(y, size=k, mode="nearest")
+    m = (y_R - y_L) / (x_R - x_L)
+    yline = y_L + m * (x - x_L)
+    d = (yline - ysm) / np.sqrt(1.0 + m * m)           # 현 위로 솟은 높이 (위 = y 작음)
+    inside = (x >= min(x_L, x_R)) & (x <= max(x_L, x_R))
+    if inside.sum() < 10:
+        return None
+    return float(d[inside].max())
+
+
+def _neighbor_trim_range(xs: np.ndarray, ys: np.ndarray):
+    """윗경계가 옆 손가락 밴드까지 이어졌으면, 주 호의 끝(골짜기)까지만 남기도록 (x_lo, x_hi) 를 돌려준다.
+
+    밴드 열은 옆 손가락과 끊김 없이 이어져서(틈 검출은 안 됨) 현의 끝점이 옆 손가락 손톱에 걸렸다(247 검지: 밴드 817px
+    인데 같은 손가락의 정상 촬영은 702px, 현이 길어져 곡률·스케일이 모두 틀어졌다). 주 호는 꼭대기에서 양옆으로 내려가다가
+    끝나고, 옆 손가락은 그 뒤에서 다시 솟는다. 꼭대기에서 한쪽으로 가며 가장 낮은 지점(골짜기) 뒤로 윗경계가 밴드 폭의
+    NEIGHBOR_RISE_FRAC 이상 다시 올라가면 그 골짜기에서 자른다. 정상 사진 30장 중 오른쪽은 247 검지(157px, 폭의 19%)만
+    걸리고 나머지는 모두 0, 왼쪽도 정상 최대 7%(손톱 끝이 말려 내려간 뒤 다시 올라오는 정도)였다.
+    """
+    o = np.argsort(xs)
+    x, y = np.asarray(xs, float)[o], np.asarray(ys, float)[o]
+    if len(x) < 40:
+        return float(x.min()), float(x.max())
+    ysm = median_filter(y, size=max(5, int(0.03 * len(x)) | 1), mode="nearest")
+    ia = int(np.argmin(ysm))
+    span = float(x.max() - x.min())
+    lo, hi = float(x.min()), float(x.max())
+    for side in ("R", "L"):
+        seg = ysm[ia:] if side == "R" else ysm[:ia + 1][::-1]
+        xseg = x[ia:] if side == "R" else x[:ia + 1][::-1]
+        if len(seg) < 20:
+            continue
+        v = int(np.argmax(seg))
+        if float(seg[v] - seg[v:].min()) > NEIGHBOR_RISE_FRAC * span:
+            if side == "R":
+                hi = float(xseg[v])
+            else:
+                lo = float(xseg[v])
+    return lo, hi
+
+
 def _compute_tilt_angle(mask: np.ndarray) -> float:
     """Angle (degrees) the finger is rolled from upright in this end-on
     crop; positive = tilted right, negative = left.
@@ -413,7 +530,9 @@ def measure_ccurve(image_path: str, width_mm: float,
                    top_crop_frac: float = 0.0,
                    bottom_crop_frac: float = 0.0,
                    left_crop_frac: float = 0.0,
-                   right_crop_frac: float = 0.0) -> dict:
+                   right_crop_frac: float = 0.0,
+                   gates: bool = True) -> dict:
+    """gates=False 는 실험용: 값이 비정상이어도 예외 대신 결과를 돌려주고 결과의 "gate_reason" 에 이유를 넣는다."""
 
     img = cv2.imread(image_path)
     if img is None:
@@ -560,10 +679,23 @@ def measure_ccurve(image_path: str, width_mm: float,
         print(f"  [Tilt] new bbox x={fx} y={fy} w={fw} h={fh}")
 
     # ── 3. Nail vs pulp: Otsu on a* inside the finger ────────
-    vals = A[fmask > 0]
+    # 임계값은 손가락 마스크 전체가 아니라 정점 주변 핵심 영역(위쪽 OTSU_CORE_ROWS_FRAC, 가운데 좌우
+    # OTSU_CORE_HALF_FRAC)에서만 구한다. 구멍 뒤의 팔·손 피부가 마스크에 붙어 있으면 그만큼 a* 분포가 바뀌어
+    # 같은 손가락 사진인데도 임계값이 달라지고(스캔 211/212 엄지: h 2.37 vs 4.11mm), 손톱 띠가 다르게 잡혔다.
+    # 임계값은 핵심 영역에서 구하되, 적용은 예전처럼 마스크 전체에 한다.
+    _top_rows = max(3, int(0.03 * fh))
+    _xs_top = np.nonzero(fmask[fy:fy + _top_rows])[1]
+    _cx = float(np.median(_xs_top)) if len(_xs_top) else fx + fw / 2.0
+    core = np.zeros(fmask.shape, bool)
+    core[fy:int(fy + OTSU_CORE_ROWS_FRAC * W_img),
+         max(0, int(_cx - OTSU_CORE_HALF_FRAC * W_img)):int(_cx + OTSU_CORE_HALF_FRAC * W_img)] = True
+    core &= (fmask > 0)
+    if int(core.sum()) < 500:        # 핵심 영역이 너무 작으면 예전처럼 마스크 전체
+        core = fmask > 0
+    vals = A[core]
     a8 = np.clip((A - vals.min()) / (np.ptp(vals) + 1e-6) * 255,
                  0, 255).astype(np.uint8)
-    t, _ = cv2.threshold(a8[fmask > 0], 0, 255,
+    t, _ = cv2.threshold(a8[core], 0, 255,
                          cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     thr_a = vals.min() + t / 255.0 * np.ptp(vals)
     print(f"  [Nail/pulp] a* Otsu split at {thr_a:.1f}")
@@ -674,6 +806,15 @@ def measure_ccurve(image_path: str, width_mm: float,
     band_mask = np.zeros_like(band_mask)
     band_mask[byy[keep_px], bxx[keep_px]] = 255
 
+    # 옆 손가락 밴드가 이어져 붙었으면 주 호 끝(골짜기)에서 자른다 (_neighbor_trim_range 설명 참고)
+    _lo, _hi = _neighbor_trim_range(cols.astype(float), top_y)
+    if _lo > cols.min() or _hi < cols.max():
+        print(f"  [Band] trimmed a neighbouring finger's band: columns {int(cols.min())}..{int(cols.max())} -> {int(_lo)}..{int(_hi)}")
+        _sel = (cols >= _lo) & (cols <= _hi)
+        cols, top_y = cols[_sel], top_y[_sel]
+        band_mask[:, :int(_lo)] = 0
+        band_mask[:, int(_hi) + 1:] = 0
+
     xs, ys = cols.astype(float), top_y
     A_fit, B_fit, C_fit, vx, vy, keep = _fit_parabola_robust(xs, ys)
     res_med = float(np.median(np.abs(
@@ -739,11 +880,12 @@ def measure_ccurve(image_path: str, width_mm: float,
     scale_mm_per_px = (INSET_FRAC * width_mm) / chord80_px
     chord_px_full = chord80_px / INSET_FRAC   # extrapolated to full width
     half_c = chord_px_full / 2.0
-    # Sagitta straight from the parabola: how far y rises from the vertex
-    # over a run of half_c - no sqrt/circle algebra needed, and it can never
-    # produce the sqrt-of-negative clamp the old circle formula needed for
-    # a too-small radius, since a parabola has no such domain limit.
-    sagitta_px = A_fit * half_c ** 2
+    # Sagitta: 현에서 윗경계 꼭대기까지 직접 잰 높이 (_direct_sagitta_px 설명 참고). 포물선 외삽(A * half_c^2)은 못 구했을
+    # 때만 쓴다. 포물선 계수 A 는 아래 방향 검증과 보고용 반지름에는 계속 쓴다.
+    sagitta_parab_px = A_fit * half_c ** 2
+    sagitta_px = _direct_sagitta_px(xs, top_y, x_L, y_L, x_R, y_R, chord_px_full)
+    if sagitta_px is None:
+        sagitta_px = sagitta_parab_px
     h_mm = round(sagitta_px * scale_mm_per_px, 2)
     # Circle-equivalent radius (osculating circle at the vertex, R=1/(2A)) -
     # kept only for reporting/consistency with the arc_radius_mm field
@@ -830,10 +972,34 @@ def measure_ccurve(image_path: str, width_mm: float,
         cv2.imwrite(debug_out, pad)
         print(f"  [Debug] saved → {debug_out}")
 
+    gate_reason = None
     if not geom_valid:
-        raise RuntimeError(f"Invalid arc geometry: {geom_reason}")
+        gate_reason = f"Invalid arc geometry: {geom_reason}"
+        if gates:
+            raise RuntimeError(gate_reason)
 
-    return {
+    # 사람 손톱의 C-curve 높이는 폭의 약 0.2~0.45배다. 이 범위 밖이면 손가락이 서 있거나 기울어서 호가 손톱 단면이
+    # 아닌 것이다(스캔 218 소지: 폭 7.04mm 에 h 5.59mm = 0.79배 - 같은 손의 다른 스캔에서는 1.7mm). 그런 값을 쓰면 같은
+    # 손인데 곡률이 들쭉날쭉해지므로 측정 실패로 돌려서 호출한 쪽이 다른 사진/대체값을 쓰게 한다.
+    # 사진 한 장의 배율(mm/px)은 폰 줌을 고정해서 0.0127~0.022 로 모여 있다. 이보다 크면 손톱 띠가 양끝이 잘려 현이
+    # 실제보다 짧게 잡힌 것이다(스캔 222 검지: 현 327px, 배율 0.0278 - 같은 손가락 221 은 현 596px, 배율 0.0154). 현이 짧으면
+    # 같은 호도 곡률이 작게 나와서(h 1.49 vs 2.17mm) 같은 손인데 곡률이 들쭉날쭉해진다. 이런 사진은 측정 실패로 돌려서
+    # 호출한 쪽이 손가락별 평균 곡률로 대체하게 한다.
+    if scale_mm_per_px > SCALE_MM_PER_PX_MAX:
+        gate_reason = gate_reason or (f"Nail arc too narrow: chord {chord_px_full:.0f}px gives {scale_mm_per_px:.4f} mm/px "
+                                      f"(> {SCALE_MM_PER_PX_MAX}); the nail band is cut off at the sides")
+        if gates:
+            raise RuntimeError(gate_reason)
+
+    _c_ratio = (h_mm / width_mm) if (h_mm and width_mm) else 0.0
+    if not (C_RATIO_MIN <= _c_ratio <= C_RATIO_MAX):
+        gate_reason = gate_reason or (f"Implausible C-curve: h/W = {_c_ratio:.2f} "
+                                      f"(h={h_mm}mm, W={width_mm}mm; expected {C_RATIO_MIN}-{C_RATIO_MAX})")
+        if gates:
+            raise RuntimeError(gate_reason)
+
+    result = {
+        "gate_reason":   gate_reason,
         "c_curve_mm":    h_mm,
         "arc_radius_mm": arc_R,
         "arc_radius_fit_mm": fit_R_mm,
@@ -847,6 +1013,10 @@ def measure_ccurve(image_path: str, width_mm: float,
             "peak":  [int(x_P), int(y_P)],
         },
     }
+    if not gates:      # 실험용: 윗경계 점과 현 끝점을 그대로 돌려준다 (JSON 저장 대상이 아니다)
+        result["_trace"] = {"xs": xs, "ys": top_y, "keep": keep, "hooks": (x_L, y_L, x_R, y_R),
+                            "chord_full": chord_px_full, "apex": (x_P, y_P)}
+    return result
 
 
 def main():

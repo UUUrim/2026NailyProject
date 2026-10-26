@@ -913,32 +913,8 @@
   word-break: keep-all;
 }
 
-.chat-demo__typing {
-  display: inline-flex;
-  gap: 0.3em;
-  padding: 0.95em 1em;
-  border-radius: 1.05em;
-  border-top-left-radius: 0.35em;
-  background: #f6f2f3;
-}
-
-.chat-demo__typing i {
-  width: 0.4em;
-  height: 0.4em;
-  border-radius: 50%;
-  background: var(--muted);
-  animation: chat-typing 1s ease-in-out infinite;
-}
-
-.chat-demo__typing i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.chat-demo__typing i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-/* 생성 결과 — 생성 중엔 로딩 표시만, 완성되면 이미지가 나타난다 */
+/* 생성 결과 — 실제 채팅의 생성 중 카드(design-chat.css의 .design-chat__design-card)를 그대로 쓰고,
+   완성되면 같은 카드에 이미지가 나타난다 */
 .chat-demo__result {
   display: flex;
   flex-direction: column;
@@ -947,51 +923,13 @@
   width: 44%;
 }
 
-.chat-demo__image {
-  position: relative;
+.chat-demo__result .design-chat__design-card {
   width: 100%;
-  aspect-ratio: 3 / 2;
-  overflow: hidden;
-  border-radius: 0.9em;
-  background: #fdf5f8;
-  box-shadow: 0 0 0 1px #f3e0e7;
 }
 
-.chat-demo__generating {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.6em;
-  font-weight: 600;
-  color: var(--accent-deep);
-  transition: opacity 0.4s;
-}
-
-.chat-demo__spinner {
-  width: 1.6em;
-  height: 1.6em;
-  border-radius: 50%;
-  border: 2.5px solid rgba(222, 134, 159, 0.25);
-  border-top-color: var(--accent);
-  animation: story-spin 0.8s linear infinite;
-}
-
-.chat-demo__image .showcase-image {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 0.6s var(--ease);
-}
-
-.chat-demo__result.is-done .showcase-image {
-  opacity: 1;
-}
-
-.chat-demo__result.is-done .chat-demo__generating {
-  opacity: 0;
+/* 데모 카드는 눌러서 크게 볼 수 없다 */
+.chat-demo__result .design-chat__design-card img {
+  cursor: default;
 }
 
 .chat-demo__result .chat-demo__bubble--ai {
@@ -1014,7 +952,8 @@
   margin: 0 1.1em 1em;
   padding: 0.45em 0.45em 0.45em 1em;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  /* 위 말풍선과 같은 둥글기 */
+  border-radius: 1.05em;
   transition:
     border-color 0.25s,
     box-shadow 0.25s;
@@ -1028,7 +967,17 @@
 .chat-demo__placeholder {
   display: inline-flex;
   align-items: center;
+  flex: 1;
+  min-width: 0;
   color: var(--muted);
+}
+
+/* 칸이 좁으면 실제 채팅처럼 말줄임표로 줄인다 */
+.chat-demo__placeholder-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 짧을 땐 왼쪽부터 쳐지고, 입력 칸보다 길어지면 앞부분이 왼쪽으로 밀려나 방금 친 글자가 보인다
@@ -1065,7 +1014,8 @@
   flex-shrink: 0;
   width: 2em;
   height: 2em;
-  border-radius: 50%;
+  /* 입력 칸 둥글기에 맞춘 둥근 사각형 */
+  border-radius: 0.65em;
   background: var(--accent);
   color: #ffffff;
 }
@@ -1222,10 +1172,11 @@
   object-fit: cover;
 }
 
-/* ── Showcase (첫 화면의 Cosmos 같은 원형 궤도) ───────────── */
+/* ── Showcase (Cosmos 같은 나선형 궤도) ───────────── */
 
 .story-showcase {
-  --card-w: clamp(96px, 10.5vw, 190px);
+  /* 화면 가장자리에 닿는 지점의 카드 크기. 안쪽은 더 작고, 바깥쪽은 조금 더 크다 */
+  --card-w: clamp(56px, 7vw, 132px);
   --showcase-bg: #fffafc;
 
   position: relative;
@@ -1283,10 +1234,6 @@
   will-change: transform, opacity;
 }
 
-.story-showcase__card[data-ring='0'] {
-  filter: blur(0.6px) saturate(0.92);
-}
-
 /* 이미지가 없는 자리 카드 */
 .story-showcase__card .showcase-image {
   --slot-bg: #f6e6ec;
@@ -1299,13 +1246,28 @@
   text-align: center;
 }
 
-/* 지나가는 카드 위에서도 글이 또렷하도록 가운데만 배경색으로 은은하게 덮는다 */
+/* 글·버튼 뒤를 넓고 진한 흰 원으로 덮는다 — 가운데 가까운 카드는 흰빛에 묻히고, 바깥으로 갈수록 서서히 드러난다 */
 .story-showcase__center::before {
   content: '';
   position: absolute;
-  inset: -22% -16%;
+  left: 50%;
+  top: 50%;
   z-index: -1;
-  background: radial-gradient(closest-side, var(--showcase-bg) 55%, rgba(255, 250, 252, 0) 100%);
+  /* 글 영역 너비의 1.45배(좁은 화면)에서 2.05배(넓은 화면) 사이 — 바꾸면 home.ts의 FEATURED_SLOTS도 다시 잰다 */
+  width: clamp(145%, 48vw, 205%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle closest-side,
+    #ffffff 0%,
+    #ffffff 38%,
+    rgba(255, 255, 255, 0.92) 52%,
+    rgba(255, 255, 255, 0.72) 66%,
+    rgba(255, 255, 255, 0.42) 80%,
+    rgba(255, 255, 255, 0.15) 92%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
@@ -1630,24 +1592,6 @@
   }
 }
 
-@keyframes story-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes chat-typing {
-  0%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.45;
-  }
-  50% {
-    transform: translateY(-3px);
-    opacity: 1;
-  }
-}
-
 /* 손톱 뿌리를 중심으로 커지며 붙는다 — 위치·기울기 transform을 그대로 두고 scale만 더한다 */
 @keyframes ar-tip-in {
   from {
@@ -1745,10 +1689,6 @@
 
   .story-intro__step-text {
     font-size: 0.8125rem;
-  }
-
-  .story-showcase__center::before {
-    inset: -12% -8%;
   }
 }
 

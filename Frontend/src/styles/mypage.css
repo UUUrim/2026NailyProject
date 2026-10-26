@@ -18,7 +18,7 @@
 }
 
 .mypage-x-page {
-  --mp-page-max: 1240px;
+  --mp-page-max: 1280px;
   max-width: var(--mp-page-max);
   margin: 0 auto;
   padding-bottom: 3rem;
@@ -37,13 +37,13 @@
   /* 스크롤과 무관하게 화면에 완전히 고정. 그리드의 첫 트랙(268px)은 고정폭이라
      사이드바를 흐름에서 빼도 그대로 자리를 잡아 두고, left는 가운데 정렬된
      .mypage-x-page(최대 var(--mp-page-max)) 콘텐츠 영역의 좌측 안쪽에 맞춘다.
-     top = 고정 헤더 높이(6.75rem) + 페이지 상단 패딩(2rem) → 오른쪽 콘텐츠 영역의
+     top = 공통 헤더 높이(--app-header-height) + 페이지 상단 패딩(2rem) → 오른쪽 콘텐츠 카드의
      상단과 정확히 맞고, sticky 헤더에 가려지지 않는다. */
   position: fixed;
-  top: 8.75rem;
-  left: max(1.5rem, calc((100vw - var(--sbw, 0px) - var(--mp-page-max, 1240px)) / 2 + 1.5rem));
+  top: calc(var(--app-header-height, 6.25rem) + 2rem);
+  left: max(1.5rem, calc((100vw - var(--sbw, 0px) - var(--mp-page-max, 1280px)) / 2 + 1.5rem));
   width: 268px;
-  max-height: calc(100svh - 8.75rem - 1.5rem);
+  max-height: calc(100svh - var(--app-header-height, 6.25rem) - 2rem - 1.5rem);
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -54,13 +54,11 @@
   border-radius: var(--mp-radius-lg);
   padding: 1.35rem 1.1rem;
   box-shadow: var(--mp-shadow);
-  /* 창이 작아 사이드바가 넘칠 때: 채팅/분석 패널과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__sidebar::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__sidebar::-webkit-scrollbar-track {
@@ -69,11 +67,22 @@
 
 .mypage-x__sidebar::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__sidebar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__sidebar {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__sidebar-profile {
@@ -108,25 +117,27 @@
   white-space: nowrap;
 }
 
+/* 원형 프로필 — 디자인 채팅 사이드바 프로필(.dcw-profile__avatar)과 같은 색·그림자, 글자는 원 지름의 0.4배 */
 .mypage-x__avatar {
   flex-shrink: 0;
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  background: linear-gradient(145deg, var(--mp-pink), var(--mp-pink-deep));
+  background: linear-gradient(145deg, #eba3b8, #d27393);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 800;
-  box-shadow: 0 6px 16px rgba(222, 134, 159, 0.35);
+  box-shadow: 0 4px 12px rgba(222, 134, 159, 0.3);
 }
 
 .mypage-x__avatar--lg {
   width: 80px;
   height: 80px;
   font-size: 2rem;
+  box-shadow: 0 6px 18px rgba(222, 134, 159, 0.3);
 }
 
 .mypage-x__nav {
@@ -883,7 +894,7 @@
   gap: 1rem;
 }
 
-/* 열 수 고정 그리드 — 디자인 이력 탭은 4열(한 페이지 16개 = 4행), 타임라인은 3열.
+/* 열 수 고정 그리드 — 디자인 이력 탭은 4열(한 페이지 20개 = 5행), 찜 탭은 4열(전체 16개 = 4행, 폴더별 20개 = 5행), 타임라인은 3열.
    칸 폭을 (그리드 폭 - 사이 간격) / 열 수로 잡아 평소엔 정확히 그 열 수로 채우고,
    그리드가 좁아져 칸이 120px 아래로 내려가면(휴대폰, 타임라인 오른쪽 영역 등)
    열 수를 줄여서 팁이 너무 작아지지 않게 한다.
@@ -1088,12 +1099,19 @@
 
 .mypage-x__scan-season {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 800;
+  font-size: 0.98rem;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.25;
-  /* 스와치 색상과 무관하게 항상 같은 브랜드 색으로 고정 */
-  color: var(--mp-pink-deep);
+  /* 제목은 베이스 이름(SkinBaseTag, 바탕은 베이스 색) — 글자는 아래 수치·쉐입 줄(#555)과 어우러지게 한 단계만 진한 회색 */
+  color: #444;
+}
+
+/* 바탕 알약이 글자를 넉넉히 감싸도록 여백을 조금 넓히고, 굵기도 한 단계 낮춘다 */
+.mypage-x__scan-season .skin-base-tag {
+  padding: 0.2em 0.78em;
+  color: inherit;
+  font-weight: 700;
 }
 
 .mypage-x__scan-metrics {
@@ -1160,6 +1178,135 @@
   width: 24px;
   height: 24px;
   object-fit: contain;
+}
+
+/* ── 목록 카드의 더보기 메뉴 (손 분석 기록 ⋯ / 출력 내역 ⋮) ──
+   카드가 통째로 버튼이라 그 안에 버튼을 넣을 수 없어서, 카드를 감싼 틀에 더보기 버튼을 겹쳐 둔다.
+   누르면 '…삭제하기' 항목이 드롭다운으로 뜨고, 그걸 누르면 삭제 확인 창이 뜬다. */
+.mypage-x__row-shell {
+  position: relative;
+}
+
+/* 더보기 버튼·드롭다운에 마우스를 올려도 카드는 올라온 모양 그대로 */
+.mypage-x__row-shell:hover > .mypage-x__scan-row,
+.mypage-x__row-shell:hover > .mypage-x__print-row {
+  border-color: #f0d5dd;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
+}
+
+/* 출력 내역 카드는 오른쪽 끝(상태·날짜 옆)에 ⋮ 자리를 비워 둔다 */
+.mypage-x__row-shell--print > .mypage-x__print-row {
+  padding-right: 3.5rem;
+}
+
+.mypage-x__row-menu {
+  position: absolute;
+  right: 0.85rem;
+  z-index: 1;
+  width: 2rem;
+  height: 2rem;
+  transition: transform 0.18s;
+}
+
+/* 열린 드롭다운이 아래 카드들 위로 올라오게 */
+.mypage-x__row-menu.is-open {
+  z-index: 30;
+}
+
+/* 손 분석 기록 카드는 오른쪽 아래 (위쪽 날짜 아래 빈자리) */
+.mypage-x__row-shell--scan > .mypage-x__row-menu {
+  bottom: 0.9rem;
+}
+
+.mypage-x__row-shell--print > .mypage-x__row-menu {
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+}
+
+.mypage-x__row-shell:hover > .mypage-x__row-menu {
+  transform: translateY(-1px);
+}
+
+.mypage-x__row-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #b3a0a7;
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s;
+}
+
+.mypage-x__row-menu-trigger:hover,
+.mypage-x__row-menu.is-open .mypage-x__row-menu-trigger {
+  background: #fff0f4;
+  color: var(--mp-pink-deep);
+}
+
+.mypage-x__row-menu-trigger:focus-visible,
+.mypage-x__row-menu-item:focus-visible {
+  outline: 2px solid rgba(222, 134, 159, 0.6);
+  outline-offset: 2px;
+}
+
+/* 드롭다운 — 정렬 메뉴(mypage-x__sort-menu)와 같은 모양 */
+.mypage-x__row-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 150px;
+  padding: 0.35rem;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgba(222, 134, 159, 0.18);
+  box-shadow: 0 14px 34px rgba(180, 90, 120, 0.16);
+  animation: mp-row-menu-in 0.14s ease-out;
+}
+
+@keyframes mp-row-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.mypage-x__row-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #555;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mypage-x__row-menu-item svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+
+.mypage-x__row-menu-item--danger {
+  color: #c94a4a;
+}
+
+.mypage-x__row-menu-item--danger:hover {
+  background: #fff3f3;
 }
 
 /* ── 손 분석/출력 상세 모달 ── */
@@ -1301,13 +1448,11 @@
   padding-right: 0.8rem;
   /* 스크롤바 위치를 패널 안쪽 여백 밖으로 살짝 밀어내 오른쪽으로 옮긴다 */
   margin-right: -0.8rem;
-  /* 채팅 ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__scanx-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__scanx-scroll::-webkit-scrollbar-track {
@@ -1316,11 +1461,22 @@
 
 .mypage-x__scanx-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__scanx-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__scanx-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__scanx-head {
@@ -1380,8 +1536,8 @@
   height: 58px;
   border-radius: 999px;
   box-shadow:
-    0 8px 20px rgba(180, 90, 120, 0.22),
-    inset 0 0 0 3px rgba(255, 255, 255, 0.75);
+          0 8px 20px rgba(180, 90, 120, 0.22),
+          inset 0 0 0 3px rgba(255, 255, 255, 0.75);
 }
 
 .mypage-x__scanx-hero-copy {
@@ -1462,8 +1618,13 @@
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.2;
-  /* 스와치 색상과 무관하게 항상 같은 브랜드 색으로 고정 */
-  color: var(--mp-pink-deep);
+  /* 제목은 대표 피부색 헥스값(SkinBaseTag — 검정 글자, 바탕은 베이스 색). 헥스값이 없을 때의 베이스 이름·'분석 결과 없음'도 검정 */
+  color: #1a1a1a;
+}
+
+.mypage-x__scanx-season .skin-base-tag {
+  margin-top: 0.15rem;
+  line-height: 1.3;
 }
 
 .mypage-x__scanx-chips {
@@ -1539,8 +1700,9 @@
   border-radius: 999px;
 }
 
+/* 베이스 — 왼쪽 핑크 베이스(분홍) → 오른쪽 옐로우 베이스(노랑), 손 분석 결과 화면의 막대와 같은 색 */
 .mypage-x__scanx-tone-bar-track--tone {
-  background: linear-gradient(90deg, #8fb4e6 0%, #f0c069 100%);
+  background: linear-gradient(90deg, #eda0bb 0%, #f0c069 100%);
 }
 
 .mypage-x__scanx-tone-bar-track--brightness {
@@ -1567,13 +1729,45 @@
 
 .mypage-x__printx-status {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0.85rem;
   padding: 0.95rem 1.05rem;
   border-radius: 16px;
   border: 1px solid #dce8f5;
   background: linear-gradient(145deg, #eef6fd 0%, #fff 52%, #e8f2fb 100%);
+}
+
+/* 카드 위쪽: 상태 제목·안내 문구(왼쪽) + 상태 배지(오른쪽) */
+.mypage-x__printx-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+/* 카드 안에 들어온 진행 상황 위젯·버튼: 따로 상자를 두지 않고 카드의 일부로 보이게 한다 */
+.mypage-x__printx-status .printer-progress {
+  padding: 0.85rem 0 0;
+  border: 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 0;
+  background: none;
+}
+
+.mypage-x__printx-status .printer-progress--loading,
+.mypage-x__printx-status .printer-progress--error {
+  padding: 0.85rem 0 0;
+}
+
+.mypage-x__printx-status .print-actions {
+  margin-top: 0;
+}
+
+/* 진행 상황 위젯이 없을 때(대기·병합 중)는 버튼 위에 구분선을 둔다 */
+.mypage-x__printx-status-head + .print-actions {
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
 }
 
 .mypage-x__printx-status--queued {
@@ -1609,6 +1803,13 @@
 .mypage-x__printx-status--failed {
   border-color: #f3c9c9;
   background: linear-gradient(145deg, #fdecec 0%, #fff 52%, #fbe3e3 100%);
+}
+
+/* 취소 중 / 취소됨 — 실패(빨강)와 구분되는 차분한 회색 계열 */
+.mypage-x__printx-status--canceling,
+.mypage-x__printx-status--canceled {
+  border-color: #dcdfe4;
+  background: linear-gradient(145deg, #f3f4f6 0%, #fff 52%, #eceef1 100%);
 }
 
 .mypage-x__printx-status-copy {
@@ -1661,6 +1862,11 @@
   color: #c94a4a;
 }
 
+.mypage-x__printx-status--canceling .mypage-x__printx-status-copy span,
+.mypage-x__printx-status--canceled .mypage-x__printx-status-copy span {
+  color: #6b7480;
+}
+
 /* 실패 사유 — 제목 카드 안에서 힌트 문구 자리를 대신해 빨간 글씨로 노출 */
 .mypage-x__printx-status-copy span.mypage-x__printx-status-fail {
   color: #d23b3b;
@@ -1711,6 +1917,22 @@
   margin-top: 0.15rem;
   font-size: 0.74rem;
   font-weight: 600;
+  color: #a08992;
+}
+
+/* 네일 팁 출력 상세 — 쉐입 한글 이름 옆에 영어 이름 */
+.mypage-x__scanx-shape-copy .mypage-x__scanx-shape-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.4rem;
+}
+
+.mypage-x__scanx-shape-name em {
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   color: #a08992;
 }
 
@@ -2219,6 +2441,12 @@
 .mypage-x__badge--failed {
   background: #fde8e8;
   color: #d23b3b;
+}
+
+.mypage-x__badge--canceling,
+.mypage-x__badge--canceled {
+  background: #eceef1;
+  color: #6b7480;
 }
 
 /* ── 타임라인 (날짜 단위) ── */
@@ -3284,13 +3512,11 @@
   margin-bottom: 0.65rem;
   padding: 0.1rem;
   padding-right: 0.4rem;
-  /* 채팅 ? 패널(design-chat-sidebar__scroll)과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__fav-folder-grid::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__fav-folder-grid::-webkit-scrollbar-track {
@@ -3299,11 +3525,22 @@
 
 .mypage-x__fav-folder-grid::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__fav-folder-grid::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__fav-folder-grid {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__fav-folder-card {
@@ -3899,10 +4136,10 @@
   max-width: 8.5rem;
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease;
+          border-color 0.18s ease,
+          transform 0.18s ease,
+          box-shadow 0.18s ease,
+          background 0.18s ease;
 }
 
 .mypage-x__modal-folder-pill-text {
@@ -3991,8 +4228,24 @@
   gap: 0.7rem;
 }
 
-.mypage-x__chat-history-date {
+/* 채팅 이력 맨 위 — 날짜와 생성 방식 표시 (오른쪽은 닫기 버튼 자리) */
+.mypage-x__chat-history-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   padding-right: 1.9rem;
+}
+
+.mypage-x__chat-history-method {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #fbe9ef;
+  color: #c2577a;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .mypage-x__chat-history-scroll {
@@ -4001,13 +4254,11 @@
   overflow-y: auto;
   padding-right: 0.4rem;
   margin-right: -0.2rem;
-  /* 채팅 ? 패널과 동일한 네일리 핑크 커스텀 스크롤바 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
 }
 
+/* 크롬 얇은 스크롤바와 같은 10px 자리 — 막대는 투명 테두리 2px씩을 빼고 6px로 보인다 */
 .mypage-x__chat-history-scroll::-webkit-scrollbar {
-  width: 6px;
+  width: 10px;
 }
 
 .mypage-x__chat-history-scroll::-webkit-scrollbar-track {
@@ -4016,11 +4267,22 @@
 
 .mypage-x__chat-history-scroll::-webkit-scrollbar-thumb {
   background-color: rgba(222, 134, 159, 0.5);
+  border: 2px solid transparent;
+  background-clip: padding-box;
   border-radius: 999px;
 }
 
 .mypage-x__chat-history-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(222, 134, 159, 0.8);
+  background-color: rgba(222, 134, 159, 0.7);
+}
+
+/* ::-webkit-scrollbar 를 모르는 브라우저(파이어폭스)만 표준 속성으로 같은 색을 쓴다 —
+   크롬은 표준 속성이 있으면 위 규칙을 무시하고, 막대에 마우스를 올리면 아주 진하게 칠한다 */
+@supports not selector(::-webkit-scrollbar) {
+  .mypage-x__chat-history-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(222, 134, 159, 0.5) transparent;
+  }
 }
 
 .mypage-x__modal-actions {
@@ -4412,4 +4674,20 @@
   .mypage-x__hero-actions .mypage-x__cta {
     width: 100%;
   }
+}
+.mypage-x__printx-fail-detail {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: #8a7a80;
+}
+.mypage-x__printx-fail-detail summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.mypage-x__printx-fail-detail code {
+  display: block;
+  margin-top: 0.3rem;
+  font-family: inherit;
+  word-break: break-all;
+  white-space: pre-wrap;
 }

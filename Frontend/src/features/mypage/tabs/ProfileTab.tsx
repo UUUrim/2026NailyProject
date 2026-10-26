@@ -1,5 +1,6 @@
 import { getPasswordRuleChecks, isPasswordValid } from '@/shared/utils/passwordRules'
 import { PageHeader } from '@/features/mypage/components/PageHeader'
+import { profileInitial } from '@/features/mypage/shared'
 import { useMyPageContext } from '../context'
 
 export function ProfileTab() {
@@ -56,7 +57,7 @@ export function ProfileTab() {
         />
         <div className="mypage-x__profile-card">
           <div className="mypage-x__avatar mypage-x__avatar--lg" aria-hidden="true">
-            {profile?.nickname.charAt(0) ?? '?'}
+            {profileInitial(profile)}
           </div>
           <div className="mypage-x__profile-body">
             <h2>{profile?.nickname ?? '-'}</h2>
@@ -78,7 +79,15 @@ export function ProfileTab() {
             )}
 
             {isEditingNickname && (
-                <div className="mypage-x__edit-form">
+                <form
+                    className="mypage-x__edit-form"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (nicknameStage === 'password') void handleVerifyNicknamePassword()
+                      else if (nicknameStage === 'nickname') void handleSaveNickname()
+                      else handleCloseNicknameForm()
+                    }}
+                >
                   {nicknameStage === 'password' && (
                       <>
                         <label>
@@ -99,9 +108,8 @@ export function ProfileTab() {
                             취소
                           </button>
                           <button
-                              type="button"
+                              type="submit"
                               className="primary"
-                              onClick={() => void handleVerifyNicknamePassword()}
                               disabled={isVerifyingNicknamePassword}
                           >
                             {isVerifyingNicknamePassword ? '확인 중...' : '확인'}
@@ -122,9 +130,8 @@ export function ProfileTab() {
                             취소
                           </button>
                           <button
-                              type="button"
+                              type="submit"
                               className="primary"
-                              onClick={() => void handleSaveNickname()}
                               disabled={isSavingNickname || !nickname.trim()}
                           >
                             {isSavingNickname ? '저장 중...' : '저장'}
@@ -143,11 +150,19 @@ export function ProfileTab() {
                         </div>
                       </>
                   )}
-                </div>
+                </form>
             )}
 
             {isEditingPassword && (
-                <div className="mypage-x__edit-form">
+                <form
+                    className="mypage-x__edit-form"
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      if (passwordStage === 'password') void handleVerifyCurrentPassword()
+                      else if (passwordStage === 'new') void handleSavePassword()
+                      else handleClosePasswordForm()
+                    }}
+                >
                   {passwordStage === 'password' && (
                       <>
                         <label>
@@ -167,9 +182,8 @@ export function ProfileTab() {
                             취소
                           </button>
                           <button
-                              type="button"
+                              type="submit"
                               className="primary"
-                              onClick={() => void handleVerifyCurrentPassword()}
                               disabled={isVerifyingCurrentPassword}
                           >
                             {isVerifyingCurrentPassword ? '확인 중...' : '확인'}
@@ -226,9 +240,8 @@ export function ProfileTab() {
                             취소
                           </button>
                           <button
-                              type="button"
+                              type="submit"
                               className="primary"
-                              onClick={() => void handleSavePassword()}
                               disabled={isSavingPassword || !isPasswordValid(newPassword) || newPassword !== passwordConfirm}
                           >
                             {isSavingPassword ? '변경 중...' : '변경'}
@@ -247,7 +260,7 @@ export function ProfileTab() {
                         </div>
                       </>
                   )}
-                </div>
+                </form>
             )}
           </div>
         </div>

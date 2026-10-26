@@ -60,9 +60,9 @@ function FingerTooltip({
           role="tooltip"
       >
         <strong>{finger.name}</strong>
-        <span>길이 {finger.lengthMm}mm</span>
-        <span>너비 {finger.widthMm}mm</span>
-        <span>C-curve {finger.cCurve.toFixed(1)}mm</span>
+        <span>길이 {finger.lengthMm.toFixed(1)}mm</span>
+        <span>너비 {finger.widthMm.toFixed(1)}mm</span>
+        <span>곡률 {finger.cCurve.toFixed(1)}mm</span>
       </div>,
       document.body,
   )

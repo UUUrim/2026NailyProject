@@ -120,7 +120,7 @@ printer/test_*
 printer/profiles/nail_tip_process2.json
 printer/profiles/combined_settings.json
 printer/profiles/process_fixed.json
-
+printer/check_gcode.py
 
 
 results/
@@ -147,3 +147,6 @@ print_queue_state.json
 new_box_photos/
 scan/tests/test_new_box_photos.py
 stl_shape_test/
+
+### 수동 확인용 STL 출력
+stl_check_220/

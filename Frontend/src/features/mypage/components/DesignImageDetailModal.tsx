@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   deleteDesign,
+  getCommunityDesignDetail,
   getDesignChatHistory,
   getDesignDetail,
   likeDesign,
@@ -10,6 +11,7 @@ import {
   unshareDesign,
   type DesignChatMessage,
   type DesignExtractedDetails,
+  type DesignGenerationMethod,
   type SavedDesignResponse,
 } from '@/entities/design/api'
 import { FavoriteFolderModal } from '@/shared/components/FavoriteFolderModal'
@@ -17,12 +19,24 @@ import { DesignDetailsPanel } from '@/shared/components/DesignDetailsPanel'
 import { ModalActionIcons } from '@/shared/components/ModalActionIcons'
 import { ShareStatusBadge } from '@/shared/components/ShareStatusBadge'
 import { NailArTryOnModal } from '@/features/mypage/components/NailArTryOnModal'
+import { ChatDesignResultRows, ChatMessageRow } from '@/features/nail-design/components/ChatBubbleParts'
+import { hidePickedColorsRoleNote } from '@/features/nail-design/utils/pickedColorsContext'
+import { prepareSavedPreferenceRepliesForHistory } from '@/features/nail-design/utils/preferenceReply'
 import { ApiError } from '@/shared/utils/apiClient'
 import { downloadImage } from '@/shared/utils/downloadImage'
 import '@/styles/mypage.css'
 import '@/styles/design-chat.css'
+import '@/styles/ar-preview-button.css'
 
 type FolderRef = { folderId: number; name: string }
+
+// 채팅 이력 위에 붙이는 생성 방식 표시
+const GENERATION_METHOD_LABELS: Record<DesignGenerationMethod, string> = {
+  preference: '선택지 기반 생성',
+  freeform: '자유 입력 생성',
+  photo: '사진 기반 생성',
+  'scan-auto': '스캔 정보 자동 생성',
+}
 
 export type DesignImageDetailInput = {
   designId: number | null
@@ -30,6 +44,8 @@ export type DesignImageDetailInput = {
   createdAt?: string
   liked: boolean
   folder?: FolderRef | null
+  /** designId가 갤러리 id인 찜 — 다른 로컬 DB 사용자가 공유한 디자인이라 상세·찜은 갤러리 API로, 채팅 이력은 없다 */
+  community?: boolean
 }
 
 type Props = {
@@ -53,7 +69,7 @@ type Props = {
   showLike?: boolean
   /** 공유 상태 배지 + 공유하기 버튼을 보여줄지 (기본 true) */
   showShare?: boolean
-  /** AR로 미리보기 버튼을 보여줄지 (기본 true) */
+  /** AR 미리보기 버튼을 보여줄지 (기본 true) */
   showAr?: boolean
   /** 이미지 다운로드 버튼을 보여줄지 (기본 true) */
   showDownload?: boolean
@@ -89,6 +105,7 @@ type LikeModalTarget = {
   imageUrl: string
   mode: 'like' | 'move'
   currentFolderId?: number | null
+  community?: boolean
 }
 
 /**
@@ -115,6 +132,7 @@ export function DesignImageDetailModal({
   const [viewImageUrl, setViewImageUrl] = useState('')
   const [viewLiked, setViewLiked] = useState(false)
   const [viewFolder, setViewFolder] = useState<FolderRef | null>(null)
+  const [viewCommunity, setViewCommunity] = useState(false)
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined)
   const [owner, setOwner] = useState<boolean | undefined>(undefined)
@@ -138,6 +156,24 @@ export function DesignImageDetailModal({
   const [chatDesignId, setChatDesignId] = useState<number | null>(null)
   // 채팅 이력 안의 이미지를 클릭했을 때 위에 띄우는, 확대/이동+다운로드만 가능한 축소판 상세모달
   const [chatHistoryZoomImage, setChatHistoryZoomImage] = useState<string | null>(null)
+  // 확정 때 저장한 채팅 화면 대화(designResult가 true/false로 옴)면 첫 인사·생성 방식 고르기 부분은 빼고
+  // 그 다음 대화부터 보여 주고, 어떤 생성 방식으로 만들었는지 따로 표시한다. 예전 이력은 그대로 다 보여 준다.
+  // 선택지 기반은 채팅 화면의 단계별 선택 말풍선(chatOnly)을 빼고, 서버로 보낸 요약 문장 하나(historyOnly)로 보여 준다.
+  // 컬러 기타 입력과 함께 서버로 보낸 문장 속 "(직접 고른 색이며, …)" 안내는 GPT에게만 필요해서 이력에서는 숨긴다.
+  // 선택지 기반은 요약 문장 다음에 서버(GPT) 답장을 다듬어서 보여 주고, 채팅 화면의 정해진 멘트("선택 감사해요! …")는 뺀다.
+  const isSavedChatTranscript = chatHistory.some((msg) => msg.designResult != null)
+  const visibleChatHistory = (
+    isSavedChatTranscript
+      ? prepareSavedPreferenceRepliesForHistory(
+          chatHistory.slice(chatHistory.findLastIndex((msg) => msg.historySection === 'method') + 1),
+          (msg) => msg.content,
+          (msg, content) => ({ ...msg, content }),
+        ).filter((msg) => !msg.chatOnly)
+      : chatHistory
+  ).map((msg) => ({ ...msg, content: hidePickedColorsRoleNote(msg.content) }))
+  const chatGenerationMethod = isSavedChatTranscript
+    ? chatHistory.findLast((msg) => msg.generationMethod)?.generationMethod ?? null
+    : null
 
   // 이미지 확대/축소/이동
   const [zoom, setZoom] = useState(1)
@@ -155,12 +191,15 @@ export function DesignImageDetailModal({
     setShowDesignDetails(false)
     setShareBusy(false)
     setIsBusy(false)
+    // 이전 이미지의 상세 조회가 끝나기 전에 바뀌면 그 조회는 취소되어 로딩을 끄지 못한다
+    setDetailLoading(false)
 
     if (!image) {
       setViewDesignId(null)
       setViewImageUrl('')
       setViewLiked(false)
       setViewFolder(null)
+      setViewCommunity(false)
       setChatDesignId(null)
       setCreatedAt(undefined)
       setOwner(undefined)
@@ -175,6 +214,7 @@ export function DesignImageDetailModal({
     setViewImageUrl(image.imageUrl)
     setViewLiked(image.liked)
     setViewFolder(image.folder ?? null)
+    setViewCommunity(Boolean(image.community))
     setChatDesignId(image.designId)
     setCreatedAt(image.createdAt)
     setOwner(undefined)
@@ -187,7 +227,7 @@ export function DesignImageDetailModal({
     if (image.designId == null) return
     let cancelled = false
     setDetailLoading(true)
-    void getDesignDetail(image.designId)
+    void (image.community ? getCommunityDesignDetail(image.designId) : getDesignDetail(image.designId))
       .then((detail) => {
         if (cancelled) return
         setShared(detail.shared)
@@ -272,6 +312,7 @@ export function DesignImageDetailModal({
       imageUrl: viewImageUrl,
       mode: 'move',
       currentFolderId: viewFolder?.folderId ?? null,
+      community: viewCommunity,
     })
   }
 
@@ -280,7 +321,7 @@ export function DesignImageDetailModal({
     if (viewLiked) {
       setIsBusy(true)
       try {
-        await unlikeDesign(viewDesignId, viewImageUrl)
+        await unlikeDesign(viewDesignId, viewImageUrl, viewCommunity)
         setViewLiked(false)
         setViewFolder(null)
         onLikeChange?.(viewDesignId, viewImageUrl, null)
@@ -291,13 +332,16 @@ export function DesignImageDetailModal({
       }
       return
     }
-    setLikeModalTarget({ designId: viewDesignId, imageUrl: viewImageUrl, mode: 'like' })
+    setLikeModalTarget({ designId: viewDesignId, imageUrl: viewImageUrl, mode: 'like', community: viewCommunity })
   }
 
   const confirmLikeWithFolder = async (choice: { folderId?: number; newFolderName?: string }) => {
     if (!likeModalTarget) return
-    const { designId, imageUrl, mode } = likeModalTarget
-    const saved = mode === 'move' ? await moveLikedDesign(designId, imageUrl, choice) : await likeDesign(designId, imageUrl, choice)
+    const { designId, imageUrl, mode, community } = likeModalTarget
+    const saved =
+      mode === 'move'
+        ? await moveLikedDesign(designId, imageUrl, choice, community)
+        : await likeDesign(designId, imageUrl, choice, community)
     if (designId === viewDesignId && imageUrl === viewImageUrl) {
       setViewLiked(true)
       setViewFolder(saved.folder)
@@ -335,7 +379,8 @@ export function DesignImageDetailModal({
     }
   }
 
-  const canManage = owner ?? false
+  // 갤러리 id로 연 남의 디자인은 공유·삭제를 로컬 디자인 API로 보낼 수 없다
+  const canManage = (owner ?? false) && !viewCommunity
   const folderLabel = viewFolder?.name ?? '기본'
   const hasActions =
     (viewDesignId != null && (showChatHistoryToggle || showDelete || showShare)) || showDownload || showAr
@@ -422,7 +467,7 @@ export function DesignImageDetailModal({
                 aria-controls="design-image-detail-panel"
               >
                 {ModalActionIcons.details}
-                <span>{showDesignDetails ? '상세 닫기' : '이미지 상세보기'}</span>
+                <span>{showDesignDetails ? '상세 닫기' : '이미지 상세 보기'}</span>
               </button>
             )}
           </div>
@@ -442,7 +487,7 @@ export function DesignImageDetailModal({
                 <span>이미지 삭제</span>
               </button>
             )}
-            {showChatHistoryToggle && viewDesignId != null && (
+            {showChatHistoryToggle && viewDesignId != null && !viewCommunity && (
               <button type="button" className="mypage-x__modal-action--ghost" onClick={() => setShowChatHistory(true)}>
                 {ModalActionIcons.chat}
                 <span>채팅 이력 보기</span>
@@ -466,10 +511,16 @@ export function DesignImageDetailModal({
                 <span>{shareBusy ? '처리 중...' : shared ? '공유 해제' : '공유하기'}</span>
               </button>
             )}
+            {/* 쉐입·손톱팁 정보가 오기 전에 열면 도중에 AR이 다시 시작되므로 상세 조회가 끝난 뒤에 연다 */}
             {showAr && (
-              <button type="button" className="mypage-x__modal-action--accent" onClick={() => setArTryOnImageUrl(viewImageUrl)}>
+              <button
+                type="button"
+                className="ar-preview-btn--badge"
+                onClick={() => setArTryOnImageUrl(viewImageUrl)}
+                disabled={detailLoading}
+              >
                 {ModalActionIcons.ar}
-                <span>AR로 미리보기</span>
+                <span>AR 미리보기</span>
               </button>
             )}
           </div>
@@ -493,17 +544,47 @@ export function DesignImageDetailModal({
             >
               ✕
             </button>
-            {createdAt && <p className="mypage-x__modal-date mypage-x__chat-history-date">{createdAt}</p>}
+            {(createdAt || chatGenerationMethod) && (
+              <div className="mypage-x__chat-history-head">
+                {createdAt && <p className="mypage-x__modal-date">{createdAt}</p>}
+                {chatGenerationMethod && (
+                  <span className="mypage-x__chat-history-method">{GENERATION_METHOD_LABELS[chatGenerationMethod]}</span>
+                )}
+              </div>
+            )}
             <div className="mypage-x__chat-history-scroll">
               <div className="design-chat__messages">
                 {isChatHistoryLoading && <p style={{ textAlign: 'center', color: '#999' }}>불러오는 중…</p>}
                 {chatHistoryError && <p style={{ textAlign: 'center', color: '#c0392b' }}>{chatHistoryError}</p>}
-                {!isChatHistoryLoading && !chatHistoryError && chatHistory.length === 0 && (
+                {!isChatHistoryLoading && !chatHistoryError && visibleChatHistory.length === 0 && (
                   <p style={{ textAlign: 'center', color: '#999' }}>
                     이 디자인은 채팅 없이 만들어졌거나, 저장된 대화 이력이 없어요.
                   </p>
                 )}
-                {chatHistory.map((msg, i) => (
+                {visibleChatHistory.map((msg, i) =>
+                  // 확정 때 저장한 채팅 화면 대화(designResult가 true/false로 옴) — 채팅 화면과 같은 조각으로 똑같이 그린다
+                  msg.designResult != null ? (
+                    msg.designResult ? (
+                      <ChatDesignResultRows
+                        key={i}
+                        imageUrls={msg.imageUrls ?? []}
+                        text={msg.content}
+                        onImageClick={setChatHistoryZoomImage}
+                      />
+                    ) : (
+                      <ChatMessageRow
+                        key={i}
+                        role={msg.role}
+                        text={msg.content}
+                        imageUrls={msg.imageUrls}
+                        colorSwatches={msg.colorSwatches}
+                        colorsInline={msg.colorsInline}
+                        textAfterColors={msg.textAfterColors}
+                        onImageClick={setChatHistoryZoomImage}
+                      />
+                    )
+                  ) : (
+                  // 예전 디자인 — 서버에 남은 메시지와 생성 이력으로 만든 이력
                   <div key={i} className={`design-chat__row design-chat__row--${msg.role}`}>
                     {msg.role === 'assistant' && <img src="/images/logo.png" alt="" className="design-chat__avatar" />}
                     <div className={`design-chat__bubble design-chat__bubble--${msg.role}`}>
@@ -526,7 +607,8 @@ export function DesignImageDetailModal({
                       )}
                     </div>
                   </div>
-                ))}
+                  ),
+                )}
               </div>
             </div>
           </div>

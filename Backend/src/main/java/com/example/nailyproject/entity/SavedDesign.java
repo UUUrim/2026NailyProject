@@ -23,9 +23,15 @@ public class SavedDesign {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    // 내 로컬 DB의 디자인. 다른 로컬 DB 사용자가 공유한 디자인을 둘러보기에서 찜했으면 null이고 communityDesignId를 쓴다.
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "nail_design_id", nullable = false)
+    @JoinColumn(name = "nail_design_id")
     private NailDesign nailDesign;
+
+    // 다른 로컬 DB 사용자가 공유한 디자인을 찜했을 때의 갤러리 DB id (community_designs.id).
+    // 갤러리 DB는 다른 DB라 FK를 걸 수 없어서, 원본이 삭제되면 찜 목록을 불러올 때 정리한다.
+    @Column(name = "community_design_id")
+    private Long communityDesignId;
 
     @Column(name = "memo")
     private String memo;

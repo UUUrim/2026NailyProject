@@ -99,7 +99,8 @@ export type MyPageContextValue = {
   setFolderSortOrder: (order: FolderSortOrder) => void
   listPage: number
   setListPage: (page: number) => void
-  paginate: <T>(items: T[], id: SectionId) => { page: number; totalPages: number; slice: T[]; total: number }
+  // pageSize를 넘기면 섹션 기본 개수 대신 그 개수로 자른다 (예: 찜 폴더별 보기)
+  paginate: <T>(items: T[], id: SectionId, pageSize?: number) => { page: number; totalPages: number; slice: T[]; total: number }
 
   // ── 활동 타임라인 ──
   calendarRef: RefObject<HTMLDivElement | null>
@@ -130,6 +131,10 @@ export type MyPageContextValue = {
   // ── 상세 모달 열기 ──
   openScanDetail: (session: ScanSession) => void
   openPrintDetail: (order: NailTipPrintOrder) => Promise<void>
+
+  // ── 목록 카드의 삭제 버튼 → 삭제 확인 창 ──
+  openDeleteScanModal: (session: ScanSession) => void
+  openDeletePrintModal: (order: NailTipPrintOrder) => void
 }
 
 export function useMyPageContext() {

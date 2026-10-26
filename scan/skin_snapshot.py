@@ -28,8 +28,12 @@ import os
 import cv2
 import numpy as np
 
-SKIN_SNAPSHOT_EXPOSURE = -7      # 피부색을 잴 사진의 수동 노출 (log2 초)
-WHITE_REF_EXPOSURE = -8          # 마커 흰색(조명 색 쏠림) 기준 사진의 수동 노출
+# 새 박스(흰 배경 + 받침대 위 마커)에서 사람 4명으로 비교한 결과 (2026-10-21): 자동 노출은 손이 밝으면 노출을 내려서 사람
+# 사이의 밝기 차이를 지운다 (자연광에서 가장 밝은 사람이 스캔에서는 3등). 노출을 -8로 고정하면 그 사람이 가장 밝게 나온다.
+# -7은 밝은 손에서 피부가 포화(L 89, 마커 254)해서 쓸 수 없고, -9는 너무 어두워서 손가락을 못 찾는다.
+# 이 사진은 피부색(밝기/채도/색상각)을 재는 데만 쓴다. 손톱 측정 사진은 자동 노출 그대로다.
+SKIN_SNAPSHOT_EXPOSURE = -8      # 피부색을 잴 사진의 수동 노출 (log2 초)
+WHITE_REF_EXPOSURE = None        # 흰색 기준 사진은 더 찍지 않는다 (색 쏠림 보정을 끄고, 밝기도 기준 삼지 않는다)
 SETTLE_FRAMES = 8                # 노출이 바뀐 뒤 버리는 프레임 (6프레임이면 안정)
 SNAPSHOT_FRAMES = 3              # 이 장수의 중앙값으로 한 장을 만든다 (노이즈 감소)
 
@@ -37,6 +41,32 @@ SNAPSHOT_FRAMES = 3              # 이 장수의 중앙값으로 한 장을 만�
 def ref_path_for(skin_path: str) -> str:
     """피부 사진 경로에 대응하는 흰색 기준 사진 경로 (<이름>_ref.jpg)."""
     return os.path.splitext(skin_path)[0] + "_ref.jpg"
+
+
+AUTO_WHITE_MIN_MEAN = 140        # 측정(자동 노출) 사진의 마커 흰색이 이보다 어두우면 보정 기준으로 약하다
+
+
+def auto_photo_white_ok(frame_bgr: np.ndarray, aruco_size_mm: float = 20.0) -> bool:
+    """측정(자동 노출) 사진 자체로 마커 흰색 보정을 믿고 쓸 수 있는지.
+
+    촬영 환경이 밝기를 잘 맞춰서 마커 흰 여백이 안 날아가고(포화 아님), 너무 어둡지도 않고, 무채색에 가까우면
+    True - 이때는 확인용 사진(노출을 바꿔 한 번 더 찍기) 없이 이 사진에서 바로 피부색을 잰다.
+    마커를 못 읽거나 하나라도 조건이 어긋나면 False(= 확인용 사진을 찍는다)."""
+    try:
+        import contextlib
+        import io
+        import nail_measurer as nm
+        import skin_color as sc
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, corners, _ = nm.detect_aruco(frame_bgr, aruco_size_mm)
+        white = sc.marker_white_rgb(frame_bgr, corners)
+        if white is None:
+            return False
+        return (float(white.mean()) >= AUTO_WHITE_MIN_MEAN
+                and float(white.max()) <= sc.WB_MAX_WHITE_CHANNEL
+                and float(np.max(np.abs(white / white.mean() - 1.0))) <= sc.WB_MAX_CAST)
+    except Exception:                                   # noqa: BLE001 - 판단 못 하면 예전처럼 확인용 사진을 찍는다
+        return False
 
 
 def _remove(path: str) -> None:

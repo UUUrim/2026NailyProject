@@ -12,11 +12,11 @@ function MetricCard({
                         hint,
                     }: {
     title: string
-    metric: { value: number; unit: string; percentile: number; comparisonLabel: string }
+    metric: { value: number; unit: string; barPercent: number; comparisonLabel: string }
     hint: string
 }) {
-    // percentile은 이미 3~97로 clamp되지만, 막대·"상위 %" 표기가 절대 범위를 벗어나지 않도록 한 번 더 방어한다.
-    const barPercent = Math.round(Math.min(100, Math.max(0, metric.percentile)))
+    // 막대는 스캔 서버의 5단계 평균 판정 위치(10/30/50/70/90%)만큼 채운다.
+    const barPercent = Math.round(Math.min(100, Math.max(0, metric.barPercent)))
     return (
         <article className="scan-metric-card">
             <h3>{title}</h3>
@@ -153,7 +153,7 @@ export function HandScanResultPageContent() {
                     <h2>손톱 기본 지표</h2>
                     {!isLoading && apiFingers.length > 0 && (
                         <button type="button" className="scan-result-link" onClick={() => setShowFingerModal(true)}>
-                            상세보기
+                            상세 보기
                         </button>
                     )}
                 </div>
@@ -194,7 +194,7 @@ export function HandScanResultPageContent() {
 
             {isLoading ? (
                 <section className="scan-result-section" aria-hidden="true">
-                    <h2>추천 네일팁 쉐입</h2>
+                    <h2>추천 네일 팁 쉐입</h2>
                     <div className="scan-shape-highlight scan-shape-highlight--skeleton">
                         <div className="scan-shape-highlight__top">
                             <div className="scan-shape-highlight__body">
@@ -207,7 +207,7 @@ export function HandScanResultPageContent() {
                 </section>
             ) : (
                 <section className="scan-result-section">
-                    <h2>추천 네일팁 쉐입</h2>
+                    <h2>추천 네일 팁 쉐입</h2>
                     {recommended ? (
                         <RecommendedShapeCard shape={recommended} userName={userName} />
                     ) : (
@@ -255,11 +255,11 @@ export function HandScanResultPageContent() {
                                 </div>
                                 <div className="skin-tone-card__body">
                                     <SkinToneSlider
-                                        label="톤"
+                                        label="베이스"
                                         valueLabel={skinToneAnalysis.tone.label}
                                         percent={skinToneAnalysis.tone.percent}
-                                        minLabel="쿨"
-                                        maxLabel="웜"
+                                        minLabel="분홍기"
+                                        maxLabel="노란기"
                                         trackClass="skin-tone-slider__track--tone"
                                     />
                                     <SkinToneSlider
@@ -283,6 +283,9 @@ export function HandScanResultPageContent() {
 
                             <article className="skin-tone-palette-card">
                                 <h3>추천 컬러</h3>
+                                <p className="skin-tone-palette-card__desc">
+                                    {userName ? `${userName}님의` : '회원님의'} 손에 어울리는 컬러예요.
+                                </p>
                                 <div className="skin-tone-palette-grid">
                                     {skinTonePalette.map((hex, i) => (
                                         <button
@@ -295,9 +298,6 @@ export function HandScanResultPageContent() {
                                         />
                                     ))}
                                 </div>
-                                <p className="skin-tone-palette-card__desc">
-                                    {userName ? `${userName}님과` : '회원님과'} 어울리는 컬러들이에요.
-                                </p>
                             </article>
                         </div>
                     )
@@ -305,7 +305,7 @@ export function HandScanResultPageContent() {
             </section>
 
             <div className="scan-result-actions">
-                <NextStepButton label="네일팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
+                <NextStepButton label="네일 팁 출력하러 가기" onClick={handleGoToPrint} disabled={isAnalyzing} />
             </div>
 
             {showFingerModal && apiFingers.length > 0 && (

@@ -1,32 +1,43 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { useLocation, useNavigate, useNavigationType } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
-import { getMyProfile } from '@/entities/user/api'
-import { getMyScanSessions, getScanResult, type ScanResultResponse } from '@/entities/scan/api'
-import { MY_SCAN_SESSIONS_QUERY_KEY } from '@/entities/scan/queries'
-import { isFullyAnalyzedSession, type ScanSession } from '@/shared/utils/scanDetail'
-import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
-import { koreanColorName } from '@/shared/utils/colorName'
+import { useNavigate } from 'react-router-dom'
+import type { ScanResultResponse } from '@/entities/scan/api'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import type { SkinLevel } from '@/shared/utils/skinTone'
 import {
     createChatSession,
     sendChatMessage,
     refineKeywords,
+    saveChatState,
+    type ChatResponse,
+    type ChatSummary,
 } from '@/features/nail-design/api/chat'
+import type { HandAnalysisSummary } from '@/features/nail-design/utils/handAnalysisSummary'
+import { buildDesignChatTitle, buildMessageChatTitle, buildMoodChatTitle } from '@/features/nail-design/utils/chatTitle'
 import {
     generateDesign,
     generateDesignFromImage,
     confirmDesign,
     getDesignChatHistory,
+    REFERENCE_PHOTO_PLACEHOLDER,
+    type ChatTranscriptEntry,
     type DesignExtractedDetails,
     type DesignChatMessage,
+    type DesignGenerateResponse,
+    type KeywordColor,
 } from '@/entities/design/api'
+import { koreanColorName } from '@/shared/utils/colorName'
 import { extractNoteKeywords } from '@/features/nail-design/utils/noteKeywords'
+import { buildPickedColorsContext } from '@/features/nail-design/utils/pickedColorsContext'
+import {
+    PREFERENCE_REPLY_MESSAGE,
+    splitSavedPreferenceReplies,
+    trimPreferenceReply,
+} from '@/features/nail-design/utils/preferenceReply'
 import { getNailShape, type NailShapeId } from '@/shared/constants/nailShapes'
 import {
     INITIAL_PREFERENCES,
     PREFERENCE_OPTIONS,
+    PREFERENCE_OPTION_INFO,
     PREFERENCE_SECTION_LABELS,
     type NailDesignPreferences,
     type PreferenceKey,
@@ -82,8 +93,6 @@ const MONTHLY_TRENDING_COLORS = sortRecommendedColors([
 ])
 import { ApiError } from '@/shared/utils/apiClient'
 import { ensureSupportedImage } from '@/shared/utils/imageFormat'
-import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
-import { registerChatSessionGuard, shouldBypassBeforeUnload } from '@/shared/utils/chatSessionGuard'
 
 // ── 타입 ──────────────────────────────────────────────────────────────────
 
@@ -93,15 +102,31 @@ type ChatBubble = {
     text: string
     imageUrls?: string[]
     colorSwatches?: string[]
+    // true면 색 동그라미를 글 아래 줄이 아니라 글 바로 옆에 붙인다 (컬러 단계의 "컬러: ●●")
+    colorsInline?: boolean
+    // 색 동그라미 아래 줄에 따로 보여 줄 글 (컬러 단계에서 색을 고르고 기타 입력도 했을 때의 "기타(…)")
+    textAfterColors?: string
     isDesignResult?: boolean
     // 디자인을 만드는 중인 카드 — 완성되면 같은 말풍선에 imageUrls가 채워지고 isDesignResult로 바뀐다
     isGenerating?: boolean
+    // 채팅 화면엔 그리지 않고 마이페이지 채팅 이력에만 보이는 말풍선 (선택지 기반에서 서버로 보낸 요약 문장)
+    historyOnly?: boolean
+    // 채팅 화면에만 보이고 마이페이지 채팅 이력에서는 빼는 말풍선 (선택지 기반의 단계별 선택 — 이력에선 요약 문장 하나로 보여 준다)
+    chatOnly?: boolean
+    // 첫 인사·생성 방식 고르기에 속한 말풍선 — 마이페이지 채팅 이력은 마지막 이런 말풍선 다음부터 보여 준다
+    historySection?: 'method'
+    // 이 말풍선에서 해당 생성 방식이 시작됐다 — 마이페이지 채팅 이력의 "생성 방식" 표시에 쓴다
+    generationMethod?: GenerationSource
 }
+
+// 선택지 라벨 앞에 붙는 아이콘 (이모지 대신 웹의 다른 아이콘과 같은 선 아이콘으로 그린다 — ChatOptionIcon)
+export type QuickReplyIcon = 'palette' | 'nail' | 'check' | 'chat' | 'party' | 'pencil'
 
 type QuickReplyOption = {
     value: string
     label: string
     colorHexes?: string[]
+    icon?: QuickReplyIcon
 }
 
 type QuickReply = {
@@ -120,7 +145,8 @@ type GenerationSource = 'preference' | 'freeform' | 'scan-auto' | 'photo'
 // 결과 페이지에서 "이 디자인이 어떻게 만들어졌는지" 보여주기 위한 생성 맥락 정보.
 type GenerationContext = {
     source: GenerationSource
-    keywords: string[] // 선택지/자유입력 대화에서 뽑은 키워드 (scan-auto·photo는 비움)
+    keywords: string[] // 선택지에서 고른 값 / 자유입력·사진은 서버 키워드 (scan-auto는 비움). 컬러는 colors로 따로
+    colors?: KeywordColor[] // 컬러 키워드 — 결과 화면이 색 스와치 + 색 이름 칩으로 보여준다
     referenceImageUrl: string | null // 사진 기반 생성일 때, 사용자가 업로드한 참고 사진
     handSummary: {
         toneLabel: string
@@ -128,14 +154,17 @@ type GenerationContext = {
         avgLength: number
         avgWidth: number
         avgCurve: number
-        // scan-auto 전용: 대표 피부색 / 쉐입 이미지 + 추천 팔레트 전체 + 그 중 실제 반영된 색 + 반영된 무드/디자인 타입
+        // scan-auto 전용: 대표 피부색(+ 명도·채도) / 쉐입 이미지 + 추천 팔레트 전체 + 그 중 실제 반영된 색 + 반영된 무드/디자인 타입
         skinToneHex?: string | null
+        skinBrightnessLevel?: SkinLevel | null
+        skinSaturationLevel?: SkinLevel | null
         shapeImage?: string | null
         recommendedColors?: string[]
         usedColors?: string[]
         reflectedMood?: string | null
         reflectedDesignType?: string | null
         reflectedMotif?: string | null
+        reflectedSeason?: string | null
     } | null // 손 스캔 기반 자동 생성일 때, 참고한 손 분석 정보
     revisionKeywords: string[] // 생성 방식에 상관없이, "수정하고 싶어요" 흐름에서 추가로 요청한 내용
 }
@@ -150,20 +179,13 @@ type GeneratedDesign = {
     details?: DesignExtractedDetails
     context: GenerationContext
 }
-// 채팅 진행 상태를 컴포넌트 바깥(모듈 스코프)에 스냅샷으로 저장해 둔다.
-// 결과 페이지로 이동했다가(브라우저 뒤로가기 포함) 다시 이 페이지로 돌아오면, 여기서 그대로
-// 복원해서 채팅 세션·대화 내역·진행 상태가 전혀 초기화되지 않도록 한다.
-// 탭이 살아있는 동안만 메모리에 남고, 새로고침하거나 새 탭에서 열면 사라진다(=새 세션으로 시작).
-type ChatSessionSnapshot = {
-    userName: string
+// 채팅 하나의 진행 상태 스냅샷 — 두 곳에 쓴다.
+// 1) 서버 저장(사이드바 채팅 이력): 이력에서 이 채팅을 다시 열면 이 상태 그대로 이어서 한다
+//    (serializeConversationSnapshot으로 파일·사진 미리보기 같은 큰 값은 빼고 보낸다).
+// 2) 메모리(뒤로가기 복원): 결과 페이지로 이동했다가 브라우저 뒤로가기로 돌아오면 첨부 사진까지 그대로 되살린다
+//    (useDesignChatWorkspace가 getLiveConversationSnapshot으로 가져가 둔다).
+export type ConversationSnapshot = {
     sessionId: number | null
-    scanId: number | null
-    scanHandSide: 'LEFT' | 'RIGHT' | null
-    leftAnalysis: ScanResultResponse | null
-    rightAnalysis: ScanResultResponse | null
-    canSelectSession: boolean
-    scanSessions: ScanSession[]
-    selectedSessionKey: string | null
     bubbles: ChatBubble[]
     activeQuickReply: QuickReply | null
     selectedInQuickReply: string[]
@@ -180,26 +202,142 @@ type ChatSessionSnapshot = {
     selectedPhotoFile: File | null
     selectedPhotoPreviewUrl: string | null
     inputValue: string
-    showAnalysisPanel: boolean
     isQuickReplyCollapsed: boolean
+    // 마지막으로 만든 디자인의 분위기로 지은 채팅 이름 (아직 디자인을 안 만들었으면 null)
+    designTitle: string | null
 }
 
-let chatSessionSnapshot: ChatSessionSnapshot | null = null
+// 서버에 저장하는 채팅 상태의 형식 버전 — 형식이 바뀌면 올리고, 복원할 때 맞지 않는 상태는 버린다
+const CONVERSATION_STATE_VERSION = 1
 
-// 로그인/로그아웃(계정 전환)이 일어나면 이전 계정의 채팅 진행 상황이 다음 계정에게
-// 보이지 않도록 스냅샷을 비운다. 실제 서버에 저장된 디자인 이력은 계정별로 분리되어 있어 영향 없음.
-window.addEventListener(AUTH_CHANGE_EVENT, () => {
-    chatSessionSnapshot = null
-})
+type SerializedConversation = Omit<ConversationSnapshot, 'selectedPhotoFile' | 'selectedPhotoPreviewUrl'> & {
+    version: number
+}
+
+// 아직 서버에 올라가지 않은 참고 사진 미리보기(data/blob URL, 수 MB)는 저장하지 않는다 — 다시 열면 그 사진만 빠진다
+const isLocalImageUrl = (url: string | null | undefined) => !!url && /^(data|blob):/.test(url)
+
+function serializeConversationSnapshot(snapshot: ConversationSnapshot): SerializedConversation {
+    return {
+        version: CONVERSATION_STATE_VERSION,
+        sessionId: snapshot.sessionId,
+        activeQuickReply: snapshot.activeQuickReply,
+        selectedInQuickReply: snapshot.selectedInQuickReply,
+        mode: snapshot.mode,
+        preferenceStepIndex: snapshot.preferenceStepIndex,
+        preferenceStepBubbleIds: snapshot.preferenceStepBubbleIds,
+        collectedPreferences: snapshot.collectedPreferences,
+        preferenceNotes: snapshot.preferenceNotes,
+        freeformSelectedColors: snapshot.freeformSelectedColors,
+        freeformLog: snapshot.freeformLog,
+        reviseLog: snapshot.reviseLog,
+        generationSource: snapshot.generationSource,
+        isQuickReplyCollapsed: snapshot.isQuickReplyCollapsed,
+        designTitle: snapshot.designTitle,
+        // 생성 중 카드는 다시 열었을 때 이어받을 수 없으므로 저장하지 않는다
+        bubbles: snapshot.bubbles
+            .filter((bubble) => !bubble.isGenerating)
+            .map((bubble) =>
+                bubble.imageUrls?.some(isLocalImageUrl)
+                    ? { ...bubble, imageUrls: bubble.imageUrls.filter((url) => !isLocalImageUrl(url)) }
+                    : bubble,
+            )
+            .filter((bubble) => bubble.text || bubble.imageUrls?.length || bubble.colorSwatches?.length),
+        lastDesign: snapshot.lastDesign && isLocalImageUrl(snapshot.lastDesign.context.referenceImageUrl)
+            ? { ...snapshot.lastDesign, context: { ...snapshot.lastDesign.context, referenceImageUrl: null } }
+            : snapshot.lastDesign,
+        // 입력하던 글은 저장하지 않는다 — 글자를 칠 때마다 저장되지 않게 (뒤로가기 복원은 메모리 스냅샷이 맡는다)
+        inputValue: '',
+    }
+}
+
+// 디자인을 만들기 전 채팅 이름 — 선택지에서 고른 분위기 → 자유 입력 첫 문장 → 생성 방식 순으로 짓는다
+const METHOD_CHAT_TITLES: Record<GenerationSource, string> = {
+    preference: '선택지로 만드는 네일',
+    freeform: '자유 입력으로 만드는 네일',
+    photo: '사진을 참고한 네일',
+    'scan-auto': '내 손에 맞춘 네일',
+}
+
+function buildProvisionalChatTitle(snapshot: ConversationSnapshot): string | null {
+    const moodLabels = snapshot.collectedPreferences.mood.map(
+        (value) => PREFERENCE_OPTIONS.mood.find((option) => option.value === value)?.label ?? value,
+    )
+    const latestMethod = [...snapshot.bubbles].reverse().find((bubble) => bubble.generationMethod)?.generationMethod
+    return (
+        buildMoodChatTitle(moodLabels) ??
+        (snapshot.freeformLog[0] ? buildMessageChatTitle(snapshot.freeformLog[0]) : null) ??
+        (latestMethod ? METHOD_CHAT_TITLES[latestMethod] : null)
+    )
+}
+
+/** 서버에 저장해 둔 채팅 상태를 스냅샷으로 되돌린다. 형식이 맞지 않으면 null */
+export function deserializeConversationSnapshot(raw: unknown): ConversationSnapshot | null {
+    if (!raw || typeof raw !== 'object') return null
+    const state = raw as Partial<SerializedConversation>
+    if (state.version !== CONVERSATION_STATE_VERSION || !Array.isArray(state.bubbles)) return null
+    return {
+        sessionId: state.sessionId ?? null,
+        // 선택지 기반 답장은 예전에 저장된 채팅이라도 지금 구조로 (채팅엔 정해진 멘트, 마이페이지 이력엔 GPT 답장)
+        bubbles: splitRestoredPreferenceReplies(state.bubbles),
+        activeQuickReply: state.activeQuickReply ?? null,
+        selectedInQuickReply: state.selectedInQuickReply ?? [],
+        mode: state.mode ?? 'menu',
+        preferenceStepIndex: state.preferenceStepIndex ?? 0,
+        preferenceStepBubbleIds: state.preferenceStepBubbleIds ?? {},
+        collectedPreferences: state.collectedPreferences ?? INITIAL_PREFERENCES,
+        preferenceNotes: state.preferenceNotes ?? {},
+        freeformSelectedColors: state.freeformSelectedColors ?? [],
+        freeformLog: state.freeformLog ?? [],
+        reviseLog: state.reviseLog ?? [],
+        lastDesign: state.lastDesign ?? null,
+        generationSource: state.generationSource ?? 'scan-auto',
+        selectedPhotoFile: null,
+        selectedPhotoPreviewUrl: null,
+        inputValue: state.inputValue ?? '',
+        isQuickReplyCollapsed: state.isQuickReplyCollapsed ?? false,
+        designTitle: state.designTitle ?? null,
+    }
+}
+
+// 지금 화면에 떠 있는 채팅의 최신 스냅샷 — 렌더할 때마다 갱신된다 (useDesignChatWorkspace의 뒤로가기 복원용)
+let liveConversationSnapshot: ConversationSnapshot | null = null
+
+// 이력에서 지운 채팅 — 화면을 옮기며 마지막 상태를 저장하거나 늦게 끝난 저장이 그 채팅을 이력에 되살리지 않게 막는다
+const deletedSessionIds = new Set<number>()
+
+export function markConversationDeleted(sessionId: number) {
+    deletedSessionIds.add(sessionId)
+}
+
+/** 삭제에 실패해 이력에 되돌렸을 때 다시 저장되게 한다 */
+export function unmarkConversationDeleted(sessionId: number) {
+    deletedSessionIds.delete(sessionId)
+}
+
+export function isConversationDeleted(sessionId: number) {
+    return deletedSessionIds.has(sessionId)
+}
+
+export function getLiveConversationSnapshot(): ConversationSnapshot | null {
+    return liveConversationSnapshot
+}
 // "수정하고 싶어요" / "이어서 수정할게요"를 골랐을 때 네일리가 보내는 안내
-const REVISE_PROMPT_MESSAGE =
-    '어떤 부분을 수정하고 싶으신지 자유롭게 말씀해 주세요!\n예를 들어 "컬러를 더 밝게 해 줘", "글리터 대신 무광으로 바꿔 줘", "하트 모티프를 빼 줘"처럼 말씀해 주시면 돼요.'
+const REVISE_PROMPT_MESSAGE = '컬러, 스타일, 모티프 등 수정하고 싶으신 부분을 자유롭게 말씀해 주세요!'
+// 디자인 확정 — 누르면 이 답을 채팅에 남기고 결과 화면으로 넘어간다
+const DESIGN_ACCEPT_LABEL = '좋아요! 이 디자인으로 할게요.'
+// 수정 제안 선택지 안에서 띄우는 확정 선택지 — 수정하려다 "그냥 방금 디자인으로 할래"로 마음을 바꾼 사용자를 위한 것.
+// 누르면 DESIGN_ACCEPT_LABEL과 똑같이 확정하고 결과 화면으로 넘어간다.
+const DESIGN_CONFIRM_FROM_REVISE_LABEL = '방금 디자인으로 확정할게요.'
+const DESIGN_CONFIRM_FROM_REVISE_VALUE = '__confirm_current_design__'
+// 확정 답으로 보는 말풍선 문장들 (확정 뒤 다시 연 채팅인지 판단할 때 쓴다)
+const DESIGN_ACCEPT_LABELS = [DESIGN_ACCEPT_LABEL, DESIGN_CONFIRM_FROM_REVISE_LABEL]
 const DESIGN_FEEDBACK_QUICK_REPLY: QuickReply = {
     id: 'design-feedback',
     question: '이 디자인 마음에 드시나요?',
     options: [
-        { value: 'accept', label: '네, 이 디자인으로 할게요 🎉' },
-        { value: 'revise', label: '수정하고 싶어요 ✏️' },
+        { value: 'accept', label: DESIGN_ACCEPT_LABEL, icon: 'party' },
+        { value: 'revise', label: '수정하고 싶어요.', icon: 'pencil' },
     ],
     multi: false,
     limit: 1,
@@ -232,8 +370,8 @@ const REGENERATE_CHOICE_QUICK_REPLY: QuickReply = {
     id: 'regenerate-choice',
     question: '이 디자인을 이어서 수정할까요, 아니면 처음부터 새로 만들까요?',
     options: [
-        { value: 'continue', label: '이어서 수정할게요' },
-        { value: 'restart', label: '처음부터 새로 만들게요' },
+        { value: 'continue', label: '이어서 수정할게요.' },
+        { value: 'restart', label: '처음부터 새로 만들게요.' },
     ],
     multi: false,
     limit: 1,
@@ -262,9 +400,15 @@ const STEP_LAYOUT: Record<PreferenceKey, 'list' | 'grid3'> = {
     color: 'list',
 }
 
-// 주어진 선택지 외에 "기타" 의견을 직접 적을 수 있는 단계 (분위기/디자인 타입/모티프만)
-export const PREFERENCE_NOTE_STEPS: PreferenceKey[] = ['mood', 'designType', 'motif']
+// 주어진 선택지 외에 "기타" 의견을 직접 적을 수 있는 단계 (분위기/디자인 타입/모티프/컬러)
+export const PREFERENCE_NOTE_STEPS: PreferenceKey[] = ['mood', 'designType', 'motif', 'color']
 export const PREFERENCE_NOTE_MAX_LENGTH = 50
+// 컬러 기타 입력은 "2번째 색은 포인트로만 써 주세요"처럼 문장으로 적는 경우가 많아 더 길게 받는다
+export const COLOR_NOTE_MAX_LENGTH = 100
+
+export function getPreferenceNoteMaxLength(step: PreferenceKey): number {
+    return step === 'color' ? COLOR_NOTE_MAX_LENGTH : PREFERENCE_NOTE_MAX_LENGTH
+}
 
 const STEP_QUESTIONS: Record<PreferenceKey, string> = {
     mood: '원하시는 분위기를 선택해 주세요.',
@@ -274,32 +418,115 @@ const STEP_QUESTIONS: Record<PreferenceKey, string> = {
     shape: '원하시는 네일 쉐입을 선택해 주세요.',
     color: '원하시는 컬러를 선택해 주세요.',
 }
-// 말풍선 안에서 입력창의 '손 분석 결과' 버튼 모양으로 그려지는 자리표시자
-// (값은 예전 '?' 아이콘 시절 그대로 둬서, 저장돼 있던 대화를 복원해도 그대로 버튼 모양으로 나온다)
-export const ANALYSIS_BUTTON_TOKEN = '{{qicon}}'
+// 디자인 생성 후 완성 멘트 — 모든 생성 방식(선택지·자유 입력·사진·스캔 자동)이 같이 쓴다 (수정 후 멘트는 따로)
+const DESIGN_COMPLETE_MESSAGE = '네일을 완성했어요! 이런 디자인은 어떠세요?'
+const REVISE_COMPLETE_MESSAGE = '말씀하신 대로 수정했어요! 어떠세요?'
+// 디자인을 만들던 중에 페이지를 떠나(새로고침·탭 닫기) 생성이 멈춘 채팅을 다시 열었을 때
+const GENERATION_INTERRUPTED_MESSAGE = '디자인 생성이 중단됐어요. 원하시는 생성 방식을 다시 선택해 주세요.'
 
-// "~로/~으로" — 마지막 글자가 받침 있는 한글(ㄹ 받침 제외)이면 '으로', 그 밖(받침 없음·ㄹ·영문·색상 코드)은 '로'
-function withDirectionParticle(word: string): string {
-    const last = word.trim().slice(-1)
-    const code = last.charCodeAt(0) - 0xac00
-    if (code < 0 || code > 11171) return '로'
-    const finalConsonant = code % 28
-    return finalConsonant === 0 || finalConsonant === 8 ? '로' : '으로'
+// 채팅 화면의 대화를 확정 때 저장할 형태로 바꾼다 — 생성 중 카드는 빼고, 참고 사진 미리보기(data URL, 수 MB)는
+// 자리표시자로 보낸다(서버가 실제로 올라간 사진 URL로 바꿔 저장한다)
+function buildChatTranscript(bubbles: ChatBubble[]): ChatTranscriptEntry[] {
+    return bubbles
+        .filter((bubble) => !bubble.isGenerating)
+        .map((bubble) => ({
+            role: bubble.role,
+            content: bubble.text,
+            imageUrls: bubble.imageUrls?.map((url) => (/^(data|blob):/.test(url) ? REFERENCE_PHOTO_PLACEHOLDER : url)),
+            colorSwatches: bubble.colorSwatches,
+            colorsInline: bubble.colorsInline,
+            textAfterColors: bubble.textAfterColors,
+            // 항상 true/false로 보낸다 — 이력을 받는 쪽이 "확정 때 저장한 대화"인지 이 값으로 알아본다
+            designResult: !!bubble.isDesignResult,
+            historyOnly: bubble.historyOnly,
+            chatOnly: bubble.chatOnly,
+            historySection: bubble.historySection,
+            generationMethod: bubble.generationMethod,
+        }))
+}
+
+// 자유 입력 대화에서 서버가 확인하는 필수 항목(분위기·디자인 기법·컬러·계절·모티프·쉐입)을 다 모았는지 —
+// 이때만 "바로 생성해 드릴까요?" 확인 창을 띄운다. 서버가 완료라고 알려 오거나, 남은 항목이 하나도 없을 때.
+function isFreeformCollectionComplete(res: ChatResponse): boolean {
+    return res.isComplete || res.remainingCategories?.length === 0
+}
+
+// 자유 입력 제안 선택지가 네일 쉐입 이름인지 (서버가 다음 질문 대상을 쉐입으로 적지 않았을 때 알아보는 용도)
+const SHAPE_OPTION_WORDS = [
+    ...PREFERENCE_OPTIONS.shape.flatMap((option) => [option.label, option.value]),
+    '스퀘어오벌',
+    '코핀',
+]
+function isShapeOptionLabel(label: string): boolean {
+    const normalized = label.toLowerCase()
+    return SHAPE_OPTION_WORDS.some((word) => normalized.includes(word.toLowerCase()))
+}
+
+// 완성 이미지가 이 시간 안에 카드에 안 뜨면(불러오기 실패·아주 느린 네트워크) 완성 멘트를 그냥 띄운다
+const CARD_REVEAL_TIMEOUT_MS = 15000
+
+// 선택지 라벨이 문장(…요 / …니다)으로 끝나는데 문장부호가 없으면 붙인다 — 서버가 주는 제안 문장은 부호 없이 오는 경우가 많다.
+// 묻는 말(…까요 / …나요 / …가요)은 물음표, 나머지는 마침표. 단어나 명사형("…하기")은 그대로 둔다.
+function withSentencePunctuation(text: string): string {
+    const trimmed = text.trim()
+    if (!/(요|니다)$/.test(trimmed)) return trimmed
+    return trimmed + (/(까요|나요|가요)$/.test(trimmed) ? '?' : '.')
 }
 
 function makeId() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-// 선택한 스캔 세션(왼손/오른손 scanId)의 실제 분석 결과를 서버에서 받아온다.
-// 초기 진입 시(최근 세션 자동 선택)와 드롭다운으로 다른 세션을 고를 때 둘 다 이 함수를 쓴다.
-async function fetchSessionAnalysis(session: ScanSession) {
-    const [leftRes, rightRes] = await Promise.all([
-        session.leftScanId ? getScanResult(session.leftScanId).catch(() => null) : Promise.resolve(null),
-        session.rightScanId ? getScanResult(session.rightScanId).catch(() => null) : Promise.resolve(null),
-    ])
-    return { leftRes, rightRes }
+// 저장된 대화의 선택지 기반 답장을 지금 구조로 맞춘다 — 채팅 화면엔 정해진 멘트(chatOnly), 마이페이지 이력엔 GPT 답장(historyOnly)
+function splitRestoredPreferenceReplies(bubbles: ChatBubble[]): ChatBubble[] {
+    return splitSavedPreferenceReplies(
+        bubbles,
+        (bubble) => bubble.text,
+        (bubble, text, marks, asNew) => ({
+            ...bubble,
+            id: asNew ? makeId() : bubble.id,
+            text,
+            historyOnly: marks.historyOnly,
+            chatOnly: marks.chatOnly,
+        }),
+    )
 }
+
+// 답변·디자인을 기다리던 중에 새로고침·탭 닫기로 떠나 멈춘 채팅 — 다시 열었을 때 이어 갈 수 있게 멈춘 자리를 정리한다.
+// 생성 중 카드는 빼고, 실패했을 때처럼 멈췄다고 알린 뒤 다시 고를 선택 창을 띄운다.
+// (isGeneratingDesign: 디자인 이미지 생성·수정 요청을 보내 둔 상태였는지)
+function buildInterruptedSnapshot(snapshot: ConversationSnapshot, isGeneratingDesign: boolean): ConversationSnapshot {
+    const hasGeneratingCard = snapshot.bubbles.some((bubble) => bubble.isGenerating)
+    const bubbles = snapshot.bubbles.filter((bubble) => !bubble.isGenerating)
+    const withMessage = (text: string, marks?: Pick<ChatBubble, 'historySection'>): ChatBubble[] => [
+        ...bubbles,
+        { id: makeId(), role: 'assistant', text, ...marks },
+    ]
+    // 완성 이미지는 받아 카드에 채웠고 나타나기만 기다리던 때 — 디자인은 다 만들어졌다
+    if (isGeneratingDesign && !hasGeneratingCard) {
+        return {
+            ...snapshot,
+            bubbles: withMessage(snapshot.mode === 'revise' ? REVISE_COMPLETE_MESSAGE : DESIGN_COMPLETE_MESSAGE),
+            activeQuickReply: DESIGN_FEEDBACK_QUICK_REPLY,
+        }
+    }
+    // 수정하던 디자인은 그대로 두고, 이 디자인으로 할지 다시 수정할지 고르게 한다
+    if (snapshot.mode === 'revise' && snapshot.lastDesign) {
+        return { ...snapshot, bubbles: withMessage('디자인 수정이 중단됐어요.'), activeQuickReply: DESIGN_FEEDBACK_QUICK_REPLY }
+    }
+    // 새로 만들던 중 (선택지 기반에서 고른 내용을 보내고 답장을 기다리던 때 포함) — 생성 방식부터 다시 고른다
+    if (isGeneratingDesign || snapshot.mode === 'preference') {
+        return {
+            ...snapshot,
+            bubbles: withMessage(GENERATION_INTERRUPTED_MESSAGE, { historySection: 'method' }),
+            activeQuickReply: MENU_QUICK_REPLY,
+            mode: 'menu',
+        }
+    }
+    // 자유 입력 답변을 기다리던 때
+    return { ...snapshot, bubbles: withMessage('답변을 받기 전에 대화가 중단됐어요. 다시 말씀해 주세요.') }
+}
+
 function buildPreferenceQuickReply(step: PreferenceKey): QuickReply {
     const limit = STEP_LIMIT[step]
     return {
@@ -314,7 +541,7 @@ function buildPreferenceQuickReply(step: PreferenceKey): QuickReply {
 // 결과 화면 "디자인 다시 생성하기"에서 넘어올 때 실어오는 정보 — 그 디자인을 만들 때 쓴
 // 채팅 세션으로 이어서 수정할 수 있게, 세션 ID와 그 디자인을 그대로 lastDesign처럼 재구성할
 // 수 있는 값들을 함께 받는다.
-type RegenerateNavState = {
+export type RegenerateNavState = {
     designId: number
     sessionId: number | null
     imageUrls: string[]
@@ -324,61 +551,140 @@ type RegenerateNavState = {
     context: GenerationContext
 }
 
-export function useNailDesignChatPage() {
+// 이 채팅에 반영 중인 손 분석 기록 — 사이드바에서 고르고(useDesignChatWorkspace), 채팅은 받아서 쓰기만 한다
+export type ConversationAnalysis = {
+    leftAnalysis: ScanResultResponse | null
+    rightAnalysis: ScanResultResponse | null
+    scanId: number | null
+    scanKey: string | null
+    summary: HandAnalysisSummary | null
+}
+
+// 채팅이 알려 주는 진행 상황 (designChatRuntime이 모은다) — 채팅을 화면에서 내릴 때 숨겨 둔 채 계속할지, "새 채팅"을
+// 다시 눌렀을 때 새로 열지 정하고, 사이드바 채팅 이력의 상태 점(디자인을 만드는 중 / 보지 않는 동안 다 만듦)을 띄우는 데 쓴다
+export type ConversationStatus = {
+    sessionId: number | null
+    // 사용자가 한 번이라도 말했는지 (이때부터 채팅 이력에 저장된다)
+    hasProgress: boolean
+    // 답변을 기다리거나 디자인을 만드는 중인지
+    isBusy: boolean
+    // 디자인을 만드는 중인지 (선택지 기반에서 고른 내용을 보내고 답장을 기다리는 동안도 포함)
+    isGeneratingDesign: boolean
+    // 이 채팅에서 만든 디자인 수 — 다 만든 뒤 늘었으면 생성에 성공한 것이다
+    designCount: number
+}
+
+type UseNailDesignChatPageParams = {
+    // 이력에서 연 채팅이나 뒤로가기로 돌아온 채팅의 스냅샷 (새 채팅이면 null)
+    initialSnapshot: ConversationSnapshot | null
+    // 결과 화면 "디자인 다시 생성하기"로 들어온 경우
+    regenerate: RegenerateNavState | null
+    // 새 채팅 인사말에 쓸 닉네임·분석 기록을 다 불러왔는지
+    isContextReady: boolean
+    userName: string
+    // 손 촬영 → 출력에서 이어 온 흐름이면 false (그때 분석한 기록에 고정)
+    canSelectSession: boolean
+    // 고를 수 있는(분석이 다 끝난) 손 분석 기록 수 — 새 채팅 인사말 마지막 줄을 정하는 데 쓴다 (모르면 여러 개로 본다)
+    recordCount?: number
+    analysis: ConversationAnalysis
+    onSessionReady?: (sessionId: number) => void
+    onSaved?: (summary: ChatSummary) => void
+    // 화면에 있든 숨겨 두었든 늘 알린다
+    onStatusChange?: (status: ConversationStatus) => void
+    // "처음부터 새로 만들게요" — 새 채팅을 연다
+    onStartNewChat?: () => void
+    // 보기만 하는 채팅 (손 촬영에서 이어 온 진입에서 연 다른 분석 기록의 채팅) — 입력·전송·선택 창을 막는다
+    isReadOnly?: boolean
+    // 답변·디자인을 기다리는 중에 다른 채팅·다른 페이지로 옮겨 화면에서만 숨긴 채팅 — 그대로 계속 진행하고 저장하되,
+    // 채팅 화면(지금 채팅 표시)·뒤로가기 복원에는 끼어들지 않는다
+    isBackground?: boolean
+}
+
+// 채팅 상태를 서버에 저장하기까지 기다리는 시간 — 그 사이에 또 바뀌면 마지막 상태만 한 번 저장한다
+const SAVE_DEBOUNCE_MS = 700
+
+// 선택지 툴팁 예시 사진을 미리 받아 둔 Image 객체들. 객체를 들고 있어야 브라우저 메모리 캐시에 남아,
+// 툴팁의 <img>가 같은 주소를 쓰면 다시 받지 않고 첫 프레임부터 바로 그린다.
+const preloadedOptionImages = new Map<string, HTMLImageElement>()
+
+const preloadOptionImage = (src: string) => {
+    if (preloadedOptionImages.has(src)) return
+    const img = new Image()
+    img.src = src
+    preloadedOptionImages.set(src, img)
+}
+
+export function useNailDesignChatPage({
+                                          initialSnapshot,
+                                          regenerate,
+                                          isContextReady,
+                                          userName,
+                                          canSelectSession,
+                                          recordCount,
+                                          analysis,
+                                          onSessionReady,
+                                          onSaved,
+                                          onStatusChange,
+                                          onStartNewChat,
+                                          isReadOnly = false,
+                                          isBackground = false,
+                                      }: UseNailDesignChatPageParams) {
+
     const navigate = useNavigate()
-    const location = useLocation()
-    const queryClient = useQueryClient()
-    const navState = (location.state as
-        | {
-        leftScanId?: number | null
-        rightScanId?: number | null
-        scanId?: number | null
-        regenerate?: RegenerateNavState | null
-    }
-        | null) ?? null
 
-    // 브라우저 뒤로/앞으로가기(POP)로 돌아온 경우에만 이전 채팅 스냅샷을 복원한다. 앱 안의
-    // 링크/버튼으로 들어온 경우(PUSH/REPLACE)엔 항상 새 채팅으로 시작하고, 남아있던 스냅샷은
-    // 버려서 나중에 엉뚱하게 되살아나지 않게 한다. 마운트 시점에 딱 한 번만 판단해서, 이후
-    // 아래 useState들의 초기값 복원과 초기화 로직 분기에 함께 쓴다.
-    const navigationType = useNavigationType()
-    const [wasRestored] = useState(() => {
-        const restored = navigationType === 'POP' && !!chatSessionSnapshot
-        if (!restored) chatSessionSnapshot = null
-        return restored
-    })
+    // 이력에서 연 채팅·뒤로가기로 돌아온 채팅은 스냅샷 그대로 이어서 하고, 새 세션을 만들거나 인사말을 다시 붙이지 않는다.
+    // 마운트 시점에 딱 한 번만 판단한다 (채팅을 바꾸면 이 훅을 쓰는 컴포넌트가 새로 마운트된다).
+    const [chatSessionSnapshot] = useState(initialSnapshot)
+    const wasRestored = !!chatSessionSnapshot
 
-    // 결과 화면에서 "디자인 다시 생성하기"로 갓 들어온 경우에만 유효하다 — 뒤로가기로 복원된
-    // 마운트라면 이미 진행 중이던 채팅이 있으므로 무시한다(그 채팅을 그대로 이어간다).
-    const regenerateState = !wasRestored ? navState?.regenerate ?? null : null
+    // 결과 화면에서 "디자인 다시 생성하기"로 갓 들어온 경우에만 유효하다
+    const [regenerateState] = useState(() => (!wasRestored ? regenerate : null))
 
-    // 헤더의 "디자인 채팅" 링크처럼 특정 스캔을 지정하지 않고 들어온 경우에만 분석 결과를
-    // 골라볼 수 있게 한다. 인쇄 페이지에서 scanId를 콕 집어 넘겨준 경우(= 메인 "시작하기"로
-    // 이어진 흐름)엔 그때 분석한 결과에 고정하고 드롭다운으로 다른 결과를 못 고르게 한다.
-    const canSelectSession = wasRestored
-        ? (chatSessionSnapshot?.canSelectSession ?? true)
-        : !(navState?.leftScanId || navState?.rightScanId || navState?.scanId)
+    const { leftAnalysis, rightAnalysis, scanId, scanKey, summary: analysisSummary } = analysis
 
-    const [userName, setUserName] = useState(chatSessionSnapshot?.userName ?? '')
-    const [isInitReady, setIsInitReady] = useState(false)
+    const [isSessionReady, setIsSessionReady] = useState(wasRestored)
+    const isInitReady = isSessionReady && (wasRestored || isContextReady)
     const [sessionId, setSessionId] = useState<number | null>(chatSessionSnapshot?.sessionId ?? null)
-    const [scanId, setScanId] = useState<number | null>(chatSessionSnapshot?.scanId ?? null)
-    const [scanHandSide, setScanHandSide] = useState<'LEFT' | 'RIGHT' | null>(chatSessionSnapshot?.scanHandSide ?? null)
 
-    // 생성 도중 페이지를 떠났다 돌아오면 그 생성 결과는 이어받을 수 없으므로, 남아 있던 생성 중 카드는 버린다
-    const [bubbles, setBubbles] = useState<ChatBubble[]>(
-        (chatSessionSnapshot?.bubbles ?? []).filter((bubble) => !bubble.isGenerating),
+    // 선택지 기반으로 디자인을 만드는 도중 페이지를 떠났다 돌아온 경우 — 선택지 기반은 입력창으로 이어 갈 수 없어서
+    // 그대로 두면 아무것도 할 수 없으므로 생성 방식 선택으로 되돌린다
+    // (생성 중 카드가 남아 있었거나, 선택을 다 마치고 서버 답장을 기다리던 중 — 선택 창도 결과도 없는 상태 — 에 떠난 경우)
+    const [wasPreferenceGenerationInterrupted] = useState(
+        () =>
+            chatSessionSnapshot?.mode === 'preference' &&
+            (chatSessionSnapshot.bubbles.some((bubble) => bubble.isGenerating) ||
+                (!chatSessionSnapshot.activeQuickReply && !chatSessionSnapshot.lastDesign)),
     )
-    const [activeQuickReply, setActiveQuickReply] = useState<QuickReply | null>(chatSessionSnapshot?.activeQuickReply ?? null)
-    // "네, 바로 생성해주세요 / 아직 더 얘기하고 싶어요" 확인 화면이 떠 있는 동안엔
+    // 생성 도중 페이지를 떠났다 돌아오면 그 생성 결과는 이어받을 수 없으므로, 남아 있던 생성 중 카드는 버린다
+    const [bubbles, setBubbles] = useState<ChatBubble[]>(() => {
+        const restoredBubbles = (chatSessionSnapshot?.bubbles ?? []).filter((bubble) => !bubble.isGenerating)
+        return wasPreferenceGenerationInterrupted
+            ? [
+                ...restoredBubbles,
+                {
+                    id: makeId(),
+                    role: 'assistant',
+                    text: GENERATION_INTERRUPTED_MESSAGE,
+                    historySection: 'method',
+                },
+            ]
+            : restoredBubbles
+    })
+    const [activeQuickReply, setActiveQuickReply] = useState<QuickReply | null>(
+        wasPreferenceGenerationInterrupted ? MENU_QUICK_REPLY : chatSessionSnapshot?.activeQuickReply ?? null,
+    )
+    // "바로 생성해 주세요 / 아직 더 얘기하고 싶어요" 확인 화면이 떠 있는 동안엔
     // 자유 텍스트 입력을 막는다 — 안 그러면 아무 텍스트나 쳤을 때 "수정 요청"으로
     // 오인돼서 의도치 않게 디자인이 재생성되는 문제가 있었다.
+    // "디자인 다시 생성하기"로 들어와 이어서 수정할지/새로 만들지 묻는 동안도 막는다 — 입력하면 선택 창이
+    // 사라지고 이전 대화에 이어 자유 입력 채팅이 시작돼 버린다.
     const isAwaitingGenerateConfirm =
         activeQuickReply?.id === 'design-feedback' ||
+        activeQuickReply?.id === 'regenerate-choice' ||
         !!activeQuickReply?.options?.some((o) => o.value === '__generate__')
     const [selectedInQuickReply, setSelectedInQuickReply] = useState<string[]>(chatSessionSnapshot?.selectedInQuickReply ?? [])
 
-    const [mode, setMode] = useState<Mode>(chatSessionSnapshot?.mode ?? 'menu')
+    const [mode, setMode] = useState<Mode>(wasPreferenceGenerationInterrupted ? 'menu' : chatSessionSnapshot?.mode ?? 'menu')
     const [preferenceStepIndex, setPreferenceStepIndex] = useState(chatSessionSnapshot?.preferenceStepIndex ?? 0)
     const [preferenceStepBubbleIds, setPreferenceStepBubbleIds] = useState<Record<number, string>>(
         chatSessionSnapshot?.preferenceStepBubbleIds ?? {},
@@ -395,6 +701,8 @@ export function useNailDesignChatPage() {
     const reviseLogRef = useRef<string[]>(chatSessionSnapshot?.reviseLog ?? [])
     const [lastDesign, setLastDesign] = useState<GeneratedDesign | null>(chatSessionSnapshot?.lastDesign ?? null)
     const [generationSource, setGenerationSource] = useState<GenerationSource>(chatSessionSnapshot?.generationSource ?? 'scan-auto')
+    // 마지막으로 만든 디자인의 분위기로 지은 채팅 이름 (사이드바 채팅 이력)
+    const [designTitle, setDesignTitle] = useState<string | null>(chatSessionSnapshot?.designTitle ?? null)
     const [selectedPhotoFile, setSelectedPhotoFile] = useState<File | null>(chatSessionSnapshot?.selectedPhotoFile ?? null)
     const [selectedPhotoPreviewUrl, setSelectedPhotoPreviewUrl] = useState<string | null>(
         chatSessionSnapshot?.selectedPhotoPreviewUrl ?? null,
@@ -405,8 +713,6 @@ export function useNailDesignChatPage() {
     const [isSending, setIsSending] = useState(false)
     // 보내는 중인 게 디자인 이미지 생성/수정이면 true — 채팅 답변 대기('…') 대신 이미지 크기의 생성 중 카드를 보여 준다
     const [isGeneratingDesign, setIsGeneratingDesign] = useState(false)
-    // 컬러 선택 단계의 "기타 입력"(예: "지금까지 고른 거에 어울리는 색 추천해줘"). 제출하면 자유채팅으로 넘어간다.
-    const [colorNote, setColorNote] = useState('')
     const [customColor, setCustomColor] = useState('#DE869F')
     const [isQuickReplyCollapsed, setIsQuickReplyCollapsed] = useState(chatSessionSnapshot?.isQuickReplyCollapsed ?? false)
 
@@ -475,6 +781,16 @@ export function useNailDesignChatPage() {
         setPinnedTooltipKey(null)
     }, [activeQuickReply?.id])
 
+    // 분위기/디자인 타입/모티프 단계가 열리면 그 단계의 예시 사진을 미리 받아 둔다.
+    // 호버한 뒤에야 받기 시작하면 사진(장당 1~2MB)이 뜨기까지 빈 칸이 잠깐 보인다.
+    useEffect(() => {
+        const id = activeQuickReply?.id
+        if (!id?.startsWith('pref-')) return
+        const infos = PREFERENCE_OPTION_INFO[id.slice(5) as PreferenceKey]
+        if (!infos) return
+        Object.values(infos).forEach((info) => preloadOptionImage(info.image))
+    }, [activeQuickReply?.id])
+
     // 스크롤/리사이즈가 일어나면 앵커 위치가 어긋나므로 열려 있던 툴팁을 닫는다.
     useEffect(() => {
         if (!tooltipAnchor) return
@@ -498,20 +814,14 @@ export function useNailDesignChatPage() {
     const [freeformSelectedColors, setFreeformSelectedColors] = useState<string[]>(
         chatSessionSnapshot?.freeformSelectedColors ?? [],
     )
-
-    const [showAnalysisPanel, setShowAnalysisPanel] = useState(chatSessionSnapshot?.showAnalysisPanel ?? false)
+    // 자유입력 컬러피커의 "기타 입력" — 고른 색과 함께 보낸다 (handleFreeformColorPickerConfirm)
+    const [freeformColorNote, setFreeformColorNote] = useState('')
 
     // 확대/이동은 공용 DesignImageDetailModal이 담당하므로, 여기서는 어떤 이미지를 확대해서 보여줄지만 들고 있는다.
     // 생성된 디자인 이미지면 다운로드 버튼만, 내가 첨부한 참고 사진이면 버튼 없이 사진만 보여준다.
     const [zoomedImage, setZoomedImage] = useState<{ url: string; isDesignResult: boolean } | null>(null)
     const openZoomedImage = (url: string, isDesignResult: boolean) => setZoomedImage({ url, isDesignResult })
     const closeZoomedImage = () => setZoomedImage(null)
-
-    const [leftAnalysis, setLeftAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.leftAnalysis ?? null)
-    const [rightAnalysis, setRightAnalysis] = useState<ScanResultResponse | null>(chatSessionSnapshot?.rightAnalysis ?? null)
-    // 헤더로 단독 진입했을 때 드롭다운으로 고를 수 있는 과거 분석 결과 목록(양손 다 촬영된 세션만)
-    const [scanSessions, setScanSessions] = useState<ScanSession[]>(chatSessionSnapshot?.scanSessions ?? [])
-    const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(chatSessionSnapshot?.selectedSessionKey ?? null)
 
     const messagesRef = useRef<HTMLDivElement | null>(null)
     const chatContainerRef = useRef<HTMLDivElement | null>(null)
@@ -571,8 +881,12 @@ export function useNailDesignChatPage() {
         fitTextarea()
     }, [])
 
-    const pushAssistant = (text: string) => {
-        setBubbles((prev) => [...prev, { id: makeId(), role: 'assistant', text }])
+    // marks: 생성 방식 고르기에 속한 말풍선/생성 방식이 시작된 말풍선/채팅 이력에만 남길 말풍선 표시
+    type BubbleMarks = Pick<ChatBubble, 'historySection' | 'generationMethod' | 'historyOnly' | 'chatOnly'>
+    const pushAssistant = (text: string, marks?: BubbleMarks) => {
+        const id = makeId()
+        setBubbles((prev) => [...prev, { id, role: 'assistant', text, ...marks }])
+        return id
     }
     // 디자인 생성 중 카드 — 생성을 시작할 때 띄워 두고, 완성되면 같은 카드에 이미지를 채운다(실패하면 지운다)
     const pushGeneratingCard = () => {
@@ -590,96 +904,62 @@ export function useNailDesignChatPage() {
     const removeGeneratingCard = (id: string) => {
         setBubbles((prev) => prev.filter((bubble) => bubble.id !== id))
     }
-    const pushUser = (text: string) => {
+    // 생성 중 카드에 완성 이미지를 채우고, 이미지가 카드에 다 나타난 뒤(handleDesignCardShown)에 완성 멘트와
+    // "이 디자인 마음에 드시나요?" 선택 창을 띄운다. 그때까지는 생성 중 상태(입력 막힘, 기다려 달라는 안내)를 유지한다.
+    // 이미지가 끝내 안 뜨는 경우에도 멈춰 있지 않도록 일정 시간이 지나면 그냥 띄운다.
+    const pendingCardRevealsRef = useRef(new Map<string, () => void>())
+    const completeGeneratingCard = (cardId: string, imageUrls: string[], message: string) => {
+        let revealed = false
+        const reveal = () => {
+            if (revealed) return
+            revealed = true
+            pendingCardRevealsRef.current.delete(cardId)
+            pushAssistant(message)
+            setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+            setIsSending(false)
+            setIsGeneratingDesign(false)
+        }
+        fillGeneratingCard(cardId, imageUrls)
+        if (imageUrls.length === 0) {
+            reveal()
+            return
+        }
+        pendingCardRevealsRef.current.set(cardId, reveal)
+        window.setTimeout(reveal, CARD_REVEAL_TIMEOUT_MS)
+    }
+    const handleDesignCardShown = (cardId: string) => {
+        pendingCardRevealsRef.current.get(cardId)?.()
+    }
+    const pushUser = (text: string, marks?: BubbleMarks) => {
         const id = makeId()
-        setBubbles((prev) => [...prev, { id, role: 'user', text }])
+        setBubbles((prev) => [...prev, { id, role: 'user', text, ...marks }])
         return id
     }
-    const pushUserColors = (text: string, colorSwatches: string[]) => {
+    const pushUserColors = (
+        text: string,
+        colorSwatches: string[],
+        options: { colorsInline?: boolean; textAfterColors?: string; chatOnly?: boolean } = {},
+    ) => {
         const id = makeId()
-        setBubbles((prev) => [...prev, { id, role: 'user', text, colorSwatches }])
+        setBubbles((prev) => [...prev, { id, role: 'user', text, colorSwatches, ...options }])
         return id
     }
 
     // ── 초기화 ─────────────────────────────────────────────────────────────
+    // 닉네임·손 분석 기록은 사이드바(useDesignChatWorkspace)가 불러와 넘겨 주고, 여기서는 채팅 세션만 만든다.
     useEffect(() => {
-        // 스냅샷에서 복원된 마운트라면(다른 페이지에 갔다가 뒤로가기 등으로 돌아온 경우),
-        // 이미 세션·대화 내역이 다 남아있으므로 새 세션을 만들거나 프로필/스캔 정보를
-        // 다시 불러오지 않는다 — 그대로 이어서 쓴다.
-        if (wasRestored) {
-            setIsInitReady(true)
-            return
-        }
+        // 이력에서 연 채팅·뒤로가기로 돌아온 채팅은 세션·대화 내역이 다 남아 있으므로 그대로 이어서 쓴다.
+        if (wasRestored) return
 
         let cancelled = false
-
-        // 아래 세 작업(프로필 조회 / 스캔 정보 조회 / 채팅 세션 생성)은 서로의 결과에
-        // 의존하지 않는다 — 순서대로 await하면 왕복 시간이 그대로 합산돼 진입이 느려지므로
-        // Promise.all로 동시에 실행한다. 각자 자기 에러는 그대로 삼켜서 하나가 실패해도
-        // 나머지 초기화는 정상 진행된다.
-        const fetchProfile = async () => {
-            try {
-                const profile = await getMyProfile()
-                if (!cancelled) setUserName(profile.nickname || profile.name)
-            } catch {
-                // 이름 못 가져와도 진행
-            }
-        }
-
-        const fetchScanInfo = async () => {
-            try {
-                if (!canSelectSession) {
-                    // 인쇄 페이지의 "디자인 생성하러 가기"로 넘어온 경우(= 메인 "시작하기"로 이어진 흐름).
-                    // 그때 골랐던 scanId로 바로 조회해서 그 결과에 고정한다 — 세션 목록/드롭다운은 안 쓴다.
-                    const [leftRes, rightRes] = await Promise.all([
-                        navState?.leftScanId ? getScanResult(navState.leftScanId).catch(() => null) : Promise.resolve(null),
-                        navState?.rightScanId ? getScanResult(navState.rightScanId).catch(() => null) : Promise.resolve(null),
-                    ])
-                    if (!cancelled) {
-                        setLeftAnalysis(leftRes)
-                        setRightAnalysis(rightRes)
-                        const primaryScanId =
-                            navState?.scanId ?? navState?.leftScanId ?? navState?.rightScanId ?? leftRes?.scanId ?? rightRes?.scanId ?? null
-                        setScanId(primaryScanId)
-                        setScanHandSide(leftRes ? 'LEFT' : rightRes ? 'RIGHT' : null)
-                    }
-                } else {
-                    // 특정 스캔이 지정되지 않은 진입(헤더 링크 등) — 과거 분석 이력을 모두 불러와
-                    // 최신 세션을 기본으로 보여주고, 드롭다운으로 다른 세션도 고를 수 있게 한다.
-                    // 마이페이지 이력과 동일하게, 실제로 분석이 다 끝난(퍼스널 컬러+추천 쉐입+
-                    // 길이/너비/곡률까지 전부 채워진) 세션만 대상으로 한다.
-                    // 마이페이지/손 촬영/출력과 같은 react-query 캐시(MY_SCAN_SESSIONS_QUERY_KEY)를 공유해서,
-                    // 다른 화면에서 이미 받아온 데이터가 있으면 다시 네트워크를 타지 않는다.
-                    const historyItems = await queryClient.fetchQuery({
-                        queryKey: MY_SCAN_SESSIONS_QUERY_KEY,
-                        queryFn: getMyScanSessions,
-                    })
-                    const sessions = historyItems.filter(isFullyAnalyzedSession)
-                    if (!cancelled) setScanSessions(sessions)
-                    const latest = sessions[0] ?? null
-                    if (latest) {
-                        const { leftRes, rightRes } = await fetchSessionAnalysis(latest)
-                        if (!cancelled) {
-                            setLeftAnalysis(leftRes)
-                            setRightAnalysis(rightRes)
-                            setScanId(latest.leftScanId ?? latest.rightScanId ?? null)
-                            setScanHandSide(leftRes ? 'LEFT' : rightRes ? 'RIGHT' : null)
-                            setSelectedSessionKey(latest.key)
-                        }
-                    }
-                }
-            } catch {
-                // 스캔 이력 없으면 null로 유지
-            }
-        }
-
         const initChatSession = async () => {
             // "디자인 다시 생성하기"로 들어온 경우, 그 디자인을 만든 세션을 그대로 이어써야
             // "이어서 수정하기"가 그 세션의 마지막 디자인을 기준으로 refine된다. 새 세션을
             // 만들면 서버가 이어서 수정할 대상을 찾지 못한다 — 세션 복원/초기 안내는 별도
             // 이펙트(아래 채팅 이력 복원)에서 처리하므로 여기서는 세션 생성만 건너뛴다.
             if (regenerateState) {
-                if (!cancelled) setSessionId(regenerateState.sessionId ?? null)
+                setSessionId(regenerateState.sessionId ?? null)
+                setIsSessionReady(true)
                 return
             }
             try {
@@ -689,47 +969,74 @@ export function useNailDesignChatPage() {
                 if (!cancelled) {
                     pushAssistant('채팅 세션을 시작하지 못했어요. 새로고침 후 다시 시도해 주세요.')
                 }
+            } finally {
+                if (!cancelled) setIsSessionReady(true)
             }
         }
 
-        const init = async () => {
-            await Promise.all([fetchProfile(), fetchScanInfo(), initChatSession()])
-            if (!cancelled) setIsInitReady(true)
-        }
-
-        void init()
+        void initChatSession()
         return () => {
             cancelled = true
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
+    const isMountedRef = useRef(true)
+    useEffect(() => {
+        isMountedRef.current = true
+        return () => {
+            isMountedRef.current = false
+        }
+    }, [])
+
+    // 채팅 세션이 생기면 사이드바에 알려 지금 채팅을 이력에서 표시하게 한다
+    const onSessionReadyRef = useRef(onSessionReady)
+    useEffect(() => {
+        onSessionReadyRef.current = onSessionReady
+    })
+    // 숨겨 둔 채팅은 사이드바에 알리지 않고, 다시 화면에 띄울 때 알린다
+    useEffect(() => {
+        if (sessionId && !isBackground) onSessionReadyRef.current?.(sessionId)
+    }, [sessionId, isBackground])
+
+    // 인사말은 한 번만 붙인다 — 인사 전에 사이드바에서 분석 기록을 바꾸면 준비 상태가 잠깐 풀렸다 다시 잡힐 수 있다
+    const hasGreetedRef = useRef(false)
     useEffect(() => {
         // 복원된 마운트에서는 이미 인사말을 포함한 이전 대화가 남아있으므로 다시 붙이지 않는다.
-        if (!isInitReady || wasRestored) return
+        if (!isInitReady || wasRestored || hasGreetedRef.current) return
+        hasGreetedRef.current = true
 
         // "디자인 다시 생성하기"로 들어온 경우 — 그 디자인을 만들 때 나눈 채팅 내역을 그대로
         // 불러와 복원하고, 이어서 수정할지 처음부터 새로 만들지 물어본다.
         if (regenerateState) {
-            let cancelled = false
             getDesignChatHistory(regenerateState.designId)
                 .then((history: DesignChatMessage[]) => {
-                    if (cancelled) return
+                    if (!isMountedRef.current) return
+                    // 확정 때 저장한 채팅 화면 대화면 말풍선 모양(색 동그라미·이력에만 보이는 말풍선 등)까지 그대로 되살린다
                     const restoredBubbles: ChatBubble[] = history.map((msg) => ({
                         id: makeId(),
                         role: msg.role,
                         text: msg.content,
-                        imageUrls: msg.imageUrls,
-                        isDesignResult: msg.role === 'assistant' && !!msg.imageUrls?.length,
+                        imageUrls: msg.imageUrls ?? undefined,
+                        colorSwatches: msg.colorSwatches ?? undefined,
+                        colorsInline: msg.colorsInline ?? undefined,
+                        textAfterColors: msg.textAfterColors ?? undefined,
+                        isDesignResult: msg.designResult ?? (msg.role === 'assistant' && !!msg.imageUrls?.length),
+                        historyOnly: msg.historyOnly ?? undefined,
+                        chatOnly: msg.chatOnly ?? undefined,
+                        historySection: msg.historySection ?? undefined,
+                        generationMethod: msg.generationMethod ?? undefined,
                     }))
-                    setBubbles((prev) => [...restoredBubbles, ...prev])
+                    // 선택지 기반 답장은 예전에 저장된 대화라도 지금 구조로 (채팅엔 정해진 멘트, 마이페이지 이력엔 GPT 답장)
+                    const displayedBubbles = splitRestoredPreferenceReplies(restoredBubbles)
+                    setBubbles((prev) => [...displayedBubbles, ...prev])
                 })
                 .catch(() => {
                     // 이력을 못 불러와도(옛 디자인 등) 계속/새로 만들기 선택 자체는 가능해야 한다.
-                    if (!cancelled) pushAssistant('이전 대화 내역을 불러오지 못했어요.')
+                    if (isMountedRef.current) pushAssistant('이전 대화 내역을 불러오지 못했어요.')
                 })
                 .finally(() => {
-                    if (cancelled) return
+                    if (!isMountedRef.current) return
                     setLastDesign({
                         designId: regenerateState.designId,
                         imageUrls: regenerateState.imageUrls,
@@ -743,27 +1050,32 @@ export function useNailDesignChatPage() {
                     pushAssistant('이 디자인을 이어서 수정할까요, 아니면 처음부터 새로 만들까요?')
                     setActiveQuickReply(REGENERATE_CHOICE_QUICK_REPLY)
                 })
-            return () => {
-                cancelled = true
-            }
+            return
         }
 
         const greetingName = userName ? `${userName}님` : '회원님'
         // 마지막 줄은 진입 상황마다 다르다 —
-        // 분석 결과를 못 불러왔으면(촬영/분석 기록 없음) 스캔을 권하고,
-        // 손 촬영 → 출력에서 이어 온 흐름(그때 분석한 결과에 고정)이면 결과 다시 보기를,
-        // 헤더 링크 등으로 단독 진입했으면(기록을 고를 수 있음) 반영할 기록 바꾸기를 안내한다.
+        // 분석 결과를 못 불러왔으면(촬영/분석 기록 없음) 스캔을 권하고, 있으면 어느 기록을 반영하는지 알려 준 뒤
+        // 단독으로 들어왔고 고를 수 있는 기록이 여러 개면 다른 기록으로 새 채팅을 여는 법(채팅 이력의 +)을,
+        // 기록이 하나뿐이거나 손 촬영 → 출력에서 이어 온 흐름(그때 분석한 결과에 고정)이면 결과 다시 보기(사이드바 '분석 결과 상세 보기')를 안내한다.
         const hasScanAnalysis = !!(leftAnalysis || rightAnalysis)
+        // 반영하는 기록은 피부톤과 대표 피부색 헥스값으로 알려 준다 — 예: "옐로우 베이스(#E8C4A8) 결과에 맞춰…"
+        const toneLabel = analysisSummary?.detectedToneLabel ?? null
+        const toneHex = analysisSummary?.skinToneHex?.toUpperCase() ?? null
+        const recordName = toneLabel && toneHex ? `${toneLabel}(${toneHex})` : toneLabel ?? toneHex
+        const recordLine = recordName ? `${recordName} 결과에 맞춰 디자인해 드릴게요.` : '선택한 손 분석 결과에 맞춰 디자인해 드릴게요.'
+        const hasOtherRecords = (recordCount ?? 2) > 1
         const guideLine = !hasScanAnalysis
-            ? `손 스캔을 하면 ${greetingName}의 손에 더욱 어울리는 디자인을 생성할 수 있어요.`
-            : canSelectSession
-                ? `반영할 손 분석 기록을 변경하고 싶다면 하단의 ${ANALYSIS_BUTTON_TOKEN} 버튼을 눌러주세요.`
-                : `손 분석 결과를 다시 확인하고 싶다면 하단의 ${ANALYSIS_BUTTON_TOKEN} 버튼을 눌러주세요.`
+            ? `손을 스캔하면 ${greetingName}의 손에 더욱 어울리는 디자인을 생성할 수 있어요.`
+            : canSelectSession && hasOtherRecords
+                ? `${recordLine} 다른 분석 기록으로 만들고 싶다면 왼쪽에서 해당 기록의 + 버튼을 눌러 주세요.`
+                : `${recordLine} 분석 결과는 왼쪽의 '분석 결과 상세 보기'에서 다시 확인하실 수 있어요.`
         setBubbles((prev) => [
             {
                 id: makeId(),
                 role: 'assistant',
                 text: `반가워요, ${greetingName}!\n원하시는 네일 디자인 생성 방식을 선택해 주세요.\n${guideLine}`,
+                historySection: 'method',
             },
             ...prev,
         ])
@@ -787,80 +1099,158 @@ export function useNailDesignChatPage() {
 
     useEffect(() => {
         setIsQuickReplyCollapsed(false)
-        setColorNote('')
     }, [activeQuickReply?.id])
 
-    // 렌더될 때마다 현재 채팅 진행 상태를 모듈 스코프 스냅샷에 그대로 반영해 둔다.
-    // 이렇게 해야 이 페이지를 벗어났다가(결과 페이지 이동, 브라우저 뒤로가기 등) 다시 돌아왔을 때
-    // 위 useState 초기값들이 이 스냅샷에서 그대로 복원된다.
-    useEffect(() => {
-        chatSessionSnapshot = {
-            userName,
-            sessionId,
-            scanId,
-            scanHandSide,
-            leftAnalysis,
-            rightAnalysis,
-            canSelectSession,
-            scanSessions,
-            selectedSessionKey,
-            bubbles,
-            activeQuickReply,
-            selectedInQuickReply,
-            mode,
-            preferenceStepIndex,
-            preferenceStepBubbleIds,
-            collectedPreferences,
-            preferenceNotes,
-            freeformSelectedColors,
-            freeformLog: freeformLogRef.current,
-            reviseLog: reviseLogRef.current,
-            lastDesign,
-            generationSource,
-            selectedPhotoFile,
-            selectedPhotoPreviewUrl,
-            inputValue,
-            showAnalysisPanel,
-            isQuickReplyCollapsed,
-        }
+    // ── 채팅 저장 (사이드바 채팅 이력) ──────────────────────────────────────
+    // 사용자가 한 번이라도 말한 채팅부터 저장한다 — 인사만 보고 나간 채팅은 이력에 남기지 않는다.
+    const hasProgress = bubbles.some((bubble) => bubble.role === 'user')
+
+    const buildSnapshot = (): ConversationSnapshot => ({
+        sessionId,
+        bubbles,
+        activeQuickReply,
+        selectedInQuickReply,
+        mode,
+        preferenceStepIndex,
+        preferenceStepBubbleIds,
+        collectedPreferences,
+        preferenceNotes,
+        freeformSelectedColors,
+        freeformLog: [...freeformLogRef.current],
+        reviseLog: [...reviseLogRef.current],
+        lastDesign,
+        generationSource,
+        selectedPhotoFile,
+        selectedPhotoPreviewUrl,
+        inputValue,
+        isQuickReplyCollapsed,
+        designTitle,
     })
 
-    // 채팅 중 새로고침/탭 닫기 방지: 세션이 있고 대화가 어느 정도 진행됐을 때만 경고
-    // (주의: "지금 세션이 날라갑니다 괜찮나요?" 같은 커스텀 문구는 브라우저 보안 정책상
-    //  최신 브라우저에서 표시가 안 되고, 브라우저 기본 확인 문구만 뜬다. 확인창 자체는 뜸.)
+    // 저장은 타이머·화면을 떠날 때에도 일어나므로 최신 값을 ref로 읽는다
+    const scanKeyRef = useRef(scanKey)
+    const onSavedRef = useRef(onSaved)
     useEffect(() => {
-        if (!sessionId || !bubbles.some((b) => b.role === 'user')) return
+        scanKeyRef.current = scanKey
+        onSavedRef.current = onSaved
+    })
+    const latestSnapshotRef = useRef<ConversationSnapshot | null>(null)
+    const lastSavedPayloadRef = useRef<string | null>(null)
+    const saveTimerRef = useRef<number | null>(null)
 
+    const buildSavePayload = (snapshot: ConversationSnapshot) => {
+        const payload = {
+            state: serializeConversationSnapshot(snapshot),
+            scanKey: scanKeyRef.current,
+            autoTitle: snapshot.designTitle ?? buildProvisionalChatTitle(snapshot),
+        }
+        return { payload, payloadJson: JSON.stringify(payload) }
+    }
+
+    // 이력에서 연 채팅은 열기만 해서는 저장하지 않는다 — 저장하면 마지막 활동 시각이 바뀌어 이력 순서가 달라진다
+    const isFirstSnapshotRef = useRef(wasRestored)
+
+    const persistSnapshot = (snapshot: ConversationSnapshot, options: { keepalive?: boolean } = {}) => {
+        if (!snapshot.sessionId || !snapshot.bubbles.some((bubble) => bubble.role === 'user')) return
+        if (deletedSessionIds.has(snapshot.sessionId)) return
+        const { payload, payloadJson } = buildSavePayload(snapshot)
+        if (payloadJson === lastSavedPayloadRef.current) return
+        lastSavedPayloadRef.current = payloadJson
+        saveChatState(snapshot.sessionId, payload, options)
+            .then((summary) => onSavedRef.current?.(summary))
+            .catch((e) => {
+                // 다음 변경 때 다시 저장되도록 기록을 지운다
+                lastSavedPayloadRef.current = null
+                console.error('채팅 저장 실패:', e)
+            })
+    }
+
+    const flushPendingSave = (options: { keepalive?: boolean } = {}) => {
+        if (saveTimerRef.current) {
+            window.clearTimeout(saveTimerRef.current)
+            saveTimerRef.current = null
+        }
+        if (latestSnapshotRef.current) persistSnapshot(latestSnapshotRef.current, options)
+    }
+
+    // 새로고침·탭 닫기로 떠날 때 멈춘 자리를 정리해 저장하는 데 쓴다 (handlePageHide)
+    const busyRef = useRef({ isSending, isGeneratingDesign })
+
+    // 렌더될 때마다 지금 상태를 스냅샷으로 남기고(뒤로가기 복원용), 잠시 뒤 서버에 저장한다
+    useEffect(() => {
+        const snapshot = buildSnapshot()
+        // 뒤로가기 복원은 화면에 떠 있는 채팅만 — 숨겨 둔 채팅이 덮어쓰지 않게 한다 (서버 저장은 그대로 한다)
+        if (!isBackground) liveConversationSnapshot = snapshot
+        latestSnapshotRef.current = snapshot
+        busyRef.current = { isSending, isGeneratingDesign }
+        if (isFirstSnapshotRef.current) {
+            isFirstSnapshotRef.current = false
+            lastSavedPayloadRef.current = buildSavePayload(snapshot).payloadJson
+            return
+        }
+        if (!snapshot.sessionId || !hasProgress) return
+        if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = window.setTimeout(() => {
+            saveTimerRef.current = null
+            persistSnapshot(snapshot)
+        }, SAVE_DEBOUNCE_MS)
+    })
+
+    // 채팅이 내려가면(언마운트) 기다리던 저장을 바로 보낸다. 페이지를 아예 떠날 때(새로고침·탭 닫기)는 keepalive로 보내고,
+    // 답변·디자인을 기다리던 중이었으면 그 진행은 여기서 멈추므로 멈춘 자리를 정리해 저장한다 (buildInterruptedSnapshot)
+    useEffect(() => {
+        const handlePageHide = (e: PageTransitionEvent) => {
+            const snapshot = latestSnapshotRef.current
+            if (!snapshot) return
+            if (saveTimerRef.current) {
+                window.clearTimeout(saveTimerRef.current)
+                saveTimerRef.current = null
+            }
+            const { isSending: wasSending, isGeneratingDesign: wasGenerating } = busyRef.current
+            // 뒤로/앞으로 캐시(bfcache)에 남는 이동이면 페이지가 그대로 살아 돌아오므로 정리하지 않는다
+            persistSnapshot(wasSending && !e.persisted ? buildInterruptedSnapshot(snapshot, wasGenerating) : snapshot, {
+                keepalive: true,
+            })
+        }
+        window.addEventListener('pagehide', handlePageHide)
+        return () => {
+            window.removeEventListener('pagehide', handlePageHide)
+            flushPendingSave()
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    // 진행 상황을 알린다 — 화면에 있든 숨겨 두었든 늘 (designChatRuntime: 채팅을 내릴 때 숨겨 둔 채 계속할지,
+    // "새 채팅"을 다시 눌렀을 때 새로 열지, 사이드바 채팅 이력의 상태 점)
+    const onStatusChangeRef = useRef(onStatusChange)
+    useEffect(() => {
+        onStatusChangeRef.current = onStatusChange
+    })
+    const designCount = useMemo(() => bubbles.filter((bubble) => bubble.isDesignResult).length, [bubbles])
+    // 선택지 기반에서 고른 내용을 보내고 답장을 기다리는 동안도 디자인을 만드는 과정이다 (입력창 안내 문구와 같은 기준)
+    const isMakingDesign = isGeneratingDesign || (mode === 'preference' && isSending)
+    useEffect(() => {
+        onStatusChangeRef.current?.({
+            sessionId,
+            hasProgress,
+            isBusy: isSending,
+            isGeneratingDesign: isMakingDesign,
+            designCount,
+        })
+    }, [sessionId, hasProgress, isSending, isMakingDesign, designCount])
+
+    // 채팅은 계속 저장되고, 답변·디자인을 기다리는 채팅은 다른 채팅이나 다른 페이지로 옮겨도 숨겨 둔 채 계속 진행되므로
+    // (designChatRuntime) 앱 안에서 옮길 때는 묻지 않는다. 그 진행을 멈추는 건 새로고침·탭 닫기뿐이라 그때만 확인한다.
+    // (beforeunload의 커스텀 문구는 브라우저 보안 정책상 표시되지 않고 브라우저 기본 확인 문구만 뜬다.)
+    useEffect(() => {
+        if (!isSending) return
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (shouldBypassBeforeUnload()) return // 이미 우리 확인창에서 동의받은 이동이면 중복으로 안 물어봄
             e.preventDefault()
             e.returnValue = '' // 크롬 등 일부 브라우저는 빈 문자열 지정이 필요함
         }
-
         window.addEventListener('beforeunload', handleBeforeUnload)
         return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-    }, [sessionId, bubbles])
-
-
-    // 뒤로가기는 여전히 막지 않는다 — 채팅 진행 상태가 모듈 스코프 스냅샷으로 항상 보존되어 뒤로가기로 돌아오면 그대로 복원된다.
-    // 다만 헤더의 scan/print/design 링크, 로그인/프로필 메뉴 클릭 같은 "뒤로가기가 아닌" 앱 내부 이동은 beforeunload로 잡히지 않으므로,
-    // 전역 네비게이션 가드에 등록해서 이동 직전에 동일하게 확인을 받고,
-    // 나가기로 하면 스냅샷을 비워서 다음에 이 페이지로 다시 들어오면 처음부터 새로 시작하도록 한다.
-    useEffect(() => {
-        if (!sessionId || !bubbles.some((b) => b.role === 'user')) return
-
-        registerChatSessionGuard(() => {
-            const confirmed = window.confirm(
-                '지금 나가면 채팅 내용이 저장되지 않고 사라져요. 그래도 나가시겠어요?',
-            )
-            if (confirmed) {
-                chatSessionSnapshot = null
-            }
-            return confirmed
-        })
-
-        return () => registerChatSessionGuard(null)
-    }, [sessionId, bubbles])
+    }, [isSending])
 
     // ── 공통: 디자인 생성 후 이동 ───────────────────────────────────────────
     const resolveShapeId = (preferences: NailDesignPreferences): NailShapeId => {
@@ -869,14 +1259,54 @@ export function useNailDesignChatPage() {
         return (fromPrefs || fromScan || 'oval') as NailShapeId
     }
 
-    // 선택지 기반 흐름에서 고른 값들을 결과 페이지에 보여줄 "키워드" 칩으로 변환한다.
-    // (색상은 팔레트 패널에서 이미 스와치로 보여주므로 여기서는 제외)
-    const buildPreferenceKeywords = (preferences: NailDesignPreferences): string[] => {
-        const keys: PreferenceKey[] = ['mood', 'designType', 'season', 'motif', 'shape']
-        const labels = keys.flatMap((key) =>
+    // 선택지 기반 결과 페이지 "키워드" 칩: 고른 선택지(한글 이름) + "기타"에 직접 적은 의견에서 나온 키워드.
+    // "기타" 의견은 자유 입력과 같은 방식으로 보여 준다 — 서버(GPT)가 요약 문장에서 뽑아 둔 슬롯 값을 사전·번역으로
+    // 한글로 바꾼 키워드(slotKeywords) 중 고른 선택지·컬러와 겹치지 않는 것. 기타 의견을 안 적었으면 고른 선택지만.
+    // 플랜에서 나온 마감·패턴 등(서버 keywords)은 섞지 않는다. 컬러는 buildPreferenceColors로 따로.
+    const buildPreferenceKeywords = (
+        preferences: NailDesignPreferences,
+        notes: Partial<Record<PreferenceKey, string>>,
+        data: DesignGenerateResponse,
+    ): string[] => {
+        // 고른 순서(선택 단계 순서) 그대로 — 컬러는 마지막 단계라 결과 화면에서도 맨 뒤에 붙는다
+        const keys = PREFERENCE_STEPS.filter((key) => key !== 'color')
+        const chosenLabels = keys.flatMap((key) =>
             (preferences[key] ?? []).map((value) => PREFERENCE_OPTIONS[key].find((o) => o.value === value)?.label ?? value),
         )
-        return Array.from(new Set(labels)).filter((label) => label && label !== '상관없음' && label !== '없음')
+        const hasNote = PREFERENCE_NOTE_STEPS.some((key) => notes[key]?.trim())
+        const colorNames = new Set((data.keywordColors ?? []).map((color) => color.name))
+        const noteKeywords = hasNote ? (data.slotKeywords ?? []).filter((keyword) => !colorNames.has(keyword)) : []
+        return Array.from(new Set([...chosenLabels, ...noteKeywords])).filter(
+            (label) => label && label !== '상관없음' && label !== '없음',
+        )
+    }
+
+    // 선택지에서 고른 컬러 — 결과 화면에서 색 스와치 + 한글 색 이름 칩으로 보여준다
+    const buildPreferenceColors = (preferences: NailDesignPreferences): KeywordColor[] =>
+        (preferences.color ?? []).map((hex) => ({ hex, name: koreanColorName(hex) }))
+
+    // 서버 키워드(자유입력·사진·수정) 중 컬러 키워드는 빼서 hex와 함께 colors로 따로 담는다 — 결과 화면이 색 스와치 칩으로 그린다
+    const splitServerKeywords = (
+        keywords: string[] | null | undefined,
+        keywordColors: KeywordColor[] | null | undefined,
+    ): { keywords: string[]; colors: KeywordColor[] } => {
+        const colors = keywordColors ?? []
+        const colorNames = new Set(colors.map((color) => color.name))
+        return { keywords: (keywords ?? []).filter((keyword) => !colorNames.has(keyword)), colors }
+    }
+
+    // 수정(refine) 후 결과 화면 키워드 — 서버가 수정을 반영해 돌려준 키워드로 교체한다.
+    // 선택지 기반은 플랜 키워드(마감·패턴 등)가 섞이지 않게 슬롯(고른 값)만으로 만든 키워드를 쓴다.
+    // 서버 키워드가 비었으면 이전 키워드를 그대로 둔다.
+    const buildRevisedKeywords = (
+        data: DesignGenerateResponse,
+        previous: GenerationContext | undefined,
+    ): { keywords: string[]; colors: KeywordColor[] } => {
+        const serverKeywords = previous?.source === 'preference' ? data.slotKeywords : data.keywords
+        if (!serverKeywords || serverKeywords.length === 0) {
+            return { keywords: previous?.keywords ?? [], colors: previous?.colors ?? [] }
+        }
+        return splitServerKeywords(serverKeywords, data.keywordColors)
     }
 
     // 자유입력 흐름에서 사용자가 실제로 입력한 문장들을 짧은 키워드 단위로 쪼갠다.
@@ -889,30 +1319,16 @@ export function useNailDesignChatPage() {
     }
 
     const buildScanAutoIntro = (): string => {
-        const skinToneHex = leftAnalysis?.skinToneHex || rightAnalysis?.skinToneHex || null
-        const tone = leftAnalysis?.tone || rightAnalysis?.tone || null
-        const warmness = leftAnalysis?.warmness ?? rightAnalysis?.warmness ?? null
-        const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
-        const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
-        const toneLabel =
-            skinToneAnalysisFromMetrics(tone, warmness, brightness, saturation)?.tone.label ??
-            (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
-        // "?" 패널과 동일하게 recommendedShape를 쓴다 (출력 신청 시 유저가 고른 쉐입으로
+        const toneLabel = analysisSummary?.detectedToneLabel ?? null
+        // 분석 결과 패널과 동일하게 recommendedShape를 쓴다 (출력 신청 시 유저가 고른 쉐입으로
         // 덮어써지는 mutable shape가 아니라, 스캔 분석이 처음 추천한 값).
-        const shapeId = leftAnalysis?.recommendedShape || rightAnalysis?.recommendedShape || null
-        const shapeLabel = shapeId ? getNailShape(shapeId)?.labelKo ?? shapeId : null
+        const shapeLabel = analysisSummary?.detectedShapeLabel ?? null
 
         const name = userName ? `${userName}님` : '회원님'
-        const tonePart = toneLabel ?? '피부톤'
+        const tonePart = toneLabel ?? '피부 톤'
         const shapePart = shapeLabel ? `${shapeLabel} 추천 쉐입` : '추천 쉐입'
 
         return `${name}의 스캔 정보를 기반으로 NAILY가 디자인을 추천해요. ${tonePart}에 어울리는 추천 컬러와 ${shapePart}을 반영해 ${name}께 어울리는 디자인을 만들어 드릴게요!`
-    }
-
-    // 완성 멘트 — 서버가 완성된 디자인 기준으로 정리해 준 한글 키워드 앞의 몇 개로 "~ 네일을 완성했어요!" 한 줄을 만든다
-    const buildCompletionMessage = (keywords?: string[] | null) => {
-        const picked = (keywords ?? []).map((keyword) => keyword.trim()).filter(Boolean).slice(0, 3)
-        return picked.length > 0 ? `${picked.join('·')} 네일을 완성했어요!` : '네일 디자인을 완성했어요!'
     }
 
     // cardId: 선택지 흐름처럼 생성 전에 이미 생성 중 카드를 띄워 둔 경우 그 카드를 이어서 쓴다
@@ -928,6 +1344,8 @@ export function useNailDesignChatPage() {
         setIsGeneratingDesign(true)
         setActiveQuickReply(null)
         const generatingCardId = cardId ?? pushGeneratingCard()
+        // 성공하면 생성 중 상태 해제를 completeGeneratingCard(이미지가 뜬 뒤)에 넘긴다
+        let revealPending = false
 
         try {
             const data = await generateDesign({
@@ -955,6 +1373,9 @@ export function useNailDesignChatPage() {
                                 avgWidth: analysisSummary.avgWidth,
                                 avgCurve: analysisSummary.avgCurve,
                                 skinToneHex: analysisSummary.skinToneHex,
+                                // 결과 화면 피부 톤 카드에 베이스(toneLabel)와 함께 "고명도 · 중채도"처럼 보여 줄 명도·채도 단계 — "?" 패널과 같은 분석값
+                                skinBrightnessLevel: analysisSummary.skinToneAnalysis?.brightness.level ?? null,
+                                skinSaturationLevel: analysisSummary.skinToneAnalysis?.saturation.level ?? null,
                                 shapeImage: analysisSummary.shapeImage,
                                 // 추천 팔레트는 "?" 패널과 동일하게 정렬해서, 실제 반영된 색을 강조 표시한다.
                                 recommendedColors: sortRecommendedColors(
@@ -964,6 +1385,7 @@ export function useNailDesignChatPage() {
                                 reflectedMood: data.scanAutoReflection?.mood ?? null,
                                 reflectedDesignType: data.scanAutoReflection?.designType ?? null,
                                 reflectedMotif: data.scanAutoReflection?.motif ?? null,
+                                reflectedSeason: data.scanAutoReflection?.season ?? null,
                             }
                             : null,
                         revisionKeywords,
@@ -973,16 +1395,18 @@ export function useNailDesignChatPage() {
                             source,
                             // 서버가 슬롯(무드/타입/모티프/쉐입/컬러)과 플랜에서 뽑아 한글로 정리한 키워드를 우선 쓴다.
                             // 사용자가 친 문장을 쪼개 칩으로 쓰는 건 서버 키워드가 비었을 때의 폴백으로만 사용한다.
-                            keywords: data.keywords && data.keywords.length > 0
-                                ? data.keywords
-                                : buildFreeformKeywords(freeformLogRef.current),
+                            ...(data.keywords && data.keywords.length > 0
+                                ? splitServerKeywords(data.keywords, data.keywordColors)
+                                : { keywords: buildFreeformKeywords(freeformLogRef.current), colors: [] }),
                             referenceImageUrl: null,
                             handSummary: null,
                             revisionKeywords,
                         }
                         : {
                             source,
-                            keywords: data.keywords ?? buildPreferenceKeywords(preferences),  // 슬롯 우선, 없으면 폴백
+                            // 선택지 기반은 사용자가 고른 값만 보여준다 (서버 키워드를 쓰지 않는다)
+                            keywords: buildPreferenceKeywords(preferences, preferenceNotes, data),
+                            colors: buildPreferenceColors(preferences),
                             referenceImageUrl: null,
                             handSummary: null,
                             revisionKeywords,
@@ -1004,23 +1428,30 @@ export function useNailDesignChatPage() {
                 context,
             })
 
-            fillGeneratingCard(generatingCardId, data.imageUrls)
-            pushAssistant(buildCompletionMessage(data.keywords))
-            setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+            // 채팅 이름은 이번 디자인의 분위기로 다시 짓는다 (서버 키워드가 없으면 결과 화면 키워드로)
+            setDesignTitle((prev) => buildDesignChatTitle(data.keywords?.length ? data.keywords : context.keywords) ?? prev)
+
+            // 완성 멘트·선택 창과 생성 중 상태 해제는 이미지가 카드에 뜬 뒤 completeGeneratingCard가 맡는다
+            completeGeneratingCard(generatingCardId, data.imageUrls, DESIGN_COMPLETE_MESSAGE)
+            revealPending = true
         } catch (e) {
             console.error('디자인 생성 실패:', e)
             removeGeneratingCard(generatingCardId)
-            pushAssistant('이미지 생성에 실패했어요. 다시 시도해 주세요.')
+            pushAssistant('이미지 생성에 실패했어요. 다시 시도해 주세요.', { historySection: 'method' })
             setActiveQuickReply(MENU_QUICK_REPLY)
             setMode('menu')
         } finally {
-            setIsSending(false)
-            setIsGeneratingDesign(false)
+            if (!revealPending) {
+                setIsSending(false)
+                setIsGeneratingDesign(false)
+            }
         }
     }
 
     // 업로드한 참고 사진(+스캔 정보) 기반 생성
-    const runGenerateDesignFromPhoto = async (file: File, note?: string) => {
+    // photoBubbleId: 내가 보낸 사진 말풍선 — 생성이 끝나면 사진 미리보기를 서버에 올라간 사진 주소로 바꿔
+    // 채팅을 저장해도(사이드바 채팅 이력) 사진이 남게 한다
+    const runGenerateDesignFromPhoto = async (file: File, note?: string, photoBubbleId?: string) => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
             return
@@ -1032,43 +1463,54 @@ export function useNailDesignChatPage() {
         setActiveQuickReply(null)
         pushAssistant('좋아요! 업로드해 주신 사진을 참고해서 디자인을 만들어 드릴게요.')
         const generatingCardId = pushGeneratingCard()
+        // 성공하면 생성 중 상태 해제를 completeGeneratingCard(이미지가 뜬 뒤)에 넘긴다
+        let revealPending = false
 
         try {
             const data = await generateDesignFromImage({ sessionId, scanId, image: file, note })
+            const uploadedPhotoUrl = data.referenceImageUrl ?? null
+            if (uploadedPhotoUrl && photoBubbleId) {
+                setBubbles((prev) =>
+                    prev.map((bubble) => (bubble.id === photoBubbleId ? { ...bubble, imageUrls: [uploadedPhotoUrl] } : bubble)),
+                )
+            }
+            setDesignTitle((prev) => buildDesignChatTitle(data.keywords) ?? prev)
             setLastDesign({
                 designId: data.designId,
                 imageUrls: data.imageUrls,
                 prompt: data.generatedPrompt,
                 preferences: INITIAL_PREFERENCES,
                 source: 'photo',
-                shapeId: resolveShapeId(INITIAL_PREFERENCES),
+                // 사진 기반 생성은 사용자 스캔 쉐입을 쓰지 않는다: 서버가 확정한 쉐입 > 오발.
+                shapeId: (data.shape && getNailShape(data.shape) ? data.shape : 'oval') as NailShapeId,
                 details: data.details,
                 context: {
                     source: 'photo',
-                    keywords: data.keywords ?? [], // 서버가 슬롯 + 플랜(마감/패턴/모티프/파츠)에서 뽑은 키워드
-                    referenceImageUrl: selectedPhotoPreviewUrl,
+                    ...splitServerKeywords(data.keywords, data.keywordColors), // 서버가 슬롯 + 플랜(마감/패턴/모티프/파츠)에서 뽑은 키워드
+                    referenceImageUrl: uploadedPhotoUrl ?? selectedPhotoPreviewUrl,
                     handSummary: null,
                     revisionKeywords: buildFreeformKeywords(reviseLogRef.current),
                 },
             })
-            fillGeneratingCard(generatingCardId, data.imageUrls)
-            pushAssistant(buildCompletionMessage(data.keywords))
-            setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+            completeGeneratingCard(generatingCardId, data.imageUrls, DESIGN_COMPLETE_MESSAGE)
+            revealPending = true
         } catch (e) {
             console.error('사진 기반 디자인 생성 실패:', e)
             removeGeneratingCard(generatingCardId)
-            pushAssistant('이미지 생성에 실패했어요. 다시 시도해 주세요.')
+            pushAssistant('이미지 생성에 실패했어요. 다시 시도해 주세요.', { historySection: 'method' })
             setActiveQuickReply(MENU_QUICK_REPLY)
             setMode('menu')
         } finally {
-            setIsSending(false)
-            setIsGeneratingDesign(false)
+            if (!revealPending) {
+                setIsSending(false)
+                setIsGeneratingDesign(false)
+            }
         }
     }
 
     // ── 메뉴 선택 ──────────────────────────────────────────────────────────
     const handleMenuSelect = (option: QuickReplyOption) => {
-        pushUser(option.label)
+        pushUser(option.label, { historySection: 'method' })
         setActiveQuickReply(null)
         reviseLogRef.current = [] // 새 생성 방식을 고르는 시점 = 새 디자인 흐름 시작이므로, 이전 수정 요청 기록은 비운다
 
@@ -1081,7 +1523,10 @@ export function useNailDesignChatPage() {
                 setMode('freeform')
                 freeformLogRef.current = []
                 setFreeformSelectedColors([]) // 새 자유입력 세션 시작 — 이전 세션에서 고르던 색이 섞이지 않게 초기화
-                pushAssistant('원하시는 네일 디자인에 대해 자유롭게 이야기해 주세요! 원하는 분위기, 스타일, 색감 등 무엇이든 좋아요! 😊')
+                pushAssistant('원하시는 네일 디자인에 대해 자유롭게 이야기해 주세요! 원하는 분위기, 스타일, 색감 등 무엇이든 좋아요!', {
+                    historySection: 'method',
+                    generationMethod: 'freeform',
+                })
                 break
             }
             case 'photo': {
@@ -1089,14 +1534,14 @@ export function useNailDesignChatPage() {
                 setMode('photo')
                 setSelectedPhotoFile(null)
                 setSelectedPhotoPreviewUrl(null)
-                pushAssistant('원하시는 스타일의 참고 사진을 첨부해 주세요!')
+                pushAssistant('원하시는 스타일의 참고 사진을 첨부해 주세요!', { historySection: 'method', generationMethod: 'photo' })
                 setActiveQuickReply(PHOTO_UPLOAD_QUICK_REPLY)
                 break
             }
             case 'scan-auto': {
                 setMode('scan-auto')
                 if (!scanId) {
-                    pushAssistant('아직 손 스캔 정보가 없어서 이 방식으로는 디자인을 만들 수 없어요.')
+                    pushAssistant('아직 손 스캔 정보가 없어서 이 방식으로는 디자인을 만들 수 없어요.', { historySection: 'method' })
                     setActiveQuickReply({
                         id: `scan-required-${makeId()}`,
                         question: '어떻게 하시겠어요?',
@@ -1111,7 +1556,8 @@ export function useNailDesignChatPage() {
                     break
                 }
                 // 고르자마자 어떤 스캔 정보(피부톤 추천 컬러·추천 쉐입)를 반영하는지 알려 주고 바로 생성한다
-                pushAssistant(buildScanAutoIntro())
+                // 어떤 스캔 정보를 반영하는지 알려 주는 멘트라 마이페이지 채팅 이력에도 남긴다(생성 방식 고르기에 넣지 않는다)
+                pushAssistant(buildScanAutoIntro(), { generationMethod: 'scan-auto' })
                 void runGenerateDesign(INITIAL_PREFERENCES, 'scan-auto')
                 break
             }
@@ -1128,7 +1574,10 @@ export function useNailDesignChatPage() {
         setPreferenceNotes({})
         setSelectedInQuickReply([])
         clearInput()
-        pushAssistant('좋아요! 몇 가지만 골라 주시면 바로 디자인을 만들어 드릴게요.')
+        pushAssistant('좋아요! 몇 가지만 골라 주시면 바로 디자인을 만들어 드릴게요.', {
+            historySection: 'method',
+            generationMethod: 'preference',
+        })
         setActiveQuickReply(buildPreferenceQuickReply(PREFERENCE_STEPS[0]))
     }
 
@@ -1185,9 +1634,19 @@ export function useNailDesignChatPage() {
     const confirmPreferenceStep = (values: string[]) => {
         const step = PREFERENCE_STEPS[preferenceStepIndex]
         const note = PREFERENCE_NOTE_STEPS.includes(step) ? preferenceNotes[step]?.trim() ?? '' : ''
+        // 단계별 선택 말풍선은 채팅 화면에만 보이고, 마이페이지 채팅 이력에서는 서버로 보낸 요약 문장 하나로 대신한다
         const bubbleId =
             step === 'color'
-                ? pushUserColors(`${PREFERENCE_SECTION_LABELS.color}:`, values)
+                ? // 색을 골랐으면 "컬러: ●●" 한 줄 + 그 아래 줄에 "기타(…)", 기타 입력만 했으면 "컬러: 기타(…)" 한 줄
+                values.length > 0
+                    ? pushUserColors(`${PREFERENCE_SECTION_LABELS.color}:`, values, {
+                        colorsInline: true,
+                        textAfterColors: note ? `기타(${note})` : undefined,
+                        chatOnly: true,
+                    })
+                    : pushUserColors(`${PREFERENCE_SECTION_LABELS.color}:${note ? ` 기타(${note})` : ''}`, values, {
+                        chatOnly: true,
+                    })
                 : pushUser(
                     `${PREFERENCE_SECTION_LABELS[step]}: ${
                         [
@@ -1195,6 +1654,7 @@ export function useNailDesignChatPage() {
                             ...(note ? [`기타(${note})`] : []),
                         ].join(', ') || '선택 안 함'
                     }`,
+                    { chatOnly: true },
                 )
         // 이 단계에서 만들어진 말풍선 id를 기록해 둔다 (뒤로가기 시 정확히 이 버블만 지우기 위함)
         setPreferenceStepBubbleIds((prev) => ({ ...prev, [preferenceStepIndex]: bubbleId }))
@@ -1211,44 +1671,13 @@ export function useNailDesignChatPage() {
         } else {
             setSelectedInQuickReply([])
             setActiveQuickReply(null)
-            // 고른 내용은 서버에 보내는 요약(마이페이지 채팅 이력에 남는 문장)과 같은 틀로, 값은 한글 이름으로 보여 준다
-            const summary = buildPreferenceSummaryBody(updated, preferenceNotes, true)
-            pushAssistant(
-                summary
-                    ? `선택 감사해요!\n${summary}${withDirectionParticle(summary)} 디자인을 만들어 드릴게요.`
-                    : '선택 감사해요!\n고르신 내용으로 디자인을 만들어 드릴게요.',
-            )
+            // 고른 내용을 서버에 보내고, 정해진 네일리 멘트를 보여 준 뒤 디자인을 만든다
             void finalizePreferenceDesign(updated, preferenceNotes)
         }
     }
 
-    // 컬러 단계 "기타 입력" 제출: 지금까지 고른 선택(+컬러피커에서 고르던 색)을 요약해 이 문장과 함께 GPT에 보내고
-    // 자유채팅으로 넘어간다. GPT가 이미 정한 무드/타입/모티프 등은 다시 묻지 않고 색 이야기부터 이어간다.
-    const submitColorNote = () => {
-        const text = colorNote.trim()
-        if (!text || isSending) return
-        // 컬러피커에서 고른 색은 "선택한 순서대로 1번째, 2번째 ..."로 번호를 붙여서 같이 보낸다 —
-        // "2번째 색상은 포인트 색으로만 써줘" 같은 기타 입력이 어떤 색을 가리키는지 GPT가 알 수 있게 하기 위함.
-        const pickedColors = [...selectedInQuickReply]
-        const basePart = buildPreferenceSummary({ ...collectedPreferences, color: [] }, preferenceNotes)
-        const colorPart = pickedColors.length > 0
-            ? `컬러는 선택한 순서대로 ${pickedColors.map((hex, i) => `${i + 1}번째 ${hex}`).join(', ')}로 해주세요. ` +
-            '(직접 고른 색이며, 아래 요청이 색의 역할(예: 포인트 색)을 정하면 따라 주세요.)'
-            : ''
-        const priorContext = [basePart, colorPart].filter(Boolean).join(' ')
-        setColorNote('')
-        setSelectedInQuickReply([])
-        setActiveQuickReply(null)
-        // 말풍선에도 고른 색과 입력한 문장이 함께 보이게 한다
-        if (pickedColors.length > 0) pushUserColors(text, pickedColors)
-        else pushUser(text)
-        setMode('freeform')
-        setFreeformSelectedColors([])
-        void sendFreeformMessage(text, priorContext)
-    }
-
     const setPreferenceNote = (step: PreferenceKey, value: string) => {
-        setPreferenceNotes((prev) => ({ ...prev, [step]: value.slice(0, PREFERENCE_NOTE_MAX_LENGTH) }))
+        setPreferenceNotes((prev) => ({ ...prev, [step]: value.slice(0, getPreferenceNoteMaxLength(step)) }))
     }
 
     // 선택지 기반 흐름에서 "뒤로가기" — 이전 단계로 돌아가서 그 단계의 답변을 다시 선택할 수 있게 한다.
@@ -1279,24 +1708,17 @@ export function useNailDesignChatPage() {
     // 같은 값처럼 붙인다 — 채팅 쪽에서 슬롯으로 변환되고, 백엔드가 디자인 플랜 생성에 넘기는 "사용자
     // 원문"에도 그대로 실리게 하기 위함(원문이 길면 뒷부분이 잘리므로 기타 의견이 들어가는
     // 분위기/디자인 타입/모티프를 앞쪽에 둔다).
-    // "무드는 …, 디자인 타입은 …, 컬러는 …" 부분만. 서버에 보내는 요약(buildPreferenceSummary)과
-    // 선택지를 다 고른 뒤 네일리가 보여 주는 정리 멘트가 함께 쓴다. 고른 게 없으면 ''.
-    // koreanLabels: 화면에 보여 줄 땐 값 대신 한글 이름(lovely → 러블리, #FFC0D0 → 라이트 핑크)을 쓴다.
-    // 서버에 보내는 요약은 백엔드가 값 그대로 알아듣도록 원래 값(영문·hex)을 쓴다.
+    // "무드는 …, 디자인 타입은 …, 컬러는 …" 부분만. 고른 게 없으면 ''.
+    // 백엔드가 값 그대로 알아듣도록 원래 값(영문·hex)을 쓴다.
     const buildPreferenceSummaryBody = (
         preferences: NailDesignPreferences,
         notes: Partial<Record<PreferenceKey, string>> = {},
-        koreanLabels = false,
     ): string => {
         const describe = (key: PreferenceKey, prefix: string) => {
-            const values = (preferences[key] ?? []).map((value) =>
-                !koreanLabels
-                    ? value
-                    : key === 'color'
-                        ? koreanColorName(value)
-                        : PREFERENCE_OPTIONS[key].find((option) => option.value === value)?.label ?? value,
-            )
-            const noteKeywords = extractNoteKeywords(notes[key] ?? '')
+            const values = preferences[key] ?? []
+            // 컬러 기타 입력은 "2번째 색은 포인트로만" 같은 문장이라 키워드로 쪼개지 않고,
+            // buildPreferenceSummary가 따로 한 줄로 붙인다.
+            const noteKeywords = key !== 'color' ? extractNoteKeywords(notes[key] ?? '') : []
             const parts = Array.from(new Set([...values, ...noteKeywords]))
             return parts.length ? `${prefix} ${parts.join(', ')}` : null
         }
@@ -1315,8 +1737,18 @@ export function useNailDesignChatPage() {
         preferences: NailDesignPreferences,
         notes: Partial<Record<PreferenceKey, string>> = {},
     ): string => {
-        const body = buildPreferenceSummaryBody(preferences, notes)
-        return body ? body + '로 해주세요.' : ''
+        const colorNote = notes.color?.trim() ?? ''
+        if (!colorNote) {
+            const body = buildPreferenceSummaryBody(preferences, notes)
+            return body ? body + '로 해주세요.' : ''
+        }
+        // 컬러 기타 입력이 있으면 예전(기타 입력이 자유 입력으로 넘어가던 때)과 같은 형식으로 보낸다 —
+        // 컬러를 뺀 요약 + 고른 색을 순서 번호와 함께 알려 주는 문장, 다음 줄에 기타 입력 문장 그대로.
+        const body = buildPreferenceSummaryBody({ ...preferences, color: [] }, notes)
+        const priorContext = [body ? body + '로 해주세요.' : '', buildPickedColorsContext(preferences.color)]
+            .filter(Boolean)
+            .join(' ')
+        return priorContext ? `${priorContext}\n${colorNote}` : colorNote
     }
 
     const finalizePreferenceDesign = async (
@@ -1330,10 +1762,8 @@ export function useNailDesignChatPage() {
 
         // 아래 요약 메시지 전송(GPT 응답 대기)부터 runGenerateDesign이 이어받을 때까지 입력창을 잠가 둔다.
         // 안 그러면 그 몇 초 사이에 채팅을 치면 자유 입력 흐름으로 넘어가 버린다.
+        // 답장을 기다리는 동안은 채팅 답변 대기 표시('…')가 보이고, 답장이 온 뒤에 생성 중 카드를 띄운다.
         setIsSending(true)
-        setIsGeneratingDesign(true)
-        // 요약을 보내는 몇 초 동안에도 비어 보이지 않게 생성 중 카드를 먼저 띄우고, runGenerateDesign이 이어 쓴다
-        const generatingCardId = pushGeneratingCard()
 
         // 선택지에서 고른 내용을 자연어 문장으로 조립해서, 실제 Gemini와 연동된
         // /chats/{sessionId}/messages(sendChatMessage)로 전송한다.
@@ -1343,10 +1773,18 @@ export function useNailDesignChatPage() {
         const summaryMessage = buildPreferenceSummary(preferences, notes) || '로 해주세요.'
 
         try {
-            await sendChatMessage(sessionId, summaryMessage)
+            const res = await sendChatMessage(sessionId, summaryMessage)
+            // 요약 문장과 서버(GPT) 답장은 채팅 화면엔 안 보이고, 마이페이지 채팅 이력에서 단계별 선택 대신 보여 준다.
+            // 답장은 의견을 묻는 말처럼 흐름에 안 맞는 끝말을 떼고 "~진행할게요."로 끝나게 다듬는다.
+            pushUser(summaryMessage, { historyOnly: true })
+            pushAssistant(trimPreferenceReply(res.reply), { historyOnly: true })
         } catch {
             // 전송 실패해도 스캔 기반 기본값으로 계속 진행
         }
+        // 채팅 화면엔 GPT 답장 대신 늘 같은 멘트를 보여 주고, 마이페이지 이력에서는 뺀다 (서버에 저장된 답장은 그대로)
+        pushAssistant(PREFERENCE_REPLY_MESSAGE, { chatOnly: true })
+        setIsGeneratingDesign(true)
+        const generatingCardId = pushGeneratingCard()
         await runGenerateDesign(preferences, 'preference', generatingCardId)
     }
 
@@ -1357,11 +1795,30 @@ export function useNailDesignChatPage() {
 
         if (option.value === 'accept') {
             if (!lastDesign) return
+            // 지금 채팅 화면에 보이는 대화(방금 누른 "좋아요! 이 디자인으로 할게요." 포함)를 함께 보내 이 디자인의 채팅 이력으로 저장한다
+            // — "디자인 다시 생성하기"와 마이페이지 채팅 이력이 이 대화를 그대로 다시 그린다.
+            const chatTranscript: ChatTranscriptEntry[] = [
+                ...buildChatTranscript(bubbles),
+                { role: 'user', content: option.label },
+            ]
             // fire-and-forget — 결과 화면에서 폴링으로 채움
-            confirmDesign(lastDesign.designId).catch((err) => {
+            confirmDesign(lastDesign.designId, chatTranscript).catch((err) => {
                 // 확정 API가 실패해도 결과 화면 이동 자체는 막지 않되, 콘솔에는 남긴다
                 console.error('디자인 확정(confirm) 실패:', err)
             })
+            // 결과 화면으로 바로 넘어가 방금 누른 답이 화면에 그려지지 않으므로, 그 답까지 담아 채팅을 저장해 둔다
+            // (사이드바 채팅 이력에서 다시 열면 "좋아요! 이 디자인으로 할게요."까지 보인다)
+            const acceptedSnapshot: ConversationSnapshot = {
+                ...buildSnapshot(),
+                bubbles: [...bubbles, { id: makeId(), role: 'user', text: option.label }],
+                activeQuickReply: null,
+            }
+            if (saveTimerRef.current) {
+                window.clearTimeout(saveTimerRef.current)
+                saveTimerRef.current = null
+            }
+            latestSnapshotRef.current = acceptedSnapshot
+            persistSnapshot(acceptedSnapshot)
             navigate('/design/result', {
                 state: {
                     designId: lastDesign.designId,
@@ -1382,7 +1839,7 @@ export function useNailDesignChatPage() {
     }
 
     // 진행 상태를 전부 비우고 새 채팅 세션을 만들어 생성 방식 선택 메뉴로 되돌아간다.
-    // ("디자인 다시 생성하기"에서 "처음부터 새로 만들게요"를 골랐을 때 쓴다)
+    // ("디자인 다시 생성하기"로 들어온 옛 디자인에 이어서 수정할 세션 정보가 없을 때 쓴다)
     const startFreshMenu = async () => {
         reviseLogRef.current = []
         freeformLogRef.current = []
@@ -1399,7 +1856,7 @@ export function useNailDesignChatPage() {
             pushAssistant('채팅 세션을 시작하지 못했어요. 새로고침 후 다시 시도해 주세요.')
             return
         }
-        pushAssistant('알겠어요! 원하시는 네일 디자인 생성 방식을 선택해 주세요.')
+        pushAssistant('알겠어요! 원하시는 네일 디자인 생성 방식을 선택해 주세요.', { historySection: 'method' })
         setActiveQuickReply(MENU_QUICK_REPLY)
     }
 
@@ -1423,7 +1880,11 @@ export function useNailDesignChatPage() {
             return
         }
 
-        // restart
+        // restart — 이 채팅은 그대로 이력에 두고 새 채팅을 연다
+        if (onStartNewChat) {
+            onStartNewChat()
+            return
+        }
         void startFreshMenu()
     }
 
@@ -1435,7 +1896,11 @@ export function useNailDesignChatPage() {
         reviseLogRef.current.push(text)
         setIsSending(true)
         setIsGeneratingDesign(true)
+        // 수정 요청을 받았다고 먼저 알리고 그 아래에 생성 중 카드를 띄운다
+        const acknowledgeBubbleId = pushAssistant('알겠어요! 말씀하신 내용을 반영해 드릴게요.')
         const generatingCardId = pushGeneratingCard()
+        // 성공하면 생성 중 상태 해제를 completeGeneratingCard(이미지가 뜬 뒤)에 넘긴다
+        let revealPending = false
 
         try {
             // ★ refine 결과(inpaint 이미지)를 바로 사용, runGenerateDesign 호출 안 함
@@ -1443,20 +1908,35 @@ export function useNailDesignChatPage() {
 
             // 서버가 "수정 요청이 아니거나 이해하지 못했다"고 안내만 돌려준 경우:
             // 이미지는 그대로 두고(lastDesign 변경 없음) 안내 메시지만 채팅에 보여준다.
+            // 반영하지 않았으므로 "반영해 드릴게요" 멘트도 생성 중 카드와 함께 거둔다.
             if (data.assistantMessage) {
+                setBubbles((prev) => prev.filter((bubble) => bubble.id !== acknowledgeBubbleId))
                 removeGeneratingCard(generatingCardId)
                 pushAssistant(data.assistantMessage)
-                // 서버가 준 "이렇게 말씀해 보세요" 선택지 + 이대로 확정 버튼을 채팅 아래에 보여준다.
+                // 서버가 준 "이렇게 말씀해 보세요" 선택지를 채팅 아래에 보여준다.
                 // (직접 입력도 계속 가능 — mode가 'revise'로 유지된다)
                 const suggestions = (data.assistantOptions ?? []).filter((s) => s.trim().length > 0)
                 if (suggestions.length > 0) {
+                    // 화면 라벨에만 문장부호를 붙이고, 수정 요청으로 보내는 값은 서버가 준 문장 그대로 둔다
+                    const reviseOptions: QuickReplyOption[] = suggestions.map((s) => ({
+                        value: s,
+                        label: withSentencePunctuation(s),
+                    }))
+                    // 지금 디자인을 그대로 확정하는 선택지는 항상 함께 둔다.
+                    // 사용자가 "방금 디자인으로 확정할래"처럼 말했으면(confirmSuggested) 맨 위에, 아니면 맨 아래에 둔다.
+                    const confirmOption: QuickReplyOption = {
+                        value: DESIGN_CONFIRM_FROM_REVISE_VALUE,
+                        label: DESIGN_CONFIRM_FROM_REVISE_LABEL,
+                        icon: 'party',
+                    }
                     setActiveQuickReply({
                         id: 'revise-suggestions',
-                        question: '다음과 같이 수정해 보는 건 어떠세요? 직접 입력하셔도 좋아요.',
-                        options: [
-                            ...suggestions.map((s) => ({ value: s, label: s })),
-                            { value: '__accept_current__', label: '이대로 괜찮아요 🎉' },
-                        ],
+                        question: data.confirmSuggested
+                            ? '이 디자인으로 확정할까요? 다른 수정을 원하시면 골라 주시거나 직접 입력하셔도 좋아요.'
+                            : '다음과 같이 수정해 보는 건 어떠세요? 직접 입력하셔도 좋아요.',
+                        options: data.confirmSuggested
+                            ? [confirmOption, ...reviseOptions]
+                            : [...reviseOptions, confirmOption],
                         multi: false,
                         limit: 1,
                         layout: 'list',
@@ -1467,6 +1947,8 @@ export function useNailDesignChatPage() {
                 return
             }
 
+            // 수정한 디자인의 분위기로 채팅 이름도 다시 짓는다
+            setDesignTitle((prev) => buildDesignChatTitle(data.keywords) ?? prev)
             setLastDesign({
                 designId: data.designId,
                 imageUrls: data.imageUrls,
@@ -1486,16 +1968,13 @@ export function useNailDesignChatPage() {
                     // 서버(RefineService)가 수정을 반영한 슬롯 기준으로 돌려준 키워드로 교체하고
                     // (예: 쉐입을 스퀘어로 바꿨으면 처음 고른 스틸레토는 빠진다),
                     // "수정 요청 문장" 원문은 키워드 칩으로 쌓지 않는다.
-                    keywords: data.keywords && data.keywords.length > 0
-                        ? data.keywords
-                        : (lastDesign?.context?.keywords ?? []),
+                    ...buildRevisedKeywords(data, lastDesign?.context),
                     revisionKeywords: [],
                 },
             })
 
-            fillGeneratingCard(generatingCardId, data.imageUrls)
-            pushAssistant('말씀하신 대로 수정했어요! 어떠세요?')
-            setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
+            completeGeneratingCard(generatingCardId, data.imageUrls, REVISE_COMPLETE_MESSAGE)
+            revealPending = true
 
         } catch (e) {
             console.error('수정 실패:', e)
@@ -1503,15 +1982,17 @@ export function useNailDesignChatPage() {
             pushAssistant('수정 중 문제가 생겼어요. 다시 말씀해 주세요.')
             setActiveQuickReply(DESIGN_FEEDBACK_QUICK_REPLY)
         } finally {
-            setIsSending(false)
-            setIsGeneratingDesign(false)
+            if (!revealPending) {
+                setIsSending(false)
+                setIsGeneratingDesign(false)
+            }
         }
         // ★ runGenerateDesign / runGenerateDesignFromPhoto 호출 완전히 제거
     }
 
     // ── 사진 기반 흐름 ─────────────────────────────────────────────────────
     const handlePhotoFileChange = async (originalFile: File | null) => {
-        if (!originalFile) return
+        if (!originalFile || isReadOnly) return
         // avif 등 생성 API가 받지 못하는 형식은 PNG로 바꿔서 쓴다.
         let file: File
         try {
@@ -1553,17 +2034,18 @@ export function useNailDesignChatPage() {
     // 사진 + (입력창에 적은) 추가 요청으로 생성. note가 비어 있으면 사진만 사용한다.
     // 내 말풍선은 사진만 담은 것 하나, 그 아래에 적은 글이 있으면 글 말풍선을 따로 하나 보낸다.
     const confirmPhotoWithNote = (note: string) => {
-        if (!selectedPhotoFile || !selectedPhotoPreviewUrl || isSending) return
+        if (!selectedPhotoFile || !selectedPhotoPreviewUrl || isSending || isReadOnly) return
         setActiveQuickReply(null)
         clearInput()
+        const photoBubbleId = makeId()
         setBubbles((prev) => [
             ...prev,
-            { id: makeId(), role: 'user', text: '', imageUrls: [selectedPhotoPreviewUrl] },
+            { id: photoBubbleId, role: 'user', text: '', imageUrls: [selectedPhotoPreviewUrl] },
             ...(note ? [{ id: makeId(), role: 'user' as const, text: note }] : []),
         ])
         // 결과 화면 키워드에도 이 요청이 남도록 기록 (buildFreeformKeywords(reviseLogRef))
         if (note) reviseLogRef.current.push(note)
-        void runGenerateDesignFromPhoto(selectedPhotoFile, note || undefined)
+        void runGenerateDesignFromPhoto(selectedPhotoFile, note || undefined, photoBubbleId)
     }
 
     const handleFreeformGenerate = () => {
@@ -1574,9 +2056,8 @@ export function useNailDesignChatPage() {
         void runGenerateDesign({ ...INITIAL_PREFERENCES, freeText }, 'freeform')
     }
 
-    // priorContext: 선택지 진행 중에 직접 입력으로 넘어온 경우, 그때까지 고른 선택 내용(요약 문장).
-    // 서버/GPT는 선택지 단계에서 고른 값을 모르고 있으므로(마지막 단계에서야 한꺼번에 전송), 첫 메시지에 같이 보내서
-    // 이미 정한 무드/타입/모티프 등을 다시 묻지 않게 한다. 말풍선과 freeformLog에는 사용자가 친 문장만 남긴다.
+    // priorContext: 서버에만 text 앞줄에 붙여 보낼 문장 (컬러피커 기타 입력과 함께 보내는 고른 색 안내).
+    // 자유 입력 기록(freeformLog)에는 사용자가 적은 text만 남긴다.
     const sendFreeformMessage = async (text: string, priorContext = '') => {
         if (!sessionId) {
             pushAssistant('채팅 세션이 아직 준비되지 않았어요. 잠시 후 다시 시도해 주세요.')
@@ -1584,41 +2065,60 @@ export function useNailDesignChatPage() {
         }
         freeformLogRef.current.push(text)
         setIsSending(true)
-        // 대화가 끝나 바로 생성으로 넘겼으면, 보내는 중 표시는 생성(runGenerateDesign)이 끝날 때 끈다
-        let handedOffToGeneration = false
         try {
             const res = await sendChatMessage(sessionId, priorContext ? `${priorContext}\n${text}` : text)
             pushAssistant(res.reply)
 
-            if (res.isComplete) {
-                // 취향 파악이 끝났다고 봇이 이미 안내했으니, 말한 대로 바로 생성 시작
-                handedOffToGeneration = true
-                handleFreeformGenerate()
-                return
-            }
-
             const suggestionOptions =
                 res.showOptions && res.options.length > 0
-                    ? res.options.map((label) => ({ value: label, label, colorHexes: res.optionColors?.[label] }))
+                    ? // 화면 라벨에만 문장부호를 붙이고, 고르면 보내는 값(value)은 서버가 준 선택지 그대로 둔다
+                    res.options.map((label) => ({
+                        value: label,
+                        label: withSentencePunctuation(label),
+                        colorHexes: res.optionColors?.[label],
+                    }))
                     : []
 
-            // 컬러/쉐입을 물어보는 차례라면, Gemini가 준 텍스트 선택지 뒤에
-            // "고정 UI로 직접 고르기" 옵션을 하나 더 붙여준다.
-            const pickerOption =
-                res.nextQuestionTarget === 'color'
-                    ? [{ value: '__color_picker__', label: '🎨 컬러피커에서 직접 선택하기' }]
-                    : res.nextQuestionTarget === 'shape'
-                        ? [{ value: '__shape_picker__', label: '💅 쉐입 이미지로 직접 선택하기' }]
-                        : []
+            // 컬러/쉐입을 물어보는 차례라면, Gemini가 준 텍스트 선택지 뒤 맨 마지막에 "고정 UI로 직접 고르기"
+            // 옵션을 항상 붙여준다. 서버가 다음 질문 대상(nextQuestionTarget)을 다르게 적어 보내도
+            // 선택지 내용(쉐입 이름 / 색상 정보)으로 한 번 더 알아본다.
+            const isShapeQuestion =
+                res.nextQuestionTarget === 'shape' ||
+                (res.nextQuestionTarget !== 'color' && res.options.some(isShapeOptionLabel))
+            const isColorQuestion =
+                !isShapeQuestion &&
+                (res.nextQuestionTarget === 'color' ||
+                    Object.keys(res.optionColors ?? {}).length > 0 ||
+                    res.options.some((option) => /#[0-9A-Fa-f]{3,6}\b/.test(option)))
+            const pickerOption = isShapeQuestion
+                ? [{ value: '__shape_picker__', label: '쉐입 이미지로 직접 선택하기', icon: 'nail' as const }]
+                : isColorQuestion
+                    ? [{ value: '__color_picker__', label: '컬러 팔레트(피커)에서 직접 선택하기', icon: 'palette' as const }]
+                    : []
 
             setFreeformColorPickerOpen(false)
             setFreeformShapePickerOpen(false)
             // 새 질문이 왔으니 컬러피커도 빈 상태에서 시작한다 — 지난 질문에서 담아두고 확정하지
-            // 않은 색이 다음 컬러피커에 이미 선택된 채로 보이지 않게 한다.
+            // 않은 색·기타 입력이 다음 컬러피커에 이미 들어간 채로 보이지 않게 한다.
             setFreeformSelectedColors([])
+            setFreeformColorNote('')
 
             const combinedOptions = [...suggestionOptions, ...pickerOption]
-            if (combinedOptions.length > 0) {
+            if (isFreeformCollectionComplete(res)) {
+                // 서버가 확인하는 필수 항목을 다 모았을 때만, 바로 생성할지 더 얘기할지 고를 수 있게 한다
+                // (예전에는 다 모이면 묻지 않고 곧바로 생성했다)
+                setActiveQuickReply({
+                    id: `freeform-actions-${makeId()}`,
+                    question: '바로 생성해 드릴까요?',
+                    options: [
+                        { value: '__generate__', label: '바로 생성해 주세요.', icon: 'check' },
+                        { value: '__continue__', label: '아직 더 얘기하고 싶어요.', icon: 'chat' },
+                    ],
+                    multi: false,
+                    limit: 1,
+                    layout: 'list',
+                })
+            } else if (combinedOptions.length > 0) {
                 setActiveQuickReply({
                     id: `freeform-actions-${makeId()}`,
                     question: '이런 느낌은 어떠세요? 직접 입력하셔도 좋아요.',
@@ -1627,28 +2127,13 @@ export function useNailDesignChatPage() {
                     limit: 1,
                     layout: 'list',
                 })
-            } else {
-                // Gemini의 답변 문구(완료됐다/시작할까요? 등)를 일일이 맞춰서 감지하는 대신,
-                // "더 이상 보여줄 선택지가 없다" 그 자체를 신호로 삼는다.
-                // isComplete가 true로 안 왔어도, 물어볼 게 없다는 건 사실상 대화가 끝났다는 뜻이므로
-                // 사용자가 바로 생성할지 더 얘기할지 선택할 수 있게 한다.
-                setActiveQuickReply({
-                    id: `freeform-actions-${makeId()}`,
-                    question: '바로 생성해 드릴까요?',
-                    options: [
-                        { value: '__generate__', label: '✅ 네, 바로 생성해주세요' },
-                        { value: '__continue__', label: '💬 아직 더 얘기하고 싶어요' },
-                    ],
-                    multi: false,
-                    limit: 1,
-                    layout: 'list',
-                })
             }
+            // 아직 모으는 중이고 고를 선택지도 없으면 아무 창도 띄우지 않는다 — 챗봇의 질문에 바로 입력해서 답한다
         } catch (e) {
             const msg = e instanceof ApiError ? e.message : '메시지 전송에 실패했어요. 다시 시도해 주세요.'
             pushAssistant(msg)
         } finally {
-            if (!handedOffToGeneration) setIsSending(false)
+            setIsSending(false)
         }
     }
 
@@ -1660,13 +2145,24 @@ export function useNailDesignChatPage() {
     }
 
     // ── 입력창 ─────────────────────────────────────────────────────────────
-    // 선택지 기반 흐름에서 선택지 창이 떠 있는 동안엔 채팅 입력을 막는다 — 안 그러면 채팅을 치는
-    // 순간 자유 입력 흐름으로 넘어가 버린다. 선택지 외 의견은 선택지 창의 "기타" 입력란으로 받는다.
-    const isPreferenceInputLocked = mode === 'preference' && !!activeQuickReply?.id.startsWith('pref-')
+    // 선택지 기반 흐름은 자유 입력으로 넘어가지 않는다 — 선택지 창이 떠 있는 동안, 그리고 디자인이 나오기 전까지는
+    // 채팅 입력을 막고, 선택지 외 의견은 선택지 창의 "기타" 입력란으로 받는다.
+    // (디자인이 나온 뒤 입력하면 그 디자인의 수정 요청으로 받는다 — handleSubmitInput)
+    const isPreferenceInputLocked =
+        mode === 'preference' && (!!activeQuickReply?.id.startsWith('pref-') || !lastDesign)
+
+    // 디자인을 확정하고 결과 화면으로 넘어간 뒤, 이력이나 뒤로가기로 이 채팅을 다시 연 상태 — 마지막 말풍선이 확정 답이다.
+    // 이때 입력한 문장은 생성 방식과 상관없이 마지막 디자인의 수정 요청으로 받는다 (handleSubmitInput)
+    const lastShownBubble = [...bubbles].reverse().find((bubble) => !bubble.historyOnly)
+    const isReopenedAfterConfirm =
+        !!lastDesign &&
+        !activeQuickReply &&
+        lastShownBubble?.role === 'user' &&
+        DESIGN_ACCEPT_LABELS.includes(lastShownBubble.text)
 
     const handleSubmitInput = () => {
         const text = inputValue.trim()
-        if ((!text && !hasPhotoAttachment) || isSending || isPreferenceInputLocked || isPhotoInputLocked) return
+        if ((!text && !hasPhotoAttachment) || isSending || isPreferenceInputLocked || isPhotoInputLocked || isReadOnly) return
         // 참고 사진을 입력창에 첨부해 둔 상태에서 보내면, 사진 + 이 문장(없으면 사진만)으로 바로 생성한다.
         if (hasPhotoAttachment) {
             confirmPhotoWithNote(text)
@@ -1675,51 +2171,41 @@ export function useNailDesignChatPage() {
         clearInput()
         setActiveQuickReply(null)
 
-        if (mode === 'revise') {
+        // 선택지 기반으로 디자인이 나온 뒤에, 또는 디자인을 확정한 뒤 다시 연 채팅에서 입력한 문장은 자유 입력으로 넘기지 않고
+        // 마지막 디자인의 수정 요청으로 받는다 ("수정하고 싶어요"를 누른 것과 같다)
+        if (mode === 'preference' || isReopenedAfterConfirm) setMode('revise')
+        if (mode === 'revise' || mode === 'preference' || isReopenedAfterConfirm) {
             pushUser(text)
             void handleReviseSubmit(text)
             return
         }
 
-        pushUser(text)
+        // 생성 방식을 고르지 않고 바로 입력했으면 이 말풍선에서 자유 입력이 시작된다
+        pushUser(text, mode !== 'freeform' ? { generationMethod: 'freeform' } : undefined)
 
         if (mode === 'freeform' && isPreferenceModeSwitchIntent(text)) {
             startPreferenceFlow()
             return
         }
 
-        // 선택지(preference) 진행 중에 직접 입력하면 자유채팅으로 넘어간다 — 이때까지 확정한 선택
-        // + 지금 단계에서 고르기만 하고 "다음"을 안 누른 값도 함께 GPT에 전달한다.
-        let priorContext = ''
-        if (mode === 'preference') {
-            const currentStep = PREFERENCE_STEPS[preferenceStepIndex]
-            priorContext = buildPreferenceSummary(
-                {
-                    ...collectedPreferences,
-                    ...(currentStep && selectedInQuickReply.length > 0 ? { [currentStep]: selectedInQuickReply } : {}),
-                },
-                preferenceNotes,
-            )
-        }
-
         if (mode !== 'freeform') {
             setMode('freeform')
             setFreeformSelectedColors([])
         }
-        void sendFreeformMessage(text, priorContext)
+        void sendFreeformMessage(text)
 
     }
 
     const handleQuickReplyClick = (option: QuickReplyOption) => {
-        if (isSending) return
+        if (isSending || isReadOnly) return
         if (option.value === '__go_to_scan__') {
             navigate('/process')
             return
         }
         if (option.value === '__back_to_menu__') {
-            pushUser(option.label)
+            pushUser(option.label, { historySection: 'method' })
             setMode('menu')
-            pushAssistant('알겠어요! 다른 생성 방식을 선택해 주세요.')
+            pushAssistant('알겠어요! 다른 생성 방식을 선택해 주세요.', { historySection: 'method' })
             setActiveQuickReply(MENU_QUICK_REPLY)
             return
         }
@@ -1736,8 +2222,9 @@ export function useNailDesignChatPage() {
             return
         }
         if (activeQuickReply?.id === 'revise-suggestions') {
-            if (option.value === '__accept_current__') {
-                handleDesignFeedback({ value: 'accept', label: option.label })
+            // "방금 디자인으로 확정할게요" — "좋아요! 이 디자인으로 할게요."를 누른 것과 똑같이 확정한다
+            if (option.value === DESIGN_CONFIRM_FROM_REVISE_VALUE) {
+                handleDesignFeedback({ ...option, value: 'accept' })
                 return
             }
             // 선택지를 눌렀으면 그 문장을 수정 요청으로 그대로 보낸다
@@ -1784,7 +2271,8 @@ export function useNailDesignChatPage() {
             } else {
                 pushUser(option.label)
             }
-            void sendFreeformMessage(option.label)
+            // 서버에는 받은 선택지 그대로 보낸다 (라벨엔 화면용 문장부호가 붙어 있을 수 있다)
+            void sendFreeformMessage(option.value)
             return
         }
     }
@@ -1802,13 +2290,23 @@ export function useNailDesignChatPage() {
 
     // 지금까지 담은 색상들을 한 번에 확정해서 Gemini에게 전송한다.
     const handleFreeformColorPickerConfirm = () => {
-        if (freeformSelectedColors.length === 0) return
+        const note = freeformColorNote.trim()
+        if (freeformSelectedColors.length === 0 && !note) return
         const hexes = [...freeformSelectedColors]
         setFreeformColorPickerOpen(false)
         setFreeformSelectedColors([])
+        setFreeformColorNote('')
         setActiveQuickReply(null)
-        pushUserColors('', hexes)
-        void sendFreeformMessage(hexes.join(', '))
+        if (!note) {
+            pushUserColors('', hexes)
+            void sendFreeformMessage(hexes.join(', '))
+            return
+        }
+        // 기타 입력이 있으면 예전 선택지 기반 컬러 단계의 기타 입력처럼, 고른 색을 순서 번호와 함께 알려 주는 문장을
+        // 앞줄에 붙여 기타 입력 문장과 함께 보낸다. 말풍선에는 색 동그라미와 그 아래 기타 입력 문장을 보여 준다.
+        if (hexes.length > 0) pushUserColors('', hexes, { colorsInline: true, textAfterColors: note })
+        else pushUser(note)
+        void sendFreeformMessage(note, buildPickedColorsContext(hexes))
     }
 
     // 자유입력 흐름에서 쉐입 이미지로 직접 고른 값을 확정한다.
@@ -1819,110 +2317,15 @@ export function useNailDesignChatPage() {
         void sendFreeformMessage(label)
     }
 
-    // 손 스캔 정보가 없어도 패널은 열 수 있게 하고, 그 안에서 빈 상태(안내 + 촬영 CTA)를 보여준다.
-    const handleToggleAnalysisPanel = () => {
-        setShowAnalysisPanel((prev) => !prev)
-    }
-
-    // 사이드바 드롭다운에서 다른 분석 결과(세션)를 골랐을 때 — 그 세션의 실제 데이터를 다시 받아온다.
-    const handleSelectSession = async (session: ScanSession) => {
-        if (session.key === selectedSessionKey) return
-        const { leftRes, rightRes } = await fetchSessionAnalysis(session)
-        setLeftAnalysis(leftRes)
-        setRightAnalysis(rightRes)
-        setScanId(session.leftScanId ?? session.rightScanId ?? null)
-        setScanHandSide(leftRes ? 'LEFT' : rightRes ? 'RIGHT' : null)
-        setSelectedSessionKey(session.key)
-    }
-
-    const analysisSummary = useMemo(() => {
-        if (!leftAnalysis && !rightAnalysis) return null
-
-        // 손 분석 결과 화면과 동일하게: 왼손 5손가락 + 오른손 5손가락 = 10손가락 실측 평균
-        const combinedFingers = [...(leftAnalysis?.fingers ?? []), ...(rightAnalysis?.fingers ?? [])]
-
-        const details = combinedFingers.map((finger, index) => {
-            let measurements: { lengthMm?: number; length?: number; widthMm?: number; width?: number; cCurveMm?: number; cCurve?: number; curve?: number } = {}
-            try {
-                measurements = JSON.parse(finger.measurements ?? '{}') || {}
-            } catch {
-                measurements = {}
-            }
-            // index는 0~9(왼손 0~4 + 오른손 5~9)이므로, 손가락 종류(엄지~소지)는 %5로 구한다.
-            const fingerSize = FINGER_SIZE_MM[index % 5]
-            // 실제 스캔 파이프라인(scan/server.py) 필드명은 cCurveMm(C-curve sagitta 깊이, mm)
-            // — cCurve/curve는 옛 목업 호환용. 값이 없으면 해당 손가락의 실측 평균값을 쓴다.
-            return {
-                lengthMm: Number(measurements.lengthMm ?? measurements.length ?? fingerSize.lengthMm),
-                widthMm: Number(measurements.widthMm ?? measurements.width ?? fingerSize.widthMm),
-                cCurve: Number(measurements.cCurveMm ?? measurements.cCurve ?? measurements.curve ?? fingerSize.cCurveMm),
-            }
-        })
-
-        const avg = (nums: number[]) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
-        const avgLength = Number(avg(details.map((d) => d.lengthMm)).toFixed(1))
-        const avgWidth = Number(avg(details.map((d) => d.widthMm)).toFixed(1))
-        // cCurve는 C-curve sagitta 깊이(mm). 소수 첫째 자리까지만 보여 준다.
-        const avgCurve = Number(avg(details.map((d) => d.cCurve)).toFixed(1))
-
-        // 톤/쉐입은 왼손을 우선하고, 없으면 오른손 값을 사용.
-        // shape는 출력 신청 시 유저가 고른 쉐입으로 덮어써질 수 있어서, "추천" 배지/문구는
-        // 반드시 recommendedShape를 써야 한다 (ScanResultResponse 타입 주석 참고)
-        const skinToneHex = leftAnalysis?.skinToneHex ?? rightAnalysis?.skinToneHex ?? null
-        const tone = leftAnalysis?.tone ?? rightAnalysis?.tone ?? null
-        const warmness = leftAnalysis?.warmness ?? rightAnalysis?.warmness ?? null
-        const brightness = leftAnalysis?.brightness ?? rightAnalysis?.brightness ?? null
-        const saturation = leftAnalysis?.saturation ?? rightAnalysis?.saturation ?? null
-        const backendSkinToneAnalysis = skinToneAnalysisFromMetrics(tone, warmness, brightness, saturation)
-        const toneLabel = backendSkinToneAnalysis?.tone.label ?? (skinToneHex ? analyzeSkinTone(skinToneHex).tone.label : null)
-        const recommendedColors = leftAnalysis?.recommendedColors?.length
-            ? leftAnalysis.recommendedColors
-            : rightAnalysis?.recommendedColors ?? []
-        const shapeId = leftAnalysis?.recommendedShape ?? rightAnalysis?.recommendedShape ?? null
-        const shapeInfo = shapeId ? getNailShape(shapeId) : undefined
-
-        // 손 분석 결과 화면과 동일한 기준값으로 막대 위치·비교 문구를 계산한다
-        const lengthPct = percentileAgainstBaseline(avgLength, NAIL_BASELINE.length)
-        const widthPct = percentileAgainstBaseline(avgWidth, NAIL_BASELINE.width)
-        const curvePct = percentileAgainstBaseline(avgCurve, NAIL_BASELINE.cCurve)
-
-        return {
-            toneLabel: toneLabel || '분석 중',
-            shapeId,
-            shapeLabel: shapeInfo ? shapeInfo.labelKo : shapeId || '분석 중',
-            shapeImage: shapeInfo?.image ?? null,
-            avgLength,
-            avgWidth,
-            avgCurve,
-            lengthPct,
-            widthPct,
-            curvePct,
-            lengthCompareLabel: labelByPercentile(lengthPct, '평균보다 짧은 편', '평균보다 긴 편', '평균과 비슷함'),
-            widthCompareLabel: labelByPercentile(widthPct, '좁은 편', '넓은 편', '평균과 비슷함'),
-            curveCompareLabel: labelByPercentile(curvePct, '완만한 편', '뚜렷한 편', '평균 범위'),
-            skinToneHex,
-            skinToneAnalysis: backendSkinToneAnalysis ?? (skinToneHex ? analyzeSkinTone(skinToneHex) : null),
-            skinTonePalette: sortRecommendedColors(
-                recommendedColors.length > 0
-                    ? recommendedColors
-                    : skinToneHex
-                        ? generateSkinTonePalette(skinToneHex, 30)
-                        : []
-            ),
-        }
-    }, [leftAnalysis, rightAnalysis])
-
     // 컬러 선택 단계에서 실제로 보여줄 팔레트 — 스캔 정보(대표 피부색)가 있으면 거기서 뽑은
     // "나와 어울리는 컬러"를, 없으면(스캔 전) 이달의 컬러 30색을 쓴다.
     const scanColorPalette = useMemo(() => analysisSummary?.skinTonePalette ?? [], [analysisSummary])
     const hasScanColorPalette = scanColorPalette.length > 0
 
-    // 사이드바 "추천 컬러"(.design-chat-sidebar__palette)와 컬러 선택 그리드(.design-chat__color-grid)
-    // 모두 sortRecommendedColors 순서를 그대로 흘려 넣는다 (스캔 팔레트는 위에서 이미 정렬됨).
-    const sidebarColorPalette = scanColorPalette
+    // 컬러 선택 그리드(.design-chat__color-grid)는 sortRecommendedColors 순서를 그대로 흘려 넣는다 (스캔 팔레트는 이미 정렬됨).
     const colorPickerPalette = hasScanColorPalette ? scanColorPalette : MONTHLY_TRENDING_COLORS
 
-    // 지금 떠 있는 선택지 단계가 "기타" 입력란을 받는 단계(분위기/디자인 타입/모티프)라면 그 단계 키
+    // 지금 떠 있는 선택지 단계가 "기타" 입력란을 받는 단계(분위기/디자인 타입/모티프/컬러)라면 그 단계 키
     const activeNoteStep = useMemo<PreferenceKey | null>(() => {
         if (!activeQuickReply?.id.startsWith('pref-')) return null
         const step = activeQuickReply.id.slice(5) as PreferenceKey
@@ -1940,23 +2343,22 @@ export function useNailDesignChatPage() {
 
     return {
         navigate,
-        canSelectSession,
+        sessionId,
         isInitReady,
-        userName,
-        scanId,
         bubbles,
         activeQuickReply,
+        mode,
+        handleDesignCardShown,
         isAwaitingGenerateConfirm,
         isPreferenceInputLocked,
+        isReopenedAfterConfirm,
+        isReadOnly,
         selectedInQuickReply,
         freeformSelectedColors,
         activeNoteStep,
         activeNote,
         hasActiveNote,
         setPreferenceNote,
-        colorNote,
-        setColorNote,
-        submitColorNote,
         preferenceStepIndex,
         lastDesign,
         selectedPhotoFile,
@@ -1977,14 +2379,10 @@ export function useNailDesignChatPage() {
         pinnedTooltipKey,
         setPinnedTooltipKey,
         freeformColorPickerOpen,
+        freeformColorNote,
+        setFreeformColorNote,
         freeformShapePickerOpen,
-        showAnalysisPanel,
-        setShowAnalysisPanel,
         zoomedImage,
-        leftAnalysis,
-        rightAnalysis,
-        scanSessions,
-        selectedSessionKey,
         messagesRef,
         chatContainerRef,
         textareaRef,
@@ -1992,7 +2390,6 @@ export function useNailDesignChatPage() {
         scrollMessagesToBottom,
         hasScanColorPalette,
         colorPickerPalette,
-        sidebarColorPalette,
         isMultiConfirmVisible,
         analysisSummary,
         MOTIF_NONE_VALUE,
@@ -2010,8 +2407,6 @@ export function useNailDesignChatPage() {
         toggleFreeformColor,
         handleFreeformColorPickerConfirm,
         handleFreeformShapeSelect,
-        handleToggleAnalysisPanel,
-        handleSelectSession,
         showOptionTooltip,
         hideOptionTooltip,
         toggleOptionTooltip,

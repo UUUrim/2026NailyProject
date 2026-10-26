@@ -36,6 +36,9 @@ Usage:
     GET  /print/status        — 프린터 현재 상태/진행률 (Spring Boot 폴링용)
     POST /print/merge-both    — 양손 로컬 STL 병합 → 양손 3MF를 S3에 업로드 → 콜백
     POST /print/start         — 슬라이싱 + 프린터 출력 시작
+    POST /print/pause         — 지금 출력 중인 주문 일시정지   {"orderId": ...}
+    POST /print/resume        — 일시정지된 주문 재개           {"orderId": ...}
+    POST /print/cancel        — 출력 중이면 프린터를 멈추고, 대기 중이면 큐에서 뺀다 {"orderId": ...}
 """
 
 import asyncio
@@ -95,17 +98,19 @@ for _p in [_PRINTER_DIR, _SCAN_DIR, _THIS_DIR]:
 from dotenv import load_dotenv
 load_dotenv(os.path.join(_SCAN_DIR, ".env"))
 
-from merge_fingers   import merge_both_hands                      # printer/
+from merge_fingers   import merge_both_hands, stl_subdir           # printer/
 from slice_and_print import (slice_and_send_to_printer,           # printer/
                               PRINTER_IP, PRINTER_ACCESS_CODE, PRINTER_SERIAL)
 import final_measurements                                        # scan/ - 양손 최종 measurements.json
 try:
     from measure_ccurve import side_edge_blur_px, find_finger_point, focus_score, finger_box_norm   # scan/ - 초점 확인, 손가락 위치, 초점 점수
+    from measure_ccurve import side_photo_check                  # scan/ - 사이드 사진에 손가락 끝이 제대로 있는지
 except Exception:                                                # 없어도 스캔은 돌아가야 한다
     side_edge_blur_px = None
     find_finger_point = None
     focus_score = None
     finger_box_norm = None
+    side_photo_check = None
 import skin_snapshot                                             # scan/ - 피부색 확인용 사진 한 장
 
 # 탑뷰 라이브 측정 - nail_live.py(로컬 CLI 도구)와 동일한 실시간 측정을 재사용한다.
@@ -119,7 +124,8 @@ from nail_live import (MeasureWorker,                                 # scan/
                         detect_marker_only as _live_detect_marker_only,
                         guide_line_row as _live_guide_line_row,
                         guide_line_offset_mm as _live_guide_offset_mm,
-                        marker_mm_per_px as _live_marker_mm_per_px)
+                        marker_mm_per_px as _live_marker_mm_per_px,
+                        apply_fixed_focus as _live_apply_fixed_focus)
 
 # ─────────────────────────────────────────────────────────────
 BASE   = _THIS_DIR
@@ -173,6 +179,23 @@ TOP_VIEW_MIN_W_PX          = 480   # 창이 이보다 좁아지면 예전 방식
 # 손가락이 잠깐 인식 안 된 한두 측정 사이클 동안 가이드 선이 마커 기준
 # 추정 위치로 튀지 않도록 마지막 실측 guide_y를 유지하는 시간.
 GUIDE_LIVE_HOLD_SEC  = 0.5
+# 손가락이 없을 때 가이드 선을 그릴 마커 위치를 이 간격으로 다시 잡는다(_refresh_guide_marker).
+# 처음 잡은 마커(_S.marker_corners)는 서버가 켜져 있는 내내 그대로인데 카메라/받침대는
+# 조금씩 움직여서(10-22 하루 사이 마커 아래 끝이 380→401px), 손가락을 넣어 실측 guide_y로
+# 바뀌는 순간 선이 그만큼 튀었다. 화면 표시 전용이고 측정에는 쓰지 않는다.
+GUIDE_MARKER_REFRESH_SEC = 0.5
+
+# 사이드뷰(폰) 사진은 버튼을 누른 뒤 폰이 요청을 받아(폴링) 촬영 설정을 다시 하고 고화질 촬영을 마칠 때까지 1.5~3.5초가
+# 걸려서, 그 사이 손가락이 빠지면 손가락 없는 사진이나 서 있는 손가락 사진이 찍혔다(스캔 217/218 소지). 그래서 탑뷰가
+# "촬영 가능(ready)" 상태로 이만큼 이어지면 버튼을 누르기 전에 사이드 사진을 미리 찍어 두고, 버튼을 누르면 그 사진을 쓴다.
+SIDE_PREFETCH_HOLD_S    = 2.0    # 탑뷰 측정이 시작(게이지가 차오르기 시작)된 뒤 이만큼 끊김 없이 이어지면 사이드 사진을 찍는다
+SIDE_SHOTS              = 3      # 사이드 사진을 이만큼 찍어 둔다(곡률은 사진마다 흔들려서 측정 단계에서 중앙값을 쓴다)
+SIDE_PREFETCH_MAX_AGE_S = 12.0   # 이보다 오래된 사진은 버리고 새로 찍는다(손가락이 그 사이 움직였을 수 있다)
+SIDE_PHOTO_MAX_ATTEMPTS = 3      # 사진 검증에 실패하면(손가락 없음/서 있음) 다시 찍는 최대 횟수
+# 폰은 사진 한 장마다 초점 맞추기(약 1초) + 촬영 + 큰 사진 업로드를 하는 동안 프리뷰를 보내지 않는다. 버튼을 누른 시점에 "폰이
+# 연결돼 있나"를 예전처럼 최근 3초 프리뷰로 판단하면, 폰이 찍고 있거나 막 찍은 직후라서 연결이 끊긴 것으로 오해해 사이드를
+# 통째로 건너뛰었다(미리 찍어 둔 사진도 같이 버려졌다). 그래서 버튼 시점에는 이만큼 조용해야 "폰이 없다"고 본다.
+PHONE_BUTTON_MAX_AGE_S  = 12.0
 
 # ─────────────────────────────────────────────────────────────
 app = FastAPI(title="Naily 통합 서버")
@@ -300,6 +323,11 @@ def _slice_and_print_local(local_3mf: str, output_dir: str, callback_url: str):
     """
     try:
         order_id = _order_id_from_callback(callback_url)
+        # 병합하는 사이 사용자가 취소했으면(preCancel) 큐에 넣지 않는다
+        if order_id in _CANCEL_REQUESTED:
+            _CANCEL_REQUESTED.discard(order_id)
+            _post_canceled(callback_url)
+            return
         order_dir = os.path.join(output_dir, f"order_{order_id}")
         os.makedirs(order_dir, exist_ok=True)
         job_3mf = os.path.join(order_dir, "input_for_slicing.3mf")
@@ -317,17 +345,51 @@ def _order_id_from_callback(callback_url: str) -> str:
     m = re.search(r"/prints/(\d+)/", callback_url or "")
     return m.group(1) if m else time.strftime("t%Y%m%d_%H%M%S")
 
-def _run_merge_both_hands(userid, left_session, right_session,
-                           left_shapes, right_shapes, callback_url, print_callback_url=None):
+
+# ── 출력 제어 (일시정지 / 재개 / 취소) ────────────────────────
+# 사용자가 취소를 요청한 주문 ID(문자열). 출력 중인 작업은 폴링이 이 값을 보고 프린터를 멈춘 뒤
+# 취소 콜백을 보내고, 대기 중인 작업은 큐 워커가 꺼낼 때 건너뛴다.
+_CANCEL_REQUESTED: set = set()
+
+
+def _cancel_requested(callback_url: str) -> bool:
+    return _order_id_from_callback(callback_url) in _CANCEL_REQUESTED
+
+
+def _post_canceled(callback_url: str):
+    """사용자가 취소한 주문을 백엔드에 알린다. success=False로 보내는 이유: 백엔드는 success=True이면서
+    모르는 status가 오면 PRINTING으로 처리하기 때문이다. 취소는 status=CANCELED로 구분한다."""
     try:
-        result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes)
-        s3_key     = f"print/{userid}/{left_session}_{right_session}/both/both_hands_merged.3mf"
+        requests.post(callback_url, json={
+            "success": False, "status": "CANCELED", "message": "사용자가 출력을 취소했습니다."}, timeout=15)
+    except Exception as e:
+        print(f"[Cancel] 취소 콜백 전송 실패: {e}")
+
+
+def _stop_printer_quietly():
+    """프린터에 정지 명령을 보낸다. 실패해도 예외를 올리지 않는다(폴링이 다음 주기에 다시 보낸다)."""
+    try:
+        _get_printer().stop_print()
+    except Exception as e:
+        print(f"[Cancel] stop_print 실패(다음 폴링에서 재시도): {e}")
+
+def _run_merge_both_hands(userid, left_session, right_session,
+                           left_shapes, right_shapes, callback_url, print_callback_url=None,
+                           tip_extension_mm=None):
+    try:
+        # 주문마다 폴더를 따로 쓴다: 같은 스캔으로 다시 신청해도 앞 주문의 병합 파일을 덮어쓰지 않는다
+        order_id   = _order_id_from_callback(callback_url)
+        pair       = f"{left_session}_{right_session}" if right_session else str(left_session)
+        result = merge_both_hands(userid, left_session, right_session, left_shapes, right_shapes,
+                                  order_id=order_id, tip_extension_mm=tip_extension_mm)
+        s3_key     = f"print/{userid}/{pair}/both/order_{order_id}/both_hands_merged.3mf"
         merged_url = _upload_3mf(result["path"], s3_key)
         requests.post(callback_url, json={
             "success": True, "mergedModelUrl": merged_url,
             "missingLeft": result["missingLeft"], "missingRight": result["missingRight"]})
         if print_callback_url:
-            _slice_and_print_local(result["path"], os.path.dirname(result["path"]), print_callback_url)
+            # _slice_and_print_local이 .../both/order_{id}/ 폴더를 만들므로, 병합 폴더(order_{id})의 부모를 넘긴다
+            _slice_and_print_local(result["path"], os.path.dirname(os.path.dirname(result["path"])), print_callback_url)
     except Exception as e:
         requests.post(callback_url, json={"success": False, "message": str(e)})
 
@@ -350,6 +412,10 @@ def _run_slice_and_print(merged_model_url, output_dir, callback_url, local_3mf=N
         if local_3mf is None:
             local_3mf = os.path.join(output_dir, "input_for_slicing.3mf")
             _download_3mf_from_url(merged_model_url, local_3mf)
+        # 다운로드하는 사이 취소됐으면 슬라이싱/업로드를 시작하지 않는다
+        if _cancel_requested(callback_url):
+            _post_canceled(callback_url)
+            return
         gcode_path = slice_and_send_to_printer(local_3mf, output_dir)
 
         # 출력 시작 콜백
@@ -380,6 +446,7 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
     last_percentage = 0
     has_started = already_started  # 서버 재시작 후 이어서 폴링할 땐 이미 출력 중이던 작업
     ACTIVE_GCODE = ("PREPARE", "RUNNING", "PAUSE")
+    last_logged = None  # 진행률/상태가 바뀔 때만 로그를 남긴다
 
     def _fail(msg):
         requests.post(callback_url, json={"success": False, "message": msg})
@@ -392,12 +459,29 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
             gcode = str(status.get("gcodeState", "")).upper()
             pct = status.get("percentage")
             pct = pct if isinstance(pct, (int, float)) else 0
-            last_percentage = max(last_percentage, pct)
-            print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+            snapshot = (stage, gcode, pct)
+            if snapshot != last_logged:
+                print(f"[Poll] stage={stage} gcode={gcode} pct={pct} file={status.get('gcodeFile')}")
+                last_logged = snapshot
 
             stage_active = bool(stage) and "IDLE" not in stage and "UNKNOWN" not in stage
-            if gcode in ACTIVE_GCODE or stage_active:
+            if not has_started and (gcode in ACTIVE_GCODE or stage_active):
                 has_started = True
+                # 직전 출력이 끝난 뒤에도 프린터는 진행률 100%를 들고 있다. 그 값이 이번 출력의
+                # 진행률로 섞이면, 중간에 취소돼도 "95% 이상"으로 보여 완료로 오판한다.
+                last_percentage = 0
+
+            # 사용자가 취소를 요청한 주문: 프린터를 멈추고, 멈춘 것이 확인되면 취소로 알린다.
+            # 출력이 막 시작되는 순간에는 stop 명령이 먹지 않을 수 있어서, 멈출 때까지 폴링마다 다시 보낸다.
+            if _cancel_requested(callback_url) and not (has_started and gcode == "FINISH"):
+                _stop_printer_quietly()
+                if has_started and gcode in ("FAILED", "IDLE") and not stage_active:
+                    _post_canceled(callback_url)
+                    return
+                if not has_started and time.time() - start >= startup_grace_sec:
+                    _post_canceled(callback_url)   # 출력이 시작되지 않은 채 취소됨
+                    return
+                continue
 
             if not has_started:
                 # 아직 예열/업로드 처리 중이거나 시작 명령이 먹지 않은 상태
@@ -406,6 +490,10 @@ def _poll_until_complete(callback_url: str, interval: int = 10, timeout: int = 2
                           f"프린터 상태를 확인해 주세요. (단계={stage}, gcode={gcode})")
                     return
                 continue
+
+            # 진행률은 이번 출력이 시작된 뒤 RUNNING일 때만 반영한다 (PREPARE 등에서는 이전 값이 남아 있을 수 있다)
+            if gcode == "RUNNING":
+                last_percentage = max(last_percentage, pct)
 
             if gcode == "FINISH":
                 requests.post(callback_url, json={"success": True, "status": "COMPLETED"})
@@ -549,6 +637,17 @@ def _print_queue_worker():
     while True:
         job = _print_job_queue.get()
         callback_url = job["callbackUrl"]
+        order_id = _order_id_from_callback(callback_url)
+        # 대기 중에 취소된 작업은 쿨다운도 기다리지 않고 건너뛴다. (취소 콜백은 취소 요청 때 이미 보냈다)
+        # resume 작업은 프린터가 실제로 출력 중인 작업이라 건너뛰지 않고, 폴링이 프린터를 멈춘다.
+        if not job.get("resume") and order_id in _CANCEL_REQUESTED:
+            with _print_queue_lock:
+                if job in _pending_jobs:
+                    _pending_jobs.remove(job)
+                _save_print_queue_state()
+            _CANCEL_REQUESTED.discard(order_id)
+            _print_job_queue.task_done()
+            continue
         # 대기 목록(_pending_jobs)에 남겨 둔 채로 기다린다: 서버가 재시작돼도 복구된다.
         # (재시작 후 상태 확인만 이어가는 resume 작업은 새 출력이 아니라서 기다리지 않는다)
         if not job.get("resume"):
@@ -556,8 +655,19 @@ def _print_queue_worker():
         with _print_queue_lock:
             if job in _pending_jobs:
                 _pending_jobs.remove(job)
-            _current_job = job
-            _save_print_queue_state()
+            # 쿨다운을 기다리는 사이 취소 요청이 들어왔는지 잠금 안에서 다시 확인한다
+            # (취소 요청도 같은 잠금 안에서 처리해서, 어느 한쪽만 보는 일이 없다)
+            if not job.get("resume") and order_id in _CANCEL_REQUESTED:
+                _CANCEL_REQUESTED.discard(order_id)
+                _save_print_queue_state()
+                skip = True
+            else:
+                _current_job = job
+                _save_print_queue_state()
+                skip = False
+        if skip:
+            _print_job_queue.task_done()
+            continue
         try:
             print(f"[PrintQueue] 출력 시작 (대기 {_print_job_queue.qsize()}개 남음)")
             if job.get("resume"):
@@ -574,6 +684,7 @@ def _print_queue_worker():
                 pass
         finally:
             _last_job_finished_at = time.time()
+            _CANCEL_REQUESTED.discard(order_id)   # 이 주문의 취소 요청은 여기서 끝
             with _print_queue_lock:
                 _current_job = None
                 _save_print_queue_state()
@@ -620,9 +731,13 @@ class _StreamState:
         self.top_view_rect: tuple | None = None
         # 손가락 자리 가로 중심(원본 프레임 px) — 가이드 실루엣이 놓이는 열.
         self.finger_slot_x: float = 0.0
-        # 마커를 처음 잡았을 때의 코너 — 손가락이 아직 없을 때도 프론트
-        # 가이드의 큐티클 라인 위치와 실루엣 크기(mm/px)를 계산하는 데 쓴다.
+        # 마커를 처음 잡았을 때의 코너 — 화면 창과 프론트 가이드 실루엣 크기(mm/px)를
+        # 계산하는 데 쓴다. 큐티클 라인 위치는 아래 guide_corners(최신 마커)로 계산한다.
         self.marker_corners = None
+        # 손가락이 없을 때 큐티클 라인 위치를 계산하는 최신 마커 코너와 잡은 시각 —
+        # marker_corners와 달리 계속 갱신돼서, 손가락을 넣었을 때 측정이 쓸 행과 같다.
+        self.guide_corners = None
+        self.guide_corners_t: float = 0.0
         # 실측 중인 guide_y(원본 프레임 px)와 마지막으로 확인된 시각. 측정이
         # 실제로 쓰는 행이라 있으면 마커 기준 추정보다 항상 우선한다.
         self.live_guide: tuple | None = None
@@ -649,8 +764,167 @@ class _StreamState:
         # cancel_capture를 켠다 - 켜지면 탑뷰/사이드뷰 촬영 루프가 다음 손가락을 기다리지 않고 빠져나온다.
         self.capture_session: tuple | None = None
         self.cancel_capture: threading.Event = threading.Event()
+        # ── 사이드 사진 미리 찍기 (측정 시작 후 SIDE_PREFETCH_HOLD_S 뒤; _manage_side_prefetch 참고) ──
+        # side_prefetch: [{"finger", "t"(요청 시각), "frame"}, ...] 최대 SIDE_SHOTS 장. gen 은 손가락이 바뀌거나 측정이 끊기거나
+        # 불안정해질 때마다 올라가서, 그 전에 시작된 촬영 결과가 뒤늦게 도착해도 버려지게 한다. side_cap_lock 은 폰 촬영(요청→수신)이
+        # 한 번에 하나만 돌게 해서 미리 찍기와 버튼 촬영이 서로의 사진을 가로채지 않게 한다.
+        # measure_since: 측정 이력이 끊김 없이 쌓이기 시작한 시각 (이력이 비면 None).
+        self.side_prefetch: list = []
+        self.side_prefetch_gen: int = 0
+        self.side_prefetch_busy: threading.Event = threading.Event()
+        self.side_cap_lock: threading.Lock = threading.Lock()
+        self.measure_since: float | None = None
+        # 지금 촬영 중인 손의 사진 폴더. 사이드 촬영 기록(side_capture.log)과 거부된 사진(side_rejected/)을 여기에 남긴다.
+        self.side_debug_dir: str | None = None
 
 _S = _StreamState()
+
+
+def _record_side(finger: str, event: str, detail: str, frame=None):
+    """사이드 촬영 기록 한 줄을 손 폴더의 side_capture.log 에 남긴다(콘솔 로그가 사라져도 왜 사이드가 빠졌는지 알 수 있게).
+    frame 이 있으면(거부된 사진) side_rejected/ 에 절반 크기로 저장한다. 기록 실패가 촬영을 막지 않게 예외는 삼킨다."""
+    d = _S.side_debug_dir
+    if not d:
+        return
+    try:
+        stamp = time.strftime("%H:%M:%S")
+        line = f"{stamp} {finger:<6} {event:<14} {detail}"
+        if frame is not None:
+            rej_dir = os.path.join(d, "side_rejected")
+            os.makedirs(rej_dir, exist_ok=True)
+            now = time.time()
+            name = f"{finger}_{time.strftime('%H%M%S', time.localtime(now))}{int(now * 1000) % 1000:03d}_{event}.jpg"
+            small = cv2.resize(frame, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+            cv2.imwrite(os.path.join(rej_dir, name), small, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            line += f"  -> side_rejected/{name}"
+        with open(os.path.join(d, "side_capture.log"), "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print(f"  [{finger}] 사이드 촬영 기록 실패(무시): {e!r}")
+
+
+def _side_photo_valid(frame) -> tuple:
+    """사이드 사진 검증 (ok, 이유). 검증 모듈이 없으면 통과."""
+    if side_photo_check is None:
+        return True, "unchecked"
+    try:
+        return side_photo_check(frame)
+    except Exception as e:
+        return True, f"check error ignored: {e!r}"
+
+
+def _reset_side_prefetch():
+    """새 손가락 시작 등: 미리 찍은 사진과 진행 중인 촬영 결과를 모두 무효로 한다."""
+    _S.side_prefetch_gen += 1
+    _S.side_prefetch = []
+    _S.measure_since = None
+
+
+def _prefetch_side_photo(finger: str, gen: int):
+    """(스레드) 폰에 사이드 사진 한 장을 요청해서 검증하고, 아직 유효하면 _S.side_prefetch 목록에 보탠다."""
+    try:
+        # 검증과 보관까지 잠금 안에서 한다. 잠금을 풀고 나서 보관하면 그 틈에 버튼 쪽(_acquire_side_photo)이 잠금을 먼저 잡고
+        # 보관된 사진을 못 본 채 새로 찍어서 같은 손가락을 두 번 찍게 된다.
+        with _S.side_cap_lock:
+            if gen != _S.side_prefetch_gen:          # 기다리는 사이 손가락이 바뀌었거나 ready 가 깨졌다
+                return
+            t_req = time.time()
+            _phone_cam.request_capture()
+            frame = _phone_cam.capture_full(timeout=15.0)
+            if frame is None:
+                print(f"  [{finger}] 사이드 사진 미리 찍기 실패(타임아웃) - 버튼 시점에 다시 찍는다")
+                _record_side(finger, "prefetch_timeout", "폰이 15초 안에 사진을 보내지 않음")
+                return
+            ok, why = _side_photo_valid(frame)
+            if gen != _S.side_prefetch_gen or _S.current_finger != finger:
+                print(f"  [{finger}] 미리 찍은 사이드 사진 폐기 (그 사이 손가락이 움직임/바뀜)")
+                return
+            if not ok:
+                print(f"  [{finger}] 미리 찍은 사이드 사진 검증 실패({why}) - 폐기")
+                _record_side(finger, "prefetch_reject", why, frame)
+                return
+            _S.side_prefetch = _S.side_prefetch + [{"finger": finger, "t": t_req, "frame": frame}]
+            print(f"  [{finger}] 사이드 사진 미리 확보 {len(_S.side_prefetch)}/{SIDE_SHOTS} "
+                  f"(안정 상태에서 촬영, 약 {time.time() - t_req:.1f}초 걸림)")
+    except Exception as e:
+        print(f"  [{finger}] 사이드 사진 미리 찍기 오류: {e!r}")
+    finally:
+        _S.side_prefetch_busy.clear()
+
+
+def _manage_side_prefetch(finger: str, measuring: bool, is_stable: bool):
+    """탑뷰 루프가 매 프레임 부른다. measuring: 측정 이력이 쌓이는 중(게이지가 차오르기 시작한 뒤). 측정이 시작된 뒤
+    SIDE_PREFETCH_HOLD_S 동안 끊김 없이 이어지고 그 순간 안정(ready)이면 사이드 사진을 미리 찍는다. 측정이 끊기면(손가락이
+    빠지거나 측정 실패) 시간을 처음부터 다시 재고, 불안정해지면(손가락이 움직임) 미리 찍은 사진만 무효로 한다.
+    한 장을 확보하면 이어서 SIDE_SHOTS 장이 찰 때까지 계속 찍는다(찍는 데 장당 1.5~3.5초)."""
+    now = time.time()
+    if not measuring:
+        if _S.measure_since is not None or _S.side_prefetch:
+            _reset_side_prefetch()
+        return
+    if _S.measure_since is None:
+        _S.measure_since = now
+    if not is_stable:
+        if _S.side_prefetch:
+            _S.side_prefetch_gen += 1
+            _S.side_prefetch = []
+        return
+    if CAMERA_SIDE != -2 or not _phone_cam.is_connected():
+        return
+    if now - _S.measure_since < SIDE_PREFETCH_HOLD_S:
+        return
+    # 너무 오래된 사진은 버리고 그만큼 다시 찍는다
+    _S.side_prefetch = [p for p in _S.side_prefetch
+                        if p["finger"] == finger and now - p["t"] < SIDE_PREFETCH_MAX_AGE_S]
+    if (len(_S.side_prefetch) >= SIDE_SHOTS or _S.side_prefetch_busy.is_set()
+            or _S.force_capture_side.is_set()):
+        return
+    _S.side_prefetch_busy.set()
+    threading.Thread(target=_prefetch_side_photo, args=(finger, _S.side_prefetch_gen), daemon=True).start()
+
+
+def _take_prefetched_side_photos(finger: str) -> list:
+    """미리 찍어 둔 사진(오래되지 않은 이 손가락 것)을 꺼내 가고, 진행 중인 촬영 결과는 버리게(gen) 한다."""
+    now = time.time()
+    got = [p for p in _S.side_prefetch if p["finger"] == finger and now - p["t"] <= SIDE_PREFETCH_MAX_AGE_S]
+    stale = len(_S.side_prefetch) - len(got)
+    _S.side_prefetch = []
+    _S.side_prefetch_gen += 1
+    if stale:
+        print(f"  [{finger}] 너무 오래된 사이드 사진 {stale}장 버림")
+    return got
+
+
+def _acquire_side_photo(finger: str):
+    """버튼을 누른 순간의 사이드 사진들(목록, 1~SIDE_SHOTS장). 미리 찍어 둔 유효한 사진이 있으면 그걸 바로 쓰고(지연 0,
+    진행 중인 촬영은 기다리지 않고 버린다), 하나도 없을 때는 진행 중인 촬영이 끝나길 기다렸다가 쓰고, 그래도 없으면 새로
+    찍는다. 새로 찍은 사진이 검증에 실패하면(손가락 없음/서 있음) 다시 찍는다. 못 얻으면 None."""
+    if _S.side_prefetch:
+        got = _take_prefetched_side_photos(finger)
+        if got:
+            print(f"  [{finger}] 미리 찍어 둔 사이드 사진 {len(got)}장 사용 "
+                  f"(버튼보다 {time.time() - got[-1]['t']:.1f}~{time.time() - got[0]['t']:.1f}초 전, 지연 없음)")
+            return [p["frame"] for p in got]
+    with _S.side_cap_lock:                     # 미리 찍는 중이면 여기서 끝날 때까지 기다린다
+        got = _take_prefetched_side_photos(finger)
+        if got:
+            print(f"  [{finger}] 미리 찍어 둔 사이드 사진 {len(got)}장 사용 (찍는 중이던 것을 기다림)")
+            return [p["frame"] for p in got]
+        for attempt in range(1, SIDE_PHOTO_MAX_ATTEMPTS + 1):
+            _phone_cam.request_capture()
+            full = _phone_cam.capture_full(timeout=15.0)
+            if full is None:
+                print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃, {attempt}/{SIDE_PHOTO_MAX_ATTEMPTS})")
+                _record_side(finger, "timeout", f"폰이 15초 안에 사진을 보내지 않음 ({attempt}/{SIDE_PHOTO_MAX_ATTEMPTS})")
+                continue
+            ok, why = _side_photo_valid(full)
+            if ok:
+                return [full]
+            print(f"  [{finger}] 사이드 사진 검증 실패({why}) → 다시 촬영 ({attempt}/{SIDE_PHOTO_MAX_ATTEMPTS})")
+            _record_side(finger, "reject", f"{why} ({attempt}/{SIDE_PHOTO_MAX_ATTEMPTS})", full)
+            _set_side_note(f"{finger.upper()}: finger not in the photo - retaking", (0, 220, 255), 4)
+        _record_side(finger, "gave_up", f"{SIDE_PHOTO_MAX_ATTEMPTS}번 모두 실패 - 이 손가락은 사이드 없이 진행")
+        return None
 
 
 # 취소된 스캔 세션 (userid, session). 사용자가 촬영 도중 "다시 촬영해야 한다"는 경고를 확인하고
@@ -716,6 +990,9 @@ class PhoneCamera:
         탑뷰만으로 테스트할 때 사이드뷰 고화질 촬영 타임아웃(8초)을 손가락마다
         기다리지 않고 바로 건너뛰기 위한 판단 기준."""
         return time.time() - self._last_preview_t < max_age
+
+    def seconds_since_preview(self) -> float:
+        return time.time() - self._last_preview_t
 
     def read(self):
         with self._lock:
@@ -835,6 +1112,9 @@ def _get_top_cam() -> cv2.VideoCapture:
         if CAMERA_WB_TEMP is not None:
             cap.set(cv2.CAP_PROP_AUTO_WB, 0)
             cap.set(cv2.CAP_PROP_WB_TEMPERATURE, CAMERA_WB_TEMP)
+        # 오토포커스는 박스 바닥에 맞춰져 손톱이 흐려지는 일이 있어서, 손톱(마커)과 같은 높이에 초점을
+        # 고정한다. 값은 scan/nail_live.py 의 CAM_FOCUS.
+        _live_apply_fixed_focus(cap)
         _top_cam       = cap
         _top_cam_index = CAMERA_TOP
         return _top_cam
@@ -935,6 +1215,26 @@ def _remember_marker(frame: np.ndarray):
     _S.top_view_rect = rect   # 마지막에 — None 여부가 "마커 잡힘" 표시라서
 
 
+def _refresh_guide_marker(frame: np.ndarray):
+    """손가락이 없을 때 가이드 선을 그릴 마커 코너를 지금 프레임으로 갱신한다 (화면 표시용).
+
+    측정은 매 프레임 마커를 새로 잡아 guide_y를 계산하는데, 손가락이 없을 때의 추정은
+    처음 잡은 코너(_S.marker_corners)를 계속 써서 그 사이 카메라/받침대가 움직였으면
+    손가락을 넣는 순간 선이 실측 위치로 튀었다. 같은 계산을 지금 마커로 하면 그대로다.
+    손가락이 잡혀 실측값을 쓰는 동안은 건너뛰고, 그 밖에는 GUIDE_MARKER_REFRESH_SEC에
+    한 번만 돈다. 마커가 가려져 못 잡으면 직전 값을 그대로 둔다."""
+    now = time.time()
+    if now - _S.guide_corners_t < GUIDE_MARKER_REFRESH_SEC:
+        return
+    live = _S.live_guide
+    if live is not None and now - live[1] < GUIDE_LIVE_HOLD_SEC:
+        return
+    _S.guide_corners_t = now
+    corners = _live_detect_marker_only(frame, ARUCO_SIZE_MM)
+    if corners is not None:
+        _S.guide_corners = corners
+
+
 def _top_measure() -> dict | None:
     """안정(촬영 가능) 상태일 때만 손톱 너비/길이와 화면 위치 — 스트림 화면(_top_view_rect
     창) 기준 비율. widthMm/lengthMm는 지금 촬영하면 최종값이 되는 그 구간 평균이다."""
@@ -958,8 +1258,10 @@ def _top_guide() -> dict | None:
 
     cuticleY는 측정이 실제로 쓰는 guide_y 행 그대로다: 손가락이 잡혀 있으면
     MeasureWorker의 실측값(EMA 포함), 아니면 같은 함수(guide_line_row)를
-    손가락 자리 열에서 마커만으로 계산한 값. 예전에 스트림에 직접
+    손가락 자리 열에서 최신 마커(_refresh_guide_marker)만으로 계산한 값 —
+    그래서 손가락을 넣든 안 넣든 선 위치가 같다. 예전에 스트림에 직접
     그리던 파란 점선과 같은 위치이고, 그리는 방식만 프론트로 옮겼다.
+    화면 창·실루엣 크기(aspect/centerX/mmToH)는 처음 잡은 마커 기준 그대로다.
     """
     corners, rect = _S.marker_corners, _S.top_view_rect
     if corners is None or rect is None:
@@ -972,8 +1274,10 @@ def _top_guide() -> dict | None:
     if live is not None and time.time() - live[1] < GUIDE_LIVE_HOLD_SEC:
         guide_y = live[0]
     else:
-        offset_px = _live_guide_offset_mm(_S.current_finger or "") / mpp
-        guide_y = _live_guide_line_row(corners, _S.finger_slot_x, offset_px)
+        now_corners = _S.guide_corners if _S.guide_corners is not None else corners
+        offset_px = (_live_guide_offset_mm(_S.current_finger or "")
+                     / _live_marker_mm_per_px(now_corners, ARUCO_SIZE_MM))
+        guide_y = _live_guide_line_row(now_corners, _S.finger_slot_x, offset_px)
 
     return {
         "aspect":   view_w / view_h,                      # 스트림 화면 가로/세로 비율
@@ -1008,6 +1312,7 @@ def _top_camera_idle_preview_loop(cap: cv2.VideoCapture, stop_event: threading.E
                 # 손가락 없이도 되는 가벼운 감지라 여기서도 똑같이 시도해서
                 # 그 틈을 없앤다. 한 번 잡히면 이후로는 추가 비용이 없다.
                 _remember_marker(frame)
+                _refresh_guide_marker(frame)
                 _push_frame(_S.top_frame, _top_view(frame))
         time.sleep(0.05)
 
@@ -1088,6 +1393,9 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
                 "ratio": min(len(history) / _LIVE_MEDIAN_N, 1.0),
                 "ready": is_stable,
             }
+            # 측정이 시작되고 SIDE_PREFETCH_HOLD_S 뒤(그때 안정이면) 사이드 사진을 미리 찍어 둔다 - 버튼을 누른 뒤의 폰 지연
+            # 동안 손가락이 빠져서 손가락 없는 사진이 찍히던 문제(스캔 217/218) 방지.
+            _manage_side_prefetch(finger, len(history) > 0, is_stable)
 
             # measure_frame silences nail_measurer's own prints (see
             # quiet()), so without this the operator has no way to see
@@ -1121,6 +1429,8 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
             # GUIDE_LIVE_HOLD_SEC 뒤 _top_guide가 마커 기준 추정으로 돌아간다.
             if result is not None and result.get("guide_y") is not None:
                 _S.live_guide = (float(result["guide_y"]), now)
+            # 손가락이 없을 때의 가이드 선도 지금 마커 위치로 — 손가락을 넣어도 선이 안 튀게
+            _refresh_guide_marker(frame)
 
             # 웹 화면에는 측정 오버레이(상태 테두리·L/W 글자·폭 표시선)를 굽지 않은
             # 깨끗한 카메라 화면만 보낸다 — 측정 중/촬영 가능 표시와 안정 상태의
@@ -1169,9 +1479,19 @@ def _capture_top_stream(cap, finger: str, save_path: str, hand: str) -> bool:
         # 손톱 측정 사진은 카메라 원래(자동 노출) 설정 그대로 두고, 이 사진은 노출을 잠깐 낮춰서
         # 마커 흰색이 날아가지 않게 찍은 것이라 피부색(톤) 계산에만 쓴다 (scan/skin_snapshot.py).
         # top_capture_busy가 아직 켜져 있어서 idle 미리보기 스레드가 같은 카메라를 읽지 않는다.
+        # 단, 자동 노출 사진에서 마커 흰색이 이미 안 날아갔으면(촬영 환경이 밝기를 잘 맞춘 경우) 건너뛴다:
+        # 그 사진에서 바로 마커 흰색 보정으로 피부색을 잴 수 있고, 여기서 노출을 더 올린 사진(-7)을 찍으면
+        # 오히려 하얗게 날아간다 (새 촬영 세팅에서 확인: 자동 -8에서 흰색 195~226, -7은 254/255로 포화).
+        skin_path = os.path.join(os.path.dirname(save_path), f"{finger}_skin.jpg")
+        for stale in (skin_path, skin_snapshot.ref_path_for(skin_path)):
+            try:
+                if os.path.isfile(stale): os.remove(stale)      # 이번엔 안 찍으니 옛 사진이 섞이지 않게
+            except OSError:
+                pass
         if CAMERA_EXPOSURE is None:
-            skin_path = os.path.join(os.path.dirname(save_path), f"{finger}_skin.jpg")
-            if skin_snapshot.capture_skin_snapshot(cap, skin_path, crop_top_px=CROP_TOP_PX):
+            if skin_snapshot.auto_photo_white_ok(accepted["frame"]):
+                print(f"  [{finger}] 측정 사진의 마커 흰색이 안 날아가서 피부 확인용 사진은 생략 (측정 사진에서 피부색을 잰다)")
+            elif skin_snapshot.capture_skin_snapshot(cap, skin_path, crop_top_px=CROP_TOP_PX):
                 print(f"  [{finger}] 피부 확인용 사진 저장: {skin_path}")
             else:
                 print(f"  [{finger}] 피부 확인용 사진을 못 찍음 - 피부색은 측정 사진에서 대신 잰다")
@@ -1276,31 +1596,47 @@ def _capture_side_stream(cap, finger: str, save_path: str) -> bool:
 
             if _S.force_capture_side.is_set():
                 _S.force_capture_side.clear()
-                if is_phone and not cap.is_connected():
+                # 미리 찍은 사진이 있거나 찍는 중이거나 폰이 사진 요청을 처리 중이면 폰은 분명히 살아 있다 - 그때는 프리뷰가
+                # 잠깐 끊겨 있는 게 정상이라(PHONE_BUTTON_MAX_AGE_S 설명) 연결 검사를 하지 않는다.
+                phone_alive = is_phone and (bool(_S.side_prefetch) or _S.side_prefetch_busy.is_set()
+                                            or cap.capture_wanted())
+                if is_phone and not phone_alive and not cap.is_connected(PHONE_BUTTON_MAX_AGE_S):
                     # 폰 카메라 페이지가 안 열려있음 - 8초 타임아웃을 기다리지 않고
                     # 바로 건너뛴다. 탑뷰만으로도 측정은 진행된다 (c-curve만 생략).
                     print(f"  [{finger}] 폰 사이드뷰 미연결 → 사이드뷰 건너뜀 (탑뷰만 측정)")
+                    _record_side(finger, "not_connected",
+                                 f"폰 프리뷰가 {cap.seconds_since_preview():.0f}초째 안 옴 (기준 {PHONE_BUTTON_MAX_AGE_S:.0f}초)")
                     return False
                 if is_phone:
                     if ret:
                         cv2.putText(disp, "Capturing full-res photo - hold the phone still",
                                     (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
                         _push_frame(_S.side_frame, _with_side_note(disp))
-                    full = None
-                    for attempt in (1, 2):
-                        cap.request_capture()
-                        full = cap.capture_full(timeout=15.0)
-                        if full is not None:
-                            break
-                        print(f"  [{finger}] 폰 고화질 촬영 실패(타임아웃, {attempt}/2)")
+                    # 버튼을 누르기 전에 안정 상태에서 미리 찍어 둔 사진이 있으면 그걸 쓴다(지연 없음). 없으면 새로
+                    # 찍고, 손가락이 없거나 서 있는 사진이면 다시 찍는다 (_acquire_side_photo).
+                    shots = _acquire_side_photo(finger)
+                    full = shots[0] if shots else None
                     if full is None:
                         # 예전에는 640px 프리뷰를 사이드 사진으로 저장했지만, 프리뷰는 화각이 달라 손가락이
                         # 측정 영역 밖에 있어서 C-curve 가 엉뚱한 값으로 나왔다 → 저장하지 않고 건너뛴다.
                         _set_side_note(f"{finger.upper()}: side photo FAILED - skipped (c-curve = fallback)", (60, 60, 255))
                         print(f"  [{finger}] 고화질 사이드 사진을 못 받음 → 이 손가락 사이드뷰 건너뜀 "
-                              f"(폰 카메라 페이지가 열려있는지/Wi-Fi 확인)")
+                              f"(폰 카메라 페이지가 열려있는지/Wi-Fi 확인) - 사유는 side_capture.log")
                         return False
                     cv2.imwrite(save_path, full)
+                    # 나머지 사진은 <이름>_2.jpg, _3.jpg 로 저장한다 - 측정이 장마다 곡률을 재서 중앙값을 쓴다
+                    # (scan/nail_measurer.py _extra_side_paths). 예전 손가락/세션의 같은 이름 파일이 섞이지 않게 먼저 지운다.
+                    _base, _ext = os.path.splitext(save_path)
+                    for _n in range(2, 6):
+                        _old = f"{_base}_{_n}{_ext}"
+                        if os.path.isfile(_old):
+                            try: os.remove(_old)
+                            except OSError: pass
+                    for _n, _extra in enumerate(shots[1:], start=2):
+                        cv2.imwrite(f"{_base}_{_n}{_ext}", _extra)
+                    if len(shots) > 1:
+                        print(f"  [{finger}] 사이드 사진 {len(shots)}장 저장 (곡률은 중앙값)")
+                    _record_side(finger, "saved", f"{len(shots)}장 저장")
                 else:
                     cv2.imwrite(save_path, frame)
                 print(f"  [{finger}] 사이드뷰 저장: {save_path}")
@@ -1316,6 +1652,7 @@ def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str, hand: s
     """탑뷰 + 사이드뷰 동시 캡처. /capture/force 한 번으로 두 카메라 동시 촬영."""
     top_path  = os.path.join(local_dir, f"{finger}_top.jpg")
     side_path = os.path.join(local_dir, f"{finger}_side.jpg")
+    _S.side_debug_dir = local_dir
 
     top_result  = [False]
     side_result = [False]
@@ -1325,6 +1662,8 @@ def _capture_finger_both(cap_top, cap_side, finger: str, local_dir: str, hand: s
 
     def capture_side():
         side_result[0] = _capture_side_stream(cap_side, finger, side_path)
+
+    _reset_side_prefetch()     # 새 손가락: 앞 손가락의 미리 찍은 사진/진행 중 촬영 결과를 무효로
 
     threads = [threading.Thread(target=capture_top)]
     if cap_side:
@@ -1397,6 +1736,7 @@ def _capture_all_fingers(userid: str, session: str, hand: str) -> str:
         _S.active = False
         _S.current_finger = None
         _S.capture_session = None
+        _S.side_debug_dir = None
         top_idle_stop.set()
         time.sleep(0.1)   # let the idle loop's in-flight read() finish before release()
         # cap_top은 release() 안 함 - 세션 내내(왼손→오른손) 계속 잡고 있는 공용 카메라라서
@@ -1614,7 +1954,10 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
     tip_extension_mm이 None이면 nail_exact_stl.py가 쉐입별 기본값(TIP_EXTENSION_DEFAULT_MM)을 쓴다."""
     try:
         results_root = os.path.join(BASE, "results", userid, session, hand)
-        stl_dir      = os.path.join(results_root, "stl")
+        # 연장 길이마다 폴더를 따로 쓴다 - 같은 스캔으로 다른 길이를 신청해도 다른 주문의 STL을 덮어쓰지 않는다
+        # (병합은 주문의 연장 길이로 같은 폴더를 찾아 읽는다: printer/merge_fingers.py stl_subdir)
+        stl_sub      = stl_subdir(tip_extension_mm)
+        stl_dir      = os.path.join(results_root, "stl", stl_sub)
         os.makedirs(stl_dir, exist_ok=True)
         rel_prefix   = f"results/{userid}/{session}/{hand}"   # 콜백에 담을 로컬 상대 경로의 앞부분
 
@@ -1662,7 +2005,7 @@ def _run_stl_and_callback(userid: str, session: str, hand: str, shape: str, call
         # stlUrl 자리에는 로컬 상대 경로를 보낸다(Spring은 이 값을 읽는 화면이 없다).
         fingers_data = [
             {"finger": finger.upper(),
-             "stlUrl": f"{rel_prefix}/stl/nail_{finger}_{shape}.stl"}
+             "stlUrl": f"{rel_prefix}/stl/{stl_sub}/nail_{finger}_{shape}.stl"}
             for finger in FINGER_ORDER if finger in succeeded
         ]
 
@@ -1695,15 +2038,26 @@ class StlRequest(BaseModel):
     tip_extension_mm: float | None = None
 
 class MergeBothHandsRequest(BaseModel):
-    userid: str; leftSession: str; rightSession: str
-    leftShapes: dict[str, str]; rightShapes: dict[str, str]
+    userid: str; leftSession: str
+    # 한 손가락만 출력할 땐 오른손 정보를 생략한다 (leftShapes에 {"index": "round"}처럼 출력할 손가락만 넣는다)
+    rightSession: str | None = None
+    leftShapes: dict[str, str]; rightShapes: dict[str, str] = {}
     callbackUrl: str; printCallbackUrl: str | None = None
+    # 주문의 연장 길이(mm). 그 길이로 만든 STL 폴더를 읽는다. 없으면(예전 주문) 쉐입 기본 길이 폴더.
+    tipExtensionMm: float | None = None
 
 class MergeBothMeasurementsRequest(BaseModel):
     userid: str; leftSession: str; rightSession: str; callbackUrl: str
 
 class StartPrintRequest(BaseModel):
     mergedModelUrl: str; outputDir: str; callbackUrl: str
+
+class PrintControlRequest(BaseModel):
+    # 조작할 출력 주문 ID. 현재 출력 중이거나(일시정지/재개/취소) 대기 중인(취소) 주문만 조작할 수 있다.
+    # Spring이 숫자로 보내도 받도록 int도 허용한다 (pydantic v2는 숫자를 문자열로 자동 변환하지 않는다).
+    orderId: str | int
+    # 취소 전용: 아직 큐에 없는 주문(병합 중)도 "이 주문은 취소됨"으로 표시해 둔다. 병합이 끝나면 큐에 넣지 않는다.
+    preCancel: bool = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1977,6 +2331,13 @@ def phone_side_calib_done(run: int = 0):
         _set_side_note(f"FOCUS CALIBRATION: no clear peak ({prominence:.2f}x) - try again", (60, 60, 255), 30)
         return {"ok": False, "best": None, "prominence": prominence, "message": "no clear sharpness peak"}
     best = float(fds[i])
+    if edge:
+        # 피크가 초점 범위 끝이면 진짜 최적이 아니라 "점수가 평평하거나 단조로움"인 경우다(폰이 박스에 안 장착돼
+        # 방을 찍고 있었는데 fd 0.0 이 저장돼 모든 사이드 촬영에 적용된 일이 있었다). 저장하지 않는다.
+        _set_side_note("FOCUS CALIBRATION FAILED: peak at the edge of the range - check the phone is mounted "
+                       "and the finger is in place, then try again", (60, 60, 255), 30)
+        return {"ok": False, "best": None, "prominence": prominence, "at_edge_of_range": True,
+                "message": "peak at range edge - not saved"}
     _phone_cam.focus_fd = best
     os.makedirs(TEST_CAPTURE_DIR, exist_ok=True)
     with open(FOCUS_FILE, "w", encoding="utf-8") as f:
@@ -2078,12 +2439,30 @@ def test_side_capture():
 
 # ── 프린터 ───────────────────────────────────────────────────
 
+def _current_order_id():
+    with _print_queue_lock:
+        return _order_id_from_callback(_current_job["callbackUrl"]) if _current_job else None
+
+
+def _find_print_job_locked(order_id: str):
+    """주문 ID로 작업을 찾는다 (호출하는 쪽이 _print_queue_lock을 잡고 있어야 한다).
+    반환: ("current" | "queued" | None, job). 재시작 후 이어서 감시 중인 resume 작업은 이미 프린터가
+    출력 중인 작업이라 대기가 아니라 current로 본다."""
+    if _current_job and _order_id_from_callback(_current_job["callbackUrl"]) == order_id:
+        return "current", _current_job
+    for j in _pending_jobs:
+        if _order_id_from_callback(j["callbackUrl"]) == order_id:
+            return ("current" if j.get("resume") else "queued"), j
+    return None, None
+
+
 @app.get("/print/status")
 def print_status():
     try:
         return {
             "success": True,
             "queueSize": _print_job_queue.qsize(),  # ← 추가
+            "currentOrderId": _current_order_id(),  # 지금 출력(또는 준비) 중인 주문 ID, 없으면 None
             **_fetch_printer_status()
         }
     except Exception as e:
@@ -2096,10 +2475,10 @@ def merge_both(request: MergeBothHandsRequest):
         target=_run_merge_both_hands,
         args=(request.userid, request.leftSession, request.rightSession,
               request.leftShapes, request.rightShapes,
-              request.callbackUrl, request.printCallbackUrl),
+              request.callbackUrl, request.printCallbackUrl, request.tipExtensionMm),
         daemon=True,
     ).start()
-    return {"status": "started", "message": "양손 병합이 시작되었습니다."}
+    return {"status": "started", "message": "병합이 시작되었습니다."}
 
 
 @app.post("/print/start")
@@ -2113,6 +2492,76 @@ def start_print(request: StartPrintRequest):
         "queuePosition": _print_job_queue.qsize(),
         "message": f"출력 대기열에 추가되었습니다. (앞에 {waiting}개 대기 중)"
     }
+
+@app.post("/print/pause")
+def pause_print(request: PrintControlRequest):
+    """지금 출력 중인 주문을 일시정지한다. 응답은 항상 200이고 성공 여부는 success로 구분한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, _ = _find_print_job_locked(order_id)
+    if kind != "current":
+        return {"success": False, "message": "지금 출력 중인 주문이 아닙니다."}
+    try:
+        printer = _get_printer()
+        gcode = str(printer.get_state()).upper()
+        if gcode == "PAUSE":
+            return {"success": True, "message": "이미 일시정지 상태입니다."}
+        if gcode != "RUNNING":
+            return {"success": False, "message": f"출력 중일 때만 일시정지할 수 있습니다. (현재 상태: {gcode})"}
+        ok = printer.pause_print()
+    except Exception as e:
+        return {"success": False, "message": f"프린터에 명령을 보내지 못했습니다: {e}"}
+    return {"success": bool(ok), "message": "일시정지를 요청했습니다." if ok else "일시정지 명령이 거부됐습니다."}
+
+
+@app.post("/print/resume")
+def resume_print(request: PrintControlRequest):
+    """일시정지된 주문을 다시 출력한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, _ = _find_print_job_locked(order_id)
+    if kind != "current":
+        return {"success": False, "message": "지금 출력 중인 주문이 아닙니다."}
+    try:
+        printer = _get_printer()
+        gcode = str(printer.get_state()).upper()
+        if gcode == "RUNNING":
+            return {"success": True, "message": "이미 출력 중입니다."}
+        if gcode != "PAUSE":
+            return {"success": False, "message": f"일시정지 상태일 때만 재개할 수 있습니다. (현재 상태: {gcode})"}
+        ok = printer.resume_print()
+    except Exception as e:
+        return {"success": False, "message": f"프린터에 명령을 보내지 못했습니다: {e}"}
+    return {"success": bool(ok), "message": "재개를 요청했습니다." if ok else "재개 명령이 거부됐습니다."}
+
+
+@app.post("/print/cancel")
+def cancel_print(request: PrintControlRequest):
+    """주문을 취소한다.
+      - 대기 중(queued): 큐에서 빼고 바로 취소 콜백을 보낸다.
+      - 출력 중(current): 프린터에 정지 명령을 보낸다. 프린터가 멈춘 것이 확인되면 폴링이 취소 콜백을 보낸다.
+    찾기, 취소 표시, 큐에서 빼기를 한 번의 잠금 안에서 처리해서 큐 워커와 엇갈리지 않게 한다."""
+    order_id = str(request.orderId)
+    with _print_queue_lock:
+        kind, job = _find_print_job_locked(order_id)
+        if kind is None:
+            if request.preCancel:
+                # 병합 중이라 아직 큐에 없다 - 병합이 끝나는 시점에 _slice_and_print_local이 이 표시를 보고 건너뛴다
+                _CANCEL_REQUESTED.add(order_id)
+                return {"success": True, "kind": "pending", "message": "병합 중인 주문을 취소했습니다."}
+            return {"success": False, "message": "대기 중이거나 출력 중인 주문이 아닙니다."}
+        _CANCEL_REQUESTED.add(order_id)
+        if kind == "queued":
+            if job in _pending_jobs:
+                _pending_jobs.remove(job)
+            _save_print_queue_state()
+    if kind == "queued":
+        _post_canceled(job["callbackUrl"])
+        return {"success": True, "kind": "queued", "message": "대기 중인 주문을 취소했습니다."}
+    _stop_printer_quietly()
+    return {"success": True, "kind": "current",
+            "message": "출력 취소를 요청했습니다. 프린터가 멈추면 취소로 반영됩니다."}
+
 
 # ── 카메라 인덱스 설정 (웹 UI에서 카메라 선택용) ─────────────
 @app.get("/camera/config")

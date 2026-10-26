@@ -8,7 +8,7 @@ import { getMyProfile } from '@/entities/user/api'
 import { ApiError } from '@/shared/utils/apiClient'
 import { analyzeSkinTone, generateSkinTonePalette, skinToneAnalysisFromMetrics } from '@/shared/utils/skinTone'
 import { sortRecommendedColors } from '@/shared/utils/colorSort'
-import { NAIL_BASELINE, FINGER_SIZE_MM, percentileAgainstBaseline, labelByPercentile } from '@/shared/utils/nailMetrics'
+import { FINGER_SIZE_MM, nailSummaryMetrics, type NailSummaryMetric } from '@/shared/utils/nailMetrics'
 import { useLeaveWarning } from '@/shared/hooks/useLeaveWarning'
 import { AUTH_CHANGE_EVENT } from '@/shared/utils/auth'
 import type { FingerDetail } from '@/shared/utils/handScanAnalysis'
@@ -91,11 +91,6 @@ export function useHandScanResultPage() {
     const [isAnalyzing, setIsAnalyzing] = useState(false)
 
     const TERMINAL_STATUSES = ['MEASURED', 'COMPLETED', 'FAILED']
-
-    function average(nums: number[]): number {
-        if (nums.length === 0) return 0
-        return nums.reduce((a, b) => a + b, 0) / nums.length
-    }
 
     // 왼손/오른손이 같은 값을 주면 그대로 사용(=둘 다 반영된 합의값).
     // 드물게 서로 다르면, 분석 파이프라인이 더 진행된(COMPLETED) 쪽을 우선하고,
@@ -375,39 +370,21 @@ export function useHandScanResultPage() {
         }
     })
 
-    // 손톱 기본 지표: 왼손 5개 + 오른손 5개 = 10손가락 실측 평균
-    // percentile/comparisonLabel은 전체 사용자 모집단 통계 API가 없어, 성인 평균 손톱 규격을
-    // 고정 기준값(NAIL_BASELINE)으로 두고 실측 평균이 그 기준과 얼마나 차이 나는지로 계산한다.
-    const lengthValue = Number(average(fingerDetails.map((f) => f.lengthMm)).toFixed(1))
-    const widthValue = Number(average(fingerDetails.map((f) => f.widthMm)).toFixed(1))
-    // cCurve는 C-curve sagitta 깊이(mm). 소수 첫째 자리까지만 보여 준다.
-    const cCurveValue = Number(average(fingerDetails.map((f) => f.cCurve)).toFixed(1))
-
-    const lengthPercentile = percentileAgainstBaseline(lengthValue, NAIL_BASELINE.length)
-    const widthPercentile = percentileAgainstBaseline(widthValue, NAIL_BASELINE.width)
-    // 곡률도 길이/너비와 동일하게, 막대 위치와 비교 문구를 같은 기준값(NAIL_BASELINE.cCurve) 대비
-    // percentile 하나로 통일해서 계산한다 — 막대가 채워진 위치와 텍스트가 항상 같은 판단 기준을 쓴다.
-    const cCurvePercentile = percentileAgainstBaseline(cCurveValue, NAIL_BASELINE.cCurve)
+    // 손톱 기본 지표: 열 손가락 평균 길이·너비·곡률과 평균 판정 — 스캔 서버 통합 measurements.json 상단 summary 값을
+    // 그대로 쓴다 (화면에서 손가락 값을 다시 평균 내거나 판정하지 않는다. 읽지 못하면 여성 평균 수치와 average).
+    // 값은 소수 첫째 자리까지만 보여 준다.
+    const summaryMetrics = nailSummaryMetrics(leftResult, rightResult)
+    const toAverageMetric = (m: NailSummaryMetric) => ({
+        value: Number(m.valueMm.toFixed(1)),
+        unit: 'mm',
+        barPercent: m.barPercent,
+        comparisonLabel: m.label,
+    })
 
     const AVERAGE_METRICS = {
-        length: {
-            value: lengthValue,
-            unit: 'mm',
-            percentile: lengthPercentile,
-            comparisonLabel: labelByPercentile(lengthPercentile, '평균보다 짧은 편', '평균보다 긴 편', '평균과 비슷함'),
-        },
-        width: {
-            value: widthValue,
-            unit: 'mm',
-            percentile: widthPercentile,
-            comparisonLabel: labelByPercentile(widthPercentile, '좁은 편', '넓은 편', '평균과 비슷함'),
-        },
-        cCurve: {
-            value: cCurveValue,
-            unit: 'mm',
-            percentile: cCurvePercentile,
-            comparisonLabel: labelByPercentile(cCurvePercentile, '완만한 편', '뚜렷한 편', '평균 범위'),
-        },
+        length: toAverageMetric(summaryMetrics.length),
+        width: toAverageMetric(summaryMetrics.width),
+        cCurve: toAverageMetric(summaryMetrics.cCurve),
     }
 
     return {

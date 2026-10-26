@@ -6,6 +6,7 @@ import { FingerDetailModal } from '@/features/hand-scan/components/FingerDetailM
 import { RecommendedShapeCard } from '@/features/hand-scan/components/RecommendedShapeCard'
 import { NextStepButton } from '@/shared/components/NextStepButton'
 import { getNailShape } from '@/shared/constants/nailShapes'
+import { sortRecommendedColors } from '@/shared/utils/colorSort'
 import { buildHandScanAnalysis } from '@/shared/utils/handScanAnalysis'
 import { analyzeSkinTone } from '@/shared/utils/skinTone'
 import '@/styles/hand-scan-result.css'
@@ -18,13 +19,14 @@ import '@/styles/hand-scan-result.css'
 
 const MOCK_SKIN_HEX = '#F3D2B8'
 
-// 추천 컬러 팔레트 (6열 × 5행, 가로 방향으로 채워진다)
+// 추천 컬러 30색 — 화면에는 실제 결과 화면처럼 sortRecommendedColors 순서(비슷한 색끼리 잇는
+// TSP 경로, 연한 색 → 진한 색)로 정렬해 6열 × 5행 그리드에 가로 방향으로 채운다.
 const MOCK_PALETTE = [
-    '#955368', '#975554', '#895E3B', '#387352', '#00728E', '#88587F',
-    '#975362', '#965551', '#786535', '#2E7359', '#266D97', '#8D5679',
-    '#97535E', '#95574B', '#726835', '#007474', '#366B98', '#94908E',
-    '#97545B', '#925946', '#616C39', '#005B5C', '#6E6091', '#1A1715',
-    '#975458', '#8D5C3F', '#5A6E3D', '#007389', '#775D8C', '#F1EDEA',
+    '#F5E6D3', '#DCC1A5', '#C9A887', '#E8B9A4', '#B9825A', '#F5C6C6',
+    '#C9858D', '#D98291', '#F08F82', '#AD6F79', '#F4B183', '#F28E78',
+    '#F6C7A1', '#C76F52', '#B85D3D', '#C6A184', '#96715B', '#704A3A',
+    '#98665F', '#9A887B', '#A8B5A0', '#898B50', '#B8D9C5', '#8CA8BC',
+    '#376D68', '#F3D875', '#C5B4D9', '#80516B', '#B83A4B', '#722F3D',
 ]
 
 function MetricCard({
@@ -94,21 +96,21 @@ export function HandScanResultPagePreviewContent() {
     // ?shape=stiletto 처럼 넘기면 그 쉐입의 추천 카드로 바꿔서 볼 수 있다
     const recommended = getNailShape(searchParams.get('shape') ?? '') ?? getNailShape(analysis.recommendedShape)
     const skinToneAnalysis = analyzeSkinTone(analysis.skinToneHex)
-    const skinTonePalette = MOCK_PALETTE
+    const skinTonePalette = sortRecommendedColors(MOCK_PALETTE)
 
     return (
         <AppShell mainClassName="scan-result-page">
             <PageHero
-                eyebrow="Hand Analysis · Preview"
+                eyebrow="Hand Analysis"
                 title="손 분석 결과"
-                description="미리보기 회원님의 손톱 수치와 피부 톤, 추천 쉐입을 확인해 보세요. (개발용 미리보기 — 실제 데이터 아님)"
+                description="네일리님의 손톱 수치와 피부 톤, 추천 쉐입을 확인해 보세요."
             />
 
             <section className="scan-result-section">
                 <div className="scan-result-section__head">
                     <h2>손톱 기본 지표</h2>
                     <button type="button" className="scan-result-link" onClick={() => setShowFingerModal(true)}>
-                        상세보기
+                        상세 보기
                     </button>
                 </div>
                 <div className="scan-result-metrics">
@@ -138,11 +140,11 @@ export function HandScanResultPagePreviewContent() {
                         </div>
                         <div className="skin-tone-card__body">
                             <SkinToneSlider
-                                label="톤"
+                                label="베이스"
                                 valueLabel={skinToneAnalysis.tone.label}
                                 percent={skinToneAnalysis.tone.percent}
-                                minLabel="쿨"
-                                maxLabel="웜"
+                                minLabel="분홍기"
+                                maxLabel="노란기"
                                 trackClass="skin-tone-slider__track--tone"
                             />
                             <SkinToneSlider
@@ -166,6 +168,9 @@ export function HandScanResultPagePreviewContent() {
 
                     <article className="skin-tone-palette-card">
                         <h3>추천 컬러</h3>
+                        <p className="skin-tone-palette-card__desc">
+                            네일리님의 손에 어울리는 컬러예요.
+                        </p>
                         <div className="skin-tone-palette-grid">
                             {skinTonePalette.map((hex, i) => (
                                 <button
@@ -178,15 +183,12 @@ export function HandScanResultPagePreviewContent() {
                                 />
                             ))}
                         </div>
-                        <p className="skin-tone-palette-card__desc">
-                            네일리님과 어울리는 컬러들이에요.
-                        </p>
                     </article>
                 </div>
             </section>
 
             <div className="scan-result-actions">
-                <NextStepButton label="네일팁 출력하러 가기" onClick={() => {}} />
+                <NextStepButton label="네일 팁 출력하러 가기" onClick={() => {}} />
             </div>
 
             {showFingerModal && (

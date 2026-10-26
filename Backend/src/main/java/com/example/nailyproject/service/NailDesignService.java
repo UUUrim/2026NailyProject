@@ -6,8 +6,6 @@ import com.example.nailyproject.dto.request.DesignGenerateRequestDto;
 import com.example.nailyproject.dto.response.DesignGenerateResponseDto;
 import com.example.nailyproject.dto.response.DesignImageResponseDto;
 import com.example.nailyproject.dto.response.DesignDetailResponseDto;
-import com.example.nailyproject.dto.response.DesignLikeResponseDto;
-import com.example.nailyproject.dto.response.CommunityDesignResponseDto;
 import com.example.nailyproject.entity.*;
 import com.example.nailyproject.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -15,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.transaction.Transactional;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
@@ -50,6 +49,10 @@ public class NailDesignService {
     private final GptClientService gptClientService;
     private final FinishReferenceService finishReferenceService;
     private final ScanResultFileService scanResultFileService;
+    private final KeywordTranslationService keywordTranslationService;
+    // '둘러보기' 공유 갤러리 DB (각자 로컬 DB를 써도 공유 디자인은 여기 모인다)
+    private final CommunityDesignStore communityDesignStore;
+    private final LocalOriginService localOriginService;
     // 색상
 //    private final JsonColorMapper jsonColorMapper;
 
@@ -115,7 +118,10 @@ public class NailDesignService {
                              TextureSwatchService textureSwatchService,
                              GptClientService gptClientService,
                              FinishReferenceService finishReferenceService,
-                             ScanResultFileService scanResultFileService) {
+                             ScanResultFileService scanResultFileService,
+                             KeywordTranslationService keywordTranslationService,
+                             CommunityDesignStore communityDesignStore,
+                             LocalOriginService localOriginService) {
         this.nailDesignRepository = nailDesignRepository;
         this.userRepository = userRepository;
         this.designSessionRepository = designSessionRepository;
@@ -134,6 +140,9 @@ public class NailDesignService {
         this.gptClientService = gptClientService;
         this.finishReferenceService = finishReferenceService;
         this.scanResultFileService = scanResultFileService;
+        this.keywordTranslationService = keywordTranslationService;
+        this.communityDesignStore = communityDesignStore;
+        this.localOriginService = localOriginService;
         this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
     }
@@ -167,6 +176,7 @@ public class NailDesignService {
         }
 
         NailDesign nailDesign = generateDesign(user.getId(), promptResult.prompt(), promptResult.negativePrompt(), session);
+        if (session != null) session.recordDesignScan(handScan);
 
         return DesignGenerateResponseDto.builder()
                 .designId(nailDesign.getId())
@@ -318,6 +328,7 @@ public class NailDesignService {
             design.updateNailTipCropsJson(objectMapper.writeValueAsString(urls));
             nailDesignRepository.save(design);
             System.out.println("[NailTipCrops] designId=" + design.getId() + " 크롭이 없어 새로 만들어 저장했습니다 (로컬 누끼).");
+            refreshCommunitySnapshot(design);
         } catch (Exception e) {
             System.err.println("[NailTipCrops] designId=" + design.getId() + " 크롭 보강 실패: " + e.getMessage());
         }
@@ -495,7 +506,8 @@ public class NailDesignService {
     /**
      * 채팅에서 "네, 이 디자인으로 할게요"를 눌렀을 때 호출
      */
-    public void confirmDesign(User user, Long designId) {
+    public void confirmDesign(User user, Long designId,
+                              List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> chatTranscript) {
         NailDesign design = nailDesignRepository.findById(designId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 디자인을 찾을 수 없습니다."));
 
@@ -503,8 +515,22 @@ public class NailDesignService {
             throw new IllegalArgumentException("본인의 디자인만 확정할 수 있습니다.");
         }
 
+        // 확정하는 순간 채팅 화면에 보이던 대화를 이 디자인의 채팅 이력으로 저장한다 (화면 표시용 — GPT 대화·생성에는 안 쓴다)
+        boolean transcriptSaved = false;
+        if (chatTranscript != null && !chatTranscript.isEmpty()) {
+            try {
+                design.updateChatTranscriptJson(
+                        objectMapper.writeValueAsString(resolveTranscriptReferencePhotos(design, chatTranscript)));
+                transcriptSaved = true;
+            } catch (JsonProcessingException e) {
+                System.err.println("[ChatTranscript] 채팅 화면 대화 저장 실패: " + e.getMessage());
+            }
+        }
+
         if (design.getStatus() == NailDesign.DesignStatus.DRAFT) {
             design.updateStatus(NailDesign.DesignStatus.CONFIRMED);
+            nailDesignRepository.save(design);
+        } else if (transcriptSaved) {
             nailDesignRepository.save(design);
         }
 
@@ -575,6 +601,7 @@ public class NailDesignService {
                                 d.updateSwatchesJson(objectMapper.writeValueAsString(swatchUrlMap));
                                 nailDesignRepository.save(d);
                                 System.out.println("[Swatch] " + swatchUrlMap.size() + "개 스와치 저장 완료: " + swatchUrlMap.keySet());
+                                refreshCommunitySnapshot(d);
                             } catch (Exception e) {
                                 System.err.println("[Swatch] DB 저장 실패: " + e.getMessage());
                             }
@@ -597,6 +624,11 @@ public class NailDesignService {
         if (!design.getUser().getId().equals(user.getId())) {
             throw new IllegalArgumentException("본인의 디자인만 조회할 수 있습니다.");
         }
+
+        // 확정할 때 채팅 화면 대화를 저장해 뒀으면 그대로 돌려준다 (실제로 나눈 대화 화면과 똑같이 다시 그리기 위함).
+        // 저장된 게 없는 예전 디자인은 아래처럼 서버에 남은 메시지와 생성 이력으로 이력을 조립한다.
+        List<com.example.nailyproject.dto.response.ChatMessageResponseDto> savedTranscript = readSavedChatTranscript(design);
+        if (savedTranscript != null) return savedTranscript;
 
         if (design.getSession() == null) return List.of();
 
@@ -672,78 +704,88 @@ public class NailDesignService {
                 .toList();
     }
 
+    // 채팅 화면 대화의 참고 사진 자리 — 프론트는 사진 미리보기(data URL, 수 MB)를 보내지 않고 이 값만 보낸다
+    private static final String REFERENCE_PHOTO_PLACEHOLDER = "reference-photo";
+
     /**
-     * 커뮤니티 갤러리 GET /designs/community
+     * 채팅 화면 대화의 참고 사진 자리표시자를 이 세션에서 실제로 올린 참고 사진(S3) URL로 바꾼다.
+     * 사진을 여러 번 올렸으면 뒤에서부터(가장 최근 것끼리) 짝짓는다 — 생성에 실패한 앞쪽 시도는 사진 URL이 남지 않아서.
+     * 짝이 없는 자리표시자는 버리고, 그래서 글도 이미지도 없어진 말풍선은 뺀다.
      */
-    public List<CommunityDesignResponseDto> getCommunityGallery(User user) {
-        List<NailDesign> designs = nailDesignRepository.findTop60BySharedTrueOrderBySharedAtDesc();
+    private List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> resolveTranscriptReferencePhotos(
+            NailDesign design, List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> transcript) {
+        List<String> photoUrls = design.getSession() == null ? List.of()
+                : nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(design.getSession().getId()).stream()
+                .filter(d -> design.getGeneratedAt() == null || d.getGeneratedAt() == null
+                        || !d.getGeneratedAt().isAfter(design.getGeneratedAt()))
+                .map(NailDesign::getReferenceImageUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .distinct()
+                .toList();
+        long placeholderCount = transcript.stream()
+                .filter(entry -> entry.getImageUrls() != null)
+                .flatMap(entry -> entry.getImageUrls().stream())
+                .filter(REFERENCE_PHOTO_PLACEHOLDER::equals)
+                .count();
+        int photoIndex = (int) (photoUrls.size() - placeholderCount);
 
-        List<Long> designIds = designs.stream().map(NailDesign::getId).toList();
-        Map<Long, Long> likeCountByDesignId = new HashMap<>();
-        if (!designIds.isEmpty()) {
-            for (Object[] row : designLikeRepository.countLikesByDesignIds(designIds)) {
-                likeCountByDesignId.put((Long) row[0], (Long) row[1]);
+        List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> resolved = new ArrayList<>();
+        for (com.example.nailyproject.dto.request.ChatTranscriptEntryDto entry : transcript) {
+            List<String> imageUrls = null;
+            if (entry.getImageUrls() != null) {
+                imageUrls = new ArrayList<>();
+                for (String url : entry.getImageUrls()) {
+                    if (REFERENCE_PHOTO_PLACEHOLDER.equals(url)) {
+                        if (photoIndex >= 0 && photoIndex < photoUrls.size()) imageUrls.add(photoUrls.get(photoIndex));
+                        photoIndex++;
+                    } else if (url != null && !url.startsWith("data:")) {
+                        imageUrls.add(url);
+                    }
+                }
             }
+            boolean hasContent = (entry.getContent() != null && !entry.getContent().isBlank())
+                    || (imageUrls != null && !imageUrls.isEmpty())
+                    || (entry.getColorSwatches() != null && !entry.getColorSwatches().isEmpty());
+            if (!hasContent) continue;
+            resolved.add(new com.example.nailyproject.dto.request.ChatTranscriptEntryDto(
+                    entry.getRole(), entry.getContent() != null ? entry.getContent() : "", imageUrls,
+                    entry.getColorSwatches(), entry.getColorsInline(), entry.getTextAfterColors(),
+                    entry.getDesignResult(), entry.getHistoryOnly(), entry.getChatOnly(),
+                    entry.getHistorySection(), entry.getGenerationMethod()));
         }
-
-        Set<Long> myLikedDesignIds = user != null
-                ? new HashSet<>(designLikeRepository.findDesignIdsByUserId(user.getId()))
-                : Set.of();
-
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy. M. d.");
-        List<CommunityDesignResponseDto> resultList = new ArrayList<>();
-
-        for (NailDesign design : designs) {
-            if (design.getImageUrls() == null || design.getImageUrls().isEmpty()) continue;
-
-            LocalDateTime displayAt = design.getSharedAt() != null ? design.getSharedAt() : design.getGeneratedAt();
-            String formattedDate = displayAt != null ? displayAt.format(formatter) : "";
-            long likeCount = likeCountByDesignId.getOrDefault(design.getId(), 0L);
-
-            resultList.add(CommunityDesignResponseDto.builder()
-                    .designId(design.getId())
-                    .imageUrl(design.getImageUrls().get(0))
-                    .createdAt(formattedDate)
-                    .likeCount(likeCount)
-                    .likedByMe(myLikedDesignIds.contains(design.getId()))
-                    .details(buildDetails(design))
-                    .build());
-        }
-
-        resultList.sort(Comparator
-                .comparingLong(CommunityDesignResponseDto::getLikeCount).reversed()
-                .thenComparing(CommunityDesignResponseDto::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())));
-
-        return resultList;
+        return resolved;
     }
 
-    @Transactional
-    public DesignLikeResponseDto addDesignLike(User user, Long designId) {
-        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
-        NailDesign design = nailDesignRepository.findById(designId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
-        if (!design.isShared()) throw new IllegalArgumentException("공유된 디자인만 좋아요할 수 있습니다.");
-        if (!designLikeRepository.existsByUserAndNailDesign(user, design)) {
-            designLikeRepository.save(DesignLike.builder().user(user).nailDesign(design).build());
+    /** 확정 때 저장한 채팅 화면 대화를 이력 응답 형태로 읽는다. 저장된 게 없거나 읽지 못하면 null. */
+    private List<com.example.nailyproject.dto.response.ChatMessageResponseDto> readSavedChatTranscript(NailDesign design) {
+        String json = design.getChatTranscriptJson();
+        if (json == null || json.isBlank()) return null;
+        try {
+            List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto> entries = objectMapper.readValue(json,
+                    new com.fasterxml.jackson.core.type.TypeReference<List<com.example.nailyproject.dto.request.ChatTranscriptEntryDto>>() {});
+            return entries.stream()
+                    .map(entry -> com.example.nailyproject.dto.response.ChatMessageResponseDto.builder()
+                            .role(entry.getRole())
+                            .content(entry.getContent() != null ? entry.getContent() : "")
+                            .sentAt("")
+                            .imageUrls(entry.getImageUrls())
+                            .colorSwatches(entry.getColorSwatches())
+                            .colorsInline(entry.getColorsInline())
+                            .textAfterColors(entry.getTextAfterColors())
+                            .designResult(entry.getDesignResult())
+                            .historyOnly(entry.getHistoryOnly())
+                            .chatOnly(entry.getChatOnly())
+                            .historySection(entry.getHistorySection())
+                            .generationMethod(entry.getGenerationMethod())
+                            .build())
+                    .toList();
+        } catch (JsonProcessingException e) {
+            System.err.println("[ChatTranscript] 저장된 채팅 화면 대화를 읽지 못해 예전 방식으로 이력을 만듭니다: " + e.getMessage());
+            return null;
         }
-        return DesignLikeResponseDto.builder()
-                .designId(designId)
-                .likeCount(designLikeRepository.countByNailDesign(design))
-                .liked(true).build();
     }
 
-    @Transactional
-    public DesignLikeResponseDto removeDesignLike(User user, Long designId) {
-        if (user == null) throw new IllegalArgumentException("로그인이 필요합니다.");
-        NailDesign design = nailDesignRepository.findById(designId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 디자인입니다."));
-        designLikeRepository.findByUserAndNailDesign(user, design)
-                .ifPresent(designLikeRepository::delete);
-        return DesignLikeResponseDto.builder()
-                .designId(designId)
-                .likeCount(designLikeRepository.countByNailDesign(design))
-                .liked(false).build();
-    }
+    // 둘러보기 목록·상세·좋아요는 갤러리 DB를 읽는 CommunityGalleryService가 맡는다 (다른 로컬 DB 사용자의 공유도 보이게)
 
     public DesignDetailResponseDto getDesignDetail(User user, Long designId) {
         NailDesign design = nailDesignRepository.findById(designId)
@@ -819,7 +861,15 @@ public class NailDesignService {
         if (design.getImageUrls() == null || design.getImageUrls().isEmpty())
             throw new IllegalArgumentException("이미지가 없는 디자인은 공유할 수 없습니다.");
         design.share();
-        return getDesignDetail(user, designId);
+        // 상세 조회가 손톱팁 크롭을 채워 주므로, 그 뒤에 스냅샷을 만들어 갤러리 DB에 올린다.
+        // 두 DB를 한 트랜잭션으로 묶을 수 없어서, 갤러리 DB에 못 쓰면 예외로 로컬 공유도 되돌린다.
+        DesignDetailResponseDto detail = getDesignDetail(user, designId);
+        try {
+            communityDesignStore.upsertShared(buildCommunitySnapshot(design), design.getSharedAt());
+        } catch (DataAccessException e) {
+            throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 공유하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+        }
+        return detail;
     }
 
     @Transactional
@@ -828,6 +878,11 @@ public class NailDesignService {
         NailDesign design = nailDesignRepository.findByIdAndUserId(designId, user.getId())
                 .orElseThrow(() -> new IllegalArgumentException("본인의 디자인만 공유 해제할 수 있습니다."));
         design.unshare();
+        try {
+            communityDesignStore.markUnshared(localOriginService.getOriginId(), designId);
+        } catch (DataAccessException e) {
+            throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 공유를 해제하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+        }
         return getDesignDetail(user, designId);
     }
 
@@ -838,12 +893,59 @@ public class NailDesignService {
         if (!design.getUser().getId().equals(user.getId()))
             throw new IllegalArgumentException("본인의 디자인만 삭제할 수 있습니다.");
 
+        // 갤러리 DB에서 먼저 지운다. 공유 중인데 못 지우면 S3 이미지만 사라져 둘러보기에 깨진 이미지가 남으므로 삭제를 막는다.
+        // 공유 해제된 디자인의 남은 행(남들의 찜·좋아요 보존용)은 못 지워도 진행하고, 다음 서버 시작 때 CommunityGallerySync가 정리한다.
+        try {
+            communityDesignStore.deleteByOrigin(localOriginService.getOriginId(), designId);
+        } catch (DataAccessException e) {
+            if (design.isShared()) {
+                throw new IllegalStateException("둘러보기 저장소에 연결하지 못해 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.", e);
+            }
+            System.err.println("[CommunityGallery] designId=" + designId + " 갤러리 DB 정리 실패 (다음 서버 시작 때 정리): " + e.getMessage());
+        }
+
         savedDesignRepository.deleteAllByNailDesign(design);
         designLikeRepository.deleteAllByNailDesign(design);
         if (design.getImageUrls() != null) {
             for (String imageUrl : design.getImageUrls()) s3Service.deleteFile(imageUrl);
         }
         nailDesignRepository.delete(design);
+    }
+
+    /**
+     * 갤러리 DB에 올릴 공유 스냅샷. 다른 로컬 DB의 백엔드는 이 디자인 행을 읽을 수 없으므로
+     * 둘러보기 상세 모달과 AR에 필요한 값을 여기서 다 담는다. (서버 시작 때 예전 공유분을 올리는 CommunityGallerySync도 쓴다)
+     */
+    public CommunityDesignStore.Snapshot buildCommunitySnapshot(NailDesign design) {
+        return new CommunityDesignStore.Snapshot(
+                localOriginService.getOriginId(),
+                design.getId(),
+                design.getUser().getId(),
+                design.getImageUrls() != null ? List.copyOf(design.getImageUrls()) : List.of(),
+                writeDetailsJson(design),
+                extractShape(design),
+                extractNailTipCropUrls(design),
+                design.getGeneratedAt());
+    }
+
+    /** 공유 뒤에 늦게 채워지는 스와치·손톱팁 크롭을 갤러리 DB 스냅샷에도 반영한다 (실패해도 원래 작업은 그대로 진행) */
+    private void refreshCommunitySnapshot(NailDesign design) {
+        if (!design.isShared()) return;
+        try {
+            communityDesignStore.updateDetails(localOriginService.getOriginId(), design.getId(),
+                    writeDetailsJson(design), extractShape(design), extractNailTipCropUrls(design));
+        } catch (Exception e) {
+            System.err.println("[CommunityGallery] designId=" + design.getId() + " 갤러리 스냅샷 갱신 실패: " + e.getMessage());
+        }
+    }
+
+    private String writeDetailsJson(NailDesign design) {
+        try {
+            return objectMapper.writeValueAsString(buildDetails(design));
+        } catch (JsonProcessingException e) {
+            System.err.println("[CommunityGallery] designId=" + design.getId() + " details 직렬화 실패: " + e.getMessage());
+            return null;
+        }
     }
 
 
@@ -890,8 +992,11 @@ public class NailDesignService {
             }
         }
 
+        // ★ 참고 사진 기반 생성은 사용자의 손 스캔 정보(추천 쉐입/컬러/피부톤 등)를 전혀 쓰지 않는다.
+        // 프론트가 scanId를 매 요청마다 자동으로 보내도 여기서 무시해서, 사진이 색감/분위기/디자인을 정한다.
+        boolean photoFlow = imageBase64 != null && !imageBase64.isBlank();
         HandScan handScan = null;
-        if (request.getScanId() != null) {
+        if (!photoFlow && request.getScanId() != null) {
             handScan = handScanRepository.findByIdAndUserId(request.getScanId(), user.getId()).orElse(null);
         }
 
@@ -908,8 +1013,11 @@ public class NailDesignService {
         // scan-auto가 아니면 기존대로 빈 슬롯을 스캔 값으로 메운다.
         // (scan-auto는 아래 buildScanAutoConfirmedSummary로 팔레트 전체를 넘기므로,
         //  여기서 랜덤 단색 하나를 슬롯에 박아넣으면 원컬러 디자인으로 굳어져 버린다.)
-        if (!scanAuto) {
-            fillMissingFromScan(slots, handScan, !hasImage);
+        // ★ 참고 사진 기반 생성에서는 비어 있는 무드/색/쉐입을 스캔 기본값(랜덤 색 1~3개, 랜덤 무드, 추천 쉐입)으로 채우지 않는다.
+        // 그 값이 사진의 색감/분위기를 덮어써서(사진은 짙은 파랑 밤하늘인데 결과가 라벤더/핑크 파스텔) 사진이 반영되지 않았다.
+        // 사진이 비어 있는 부분을 정하고, 쉐입은 아래 enforceAppShape가 (사용자 말 > 슬롯 > 플랜 > 스캔) 순서로 정리한다.
+        if (!scanAuto && !photoFlow) {
+            fillMissingFromScan(slots, handScan);
         }
 
         if (session != null && !scanAuto) {
@@ -919,6 +1027,7 @@ public class NailDesignService {
         String summary = scanAuto
                 ? buildScanAutoConfirmedSummary(handScan)
                 : summarizeSlots(slots, handScan, !hasImage)
+                + (photoFlow ? "" : ScanFitWeighting.fitLine(fitOf(handScan)))
                 + buildFingerInstructionText(session != null ? session.getFingerOverrides() : null)
                 + buildFingerDislikeInstructionText(session != null ? session.getFingerDislikes() : null)
                 + buildUserOwnWordsText(session)
@@ -955,7 +1064,33 @@ public class NailDesignService {
 
         // 앱이 제공하는 쉐입은 6가지(round/oval/almond/stiletto/ballerina/square)뿐이다. 플랜 LLM이 사진을 보고
         // "rounded square" 같은 새 이름을 적으면 프롬프트와 AR 3D 템플릿(파일명 매칭)이 어긋나므로, 항상 6가지 중 하나로 정리한다.
-        enforceAppShape(plan, getLiked(slots, "shape"), handScan != null ? scanRecommendedShape(handScan) : null);
+        // ★ 사진 기반 생성에서 사용자가 "쉐입은 스틸레토로" 처럼 직접 말한 쉐입은 가장 우선한다(참고 사진의 손톱 모양, 플래너 값보다 위).
+        List<String> shapePriority = new ArrayList<>();
+        if (hasImage) {
+            String wordsShape = shapeFromUserWords(session, request.getUserNote());
+            if (wordsShape != null) {
+                shapePriority.add(wordsShape);
+                System.out.println("[NailDesignService] 사용자 문장에서 쉐입 지정 감지 → '" + wordsShape + "' 우선 적용");
+            }
+        }
+        // ★ scan-auto는 쉐입을 스캔 추천으로 고정하는 흐름인데(위에서 plan.shape에 넣음), 세션에 저장된 쉐입 슬롯
+        // (이전 채팅에서 고른 값, 또는 이전 생성의 플랜이 자동으로 채워 넣은 값)이 enforceAppShape에서 가장 우선이라
+        // 추천이 발레리나여도 슬롯의 아몬드가 이겼다. 슬롯을 스캔 추천으로 맞춰서 프롬프트/AR 템플릿/키워드가 모두 같은 값을 보게 한다.
+        if (scanAuto && handScan != null && scanRecommendedShape(handScan) != null) {
+            SlotData shapeSlot = slots.computeIfAbsent("shape", k -> new SlotData());
+            List<String> before = new ArrayList<>(shapeSlot.getLiked());
+            shapeSlot.getLiked().clear();
+            shapeSlot.getLiked().add(scanRecommendedShape(handScan));
+            if (!before.isEmpty() && !before.equals(shapeSlot.getLiked())) {
+                System.out.println("[Shape] scan-auto: 세션 슬롯 쉐입 " + before + " 를 스캔 추천 '" + scanRecommendedShape(handScan) + "' 로 교체");
+            }
+        }
+        shapePriority.addAll(getLiked(slots, "shape"));
+        System.out.println("[Shape] scanAuto=" + scanAuto + " scanId=" + request.getScanId()
+                + " 스캔추천=" + (handScan != null ? scanRecommendedShape(handScan) : null)
+                + " 슬롯=" + getLiked(slots, "shape") + " 플랜=" + (plan != null ? plan.path("shape").asText("") : null)
+                + " 우선순위=" + shapePriority);
+        enforceAppShape(plan, shapePriority, handScan != null ? scanRecommendedShape(handScan) : null);
 
         // scan-auto: top-level color(= 최종 프롬프트 Overall style의 헥스)를 추천 팔레트 값으로 정규화한다.
         // LLM이 헥스를 살짝 바꿔 쓰거나 이름만 적어도, 프롬프트에 쓰인 색과 결과 화면의 "반영된 추천 컬러"
@@ -1035,8 +1170,18 @@ public class NailDesignService {
         // 디자인 생성(저장) 직전에 저장해야 이 디자인의 generatedAt 이전 시점이라 이력 조회에서 잘리지 않는다.
         savePhotoRequestMessage(session, hasImage, request.getUserNote());
 
+        // 결과 화면 키워드(영어 슬롯·플랜 값)를 미리 모아, 사전에 없는 말의 한글 번역(GPT)을 이미지를 만드는 동안 끝내 둔다
+        List<String> resultKeywords = mergeKeywords(referenceSubjectKeyword(plan),
+                mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)));
+        List<String> translationCandidates = new ArrayList<>(resultKeywords);
+        translationCandidates.addAll(extractKeywordsFromSlots(slots, session)); // slotKeywords (resultKeywords는 개수 제한이 있다)
+        if (scanAuto) translationCandidates.addAll(scanReflectionValues(plan));
+        prefetchKeywordTranslations(translationCandidates);
+
         // ★ gen 서버로 이미지 생성 (ComfyUI 대체)
         NailDesign nailDesign = generateDesign(user.getId(), combinedPrompt, finalNegative, session, referenceFinishes);
+        // 디자인 생성에 쓰인 손 분석 기록 — 채팅 이력에서 지워도 남아, 마이페이지가 이 기록을 지우지 못하게 한다
+        if (session != null && handScan != null) session.recordDesignScan(handScan);
 
         nailDesign.updateDesignPlan(plan.toString());
 
@@ -1073,8 +1218,13 @@ public class NailDesignService {
                 .generatedPrompt(combinedPrompt)
                 .imageUrls(nailDesign.getImageUrls())
                 .details(buildDetails(nailDesign))
-                .keywords(localizeKeywords(mergeKeywords(referenceSubjectKeyword(plan), mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan))))) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
+                .shape(plan.path("shape").asText(null))
+                .keywords(localizeKeywords(resultKeywords)) //디자인결과화면 선택옵션 단어 (슬롯 + 플랜의 마감/패턴/모티프/파츠)
+                .keywordColors(extractKeywordColors(slots))
+                // 선택지 기반 결과 화면이 "기타" 의견에서 나온 키워드를 자유 입력과 같은 방식으로 보여 줄 때 쓴다 (표시 전용)
+                .slotKeywords(extractSlotKeywords(slots, session))
                 .scanAutoReflection(scanAuto ? buildScanAutoReflection(handScan, plan) : null)
+                .referenceImageUrl(nailDesign.getReferenceImageUrl())
                 .build();
     }
 
@@ -1105,10 +1255,10 @@ public class NailDesignService {
         }
 
         // ★ textures: confirm 후엔 swatchMap 키 사용, 그 전엔 프롬프트 키워드 폴백
-        String fullPrompt = buildFullPromptForSwatch(nailDesign);
+        // (프롬프트는 폴백할 때만 읽는다 — 스와치 저장 스레드처럼 세션을 읽을 수 없는 곳에서도 부를 수 있게)
         LinkedHashSet<String> textures = !swatchMap.isEmpty()
                 ? new LinkedHashSet<>(swatchMap.keySet())
-                : extractTexturesFromPrompt(fullPrompt);
+                : extractTexturesFromPrompt(buildFullPromptForSwatch(nailDesign));
 
         return DesignGenerateResponseDto.Details.builder()
                 .colorPalette(colorPalette)
@@ -1183,9 +1333,10 @@ public class NailDesignService {
     private LinkedHashSet<String> extractTexturesFromPrompt(String prompt) {
         LinkedHashSet<String> textures = new LinkedHashSet<>();
         if (prompt == null || prompt.isBlank()) return textures;
-        String lower = prompt.toLowerCase();
+        // "no matte", "never as glitter specks" 같은 부정 표현과 "Avoid: ..." 절은 그 텍스처를 쓴다는 뜻이 아니다
+        String cleaned = TextureExtractService.stripAvoidClauses(prompt);
         TEXTURE_KEYWORD_MAP.forEach((keyword, textureKey) -> {
-            if (lower.contains(keyword)) textures.add(textureKey);
+            if (TextureExtractService.mentionedPositively(cleaned, keyword)) textures.add(textureKey);
         });
         return textures;
     }
@@ -1244,6 +1395,12 @@ public class NailDesignService {
     private String pickDefaultMood(Map<String, SlotData> slots) {
         String designType = getLiked(slots, "designType").isEmpty() ? null : getLiked(slots, "designType").get(0);
         if ("glitter".equals(designType) || "marble".equals(designType)) return "chic";
+        // 쉐입이 주는 인상(둥글면 큐트/순수, 아몬드면 우아/러블리, 스퀘어/스틸레토면 시크 ...)과 색 톤에 맞춰 가중치로 고른다.
+        List<String> shapeLiked = getLiked(slots, "shape");
+        String shape = shapeLiked.isEmpty() ? null : shapeLiked.get(0);
+        List<String> hexes = ScanFitWeighting.hexesIn(String.join(" ", getLiked(slots, "color")));
+        String byShape = ScanFitWeighting.pickMood(shape, hexes, new Random());
+        if (byShape != null) return byShape;
         return DEFAULT_MOOD_POOL.get(new Random().nextInt(DEFAULT_MOOD_POOL.size()));
     }
 
@@ -1272,10 +1429,10 @@ public class NailDesignService {
         if (useScanColors && getLiked(slots, "color").isEmpty()) {
             List<String> palette = scanRecommendedColors(handScan);
             if (!palette.isEmpty()) {
-                List<String> shuffled = new ArrayList<>(palette);
-                Collections.shuffle(shuffled);
-                int count = Math.min(shuffled.size(), 1 + new Random().nextInt(3)); // 1~3개
-                for (String color : shuffled.subList(0, count)) {
+                // 완전 무작위가 아니라 가중치로 뽑는다: 짧은 손톱이면 비비드한 색을 더 자주, 이미 뽑은 색과 어울리는 계열을 더 자주.
+                Random rnd = new Random();
+                int count = Math.min(palette.size(), 1 + rnd.nextInt(3)); // 1~3개
+                for (String color : ScanFitWeighting.pickWeighted(palette, fitOf(handScan), count, rnd)) {
                     addLiked(slots, "color", color);
                 }
             }
@@ -1284,6 +1441,18 @@ public class NailDesignService {
         if (getLiked(slots, "mood").isEmpty()) {
             addLiked(slots, "mood", pickDefaultMood(slots));
         }
+    }
+
+    /**
+     * 스캔에서 읽은 손 특성: 손톱 몸통(스캔 쉐입 추천과 같은 기준의 폭/길이 z값), 손톱 크기, 피부 밝기.
+     * 스캔 값이 없으면 빈 Fit.
+     */
+    private ScanFitWeighting.Fit fitOf(HandScan handScan) {
+        if (handScan == null) return ScanFitWeighting.Fit.NONE;
+        ScanFitWeighting.NailBody body = ScanFitWeighting.nailBodyFromShape(scanRecommendedShape(handScan));
+        return scanResultFileService.analysisFor(handScan)
+                .map(a -> new ScanFitWeighting.Fit(body, ScanFitWeighting.handSizeFrom(a.overallSize()), a.brightness()))
+                .orElse(new ScanFitWeighting.Fit(body, null, null));
     }
 
     private void addLiked(Map<String, SlotData> slots, String category, String value) {
@@ -1349,6 +1518,41 @@ public class NailDesignService {
                 .role(ChatMessage.MessageRole.user)
                 .content(PHOTO_REQUEST_TEXT + "\n" + trimmed)
                 .build());
+    }
+
+    // 사용자 문장에서 쉐입 이름을 찾는다(한글/영어). "아몬드 말고" 같은 부정은 건너뛰고, 여러 번 나오면 마지막 것을 쓴다.
+    private static final java.util.regex.Pattern SHAPE_WORD = java.util.regex.Pattern.compile(
+            "(스틸레토|stiletto|아몬드|almond|발레리나|코핀|ballerina|coffin|스퀘어|square|오발|타원|oval|라운드|\\bround\\b)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern SHAPE_NEGATION = java.util.regex.Pattern.compile(
+            "^\\s*(?:쉐입|모양|형)?\\s*(?:말고|빼고|제외|싫|아니|아닌|말아)");
+
+    private String shapeFromUserWords(DesignSession session, String note) {
+        StringBuilder text = new StringBuilder();
+        if (session != null) {
+            chatMessageRepository.findBySessionOrderBySentAtAsc(session).stream()
+                    .filter(m -> m.getRole() == ChatMessage.MessageRole.user)
+                    .map(m -> m.getContent() == null ? "" : m.getContent())
+                    .forEach(c -> text.append(c).append('\n'));
+        }
+        if (note != null) text.append(note);
+        String found = null;
+        java.util.regex.Matcher m = SHAPE_WORD.matcher(text);
+        while (m.find()) {
+            String after = text.substring(m.end(), Math.min(text.length(), m.end() + 8));
+            if (SHAPE_NEGATION.matcher(after).find()) continue;
+            String w = m.group(1).toLowerCase();
+            String mapped;
+            if (w.contains("스틸레토")) mapped = "stiletto";
+            else if (w.contains("아몬드")) mapped = "almond";
+            else if (w.contains("발레리나") || w.contains("코핀")) mapped = "ballerina";
+            else if (w.contains("스퀘어")) mapped = "square";
+            else if (w.contains("오발") || w.contains("타원")) mapped = "oval";
+            else if (w.contains("라운드")) mapped = "round";
+            else mapped = mapToAppShape(w);
+            if (mapped != null) found = mapped;
+        }
+        return found;
     }
 
     private String buildPhotoNoteText(String note) {
@@ -1606,6 +1810,20 @@ public class NailDesignService {
                 .filter(hex -> overallStyleHexes.contains(normalizeHex(hex)))
                 .toList();
 
+        List<String> reflection = scanReflectionValues(plan);
+        return DesignGenerateResponseDto.ScanAutoReflection.builder()
+                .recommendedColors(palette)
+                .usedColors(used)
+                .shape(cleanPlanValue(plan.path("shape").asText("")))
+                .mood(localizeReflection(reflection.get(0)))
+                .designType(localizeReflection(reflection.get(1)))
+                .motif(localizeReflection(reflection.get(2)))
+                .season(localizeReflection(reflection.get(3)))
+                .build();
+    }
+
+    /** scan-auto "반영된 스타일"의 원래(영어) 값 — 무드, 디자인 타입, 모티프, 계절 순 (없으면 null). */
+    private List<String> scanReflectionValues(JsonNode plan) {
         LinkedHashSet<String> designTypes = new LinkedHashSet<>();
         LinkedHashSet<String> motifs = new LinkedHashSet<>();
         for (String f : List.of("thumb", "index", "middle", "ring", "pinky")) {
@@ -1617,17 +1835,25 @@ public class NailDesignService {
                 for (JsonNode n : finger.path(field)) addIfMeaningful(motifs, n.asText(""));
             }
         }
+        return Arrays.asList(
+                cleanPlanValue(plan.path("mood").asText("")),
+                designTypes.isEmpty() ? cleanPlanValue(plan.path("designType").asText("")) : String.join(", ", designTypes),
+                motifs.isEmpty() ? cleanPlanValue(plan.path("motif").asText("")) : String.join(", ", motifs),
+                cleanPlanValue(plan.path("season").asText("")));
+    }
 
-        return DesignGenerateResponseDto.ScanAutoReflection.builder()
-                .recommendedColors(palette)
-                .usedColors(used)
-                .shape(cleanPlanValue(plan.path("shape").asText("")))
-                .mood(cleanPlanValue(plan.path("mood").asText("")))
-                .designType(designTypes.isEmpty() ? cleanPlanValue(plan.path("designType").asText(""))
-                        : String.join(", ", designTypes))
-                .motif(motifs.isEmpty() ? cleanPlanValue(plan.path("motif").asText(""))
-                        : String.join(", ", motifs))
-                .build();
+    /**
+     * 결과 화면 "반영된 스타일" 표시용: "glitter, chrome" 같은 플랜 값을 결과 키워드와 같은 한글 표기로 바꾼다 ("글리터, 크롬").
+     * 한글로 못 바꾼 값은 뺀다(결과 키워드와 같은 규칙). 남는 게 없으면 null. 표시 전용이라 플랜/프롬프트는 건드리지 않는다.
+     */
+    private String localizeReflection(String value) {
+        if (value == null) return null;
+        List<String> parts = Arrays.stream(value.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isBlank() && !"none".equalsIgnoreCase(s))
+                .toList();
+        List<String> localized = localizeKeywords(parts);
+        return localized.isEmpty() ? null : String.join(", ", localized);
     }
 
     /** 스캔의 추천 쉐입 - 로컬 최종 measurements.json 값, 없으면 DB 값. 없거나 공백이면 null. */
@@ -1668,11 +1894,19 @@ public class NailDesignService {
         // 다른 생성 방식(summarizeSlots)과 같은 "#HEX (이름)" 형식으로 넘겨서, top-level color(= 최종 프롬프트의
         // Overall style)엔 헥스가, 손톱별 description엔 자연어 색 이름이 들어가도록 맞춘다.
         List<String> palette = scanRecommendedColors(handScan);
+        ScanFitWeighting.Fit fit = fitOf(handScan);
+        // 30색을 전부 주면 GPT가 매번 비슷한 색만 고른다. 가중치로 후보 8색을 먼저 추려서(짧은 손톱이면 비비드 우대,
+        // 서로 어울리는 계열 우대) 그 안에서 고르게 한다.
+        if (palette.size() > 8) {
+            palette = ScanFitWeighting.pickWeighted(palette, fit, 8, new Random());
+        }
         if (!palette.isEmpty()) {
-            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트 ").append(palette.size())
+            sb.append("color 후보(사용자 퍼스널컬러 분석 기반 추천 팔레트에서 추린 ").append(palette.size())
                     .append("색 - 이 목록 안에서만 색을 고르고, 고른 색 앞의 헥스코드를 top-level color 필드에 그대로 복사): ")
                     .append(String.join(", ", pairHexWithNames(palette))).append("\n");
         }
+        sb.append(ScanFitWeighting.fitLine(fit));
+        sb.append(ScanFitWeighting.autoHint(fit, recShape));
 
         sb.append("""
                 [스캔 정보 기반 자동 생성 - 매우 중요]
@@ -2128,7 +2362,8 @@ public class NailDesignService {
                 .append("set from a Korean nail salon's portfolio, not an AI render. Real sets are restrained and ")
                 .append("delicate: charms, pearls, and motifs are SMALL (one charm covers at most about a quarter of ")
                 .append("the nail) and sit off-center, leaving most of the nail as a bare sheer milky base. Colors are ")
-                .append("soft, translucent, and slightly desaturated, never flat saturated candy pigment, and a ")
+                .append("translucent and glossy, soft and slightly desaturated by default but deep or saturated when the ")
+                .append("palette or the nail descriptions call for it (for example a deep midnight blue), never flat opaque candy pigment, and a ")
                 .append("gradient is a soft translucent blend of gel rather than a digital two-color fade. Resin or ")
                 .append("acrylic charms are small, milky or pearly with slightly irregular hand-molded edges, set into ")
                 .append("a small bead of clear gel that blends them into the nail; metal charms are tiny and polished; ")
@@ -2144,12 +2379,12 @@ public class NailDesignService {
                 .append("art, not a cartoon or plastic-toy look, not a smooth game-asset render.\n\n")
                 .append("Lighting: a soft studio softbox at a low angle wraps gently around the curved ")
                 .append("surface of each nail with soft bounce fill in the shadows — the exact highlight ")
-                .append("shape (a long, bright, window-shaped glassy highlight along the gel dome for glossy/chrome/jelly finishes, or a luminous, wet-looking ")
+                .append("shape (a long, bright, window-shaped glassy highlight along the gel dome for glossy/chrome/syrup finishes, or a luminous, wet-looking ")
                 .append("pearly sheen over the whole nail with bright soft reflections gliding along the curve for ")
                 .append("powder finishes, ")
                 .append("without changing the nail's color) ")
                 .append("should follow whatever each nail's own material description above specifies, ")
-                .append("rendered with real-photo specular realism. Where the nail is jelly, milky, or ")
+                .append("rendered with real-photo specular realism. Where the nail is syrup, milky, or ")
                 .append("translucent, render real light transmission — light glows softly from within ")
                 .append(useTransparentGptImage()
                         // 투명 PNG로 받을 때 "배경이 비친다"고 쓰면 모델이 손톱의 흰/맑은 부분을 알파 0으로 뚫어버려
@@ -2171,10 +2406,9 @@ public class NailDesignService {
                 .append("true-to-life color rendering. Only tiny natural imperfections of real handmade ")
                 .append("gel nails (a slightly uneven edge or cuticle line); the color layer itself is smooth and ")
                 .append("even with no texture, grain, crackle, grid, or surface pattern of its own (except the knit fibers or ink check that a nail's own description specifies), and the clear top gel stays smooth, thick, and glossy. ")
-                .append("The five nails are one matched set cured from the same bottle: the base color, ")
-                .append("tone, translucency, and gloss level are exactly the same on every nail, with no ")
-                .append("nail looking pinker, grayer, bluer, lighter, or more transparent than the others — ")
-                .append("only designs that a nail's own description assigns to it may differ. Unless the design explicitly ")
+                .append("The five nails are one coordinated set cured the same way: the translucency and ")
+                .append("gloss level are the same on every nail, while each nail's base color and design follow ")
+                .append("that nail's own description above. Unless the design explicitly ")
                 .append("calls for glitter, render every reflective or shimmery surface as a smooth, ")
                 .append("continuous, mirror-like gloss — never as scattered glitter specks or sparkle ")
                 .append("dust. This must read as an unedited raw photograph from a real Korean nail ")
@@ -2270,16 +2504,16 @@ public class NailDesignService {
         boolean isMatte = surface.toLowerCase().contains("matte");
         items.add(isMatte ? "matte finish"
                 : "glossy gel polish under a thick clear top-gel overlay that forms a plump convex glass-like dome");
-        // ★ 항상 "시럽젤" 스타일 투명감을 언급 — jelly가 선택 안 돼도 요즘 트렌드인 시럽젤
+        // ★ 항상 "시럽젤" 스타일 투명감을 언급 — syrup이 선택 안 돼도 요즘 트렌드인 시럽젤
         // (두껍고 촉촉해 보이는 유리질 투명 젤, 손톱 색이 은은히 비치는) 느낌이 없으면
         // 이미지가 납작한 스티커/오페이크 페인트처럼 나옴.
         String finishLower = finishes.stream().map(String::toLowerCase).collect(Collectors.joining(" "));
         String partsLower  = parts.stream().map(String::toLowerCase).collect(Collectors.joining(" "));
 
-        // ★ 시럽(jelly)은 이제 손톱별로 고르는 색 표현 중 하나라서, 시럽 손톱이 있을 때만 투명 시럽젤 문구를 넣고
+        // ★ 시럽(syrup)은 이제 손톱별로 고르는 색 표현 중 하나라서, 시럽 손톱이 있을 때만 투명 시럽젤 문구를 넣고
         // 솔리드 손톱은 불투명하게 둔다. 시럽이 없으면 광택 있는 젤 깊이감만 가볍게 언급한다.
         if (!isMatte) {
-            if (finishLower.contains("jelly")) {
+            if (finishLower.contains("syrup")) {
                 items.add("thick glossy syrup-gel texture on the nails described as syrup — a wet-looking, " +
                         "glass-clear translucent gel layer with a large soft mirror-like highlight, the nail bed " +
                         "color subtly glowing through the translucent gel, like a trending Korean syrup-gel " +
@@ -2289,7 +2523,7 @@ public class NailDesignService {
             }
         }
 
-        if (finishLower.contains("jelly"))          items.add("translucent jelly layers");
+        if (finishLower.contains("syrup"))          items.add("translucent syrup layers");
         if (finishLower.contains("glitter"))        items.add("fine sparkle on the nails described with glitter — only small bright twinkling points of " +
                 "light scattered loosely over a perfectly smooth, clean, evenly colored glossy surface, in the nail's own " +
                 "hue family (soft pink, rose, silver, or champagne). The sparkle adds no texture and no pattern: the color " +
@@ -2465,23 +2699,54 @@ public class NailDesignService {
 
     /** 슬롯 키워드 뒤에 플랜 키워드를 붙이되, 같은 뜻(snowman / snowman art, check pattern / plaid)은 먼저 나온 것만 남기고 전체 MAX_TOTAL_KEYWORDS개까지만. */
     private List<String> mergeKeywords(List<String> primary, List<String> extra) {
-        Set<String> seen = new HashSet<>();
         List<String> out = new ArrayList<>();
+        List<String> outCores = new ArrayList<>(); // out[i]의 정규형
         for (List<String> list : List.of(primary, extra)) {
             for (String k : list) {
                 if (k == null || k.isBlank()) continue;
                 if (VAGUE_KEYWORDS.contains(k.trim().toLowerCase())) continue;
-                if (seen.add(keywordCore(k)) && out.size() < MAX_TOTAL_KEYWORDS) out.add(k.trim());
+                String core = keywordCore(k);
+                int same = -1;
+                for (int i = 0; i < outCores.size(); i++) {
+                    if (isSameKeyword(outCores.get(i), core)) { same = i; break; }
+                }
+                if (same >= 0) {
+                    // 같은 대상이면 꾸밈말 없는 쪽("heart")을 남긴다 — 꾸민 말("clear heart charm")이 먼저 들어와 있었으면 그 자리를 바꾼다
+                    if (core.split(" ").length < outCores.get(same).split(" ").length) {
+                        out.set(same, k.trim());
+                        outCores.set(same, core);
+                    }
+                    continue;
+                }
+                if (out.size() < MAX_TOTAL_KEYWORDS) {
+                    out.add(k.trim());
+                    outCores.add(core);
+                }
             }
         }
         return out;
     }
 
+    /**
+     * 두 키워드(정규형)가 같은 대상인지: 완전히 같거나, 한쪽이 한 단어("heart")이고 다른 쪽이 그 단어로 끝나는
+     * 꾸민 말("clear heart", "red heart")이면 같은 것으로 본다. ("heart charm"은 정규형이 이미 "heart"다)
+     * 둘 다 여러 단어("pale pink" / "hot pink")면 다른 키워드로 둔다.
+     */
+    private boolean isSameKeyword(String coreA, String coreB) {
+        if (coreA.equals(coreB)) return true;
+        String[] a = coreA.split(" ");
+        String[] b = coreB.split(" ");
+        if (a.length == 1 && b.length > 1) return b[b.length - 1].equals(a[0]);
+        if (b.length == 1 && a.length > 1) return a[a.length - 1].equals(b[0]);
+        return false;
+    }
+
     // ── 키워드 한글화 ─────────────────────────────────────────────────────────
     // 결과 화면 키워드 칩은 영어 값(슬롯/플랜의 통제 어휘)이므로, 마지막 단계에서 한글로 바꾼다.
     // 중복 제거(keywordCore)는 영어 기준으로 먼저 끝난 뒤에 적용한다.
-    // 사전에 없는 단어가 하나라도 있으면 그 키워드는 영어 그대로 둔다 (엉뚱한 번역보다 낫다).
-    // 새 키워드가 영어로 뜨면 KO_WORDS(단어) 또는 KO_PHRASES(문구 전체)에 한 줄 추가하면 된다.
+    // 사전에 없는 단어가 하나라도 있으면 그 키워드는 사전으로 옮기지 않고(엉뚱한 조합보다 낫다) 통째로
+    // KeywordTranslationService에 맡긴다 — DB(keyword_translations)에 저장된 번역, 없으면 GPT로 한 번 번역해 저장한다.
+    // 자주 나오는 말은 KO_WORDS(단어) 또는 KO_PHRASES(문구 전체)에 넣어 두면 DB·GPT를 거치지 않는다.
     private static final Map<String, String> KO_PHRASES = Map.ofEntries(
             Map.entry("warm and cozy", "따뜻/포근"),
             Map.entry("french tip", "프렌치"),
@@ -2509,11 +2774,12 @@ public class NailDesignService {
             Map.entry("sweet", "스위트"), Map.entry("sophisticated", "세련된"), Map.entry("cool", "쿨"),
             Map.entry("y2k", "Y2K"), Map.entry("cozy", "포근한"), Map.entry("warm", "따뜻한"),
             Map.entry("dreamy", "몽환적"), Map.entry("pastel", "파스텔"),
+            Map.entry("anime", "애니"), Map.entry("oriental", "오리엔탈"), Map.entry("innocent", "청순"),
             // 디자인/마감/패턴
             Map.entry("glitter", "글리터"), Map.entry("gradient", "그라데이션"), Map.entry("cheek", "치크"),
             Map.entry("marble", "마블"), Map.entry("french", "프렌치"), Map.entry("magnetic", "마그네틱"),
             Map.entry("powder", "파우더"), Map.entry("matte", "매트"), Map.entry("glossy", "글로시"),
-            Map.entry("art", "아트"), Map.entry("chrome", "크롬"), Map.entry("jelly", "젤리"),
+            Map.entry("art", "아트"), Map.entry("chrome", "크롬"),
             Map.entry("foil", "호일"), Map.entry("syrup", "시럽"), Map.entry("plaid", "체크"),
             Map.entry("check", "체크"), Map.entry("stripe", "스트라이프"), Map.entry("lace", "레이스"),
             Map.entry("watercolor", "수채화"), Map.entry("blooming", "블루밍"), Map.entry("speckle", "스펙클"), Map.entry("line", "라인"),
@@ -2537,6 +2803,8 @@ public class NailDesignService {
             // 계절
             Map.entry("spring", "봄"), Map.entry("summer", "여름"), Map.entry("autumn", "가을"),
             Map.entry("fall", "가을"), Map.entry("winter", "겨울"),
+            Map.entry("christmas", "크리스마스"), Map.entry("halloween", "할로윈"),
+            Map.entry("wedding", "웨딩"), Map.entry("vacation", "바캉스"),
             // 색 (ColorNameService 이름 + 수식어)
             Map.entry("white", "화이트"), Map.entry("black", "블랙"), Map.entry("red", "레드"),
             Map.entry("blue", "블루"), Map.entry("green", "그린"), Map.entry("yellow", "옐로"),
@@ -2574,22 +2842,75 @@ public class NailDesignService {
     // 한글로 바꾼 뒤에도 남아도 되는 영문 표기 ("3D", "Y2K")
     private static final java.util.regex.Pattern ALLOWED_LATIN = java.util.regex.Pattern.compile("3D|Y2K");
 
+    // 사전으로 옮긴 뒤에도 영어가 남았는지 ("3D", "Y2K"는 영어로 둬도 된다)
+    private static boolean hasLatin(String text) {
+        return ALLOWED_LATIN.matcher(text).replaceAll("").matches(".*[A-Za-z].*");
+    }
+
+    /** 사전으로 한글이 안 되는 키워드 조각들 — KeywordTranslationService(저장된 번역 → GPT)에 맡길 것 */
+    private List<String> unmappedKeywordParts(Collection<String> keywords) {
+        List<String> parts = new ArrayList<>();
+        for (String k : keywords) {
+            if (k == null || k.isBlank()) continue;
+            for (String part : splitJoinedKeyword(k)) {
+                if ("none".equalsIgnoreCase(part.trim()) || ColorNameService.isHex(part)) continue;
+                if (hasLatin(localizeKeyword(part))) parts.add(part);
+            }
+        }
+        return parts;
+    }
+
+    /** 사전에 없는 말의 번역을 미리 시작해 둔다(기다리지 않는다) — 이미지를 만들기 전에 불러 두면 그동안 끝난다. */
+    public void prefetchKeywordTranslations(Collection<String> keywords) {
+        keywordTranslationService.prefetch(unmappedKeywordParts(keywords));
+    }
+
+    /** 키워드 조각 하나를 한글로: 사전 먼저, 없으면 번역 저장소(translated). 둘 다 없거나 칩으로 쓸 뜻이 없는 말이면 null */
+    private String toKorean(String part, Map<String, String> translated) {
+        String ko = localizeKeyword(part);
+        if (!hasLatin(ko)) return ko;
+        String saved = translated.get(KeywordTranslationService.normalize(part));
+        return saved == null || saved.isBlank() ? null : saved;
+    }
+
     /**
      * 키워드 목록을 한글로 바꾸고, 한글로 바꾼 뒤 같아진 것(예: plaid / check pattern -> 체크)은 하나만 남긴다.
-     * 사전에 없어서 영어가 그대로 남은 키워드는 화면에 영어 단어로 뜨지 않도록 제외한다(서버 로그에는 남긴다 -> 사전에 추가하면 됨).
+     * 사전에 없는 말은 저장된 번역(없으면 GPT 번역)을 쓰고, 그래도 한글이 없으면 화면에 영어 단어로 뜨지 않도록 제외한다.
      */
     private List<String> localizeKeywords(List<String> keywords) {
+        Map<String, String> translated = keywordTranslationService.translate(unmappedKeywordParts(keywords));
         Set<String> seen = new LinkedHashSet<>();
         for (String k : keywords) {
             if (k == null || k.isBlank()) continue;
-            String ko = localizeKeyword(k);
-            if (ALLOWED_LATIN.matcher(ko).replaceAll("").matches(".*[A-Za-z].*")) {
-                System.out.println("[Keyword] 한글 매핑이 없어 키워드에서 제외: '" + k + "' (KO_WORDS/KO_PHRASES에 추가하면 표시됨)");
-                continue;
+            for (String part : splitJoinedKeyword(k)) {
+                String ko = toKorean(part, translated);
+                if (ko == null) {
+                    System.out.println("[Keyword] 사전에도 번역에도 없어 키워드에서 제외: '" + part + "'");
+                    continue;
+                }
+                seen.add(ko);
             }
-            seen.add(ko);
         }
         return new ArrayList<>(seen);
+    }
+
+    // 여러 값을 이어 쓴 슬롯 값 ("funky and glamorous", "pure & innocent", "chic/modern")을 값마다 나누는 구분자
+    private static final java.util.regex.Pattern KEYWORD_JOINER =
+            java.util.regex.Pattern.compile("\\s+(?:and|or)\\s+|\\s*[&/,]\\s*");
+
+    /**
+     * 채팅 슬롯 추출 규칙이 "화려한" -> "funky and glamorous"처럼 무드를 이어 쓴 문구로 저장하는데, 통째로는 사전에 없어서
+     * ("and") 키워드에서 빠지고 펑키도 안 보였다. 값마다 나눠 "펑키", "화려"로 바꾼다.
+     * "warm and cozy"처럼 문구 전체가 KO_PHRASES에 있으면 나누지 않는다. 표시 전용 (슬롯·플랜·프롬프트는 그대로).
+     */
+    private List<String> splitJoinedKeyword(String keyword) {
+        String k = keyword.trim();
+        if (KO_PHRASES.containsKey(k.toLowerCase())) return List.of(k);
+        List<String> parts = Arrays.stream(KEYWORD_JOINER.split(k))
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .toList();
+        return parts.isEmpty() ? List.of(k) : parts;
     }
 
     /**
@@ -2598,13 +2919,25 @@ public class NailDesignService {
      * 생성 직후에는 overrides가 없으므로 슬롯 + 플랜 키워드만 나온다.
      */
     public List<String> extractDesignKeywords(Map<String, SlotData> slots, DesignSession session, String planJson) {
+        return localizeKeywords(rawDesignKeywords(slots, session, planJson));
+    }
+
+    /** extractDesignKeywords·extractSlotKeywords가 쓸 말의 번역을 미리 시작해 둔다 — 수정(RefineService)이 이미지를 고치기 전에 부른다. */
+    public void prefetchDesignKeywordTranslations(Map<String, SlotData> slots, DesignSession session, String planJson) {
+        List<String> candidates = new ArrayList<>(rawDesignKeywords(slots, session, planJson));
+        candidates.addAll(extractKeywordsFromSlots(slots, session));
+        prefetchKeywordTranslations(candidates);
+    }
+
+    /** extractDesignKeywords의 한글로 옮기기 전(영어) 목록 */
+    private List<String> rawDesignKeywords(Map<String, SlotData> slots, DesignSession session, String planJson) {
         JsonNode plan = null;
         if (planJson != null && !planJson.isBlank()) {
             try { plan = objectMapper.readTree(planJson); } catch (Exception ignored) {}
         }
         List<String> base = mergeKeywords(referenceSubjectKeyword(plan),
                 mergeKeywords(extractKeywordsFromSlots(slots, session), extractPlanKeywords(plan)));
-        if (plan == null) return localizeKeywords(base);
+        if (plan == null) return base;
 
         List<String> removes = new ArrayList<>();
         plan.path("keywordOverrides").path("remove").forEach(n -> removes.add(n.asText("").trim().toLowerCase()));
@@ -2622,7 +2955,7 @@ public class NailDesignService {
         }
         int room = Math.max(0, MAX_TOTAL_KEYWORDS - adds.size());
         if (kept.size() > room) kept = new ArrayList<>(kept.subList(0, room));
-        return localizeKeywords(mergeKeywords(kept, adds));
+        return mergeKeywords(kept, adds);
     }
 
     public List<String> extractKeywordsFromSlots(Map<String, SlotData> slots, DesignSession session) {
@@ -2646,5 +2979,45 @@ public class NailDesignService {
             }
         }
         return keywords;
+    }
+
+    /**
+     * 슬롯(무드/디자인 타입/모티프/계절/쉐입/컬러)만으로 만든 결과 화면 키워드 — 플랜 키워드(마감/패턴/파츠)와
+     * 수정 overrides는 섞지 않는다. 선택지 기반 결과 화면이 수정 후에도 "고른 값"만 보여줄 때 쓴다(표시 전용).
+     */
+    public List<String> extractSlotKeywords(Map<String, SlotData> slots, DesignSession session) {
+        return localizeKeywords(extractKeywordsFromSlots(slots, session));
+    }
+
+    /**
+     * 결과 화면 컬러 키워드의 원래 hex — extractKeywordsFromSlots가 키워드로 넣는 색(color 슬롯)을
+     * 키워드와 같은 한글 표기로 짝지어 준다. 결과 화면은 이 이름의 키워드 칩을 색 스와치 칩으로 바꿔 그린다.
+     * 한글로 못 바꾼 색은 키워드에서도 빠지므로(localizeKeywords) 여기서도 뺀다.
+     */
+    public List<DesignGenerateResponseDto.KeywordColor> extractKeywordColors(Map<String, SlotData> slots) {
+        List<DesignGenerateResponseDto.KeywordColor> result = new ArrayList<>();
+        Set<String> seenNames = new HashSet<>();
+        try {
+            Map<String, String> englishNameByHex = new LinkedHashMap<>();
+            for (String value : getLiked(slots, "color")) {
+                if (!ColorNameService.isHex(value)) continue;
+                String hex = value.trim().toUpperCase();
+                englishNameByHex.putIfAbsent(hex.startsWith("#") ? hex : "#" + hex, colorNameService.resolveColorName(value));
+            }
+            Map<String, String> translated = keywordTranslationService.translate(unmappedKeywordParts(englishNameByHex.values()));
+            for (Map.Entry<String, String> entry : englishNameByHex.entrySet()) {
+                String name = toKorean(entry.getValue(), translated);
+                if (name == null || !seenNames.add(name)) continue;
+                result.add(DesignGenerateResponseDto.KeywordColor.builder()
+                        .hex(entry.getKey())
+                        .name(name)
+                        .build());
+            }
+        } catch (Exception e) {
+            // 표시용 정보라 실패해도 생성 응답은 그대로 내려간다 (컬러는 키워드 글자로만 보인다)
+            System.err.println("[Keyword] 컬러 키워드 hex 정리 실패: " + e.getMessage());
+            return new ArrayList<>();
+        }
+        return result;
     }
 }

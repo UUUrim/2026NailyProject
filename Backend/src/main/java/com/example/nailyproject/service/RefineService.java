@@ -9,7 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.*;
 import java.util.regex.Pattern;
@@ -34,6 +37,8 @@ public class RefineService {
                     + "no cast shadow), and keep the silhouette of every nail fully solid and unchanged from the original photo.";
 
     private final DesignSessionRepository designSessionRepository;
+    // applyRevision은 GPT·이미지 편집을 기다리는 동안 DB 트랜잭션을 잡지 않도록, DB 작업만 짧은 트랜잭션으로 나눠 실행한다
+    private final PlatformTransactionManager transactionManager;
     private final NailDesignRepository nailDesignRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final S3Service s3Service;
@@ -119,6 +124,21 @@ public class RefineService {
             must be a concrete, ready-to-use edit request relevant to the current image and to what the
             user seemed to want, e.g. "전체적으로 색을 더 연하게", "글리터 추가해줘", "약지 장식 바꿔줘".
             When "isEditRequest" is true, set "replyOptions" to an empty array.
+
+            [When the user wants to keep the current design - VERY IMPORTANT]
+            The user is in the middle of revising, but may change their mind and decide they like the
+            CURRENT image as it is and want to finish with it, instead of asking for a change. Examples:
+            "아니야 방금 네일로 확정할래", "아니 그냥 확정", "그냥 이걸로 할게", "수정 안 할래", "이대로 할게요",
+            "지금 게 마음에 들어", "방금 거 좋아요", "됐어 이걸로 저장해줘".
+            In that case do NOT edit: set "isEditRequest" to false, "editInstruction" to an empty string,
+            and set "wantsToConfirm" to true. In "replyToUser" write ONE short, friendly KOREAN sentence
+            that tells the user they can finish by tapping the confirm button below, e.g. "지금 디자인이
+            마음에 드셨군요! 아래 '방금 디자인으로 확정할게요'를 누르시면 이 디자인으로 저장해 드릴게요."
+            Never say that you already saved it - saving happens only when the user taps that button.
+            Still fill "replyOptions" with 2 to 3 short edit requests, in case the user changes their mind.
+            If the message ALSO asks for a concrete change ("확정하기 전에 색만 연하게 해줘"), it is an
+            edit request: handle it as a normal edit and set "wantsToConfirm" to false.
+            In every other case set "wantsToConfirm" to false.
 
             [Three kinds of edit requests - VERY IMPORTANT]
             Before writing editInstruction, decide which kind the user's request is. This decides how
@@ -207,6 +227,18 @@ public class RefineService {
               "where suitable", "if possible", "may". The image model treats them as optional and often
               changes almost nothing. Instead state concrete actions: "add small heart charms to two of
               the nails", "give each nail a soft pastel base".
+            - GORGEOUS / ART-LIKE REQUESTS - VERY IMPORTANT: when the user asks for "화려하게", "아트적으로",
+              "포인트 많이", "더 예쁘게", "gorgeous", "more artistic" or similar without naming an element, they
+              mean more NAIL ART like a real market nail-art display sheet, NOT more rhinestones, stars or
+              glitter scattered over the same nails. Write concrete actions that give the five nails clearly
+              DIFFERENT art: hand-drawn thin-line doodle motifs (bow outline, hearts, stars, crosses,
+              butterflies, cherries, music notes) in black, dark brown or a deeper tone of the nail's own color
+              on some nails; one or two pattern nails (leopard print, plaid check, polka dots or stripes); a
+              french-tip variant (thin black french, leopard french, glitter french or double french) on one
+              nail; a soft wash such as a smoky aura gradient or cat-eye glow on one nail; and one or two small
+              raised 3D charms such as a polished silver bow or a chrome cross. Drawn motifs and patterns may
+              be medium sized (up to about half of the nail). Gem or glitter accents appear on at most two
+              nails and are never the main change. Keep it as one coordinated set in the original color family.
             - KEEP COLORS CLOSE TO THE ORIGINAL - VERY IMPORTANT: unless the user explicitly asks for a
               color change, do not tell the model to move to a different color family (for example
               "shift the color palette toward pastel tones"). Keep each nail's original color family and
@@ -326,7 +358,7 @@ public class RefineService {
 
             [keywordsAdd / keywordsRemove]
             The result page shows short English keyword chips describing the whole nail set (for
-            example "jelly", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
+            example "syrup", "chrome", "line art", "watercolor", "gradient", "foil", "heart charm",
             "pearl"). After your edit, list in "keywordsAdd" the 0 to 4 chips that the edit newly adds
             to the set (a finish, pattern, motif or decoration that now visibly exists), and in
             "keywordsRemove" the chips that no longer apply because the edit replaced or removed them
@@ -337,6 +369,7 @@ public class RefineService {
             Respond ONLY with the JSON below. No markdown, pure JSON only.
             {
                 "isEditRequest": true,
+                "wantsToConfirm": false,
                 "replyToUser": "",
                 "replyOptions": [],
                 "keywordsAdd": ["star charm"],
@@ -357,26 +390,49 @@ public class RefineService {
      * 채팅 수정 요청 처리 메인 메서드.
      * POST /chats/{sessionId}/refine
      */
+    //
+    // [트랜잭션 나누기] 예전에는 이 메서드 전체가 트랜잭션 하나라서, 맨 앞에서 채팅 메시지를 저장할 때 걸린
+    // design_sessions 행 잠금(외래 키 확인용)이 GPT·이미지 편집·누끼·업로드가 끝날 때까지(수십 초~1분) 유지됐다.
+    // 그동안 프론트의 채팅 자동 저장(PUT /chats/{id}/state)이 같은 행을 UPDATE하려다 50초를 기다리고
+    // "Lock wait timeout exceeded"로 실패했다. 그래서 이 메서드는 트랜잭션 없이 돌고(NOT_SUPPORTED),
+    // DB 작업만 짧은 트랜잭션으로 나눈다:
+    //   1) 읽기: 세션·직전 디자인·대화 내역
+    //   2) 트랜잭션 없음: S3 다운로드, GPT 호출, 이미지 편집, 누끼, S3 업로드
+    //   3) 쓰기: 세션 슬롯/손가락 지정, 사용자 메시지, 새 디자인, 답변 메시지를 한 번에 저장
+    // 사용자 메시지도 3)에서 함께 저장한다 — 예전처럼 중간에 실패하면 아무것도 남지 않는다(예전엔 롤백됐다).
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DesignGenerateResponseDto applyRevision(User user, Long sessionId, String message) throws Exception {
-        DesignSession session = designSessionRepository.findByIdAndUserId(sessionId, user.getId())
-                .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
-        chatMessageRepository.save(ChatMessage.builder()
-                .session(session).role(ChatMessage.MessageRole.user).content(message).build());
-
-        // 직전 생성 디자인 로드
-        NailDesign prevDesign = nailDesignRepository
-                .findTopBySessionIdOrderByGeneratedAtDesc(sessionId)
-                .orElseThrow(() -> new IllegalArgumentException("수정할 디자인이 없습니다."));
+        // ── 1) 읽기 (짧은 트랜잭션) ───────────────────────────────────────────
+        RevisionSource src = tx.execute(status -> {
+            DesignSession found = designSessionRepository.findByIdAndUserId(sessionId, user.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
+            // 직전 생성 디자인 로드
+            NailDesign prev = nailDesignRepository
+                    .findTopBySessionIdOrderByGeneratedAtDesc(sessionId)
+                    .orElseThrow(() -> new IllegalArgumentException("수정할 디자인이 없습니다."));
+            // 이미지 목록은 지연 로딩이라 트랜잭션 안에서 미리 꺼내 둔다
+            List<String> prevImageUrls = new ArrayList<>(prev.getImageUrls());
+            // 이전 대화(사용자의 수정 요청/답변)와 앞선 수정 지시문(프롬프트) 내역을 텍스트로 GPT에게 같이 보여줘서,
+            // "아니 다 없애란 말은 아니었는데"처럼 앞선 수정을 가리키는 말을 이해하게 한다. (이미지는 현재 이미지 한 장만 보낸다)
+            List<NailDesign> designsInSession = nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(sessionId);
+            String context = buildConversationContext(found, message, designsInSession, prev);
+            return new RevisionSource(found, prev, prevImageUrls, context);
+        });
+        DesignSession session = src.session();
+        NailDesign prevDesign = src.prevDesign();
+        String conversationContext = src.conversationContext();
 
         String originalPrompt = session.getGeneratedPrompt() != null
                 ? session.getGeneratedPrompt() : prevDesign.getPromptSummary();
         String previousPlanJson = prevDesign.getDesignPlan() != null
                 ? prevDesign.getDesignPlan() : "(직전 플랜 없음)";
 
+        // ── 2) 트랜잭션 없이: 외부 호출 ───────────────────────────────────────
         // 1. 현재(원본) 이미지를 S3에서 받는다 - GPT가 실제 그림을 보고 어느 손톱인지 판단하게 하고,
         //    이어서 이미지 편집(gpt-image)의 입력으로도 쓴다.
-        String originalImageUrl = prevDesign.getImageUrls().get(0);
+        String originalImageUrl = src.prevImageUrls().get(0);
         byte[] originalImageBytes = s3Service.downloadImageBytes(originalImageUrl);
         if (originalImageBytes == null) {
             throw new IllegalStateException("원본 이미지를 불러오지 못했어요.");
@@ -384,10 +440,6 @@ public class RefineService {
 
         // 2. GPT(vision)로 수정 지시문(editInstruction) 생성 - 이전 플랜 텍스트만 보면 실제 그림과 달라서
         //    엉뚱한 손톱을 고르는 문제가 있어, 이미지를 함께 보내 "보이는 대로" 판단하게 한다.
-        // 이전 대화(사용자의 수정 요청/답변)와 앞선 수정 지시문(프롬프트) 내역을 텍스트로 GPT에게 같이 보여줘서,
-        // "아니 다 없애란 말은 아니었는데"처럼 앞선 수정을 가리키는 말을 이해하게 한다. (이미지는 현재 이미지 한 장만 보낸다)
-        List<NailDesign> designsInSession = nailDesignRepository.findBySessionIdOrderByGeneratedAtAsc(sessionId);
-        String conversationContext = buildConversationContext(session, message, designsInSession, prevDesign);
         String systemPrompt = String.format(GPT_IMAGE_EDIT_SYSTEM_PROMPT_TEMPLATE,
                 originalPrompt, previousPlanJson, conversationContext);
         String originalImageBase64 = Base64.getEncoder().encodeToString(originalImageBytes);
@@ -421,6 +473,8 @@ public class RefineService {
         boolean isEditRequest = resultJson.path("isEditRequest").asBoolean(true);
         String editInstruction = resultJson.path("editInstruction").asText("").trim();
         String replyToUser = resultJson.path("replyToUser").asText("").trim();
+        // 수정 대신 "방금 디자인으로 확정할래"처럼 지금 디자인을 그대로 쓰겠다는 뜻인지
+        boolean wantsToConfirm = resultJson.path("wantsToConfirm").asBoolean(false);
         System.out.println("[RefineService] (gpt-image) isEditRequest=" + isEditRequest
                 + " editInstruction: " + editInstruction);
 
@@ -432,18 +486,24 @@ public class RefineService {
         boolean looksLikeInstruction = instructionLower.startsWith("in this five-nail")
                 || instructionLower.startsWith("the first image is the nail set");
         if (!isEditRequest || editInstruction.isBlank() || !looksLikeInstruction) {
-            String reply = replyToUser.isBlank()
-                    ? "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
-                    + "(예: \"약지 하트를 별로 바꿔줘\", \"전체적으로 색을 더 연하게\")"
-                    : replyToUser;
-            return replyWithoutEdit(session, prevDesign, reply, parseReplyOptions(resultJson.path("replyOptions")));
+            String reply;
+            if (!replyToUser.isBlank()) {
+                reply = replyToUser;
+            } else if (wantsToConfirm) {
+                reply = "지금 디자인이 마음에 드셨군요! 아래 '방금 디자인으로 확정할게요'를 누르시면 이 디자인으로 저장해 드릴게요.";
+            } else {
+                reply = "어떻게 바꾸고 싶으신지 정확히 이해하지 못했어요. 바꾸고 싶은 색, 장식, 위치를 구체적으로 알려주실래요? "
+                        + "(예: \"약지 하트를 별로 바꿔줘\", \"전체적으로 색을 더 연하게\")";
+            }
+            return replyWithoutEdit(session, prevDesign, src.prevImageUrls(), message, reply,
+                    parseReplyOptions(resultJson.path("replyOptions")), wantsToConfirm);
         }
 
         // 쉐입 변경 요청이면 새 쉐입 키워드(round/oval/almond/square/stiletto/ballerina)
         String newShape = normalizeShape(resultJson.path("newShape").asText(""));
         System.out.println("[RefineService] newShape: " + newShape);
 
-        // 세션 슬롯/손가락별 지정 업데이트 (이후 디자인 생성/수정에 계속 반영)
+        // 세션 슬롯 업데이트 내용을 계산해 둔다 (이후 디자인 생성/수정에 계속 반영). DB 저장은 아래 3)에서 한다.
         Map<String, SlotData> slots = loadSlots(session.getExtractedPreferences());
         applySlotActions(slots, resultJson.path("slotActions"));
         if (newShape != null) {
@@ -454,14 +514,16 @@ public class RefineService {
             shapeSlot.getLiked().add(newShape);
             shapeSlot.getDisliked().remove(newShape);
         }
+        String slotsJson = null;
         try {
-            session.updateExtractedPreferences(objectMapper.writeValueAsString(slots));
+            slotsJson = objectMapper.writeValueAsString(slots);
         } catch (Exception ignored) {}
-        mergeFingerOverrides(resultJson.path("fingerOverrides"),
-                session.getFingerOverrides(), session::updateFingerOverrides);
-        mergeFingerDislikes(resultJson.path("fingerDislikes"),
-                session.getFingerDislikes(), session::updateFingerDislikes);
-        designSessionRepository.save(session);
+
+        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
+        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
+                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
+        // 결과 화면 키워드 중 사전에 없는 말의 한글 번역(GPT)을 이미지를 고치는 동안 끝내 둔다
+        nailDesignService.prefetchDesignKeywordTranslations(slots, session, nextPlanJson);
 
         // 3. gpt-image edit 호출 — 마스크 없이 원본 전체 + 지시문만 보냄.
         //    생성과 똑같이 투명 배경으로 받아서(설정이 켜져 있을 때) AR 크롭을 투명 원본의 알파로 만든다. 입력은 흰 배경
@@ -503,32 +565,48 @@ public class RefineService {
         // 흰색으로 번지는 손톱 끝이 잘린다.
         String nailTipCropsJson = nailDesignService.createNailTipCrops(user.getId(), editedBase64, displayBase64);
 
-        // 이번 수정으로 추가/제거된 키워드를 plan.keywordOverrides에 누적 (이후 수정에서도 이어서 반영)
-        String nextPlanJson = buildNextPlan(prevDesign.getDesignPlan(), newShape,
-                resultJson.path("keywordsAdd"), resultJson.path("keywordsRemove"));
+        // ── 3) 쓰기 (짧은 트랜잭션) ───────────────────────────────────────────
+        final String finalSlotsJson = slotsJson;
+        final String finalNailTipCropsJson = nailTipCropsJson;
+        NailDesign newDesign = tx.execute(status -> {
+            DesignSession current = designSessionRepository.findById(session.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("해당 채팅 세션을 찾을 수 없습니다."));
 
-        // 5. 새 NailDesign 저장 (플랜은 그대로 유지, 수정 지시문을 프롬프트로 기록)
-        NailDesign newDesign = NailDesign.builder()
-                .user(user)
-                .session(session)
-                .imageUrls(new ArrayList<>(List.of(newImageUrl)))
-                .promptSummary(editInstruction)
-                .aiModel("gpt-image-2.5-sunburst (edit)")
-                .status(NailDesign.DesignStatus.DRAFT)
-                // 플랜은 그대로 유지하되, 쉐입이 바뀐 경우 plan의 shape만 새 값으로 바꾼다
-                // (AR/3D 템플릿과 이후 수정 요청이 이 shape를 읽는다)
-                .designPlan(nextPlanJson)
-                .nailTipCropsJson(nailTipCropsJson)
-                .seed(null) // OpenAI 이미지 API는 seed 개념이 없어 재현 불가
-                .build();
-        nailDesignRepository.save(newDesign);
-        session.updateGeneratedPrompt(originalPrompt); // 원본 프롬프트 유지
-        designSessionRepository.save(session);
+            // 세션 슬롯/손가락별 지정 업데이트
+            if (finalSlotsJson != null) current.updateExtractedPreferences(finalSlotsJson);
+            mergeFingerOverrides(resultJson.path("fingerOverrides"),
+                    current.getFingerOverrides(), current::updateFingerOverrides);
+            mergeFingerDislikes(resultJson.path("fingerDislikes"),
+                    current.getFingerDislikes(), current::updateFingerDislikes);
+            current.updateGeneratedPrompt(originalPrompt); // 원본 프롬프트 유지
+            designSessionRepository.save(current);
 
-        // 6. 채팅 이력 저장
-        chatMessageRepository.save(ChatMessage.builder()
-                .session(session).role(ChatMessage.MessageRole.assistant)
-                .content("말씀하신 대로 수정했어요! 어떠세요?").build());
+            // 사용자 요청 메시지 (예전엔 맨 처음에 저장했다 — 대화 순서는 같다)
+            chatMessageRepository.save(ChatMessage.builder()
+                    .session(current).role(ChatMessage.MessageRole.user).content(message).build());
+
+            // 5. 새 NailDesign 저장 (플랜은 그대로 유지, 수정 지시문을 프롬프트로 기록)
+            NailDesign created = NailDesign.builder()
+                    .user(user)
+                    .session(current)
+                    .imageUrls(new ArrayList<>(List.of(newImageUrl)))
+                    .promptSummary(editInstruction)
+                    .aiModel("gpt-image-2.5-sunburst (edit)")
+                    .status(NailDesign.DesignStatus.DRAFT)
+                    // 플랜은 그대로 유지하되, 쉐입이 바뀐 경우 plan의 shape만 새 값으로 바꾼다
+                    // (AR/3D 템플릿과 이후 수정 요청이 이 shape를 읽는다)
+                    .designPlan(nextPlanJson)
+                    .nailTipCropsJson(finalNailTipCropsJson)
+                    .seed(null) // OpenAI 이미지 API는 seed 개념이 없어 재현 불가
+                    .build();
+            nailDesignRepository.save(created);
+
+            // 6. 채팅 이력 저장
+            chatMessageRepository.save(ChatMessage.builder()
+                    .session(current).role(ChatMessage.MessageRole.assistant)
+                    .content("말씀하신 대로 수정했어요! 어떠세요?").build());
+            return created;
+        });
 
         return DesignGenerateResponseDto.builder()
                 .designId(newDesign.getId())
@@ -537,6 +615,8 @@ public class RefineService {
                 .imageUrls(newDesign.getImageUrls())
                 .details(nailDesignService.buildDetails(newDesign))
                 .keywords(nailDesignService.extractDesignKeywords(slots, session, nextPlanJson))
+                .keywordColors(nailDesignService.extractKeywordColors(slots))
+                .slotKeywords(nailDesignService.extractSlotKeywords(slots, session))
                 .build();
     }
 
@@ -552,7 +632,7 @@ public class RefineService {
 
         List<ChatMessage> all = chatMessageRepository.findBySessionOrderBySentAtAsc(session);
         int end = all.size();
-        // 맨 끝은 방금 저장한 현재 사용자 메시지이므로 제외
+        // 현재 사용자 메시지는 이제 수정이 끝난 뒤에 저장하므로 보통 여기에 없다. 혹시 맨 끝에 같은 문장이 있으면 예전처럼 뺀다.
         if (end > 0 && all.get(end - 1).getRole() == ChatMessage.MessageRole.user
                 && currentMessage.equals(all.get(end - 1).getContent())) {
             end--;
@@ -632,19 +712,30 @@ public class RefineService {
      * 이미지를 바꾸지 않고 사용자에게 안내 메시지만 돌려준다. 기존 디자인(이미지)은 그대로 응답에 담고,
      * assistantMessage가 있으면 프론트는 새 이미지 대신 이 메시지를 채팅에 보여준다.
      */
-    private DesignGenerateResponseDto replyWithoutEdit(DesignSession session, NailDesign prevDesign, String reply,
-                                                       List<String> options) {
-        chatMessageRepository.save(ChatMessage.builder()
-                .session(session).role(ChatMessage.MessageRole.assistant).content(reply).build());
+    private DesignGenerateResponseDto replyWithoutEdit(DesignSession session, NailDesign prevDesign,
+                                                       List<String> prevImageUrls, String userMessage, String reply,
+                                                       List<String> options, boolean wantsToConfirm) {
+        // 사용자 메시지와 안내 답변을 짧은 트랜잭션 하나로 저장한다 (applyRevision은 트랜잭션 없이 돈다)
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            chatMessageRepository.save(ChatMessage.builder()
+                    .session(session).role(ChatMessage.MessageRole.user).content(userMessage).build());
+            chatMessageRepository.save(ChatMessage.builder()
+                    .session(session).role(ChatMessage.MessageRole.assistant).content(reply).build());
+        });
         return DesignGenerateResponseDto.builder()
                 .designId(prevDesign.getId())
                 .status(prevDesign.getStatus().name())
                 .generatedPrompt(prevDesign.getPromptSummary())
-                .imageUrls(prevDesign.getImageUrls())
+                .imageUrls(prevImageUrls)
                 .assistantMessage(reply)
                 .assistantOptions(options)
+                .confirmSuggested(wantsToConfirm)
                 .build();
     }
+
+    /** applyRevision 1단계(읽기 트랜잭션)에서 꺼내 두는 값 */
+    private record RevisionSource(DesignSession session, NailDesign prevDesign,
+                                  List<String> prevImageUrls, String conversationContext) {}
 
     private static final List<String> DEFAULT_REPLY_OPTIONS = List.of(
             "전체적으로 색을 더 연하게", "전체적으로 색을 더 진하게", "글리터 추가해줘", "하트 장식 빼줘");

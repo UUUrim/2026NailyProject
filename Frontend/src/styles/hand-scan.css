@@ -329,6 +329,12 @@
     inset: 0;
     z-index: 1;
     pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+/* 방금 찍은 손가락을 빼기를 기다리는 중 — 다음 손가락을 먼저 올리지 않게 가이드를 통째로 숨긴다 */
+.hand-scan-guide--hidden {
+    opacity: 0;
 }
 
 .hand-scan-guide--ready {
@@ -367,13 +373,6 @@
     stroke-width: 1.5;
     stroke-linejoin: round;
     transition: opacity 0.35s ease;
-}
-
-.hand-scan-guide__track {
-    stroke: rgba(var(--guide-line-rgb), 0.5);
-    stroke-width: 1.5;
-    stroke-dasharray: 10 8;
-    transition: stroke 0.3s ease;
 }
 
 .hand-scan-guide__line-glow {
@@ -548,6 +547,12 @@
     object-fit: cover;
     object-position: center;
     background: #000;
+}
+
+/* 탑뷰 영상 — 지지대가 손가락 가이드 가운데에 오고 화면 끝이 비지 않도록 화면에서만
+   확대·이동한다(TopViewStream이 transform을 넣음). 그 계산이 왼쪽 위 기준이라 원점을 맞춘다. */
+.hand-scan-fs__video--top {
+    transform-origin: 0 0;
 }
 
 /* 작은 배지로 표시 — 화면 전체를 덮지 않아서 라이브 영상을 계속 볼 수 있음 */
@@ -1157,6 +1162,24 @@
     100% { box-shadow: inset 0 0 0 0 rgba(74, 222, 128, 0); }
 }
 
+/* 손가락을 빼기를 기다리는 동안(switching) 카메라 화면을 어둡고 흐리게 덮는다 — 측정 상태 표시보다 위,
+   화면 가운데 "촬영 완료" 안내보다는 아래.
+   흐림(backdrop-filter)은 덮을 때만 켜서, 평소에 MJPEG 프레임마다 흐림 계산이 돌지 않게 한다. */
+.hand-scan-cover {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    background: rgba(10, 10, 12, 0.8);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.hand-scan-cover--on {
+    opacity: 1;
+    backdrop-filter: blur(8px) grayscale(0.6);
+}
+
 /* 측정 중 — 카메라 화면 한가운데 상태 배지 */
 .hand-scan-fs__state-badge {
     position: absolute;
@@ -1748,11 +1771,16 @@
 }
 
 .hand-scan-rescan-gate__record-season {
+    display: flex;
     margin-top: 0.15rem;
     font-size: 0.86rem;
     font-weight: 800;
-    /* 스와치 색상과 무관하게 항상 같은 브랜드 색으로 고정 */
-    color: #c96d88;
+    /* 마이페이지 손 분석 목록과 같은 베이스 이름 알약(SkinBaseTag) — 글자는 아래 수치·쉐입 줄(#8a727c)과 같은 계열로 조금 진하게 */
+    color: #756169;
+}
+
+.hand-scan-rescan-gate__record-season .skin-base-tag {
+    color: inherit;
 }
 
 .hand-scan-rescan-gate__record-metrics,

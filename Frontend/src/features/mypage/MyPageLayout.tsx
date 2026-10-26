@@ -24,6 +24,7 @@ import {
   compareByTime,
   todayKey,
   shiftDateKey,
+  profileInitial,
 } from './shared'
 
 const SECTION_IDS: readonly SectionId[] = ['dashboard', 'profile', 'timeline', 'scans', 'prints', 'designs', 'favorites']
@@ -113,6 +114,19 @@ export function MyPageLayout() {
     openDeleteFolderModal,
     closeDeleteFolderModal,
     confirmDeleteFolder,
+    scanToDelete,
+    printToDelete,
+    isDeletingRecord,
+    recordDeleteError,
+    openDeleteScanModal,
+    openDeletePrintModal,
+    closeDeleteRecordModal,
+    confirmDeleteScan,
+    confirmDeletePrint,
+    applyPrintOrderUpdate,
+    reprintOrder,
+    isReprinting,
+    reprintError,
   } = useMyPageData()
 
   // 현재 URL 경로에서 활성 탭을 파생시킨다 — 예전엔 useState(section)로 관리했지만, 이제
@@ -365,11 +379,11 @@ export function MyPageLayout() {
     }
   }
 
-  // 디자인 이력은 4열 x 4행(16개), 찜은 12개, 나머지 목록은 10개씩
-  const pageSizeForSection = (id: SectionId) => (id === 'designs' ? 16 : id === 'favorites' ? 12 : 10)
+  // 디자인 이력은 4열 x 5행(20개), 찜은 4열 x 4행(16개, 폴더별 보기는 FavoritesTab에서 20개), 나머지 목록은 10개씩
+  const pageSizeForSection = (id: SectionId) => (id === 'designs' ? 20 : id === 'favorites' ? 16 : 10)
 
-  const paginate = <T,>(items: T[], id: SectionId) => {
-    const size = pageSizeForSection(id)
+  const paginate = <T,>(items: T[], id: SectionId, pageSize?: number) => {
+    const size = pageSize ?? pageSizeForSection(id)
     const totalPages = Math.max(1, Math.ceil(items.length / size))
     const page = Math.min(listPage, totalPages)
     const start = (page - 1) * size
@@ -503,6 +517,9 @@ export function MyPageLayout() {
 
     openScanDetail,
     openPrintDetail,
+
+    openDeleteScanModal,
+    openDeletePrintModal,
   }
 
   return (
@@ -512,7 +529,7 @@ export function MyPageLayout() {
           <aside className="mypage-x__sidebar">
             <div className="mypage-x__sidebar-profile">
               <div className="mypage-x__avatar" aria-hidden="true">
-                {profile?.nickname.charAt(0) ?? '?'}
+                {profileInitial(profile)}
               </div>
               <div className="mypage-x__sidebar-profile-text">
                 <p className="mypage-x__sidebar-name">{profile?.nickname ?? '-'}</p>
@@ -584,6 +601,17 @@ export function MyPageLayout() {
             printDetailScan={printDetailScan}
             isLoadingPrintDetail={isLoadingPrintDetail}
             closePrintDetail={closePrintDetail}
+            onPrintOrderUpdated={applyPrintOrderUpdate}
+            onReprint={reprintOrder}
+            isReprinting={isReprinting}
+            reprintError={reprintError}
+            scanToDelete={scanToDelete}
+            printToDelete={printToDelete}
+            isDeletingRecord={isDeletingRecord}
+            recordDeleteError={recordDeleteError}
+            closeDeleteRecordModal={closeDeleteRecordModal}
+            confirmDeleteScan={confirmDeleteScan}
+            confirmDeletePrint={confirmDeletePrint}
         />
       </AppShell>
   )

@@ -4,6 +4,7 @@ import { PageHero } from '@/shared/layout/PageHero'
 import { ScanDetailModal } from '@/shared/components/ScanDetailModal'
 import { PillButton } from '@/shared/components/PillButton'
 import { Pagination } from '@/shared/components/Pagination'
+import { SkinBaseTag } from '@/shared/components/SkinBaseTag'
 import { WarningIcon } from '@/shared/components/icons/WarningIcon'
 import { getDefaultTipExtensionMm, getNailShape, NAIL_SHAPES } from '@/shared/constants/nailShapes'
 import { formatMetricCurve } from '@/shared/utils/scanDetail'
@@ -87,7 +88,7 @@ export function PrintPageContent() {
                 <WarningIcon width={26} height={26} />
               </span>
                         <h2>아직 분석 완료된 손 스캔 기록이 없어요.</h2>
-                        <p>먼저 손을 스캔하면 그 결과를 바탕으로 네일팁을 출력할 수 있어요.</p>
+                        <p>먼저 손을 스캔하면 그 결과를 바탕으로 네일 팁을 출력할 수 있어요.</p>
                         <PillButton variant="primary" className="print-page__empty-cta" onClick={() => navigate('/scan/hand')}>
                             손 촬영하러 가기
                         </PillButton>
@@ -115,10 +116,9 @@ export function PrintPageContent() {
                         {pagedSessions.map((session) => {
                             const isSelected = session.key === selectedKey
                             const skinHex = session.skinToneHex
-                            const toneLabel = (
-                                skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation)?.tone.label ??
-                                (skinHex ? analyzeSkinTone(skinHex).tone.label : null)
-                            )?.replace(/\s+/g, '') ?? '미분석'
+                            const skinAnalysis =
+                                skinToneAnalysisFromMetrics(session.tone, session.warmness, session.brightness, session.saturation) ??
+                                (skinHex ? analyzeSkinTone(skinHex) : null)
                             const shapeLabel = session.recommendedShape
                                 ? getNailShape(session.recommendedShape)?.labelKo ?? session.recommendedShape
                                 : null
@@ -147,7 +147,13 @@ export function PrintPageContent() {
                         <strong className="print-session-card__date">
                           {formatScanDateLabel(session.scannedAt)}
                         </strong>
-                        <span className="print-session-card__season">{toneLabel}</span>
+                        <span className="print-session-card__season">
+                          {skinAnalysis ? (
+                            <SkinBaseTag kind={skinAnalysis.baseKind}>{skinAnalysis.tone.label}</SkinBaseTag>
+                          ) : (
+                            '미분석'
+                          )}
+                        </span>
                         <span className="print-session-card__metrics">{metricsLine}</span>
                         <span className="print-session-card__shape">추천 쉐입: {shapeLabel ?? '미정'}</span>
                       </span>
@@ -157,7 +163,7 @@ export function PrintPageContent() {
                                         className="print-session-card__detail-btn"
                                         onClick={() => setDetailSession(session)}
                                     >
-                                        상세보기
+                                        상세 보기
                                     </button>
                                 </div>
                             )
@@ -182,7 +188,7 @@ export function PrintPageContent() {
                                 원하는 모양을 선택해 주세요.
                             </>
                         ) : (
-                            <>원하는 네일팁 모양을 선택해 주세요.</>
+                            <>원하는 네일 팁 모양을 선택해 주세요.</>
                         )}
                     </p>
                     <div className={`scan-shape-grid ${printConfirmed ? 'is-locked' : ''}`}>
@@ -308,13 +314,13 @@ export function PrintPageContent() {
                         {printModalStep === 'confirm' ? (
                             <>
                                 <span className="print-modal__icon-badge" aria-hidden="true">{PrinterIcon}</span>
-                                <h2>네일팁 출력 안내</h2>
+                                <h2>네일 팁 출력 안내</h2>
                                 <p>
                                     {userName || '회원'}님의{' '}
                                     {selectedSession ? formatScanDateLabel(selectedSession.scannedAt) : ''} 분석 결과를 기반으로
                                     <br />
                                     <strong> {selectedShape ? getNailShape(selectedShape)?.labelKo ?? selectedShape : ''} </strong>
-                                    네일팁이 연장 길이 <strong>+{tipExtensionMm}mm</strong>로 3D 프린터로 출력됩니다.
+                                    네일 팁이 연장 길이 <strong>+{tipExtensionMm}mm</strong>로 3D 프린터로 출력됩니다.
                                     <br />
                                     출력을 진행하시겠습니까?
                                 </p>
@@ -344,7 +350,7 @@ export function PrintPageContent() {
                                 </span>
                                 <h2>출력 신청 완료</h2>
                                 <p>
-                                    당신의 네일팁이{' '}
+                                    당신의 네일 팁이{' '}
                                     <br />
                                     <strong>{selectedShape ? getNailShape(selectedShape)?.labelKo ?? selectedShape : ''}</strong>
                                     {' '}(으)로 출력 신청되었습니다.

@@ -6,6 +6,7 @@ import com.example.nailyproject.entity.User;
 import com.example.nailyproject.repository.HandScanRepository;
 import com.example.nailyproject.service.PrintOrderService;
 import com.example.nailyproject.service.ScanResultFileService;
+import com.example.nailyproject.service.ScanService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -17,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,8 +44,11 @@ class UserHistoryControllerTest {
     void setUp() throws IOException {
         handScanRepository = mock(HandScanRepository.class);
         when(handScanRepository.findByIdAndUserId(any(), any())).thenReturn(Optional.empty());
+        // 채팅/디자인에 쓰인 기록이 없는 사용자 (삭제 가능 여부 판단용)
+        ScanService scanService = mock(ScanService.class);
+        when(scanService.scanUsage(any())).thenReturn(new ScanService.ScanUsage(Set.of(), Set.of()));
         controller = new UserHistoryController(
-                handScanRepository, mock(PrintOrderService.class), new ScanResultFileService(results.toString()));
+                handScanRepository, mock(PrintOrderService.class), new ScanResultFileService(results.toString()), scanService);
 
         Path dir = results.resolve(String.valueOf(USER)).resolve("10_11").resolve("both");
         Files.createDirectories(dir);

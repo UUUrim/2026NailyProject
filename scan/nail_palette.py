@@ -161,11 +161,15 @@ LIGHT_MIN_L = 75.0
 MID_MIN_L = 50.0
 
 # ── 피부 기준 (이 카메라 설정에서 잰 값 기준의 임시값) ───────────────────────────
-SKIN_REF_HUE = 59.0       # 이 색상각이 웜 정도 0 (skin_color의 쿨 55 / 웜 63의 한가운데 = 뉴트럴)
-SKIN_WARM_SPAN = 12.0     # 기준에서 이만큼(도) 벗어나면 웜 정도가 +-1 (47도 이하 완전 쿨, 71도 이상 완전 웜)
-SKIN_REF_CHROMA = 33.0    # 이 채도 위/아래로 차분한 색 / 선명한 색을 더 높게 본다
-SKIN_CHROMA_SPAN = 4.0
-SKIN_L_LOW, SKIN_L_HIGH = 60.0, 76.0     # 이 사이에서 밝은 색/딥 색 개수가 연속으로 바뀐다
+# 이 값들이 실제 사람들의 값 범위 한가운데에 있어야, 사람마다 추천이 달라진다. 범위 밖이면 값이 한쪽 끝에 붙어서(포화)
+# 누가 와도 같은 추천이 나온다 (2026-10-21: 기준 채도 33이 새 세팅의 실제 채도 20~24보다 훨씬 높아서 모두 같은 값으로
+# 처리되고, 밝기 구간도 모두 "밝은 피부" 한쪽 끝에 붙어서 두 사람의 추천 30색이 순서까지 똑같이 나왔다).
+# 아래는 새 세팅(흰 배경 + 종이 기준 색 보정 + 노출 고정)에서 스캔한 몇 명의 값 범위에 맞춘 임시값이다.
+SKIN_REF_SCORE = 15.27    # 노란기 점수 b - 0.5a의 기준 = 웜 정도 0 (skin_color의 쿨 15.1 / 웜 15.45 경계의 가운데)
+SKIN_SCORE_SPAN = 3.0     # 기준에서 이만큼 벗어나면 웜 정도가 +-1 (12.3 이하 완전 쿨, 18.3 이상 완전 웜). 스캔 측정값 14~15.7
+SKIN_REF_CHROMA = 28.5    # 측정 채도(a,b 크기)의 기준. 이 위/아래로 차분한 색 / 선명한 색을 더 높게 본다 (종이 기준 보정 후 27~31)
+SKIN_CHROMA_SPAN = 2.5
+SKIN_L_LOW, SKIN_L_HIGH = 70.0, 86.0     # 화면용 밝기(보정 후 L). 이 사이에서 밝은 색/딥 색 개수가 연속으로 바뀐다
 
 # 피부 밝기에 따른 구간별 개수: 밝은 피부 쪽 / 어두운 피부 쪽 양 끝 (중간은 보간)
 QUOTA_LIGHT_SKIN = {"light": 11, "mid": 12, "deep": 7}
@@ -178,13 +182,17 @@ NEUTRAL_CHROMA = 14.0
 
 # 점수 가중치
 W_TONE = 1.0
+W_TONE_OVER = 1.5          # 피부-색 웜 정도 차이가 1을 넘는 만큼(정반대 톤) 더 깎는 비율
 W_CHROMA = 0.30
 W_COMPLEMENT = 0.20
 NEUTRAL_PENALTY = 0.35      # 흰색/회색/베이지처럼 채도가 거의 없는 색은 무난하지만 '추천'으로는 조금 덜 앞세운다
 DIVERSITY_PENALTY = 1.1     # 이미 뽑은 색과 같은 색일 때의 감점 (색을 고를 때)
 ORDER_DIVERSITY = 0.45      # 같은 감점을, 고른 색을 화면 순서로 늘어놓을 때는 이만큼만 쓴다
 DIVERSITY_DELTA_E = 14.0    # Lab 거리 이만큼이면 유사도가 약 37%로 줄어든다
-MAX_MISMATCH_STEPS = (1.0, 1.4, 9.0)   # 피부-색 웜 정도 차이 허용 한계 (모자라면 단계적으로 푼다)
+# 피부-색 웜 정도 차이 허용 한계: 계열 제한을 먼저 풀어 보고, 그래도 모자랄 때만 이 한계를 단계적으로 푼다. (이 단계를 없애고
+# 점수만으로 고르게 해 봤더니, 뚜렷한 웜 피부에 쿨 색이 7개나 섞였다: 웜 색이 몇몇 계열에 몰려 있어서 계열 제한에 걸리면
+# 계열을 다양하게 채우느라 반대 톤 색이 들어왔다. 점수 0.1 차이로 추천이 크게 바뀌는 문제와는 별개였다.)
+MAX_MISMATCH_STEPS = (1.0, 1.4, 9.0)
 
 # 보색 궁합: 붉은기가 강한 피부 -> 초록/청록, 노란기가 강한 피부 -> 보라/파랑 (Lab 색상각 기준 범위, 중심, 폭)
 COMPLEMENT_FOR_RED = (160.0, 60.0)       # 초록~청록
@@ -241,7 +249,7 @@ CATALOG = _build_catalog()
 # ── 피부 프로필 ───────────────────────────────────────────────────────────
 
 # a, b를 모를 때(톤만 아는 옛 호출) 쓰는 대표 피부 색상각/채도
-_TONE_DEFAULT_HUE = {"cool": 46.0, "neutral": 58.0, "warm": 70.0}
+_TONE_DEFAULT_SCORE = {"cool": 12.3, "neutral": 15.27, "warm": 18.3}
 
 
 def _clip(x: float, lo: float, hi: float) -> float:
@@ -250,16 +258,19 @@ def _clip(x: float, lo: float, hi: float) -> float:
 
 def skin_profile(tone: str, skin_L: float, skin_a: float = None, skin_b: float = None) -> dict:
     if skin_a is not None and skin_b is not None:
-        hue = math.degrees(math.atan2(skin_b, skin_a)) % 360
+        score = skin_b - 0.5 * skin_a                         # 노란기 점수 (skin_color.warm_score와 같은 식)
         chroma = math.hypot(skin_a, skin_b)
+        hue = math.degrees(math.atan2(skin_b, skin_a)) % 360
     else:
-        hue = _TONE_DEFAULT_HUE.get(tone, 58.0)
+        score = _TONE_DEFAULT_SCORE.get(tone, SKIN_REF_SCORE)
         chroma = SKIN_REF_CHROMA
+        hue = None
+    raw = (score - SKIN_REF_SCORE) / SKIN_SCORE_SPAN
     return {
-        "L": skin_L, "hue": hue, "chroma": chroma,
-        "warmth": _clip((hue - SKIN_REF_HUE) / SKIN_WARM_SPAN, -1.0, 1.0),          # -1 쿨 ~ +1 웜
-        "redness": _clip((SKIN_REF_HUE - hue) / SKIN_WARM_SPAN, 0.0, 1.5),           # 붉은기가 강할수록 커진다
-        "yellowness": _clip((hue - SKIN_REF_HUE) / SKIN_WARM_SPAN, 0.0, 1.5),        # 노란기가 강할수록 커진다
+        "L": skin_L, "hue": hue, "chroma": chroma, "score": score,
+        "warmth": _clip(raw, -1.0, 1.0),                      # -1 쿨 ~ +1 웜
+        "redness": _clip(-raw, 0.0, 1.5),                     # 붉기(쿨 쪽)가 강할수록 커진다
+        "yellowness": _clip(raw, 0.0, 1.5),                   # 노란기(웜 쪽)가 강할수록 커진다
         "chroma_z": _clip((chroma - SKIN_REF_CHROMA) / SKIN_CHROMA_SPAN, -1.5, 1.5),
     }
 
@@ -283,7 +294,8 @@ def _angle_match(H: float, center: float, half_width: float) -> float:
 
 
 def _base_score(e: dict, prof: dict) -> float:
-    tone = W_TONE * (2.0 - _mismatch(e, prof))
+    mm = _mismatch(e, prof)
+    tone = W_TONE * (2.0 - mm) - W_TONE_OVER * max(0.0, mm - 1.0)
     muted = _clip(1.0 - e["C"] / 50.0, 0.0, 1.0)                  # 1 = 차분한 색, 0 = 선명한 색
     chroma = W_CHROMA * prof["chroma_z"] * (2.0 * muted - 1.0)    # 채도 높은 피부 -> 차분한 색 가산
     comp = 0.0
@@ -297,22 +309,16 @@ def _distance(e1: dict, e2: dict) -> float:
     return math.sqrt((e1["L"] - e2["L"]) ** 2 + (e1["a"] - e2["a"]) ** 2 + (e1["b"] - e2["b"]) ** 2)
 
 
-def _similarity_penalty(e: dict, chosen: list, weight: float = DIVERSITY_PENALTY) -> float:
+def _similarity_penalty(e: dict, chosen: list, weight: float = None) -> float:
     if not chosen:
         return 0.0
+    if weight is None:
+        weight = DIVERSITY_PENALTY                      # 호출 시점의 값을 읽는다 (기본 인자는 정의 시점에 굳어서 바꿔 볼 수 없다)
     return weight * max(math.exp(-_distance(e, c) / DIVERSITY_DELTA_E) for c in chosen)
 
 
-def pick_palette(tone: str, skin_L: float, n: int = 30, skin_a: float = None, skin_b: float = None) -> list:
-    """피부에 맞는 네일 컬러 n개. 가장 잘 맞고 서로 다른 색이 앞에 오도록 정렬해서 돌려준다.
-
-    skin_a/skin_b를 주면 피부 색상각/채도로 연속 점수를 매기고, 안 주면 tone(웜/쿨/뉴트럴)의 대표값을 쓴다.
-    밝기 구간(light/mid/deep)마다 정해진 개수를 채우되, 정반대 톤인 색은 처음에는 후보에서 빼고
-    개수가 모자랄 때만 단계적으로 허용한다.
-    """
-    n = min(n, len(CATALOG))
-    prof = skin_profile(tone, skin_L, skin_a, skin_b)
-    base = {e["name"]: _base_score(e, prof) for e in CATALOG}
+def _greedy_select(prof: dict, skin_L: float, n: int, base: dict) -> list:
+    """밝기 구간별 개수, 계열 제한, 비슷한 색 감점을 지키면서 점수가 높은 색부터 n개 고른다."""
     quota = _quota(skin_L, n)
     chosen, fam_count = [], {}
 
@@ -330,7 +336,7 @@ def pick_palette(tone: str, skin_L: float, n: int = 30, skin_a: float = None, sk
         fam_count[best["family"]] = fam_count.get(best["family"], 0) + 1
         return True
 
-    # 톤이 맞는 색 안에서 계열 제한을 먼저 풀고, 그래도 모자랄 때만 톤 허용 범위를 넓힌다
+    # 계열 제한을 먼저 풀고, 그래도 모자랄 때만 톤 허용 범위를 넓힌다
     passes = [(f, m) for m in MAX_MISMATCH_STEPS for f in (1, 2, 99)]
     for band in ("light", "mid", "deep"):
         got = 0
@@ -340,6 +346,24 @@ def pick_palette(tone: str, skin_L: float, n: int = 30, skin_a: float = None, sk
     for fam_mult, max_mm in passes:                            # 구간 안에서 못 채운 만큼은 어느 구간이든
         while len(chosen) < n and pick_one(None, fam_mult, max_mm):
             pass
+    return chosen
+
+
+def pick_palette(tone: str, skin_L: float, n: int = 30, skin_a: float = None, skin_b: float = None) -> list:
+    """피부에 맞는 네일 컬러 n개. 가장 잘 맞고 서로 다른 색이 앞에 오도록 정렬해서 돌려준다.
+
+    skin_a/skin_b를 주면 피부 노란기 점수(b - 0.5a)/채도/밝기로 연속 점수를 매기고, 안 주면 tone(웜/쿨/뉴트럴)의 대표값을 쓴다.
+    밝기 구간(light/mid/deep)마다 정해진 개수를 채운다.
+
+    [안정성] 같은 사람을 다시 스캔하면 값이 조금 달라지는데(노란기 점수 +-0.3, 채도 +-1, 밝기 +-1.5) 추천 30색이 얼마나 바뀌는지
+    시뮬레이션하면(재스캔 겹침), 반응 폭(SKIN_SCORE_SPAN, SKIN_CHROMA_SPAN)이 좁을수록 사람 사이는 잘 구분되지만 같은 사람
+    재스캔에서도 많이 바뀐다. 폭 1.5/2.5: 재스캔 겹침 58% 사람끼리 15~33%, 폭 3.0/2.5: 68% / 25~50%. 후자로 정했다.
+    (입력을 흔들어 여러 번 뽑은 뒤 많이 뽑힌 색을 고르는 방식도 시험했는데 재스캔 겹침이 1~5%p밖에 안 올라서 뺐다.)
+    """
+    n = min(n, len(CATALOG))
+    prof = skin_profile(tone, skin_L, skin_a, skin_b)
+    base = {e["name"]: _base_score(e, prof) for e in CATALOG}
+    chosen = _greedy_select(prof, skin_L, n, base)
 
     # 표시 순서: 밝은 색 / 중간 색 / 딥 컬러를 번갈아 가며, 각 구간에서는 점수가 높으면서 이미 나온 색과 다른 색을
     # 먼저 둔다 (화면에는 앞쪽 몇 개만 보이는데, 파스텔만 또는 회색만 줄줄이 나오지 않게)
