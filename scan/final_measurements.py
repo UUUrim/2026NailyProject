@@ -29,7 +29,7 @@ from typing import Optional
 import numpy as np
 
 from nail_measurer import (merge_hand_measurements, classify_size_totals,
-                           recommend_nail_shape)
+                           recommend_nail_shape, pooled_hand_curve_k)
 from skin_color import (recommend_nail_colors, lab_to_rgb_hex, display_skin_lab,
                         brightness_ui, saturation_ui, base_tone)
 

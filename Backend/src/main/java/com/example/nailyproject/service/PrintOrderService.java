@@ -41,7 +41,7 @@ public class PrintOrderService {
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy. M. d. HH:mm");
     // 출력하는 손가락: 왼손 검지 하나로 고정 (병합할 STL은 이 손가락의 것만 쓴다)
-    private static final String PRINT_FINGER = "index";
+    private static final String PRINT_FINGER = "pinky";
     private static final String CANCELED_MESSAGE = "사용자가 출력을 취소했습니다.";
 
     // printer/server.py 주소 — 로컬 PC에서 돌리는 걸 ngrok으로 터널링한 공개 URL을 여기 넣는다.

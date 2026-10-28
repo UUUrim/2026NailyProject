@@ -48,8 +48,8 @@ SUPPORT_OVERRIDES = {
     "support_threshold_angle": "50",        # 값이 클수록 서포트가 더 많이 생긴다. 40 -> 50: 큐티클 쪽 손톱 끝 경사가 약 30도라 40에서는 서포트가 필요한 띠가 0.04mm뿐이라 방향을 돌리면 서포트가 사라졌다. 50이면 약 0.07mm
     "support_remove_small_overhang": "0",   # 기본값(1)은 "작은 돌출은 서포트 대상에서 뺀다": 우리 모델은 서포트가 필요한 면적이 0.55mm²로 작아서 통째로 무시될 수 있다
     "support_on_build_plate_only": "0",     # 1이면 바닥까지 곧바로 못 내려가는 자리는 서포트를 지운다: 이 모양은 서포트 필요 자리가 전부 손톱 아래층 0.7mm 안이라 서포트가 사라졌다
-    "support_top_z_distance": "0.0",       # 0.12 -> 0.24(2층): PETG는 서포트와 잘 녹아붙어서 간격을 벌려 쉽게 떼게 한다
-    "support_object_xy_distance": "0.0",    # 서포트와 출력물 옆면 사이 간격 (기본 0.35). 0.4 -> 0.2: 큐티클 쪽 손톱 끝과 서포트가 0.7mm 떨어져 받치지 못해서 가깝게. 너무 붙으면 떼기 어렵다
+    "support_top_z_distance": "0.01",       # 0.12 -> 0.24(2층): PETG는 서포트와 잘 녹아붙어서 간격을 벌려 쉽게 떼게 한다
+    "support_object_xy_distance": "0.1",    # 서포트와 출력물 옆면 사이 간격 (기본 0.35). 0.4 -> 0.2: 큐티클 쪽 손톱 끝과 서포트가 0.7mm 떨어져 받치지 못해서 가깝게. 너무 붙으면 떼기 어렵다
     "support_interface_top_layers": "1",    # 2 -> 1: 출력물에 닿는 촘촘한 접촉층을 한 겹만 (덜 붙는다)
     "support_interface_spacing": "0.2",     # 접촉층 선 간격: 넓을수록 덜 붙는다
     "support_type": "tree(auto)",

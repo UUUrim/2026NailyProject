@@ -128,7 +128,7 @@ SHOULDER_ROUND_DEFAULT_MM = {"ballerina": 2.0, "stiletto": 3.5, "almond": 4.0}
 # (--exact 모드는 검증용 실측 복제이므로 적용하지 않음.)
 # 2026-10-23: 0.5 -> -0.1.  출력물이 실제 손톱보다 넓게 나와서(측정 폭 + 0.5), 생성 폭이
 # 이전보다 정확히 0.6mm 줄도록(측정 폭 - 0.1) 바꿨다.  예전 값으로 되돌리려면 0.5.
-WIDTH_FIT_MARGIN_MM = -0.1
+WIDTH_FIT_MARGIN_MM = 2.0
 
 # 안쪽 돔(폭 방향 C-curve)의 길이 방향 높이 프로파일.  테두리는 항상 한 평면(z=0)에
 # 두고, 돔 높이만 큐티클 끝(0) → L*DOME_CREST_START에서 최대 → 팁 끝(C*TIP_DOME_FRAC)
@@ -186,6 +186,13 @@ FLAT_TIP_EDGE_FLOOR_MM = 0.3
 # 폭 방향 C-curve 하한(mm).  측정값/폴백이 이보다 작으면 이 값으로 올린다.
 # 0이면 하한 없음.  --exact 모드에는 적용하지 않음.
 MIN_C_CURVE_DEFAULT_MM = 2.0
+
+# 스캔한 곡률(C)보다 STL 돔을 이만큼(mm) 더 휘게 만든다(2026-10-26).  팁은 딱딱한 PETG라서 손톱보다 덜 휘면 가운데가 손톱에 먼저 걸려
+# 양쪽이 뜨고, 조금 더 휘면 양쪽 가장자리가 손톱에 닿고 가운데에 얇은 틈이 생기는데 그 틈은 접착제가 채운다.  그래서 여유를 약간 준다.
+# 최소 곡률(MIN_C_CURVE_DEFAULT_MM) 보정을 한 다음에 더하므로, 평평한 손톱도 2.0 + 이 값이 된다.
+# 0이면 스캔 곡률 그대로(예전과 같음).  너무 크게 주면 가운데가 너무 비고 가장자리가 손톱 옆을 조이므로 0.1~0.3 정도만 쓴다.
+# --exact 모드(검증용 복제)에는 적용하지 않는다.
+C_CURVE_OFFSET_MM = 0.15
 
 # Stiletto plan-view taper shape — see the superellipse formula where it's
 # used below. 1 = straight line to the point, 2 = full ellipse (round/oval/
@@ -607,6 +614,13 @@ def generate_stl(params, output_path):
     MIN_C = float(params.get("min_c_curve_mm", MIN_C_CURVE_DEFAULT_MM) or 0.0)
     if not EXACT and C < MIN_C:
         C     = MIN_C
+        arc_r = W ** 2 / (8.0 * C) + C / 2.0
+
+    # 스캔 곡률보다 조금 더 휘게(C_CURVE_OFFSET_MM): 위의 최소 곡률 보정이 끝난 값에 더하고, 반지름도 이 폭에 맞게 다시 계산한다.
+    _c_off = params.get("c_curve_offset_mm")
+    C_OFFSET = C_CURVE_OFFSET_MM if _c_off is None else float(_c_off)
+    if not EXACT and C >= 0.05 and C_OFFSET != 0.0:
+        C     = max(C + C_OFFSET, 0.05)
         arc_r = W ** 2 / (8.0 * C) + C / 2.0
 
     shape   = params.get("shape", "round")
@@ -1072,6 +1086,10 @@ def main():
                    help="Minimum width-direction C-curve height in mm; a "
                         "smaller measured value is raised to this "
                         "(default 2.0; 0 = no floor). Ignored in --exact mode")
+    p.add_argument("--c-offset",       type=float, default=None,
+                   help="Extra dome height in mm added to the (floored) C-curve so "
+                        f"the tip is slightly more curved than the scan (default: {C_CURVE_OFFSET_MM}; "
+                        "0 = exactly the scanned curve). Ignored in --exact mode")
     p.add_argument("--thickness",      type=float, default=0.6,
                    help="Uniform shell thickness in mm (default 0.6)")
     p.add_argument("--exact",          action="store_true",
@@ -1178,6 +1196,7 @@ def main():
             "cuticle_depth_mm":    args.cuticle_depth,
             "cuticle_curve_mm":    args.cuticle_curve,
             "min_c_curve_mm":      args.min_c_curve,
+            "c_curve_offset_mm":   args.c_offset,
             "cuticle_round_mm":    args.cuticle_round,
             "thickness_mm":        args.thickness,
             "shape":               args.shape,
